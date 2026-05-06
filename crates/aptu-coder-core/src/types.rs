@@ -932,8 +932,7 @@ impl ExecCommandParams {
             command,
             timeout_secs,
             working_dir,
-            memory_limit_mb: None,
-            cpu_limit_secs: None,
+            ..Default::default()
         }
     }
 }

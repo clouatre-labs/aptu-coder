@@ -3080,6 +3080,10 @@ impl CodeAnalyzer {
         {
             let memory_limit_mb = params.memory_limit_mb;
             let cpu_limit_secs = params.cpu_limit_secs;
+            #[cfg(not(target_os = "linux"))]
+            if memory_limit_mb.is_some() {
+                warn!("memory_limit_mb is not enforced on this platform (Linux only)");
+            }
             if memory_limit_mb.is_some() || cpu_limit_secs.is_some() {
                 // SAFETY: pre_exec runs in the forked child process before exec.
                 // nix::sys::resource::setrlimit is a safe Rust API.
