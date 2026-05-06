@@ -1897,7 +1897,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_raw",
         title = "Analyze Raw",
-        description = "Raw UTF-8 file content with line numbers; no AST parsing. Returns path, total_lines, start_line, end_line, content. Use start_line/end_line (1-indexed, inclusive) to read a range; defaults to full file. Fails if directory path supplied; fails on binary or non-UTF-8 files. Use analyze_file or analyze_module for AST-structured output. Example queries: Show lines 100-150 of src/lib.rs.",
+        description = "Raw UTF-8 file content with line numbers; no AST parsing. Returns path, total_lines, start_line, end_line, content, next_start_line (null at EOF; pass as start_line to continue pagination). Use start_line/end_line (1-indexed, inclusive) to read a range; defaults to full file. Fails if directory path supplied; fails on binary or non-UTF-8 files. Use analyze_file or analyze_module for AST-structured output. Example queries: Show lines 100-150 of src/lib.rs.",
         output_schema = schema_for_type::<types::AnalyzeRawOutput>(),
         annotations(
             title = "Analyze Raw",

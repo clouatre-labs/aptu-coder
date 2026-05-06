@@ -1483,6 +1483,7 @@ pub fn analyze_raw_range(
             start_line: 0,
             end_line: 0,
             content: String::new(),
+            next_start_line: None,
         });
     }
     let start = start_line.unwrap_or(1).max(1).min(total.max(1));
@@ -1503,6 +1504,7 @@ pub fn analyze_raw_range(
         start_line: start,
         end_line: end,
         content,
+        next_start_line: if end == total { None } else { Some(end + 1) },
     })
 }
 
@@ -1987,6 +1989,7 @@ fn caller_c() { target(); }
         assert_eq!(out.total_lines, 3);
         assert_eq!(out.start_line, 1);
         assert_eq!(out.end_line, 3);
+        assert_eq!(out.next_start_line, None);
         assert!(out.content.contains("line1"));
         assert!(out.content.contains("line3"));
     }
@@ -1997,6 +2000,7 @@ fn caller_c() { target(); }
         let out = analyze_raw_range(f.path(), Some(2), Some(4)).unwrap();
         assert_eq!(out.start_line, 2);
         assert_eq!(out.end_line, 4);
+        assert_eq!(out.next_start_line, Some(5));
         assert!(out.content.contains("b"));
         assert!(out.content.contains("d"));
         assert!(!out.content.contains("a"));
@@ -2017,6 +2021,7 @@ fn caller_c() { target(); }
         let out = analyze_raw_range(f.path(), Some(1), Some(999)).unwrap();
         assert_eq!(out.end_line, 3);
         assert_eq!(out.total_lines, 3);
+        assert_eq!(out.next_start_line, None);
     }
 
     #[test]
@@ -2025,5 +2030,47 @@ fn caller_c() { target(); }
         let out = analyze_raw_range(f.path(), None, None).unwrap();
         assert_eq!(out.total_lines, 0);
         assert_eq!(out.content, "");
+        assert_eq!(out.next_start_line, None);
+    }
+
+    #[test]
+    fn test_analyze_raw_pagination_loop() {
+        // Create a temp file with 10 lines
+        let content = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n";
+        let f = make_temp_file(content);
+
+        let mut all_collected = String::new();
+        let mut start = 1;
+        let mut iterations = 0;
+        let max_iterations = 10; // Safety check
+
+        loop {
+            iterations += 1;
+            assert!(
+                iterations <= max_iterations,
+                "pagination loop exceeded max iterations"
+            );
+
+            let out = analyze_raw_range(f.path(), Some(start), Some(start + 2)).unwrap();
+            all_collected.push_str(&out.content);
+            all_collected.push('\n');
+
+            match out.next_start_line {
+                Some(next) => {
+                    start = next;
+                }
+                None => {
+                    break;
+                }
+            }
+        }
+
+        // Verify all 10 lines were collected and loop terminated
+        assert!(all_collected.contains("line1"));
+        assert!(all_collected.contains("line10"));
+        assert!(
+            iterations <= 5,
+            "should take at most 5 iterations for 10 lines with page_size=3"
+        );
     }
 }

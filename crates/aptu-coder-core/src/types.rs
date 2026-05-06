@@ -804,6 +804,9 @@ pub struct AnalyzeRawOutput {
     pub start_line: usize,
     pub end_line: usize,
     pub content: String,
+    /// When `end_line < total_lines`, the `start_line` value for the next page.
+    /// `None` when `end_line == total_lines` (EOF reached).
+    pub next_start_line: Option<usize>,
 }
 
 #[non_exhaustive]
@@ -962,7 +965,9 @@ pub struct ShellOutput {
     pub exit_code: Option<i32>,
     /// True if the command was killed due to timeout.
     pub timed_out: bool,
-    /// True if stdout or stderr was truncated due to size limits.
+    /// True if the post-exit drain timed out (backgrounded process kept pipes open).
+    /// When true, any available output is still included; use the overflow file path
+    /// from the truncation notice Content block to recover the full output.
     pub output_truncated: bool,
 }
 
