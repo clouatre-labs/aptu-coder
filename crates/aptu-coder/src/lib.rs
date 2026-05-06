@@ -69,6 +69,9 @@ use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tracing::{instrument, warn};
 use tracing_subscriber::filter::LevelFilter;
 
+#[cfg(unix)]
+use nix::sys::resource::{Resource, setrlimit};
+
 static GLOBAL_SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 const SIZE_LIMIT: usize = 50_000;
@@ -873,6 +876,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, context))]
     #[tool(
         name = "analyze_directory",
+        title = "Analyze Directory",
         description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Returns per-file stats plus next_cursor for pagination. Fails if summary=true and cursor. For 1000+ files, use max_depth=2-3 and summary=true. git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts. Example queries: Analyze the src/ directory to understand module structure; What files are in the tests/ directory and how large are they?",
         output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
@@ -1033,6 +1037,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "analyze_file",
+        title = "Analyze File",
         description = "Functions, types, classes, and imports from a single source file. Returns functions (name, signature, line range), classes (methods, fields, inheritance), imports; paginate with cursor/page_size. Use fields=[\"functions\",\"classes\",\"imports\"] to limit output sections. Fails if directory path supplied; use analyze_directory instead. Fails if summary=true and cursor. git_ref not supported for single-file analysis. Use analyze_module for lightweight function/import index (~75% smaller). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
@@ -1248,6 +1253,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, context))]
     #[tool(
         name = "analyze_symbol",
+        title = "Analyze Symbol",
         description = "Call graph for a named symbol across all files in a directory. Returns callers and callees. Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if import_lookup=true with empty symbol; fails if summary=true and cursor. match_mode controls name matching (exact/insensitive/prefix/contains). git_ref restricts to changed files. Example queries: Find all callers of parse_config; Find all files that import std::collections.",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
@@ -1651,6 +1657,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "analyze_module",
+        title = "Analyze Module",
         description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: What functions are defined in src/analyze.rs?",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
@@ -1889,6 +1896,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "analyze_raw",
+        title = "Analyze Raw",
         description = "Raw UTF-8 file content with line numbers; no AST parsing. Returns path, total_lines, start_line, end_line, content. Use start_line/end_line (1-indexed, inclusive) to read a range; defaults to full file. Fails if directory path supplied; fails on binary or non-UTF-8 files. Use analyze_file or analyze_module for AST-structured output. Example queries: Show lines 100-150 of src/lib.rs.",
         output_schema = schema_for_type::<types::AnalyzeRawOutput>(),
         annotations(
@@ -2092,6 +2100,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_overwrite",
+        title = "Edit Overwrite",
         description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Returns path, bytes_written. Fails if directory path supplied. AST-unaware (no language constraint). Use edit_replace for targeted single-block edits; edit_rename/edit_insert for AST-targeted changes. Example queries: Overwrite src/config.rs with updated content.",
         output_schema = schema_for_type::<EditOverwriteOutput>(),
         annotations(
@@ -2270,6 +2279,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_replace",
+        title = "Edit Replace",
         description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file; edit_rename/edit_insert for AST-targeted changes. Example queries: Update the function signature in lib.rs.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
@@ -2504,6 +2514,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_rename",
+        title = "Edit Rename",
         description = "AST-aware rename within a single file. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found; fails if kind parameter supplied (reserved, not yet supported). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs.",
         output_schema = schema_for_type::<EditRenameOutput>(),
         annotations(
@@ -2789,6 +2800,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_insert",
+        title = "Edit Insert",
         description = "Insert content immediately before or after a named identifier in a source file. Returns path, symbol_name, position, byte_offset. position is \"before\" or \"after\"; symbol_name must be an identifier (not a keyword or punctuation). Inserts content verbatim at that token's byte boundary; include leading/trailing newlines as needed. Uses first occurrence if symbol_name appears multiple times. Fails if symbol not found; fails if directory path supplied. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Insert a #[instrument] attribute before the handle_request function.",
         output_schema = schema_for_type::<EditInsertOutput>(),
         annotations(
@@ -2997,6 +3009,7 @@ impl CodeAnalyzer {
 
     #[tool(
         name = "exec_command",
+        title = "Exec Command",
         description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<types::ShellOutput>(),
         annotations(
@@ -3062,6 +3075,36 @@ impl CodeAnalyzer {
 
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        #[cfg(unix)]
+        {
+            let memory_limit_mb = params.memory_limit_mb;
+            let cpu_limit_secs = params.cpu_limit_secs;
+            #[cfg(not(target_os = "linux"))]
+            if memory_limit_mb.is_some() {
+                warn!("memory_limit_mb is not enforced on this platform (Linux only)");
+            }
+            if memory_limit_mb.is_some() || cpu_limit_secs.is_some() {
+                // SAFETY: pre_exec runs in the forked child process before exec.
+                // nix::sys::resource::setrlimit is a safe Rust API.
+                // The unsafe block is required by tokio::process::Command::pre_exec API contract.
+                unsafe {
+                    cmd.pre_exec(move || {
+                        #[cfg(target_os = "linux")]
+                        if let Some(mb) = memory_limit_mb {
+                            let bytes = mb.saturating_mul(1024 * 1024);
+                            setrlimit(Resource::RLIMIT_AS, bytes, bytes)
+                                .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                        }
+                        if let Some(cpu) = cpu_limit_secs {
+                            setrlimit(Resource::RLIMIT_CPU, cpu, cpu)
+                                .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                        }
+                        Ok(())
+                    });
+                }
+            }
+        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,

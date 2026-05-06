@@ -917,6 +917,12 @@ pub struct ExecCommandParams {
     pub timeout_secs: Option<u64>,
     /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
     pub working_dir: Option<String>,
+    /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
+    /// None = no limit (default).
+    pub memory_limit_mb: Option<u64>,
+    /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
+    /// None = no limit (default).
+    pub cpu_limit_secs: Option<u64>,
 }
 
 impl ExecCommandParams {
@@ -926,6 +932,7 @@ impl ExecCommandParams {
             command,
             timeout_secs,
             working_dir,
+            ..Default::default()
         }
     }
 }
@@ -937,6 +944,8 @@ impl Default for ExecCommandParams {
             command: String::new(),
             timeout_secs: None,
             working_dir: None,
+            memory_limit_mb: None,
+            cpu_limit_secs: None,
         }
     }
 }
