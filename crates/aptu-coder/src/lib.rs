@@ -3143,26 +3143,26 @@ impl CodeAnalyzer {
         let (stdout_str, stderr_str, exit_code, timed_out) = tokio::select! {
             result = async {
                 use tokio::io::AsyncReadExt;
-                let mut stdout = child.stdout.take();
-                let mut stderr = child.stderr.take();
 
-                let stdout_bytes = if let Some(ref mut s) = stdout {
-                    let mut stdout_reader = s.take(MAX_BYTES as u64);
-                    let mut stdout_buf = Vec::new();
-                    let _ = stdout_reader.read_to_end(&mut stdout_buf).await;
-                    stdout_buf
-                } else {
-                    Vec::new()
-                };
-
-                let stderr_bytes = if let Some(ref mut s) = stderr {
-                    let mut stderr_reader = s.take(MAX_BYTES as u64);
-                    let mut stderr_buf = Vec::new();
-                    let _ = stderr_reader.read_to_end(&mut stderr_buf).await;
-                    stderr_buf
-                } else {
-                    Vec::new()
-                };
+                // Concurrent drain -- prevents pipe deadlock when command writes > OS buffer
+                let (stdout_bytes, stderr_bytes) = tokio::join!(
+                    async {
+                        let mut buf = Vec::new();
+                        if let Some(stdout) = child.stdout.take() {
+                            let mut reader = stdout.take(MAX_BYTES as u64);
+                            let _ = reader.read_to_end(&mut buf).await;
+                        }
+                        buf
+                    },
+                    async {
+                        let mut buf = Vec::new();
+                        if let Some(stderr) = child.stderr.take() {
+                            let mut reader = stderr.take(MAX_BYTES as u64);
+                            let _ = reader.read_to_end(&mut buf).await;
+                        }
+                        buf
+                    }
+                );
 
                 let status = child.wait().await.ok();
                 (stdout_bytes, stderr_bytes, status)
@@ -3180,12 +3180,11 @@ impl CodeAnalyzer {
             }
         };
 
-        // Truncate output if needed
-        const MAX_LINES: usize = 2000;
-
-        let (stdout, stdout_truncated) = truncate_output(&stdout_str, MAX_LINES, MAX_BYTES);
-        let (stderr, stderr_truncated) = truncate_output(&stderr_str, MAX_LINES, MAX_BYTES);
-        let output_truncated = stdout_truncated || stderr_truncated;
+        // Handle output overflow with slot isolation
+        let slot = seq % 8;
+        let (stdout, stderr, overflow_notice) =
+            handle_output_overflow(stdout_str, stderr_str, slot);
+        let output_truncated = overflow_notice.is_some();
 
         let output =
             types::ShellOutput::new(stdout, stderr, exit_code, timed_out, output_truncated);
@@ -3202,8 +3201,11 @@ impl CodeAnalyzer {
             output.stderr
         );
 
-        let mut result = CallToolResult::success(vec![Content::text(text.clone())])
-            .with_meta(Some(no_cache_meta()));
+        let mut content_blocks = vec![Content::text(text.clone())];
+        if let Some(notice) = overflow_notice {
+            content_blocks.push(Content::text(notice));
+        }
+        let mut result = CallToolResult::success(content_blocks).with_meta(Some(no_cache_meta()));
 
         let structured = match serde_json::to_value(&output).map_err(|e| {
             ErrorData::new(
@@ -3255,30 +3257,63 @@ impl CodeAnalyzer {
     }
 }
 
-/// Truncates output to a maximum number of lines and bytes.
-/// Returns (truncated_output, was_truncated).
-fn truncate_output(output: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
-    let lines: Vec<&str> = output.lines().collect();
+/// Handles output overflow by writing to temp files and returning preview + notice.
+/// If output exceeds 2000 lines, writes full stdout/stderr to:
+///   {temp_dir}/aptu-coder-overflow/slot-{slot}/{stdout,stderr}
+/// Returns (stdout_preview, stderr_preview, overflow_notice).
+/// If no overflow: returns (stdout, stderr, None).
+fn handle_output_overflow(
+    stdout: String,
+    stderr: String,
+    slot: u32,
+) -> (String, String, Option<String>) {
+    const MAX_OUTPUT_LINES: usize = 2000;
+    const OVERFLOW_PREVIEW_LINES: usize = 50;
 
-    let output_to_use = if lines.len() > max_lines {
-        lines[..max_lines].join("\n")
+    let stdout_lines: Vec<&str> = stdout.lines().collect();
+    let stderr_lines: Vec<&str> = stderr.lines().collect();
+
+    if stdout_lines.len() <= MAX_OUTPUT_LINES && stderr_lines.len() <= MAX_OUTPUT_LINES {
+        return (stdout, stderr, None);
+    }
+
+    // Write overflow to temp file
+    let base = std::env::temp_dir()
+        .join("aptu-coder-overflow")
+        .join(format!("slot-{slot}"));
+    let _ = std::fs::create_dir_all(&base);
+
+    let stdout_path = base.join("stdout");
+    let stderr_path = base.join("stderr");
+
+    let _ = std::fs::write(&stdout_path, stdout.as_bytes());
+    let _ = std::fs::write(&stderr_path, stderr.as_bytes());
+
+    // Last 50 lines as preview
+    let stdout_preview = if stdout_lines.len() > MAX_OUTPUT_LINES {
+        stdout_lines[stdout_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
     } else {
-        output.to_string()
+        stdout
+    };
+    let stderr_preview = if stderr_lines.len() > MAX_OUTPUT_LINES {
+        stderr_lines[stderr_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
+    } else {
+        stderr
     };
 
-    if output_to_use.len() > max_bytes {
-        // Find the last valid UTF-8 char boundary at or before max_bytes
-        let safe_end = (0..=max_bytes.min(output_to_use.len()))
-            .rev()
-            .find(|&i| output_to_use.is_char_boundary(i))
-            .unwrap_or(0);
-        (output_to_use[..safe_end].to_string(), true)
-    } else {
-        (output_to_use, lines.len() > max_lines)
-    }
+    let notice = format!(
+        "Output exceeded {MAX_OUTPUT_LINES} lines and was saved to:\n  stdout: {}\n  stderr: {}\nThe last {OVERFLOW_PREVIEW_LINES} lines are included above. To read the full output:\n  cat {}",
+        stdout_path.display(),
+        stderr_path.display(),
+        stdout_path.display(),
+    );
+
+    (stdout_preview, stderr_preview, Some(notice))
 }
 
-// Parameters for focused analysis task.
+/// Truncates output to a maximum number of lines and bytes.
+/// Returns (truncated_output, was_truncated).
+
 #[derive(Clone)]
 struct FocusedAnalysisParams {
     path: std::path::PathBuf,
