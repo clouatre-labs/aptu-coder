@@ -475,14 +475,15 @@ async fn test_handler_cpu_limit_kills_spin() {
     }))
     .await;
 
-    // Act & Assert: process should be killed (non-zero exit or error)
+    // Act & Assert: process should be killed by SIGXCPU/SIGKILL.
+    // When killed by a signal, the OS does not produce a numeric exit code, so
+    // exit_code is null in the response. Accept either null (signal kill) or a
+    // non-zero integer (some kernels synthesise 128+signum).
     let sc = &resp["result"]["structuredContent"];
     let exit_code = sc["exit_code"].as_i64();
-    // SIGXCPU (signal 24) or SIGKILL (signal 9) should result in non-zero exit
-    // On some systems, the exit code may be 137 (128 + 9 for SIGKILL) or similar
     assert!(
-        exit_code.is_some() && exit_code != Some(0),
-        "exit code should be non-zero (killed by signal): {sc}"
+        exit_code.is_none() || exit_code != Some(0),
+        "exit code should be null (signal kill) or non-zero: {sc}"
     );
 }
 
