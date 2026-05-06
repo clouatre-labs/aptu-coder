@@ -1248,7 +1248,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, context))]
     #[tool(
         name = "analyze_symbol",
-        description = "Call graph for a named function/method across all files in a directory to trace usage. Returns direct callers and callees. Unknown symbols return error; symbols with no callers/callees return empty chains. Use import_lookup=true with symbol set to the module path to find all files that import a given module path instead of tracing a call graph. When def_use is true, returns write and read sites for the symbol in def_use_sites; write sites include assignments and initializations, read sites include all references, augmented assignments appear as kind write_read. Passing a file path returns INVALID_PARAMS. summary=true and cursor are mutually exclusive. Example queries: Find all callers of the parse_config function; Trace the call chain for MyClass.process_request up to 2 levels deep; Show only trait impl callers of the write method; Find all files that import std::collections",
+        description = "Call graph for a named symbol across all files in a directory. Returns callers and callees. Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Passing a file path returns INVALID_PARAMS. Example queries: Find all callers of parse_config; Trace MyClass.process_request up to 2 levels deep; Show only trait impl callers of the write method; Find all files that import std::collections",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
             title = "Analyze Symbol",

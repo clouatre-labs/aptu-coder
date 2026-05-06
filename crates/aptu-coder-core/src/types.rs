@@ -231,12 +231,12 @@ pub struct AnalyzeSymbolParams {
     #[serde(default)]
     pub impl_only: Option<bool>,
 
-    /// When true, find all files in the directory that import the module named by symbol. symbol must be non-empty (it holds the module path to search for). Mutually exclusive with normal call-graph lookup.
+    /// Find all files in the directory that import the module path given in symbol (e.g., std::collections). Requires symbol to be non-empty. Mutually exclusive with def_use and normal call-graph lookup. When set, follow_depth, impl_only, and match_mode are ignored.
     #[serde(default)]
     #[cfg_attr(
         feature = "schemars",
         schemars(
-            description = "When true, find all files in the directory that import the module named by symbol. symbol must be non-empty (it holds the module path to search for). Mutually exclusive with normal symbol lookup."
+            description = "Find all files in the directory that import the module path given in symbol (e.g., std::collections). Requires symbol to be non-empty. Mutually exclusive with def_use and normal call-graph lookup. When set, follow_depth, impl_only, and match_mode are ignored."
         )
     )]
     pub import_lookup: Option<bool>,
@@ -251,7 +251,7 @@ pub struct AnalyzeSymbolParams {
     )]
     pub git_ref: Option<String>,
 
-    /// Extract definition and use sites (write/read locations) for the symbol. When true, def_use_sites will be populated in the response. Default: false.
+    /// Extract write/read sites for the symbol. First call returns empty def_use_sites and a cursor; paginate with that cursor to retrieve results. Mutually exclusive with import_lookup. Default: false.
     #[serde(default)]
     pub def_use: Option<bool>,
 }
