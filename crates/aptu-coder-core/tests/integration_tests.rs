@@ -4642,7 +4642,7 @@ fn test_regression_analyze_raw_attribute_line() {
         .expect("should find analyze_raw function");
 
     assert_eq!(
-        analyze_raw.line, 1889,
-        "analyze_raw should report the first attribute line 1889, not the fn line 1902"
+        analyze_raw.line, 1896,
+        "analyze_raw should report the first attribute line 1896, not the fn line 1910"
     );
 }
