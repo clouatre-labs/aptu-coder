@@ -873,7 +873,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, context))]
     #[tool(
         name = "analyze_directory",
-        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. For 1000+ files, use max_depth=2-3 and summary=true. Empty directories return zero counts. Example queries: Analyze the src/ directory to understand module structure; What files are in the tests/ directory and how large are they?",
+        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Returns per-file stats (path, language, line_count, function_count, class_count, is_test) plus next_cursor for pagination. Fails if summary=true and cursor both set. For 1000+ files, use max_depth=2-3 and summary=true. git_ref restricts to files changed since a branch/tag/commit. verbose=true adds section headers; force=true bypasses 50K char auto-summary. Empty directories return zero counts. Example queries: Analyze the src/ directory to understand module structure; What files are in the tests/ directory and how large are they?",
         output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
             title = "Analyze Directory",
@@ -1033,7 +1033,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "analyze_file",
-        description = "Functions, types, classes, and imports from a single source file; use analyze_directory for directories. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Passing a directory path returns INVALID_PARAMS; use analyze_directory instead. git_ref filtering is not supported for single-file analysis. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
+        description = "Functions, types, classes, and imports from a single source file. Returns functions (name, signature, line range), classes (methods, fields, inheritance), imports; paginate with cursor/page_size. Use fields=[\"functions\",\"classes\",\"imports\"] to limit output sections. Fails if directory path supplied; use analyze_directory instead. Fails if summary=true with cursor. git_ref not supported for single-file analysis. Use analyze_module for lightweight function/import index (~75% smaller). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -1248,7 +1248,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, context))]
     #[tool(
         name = "analyze_symbol",
-        description = "Call graph for a named symbol across all files in a directory. Returns callers and callees. Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Passing a file path returns INVALID_PARAMS. Example queries: Find all callers of parse_config; Trace MyClass.process_request up to 2 levels deep; Show only trait impl callers of the write method; Find all files that import std::collections",
+        description = "Call graph for a named symbol across all files in a directory. Returns callers and callees. Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if import_lookup=true with empty symbol; fails if summary=true with cursor. match_mode controls name matching (exact/insensitive/prefix/contains). git_ref restricts to changed files. Example queries: Find all callers of parse_config; Find all files that import std::collections.",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
             title = "Analyze Symbol",
@@ -1651,7 +1651,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "analyze_module",
-        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Use analyze_file when you need signatures, types, or class details. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Pagination, summary, force, and verbose not supported. git_ref filtering is not supported. Example queries: What functions are defined in src/analyze.rs?; List all imports in src/lib.rs.",
+        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Returns name, line_count, language, functions (name, line), imports. Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: What functions are defined in src/analyze.rs?; List all imports in src/lib.rs.",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
             title = "Analyze Module",
@@ -1889,7 +1889,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "analyze_raw",
-        description = "Raw UTF-8 file content with line numbers; no AST parsing. Accepts any file extension; errors on non-UTF-8 or binary files. Use analyze_file or analyze_module for AST-structured output. Passing a directory path returns an error. Example queries: Read the first 50 lines of src/main.rs; Show lines 100-150 of src/lib.rs; Read a specific block from a config file.",
+        description = "Raw UTF-8 file content with line numbers; no AST parsing. Returns path, total_lines, start_line, end_line, content. Use start_line/end_line (1-indexed, inclusive) to read a range; defaults to full file. Fails if directory path supplied; fails on binary or non-UTF-8 files. Use analyze_file or analyze_module for AST-structured output. Example queries: Read the first 50 lines of src/main.rs; Show lines 100-150 of src/lib.rs.",
         output_schema = schema_for_type::<types::AnalyzeRawOutput>(),
         annotations(
             title = "Analyze Raw",
@@ -2092,7 +2092,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_overwrite",
-        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. AST-unaware (no language constraint). Cross-ref: use edit_replace for targeted single-block edits, or edit_rename/edit_insert for AST-targeted changes. Example queries: Write a new test file at tests/foo_test.rs; Overwrite src/config.rs with updated content; Create a new module file with boilerplate.",
+        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Returns path, bytes_written. Fails if directory path supplied. AST-unaware (no language constraint). Use edit_replace for targeted single-block edits; edit_rename/edit_insert for AST-targeted changes. Example queries: Write a new test file at tests/foo_test.rs; Overwrite src/config.rs with updated content.",
         output_schema = schema_for_type::<EditOverwriteOutput>(),
         annotations(
             title = "Edit Overwrite",
@@ -2270,7 +2270,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_replace",
-        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Errors if zero or multiple matches; fix by extending old_text to be more specific. Whitespace-sensitive exact match. Cross-ref: use edit_overwrite to replace the whole file. Example queries: Replace the error handling block in src/main.rs; Update the function signature in lib.rs; Fix a specific import statement.",
+        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file; edit_rename/edit_insert for AST-targeted changes. Example queries: Replace the error handling block in src/main.rs; Update the function signature in lib.rs.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
@@ -2504,7 +2504,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_rename",
-        description = "AST-aware rename within a single file. Matches syntactic identifiers only -- occurrences in string literals and comments are excluded. Errors if old_name is not found. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. kind parameter reserved for future use; supplying it returns an error. Example queries: Rename function parse_config to load_config in src/config.rs; Rename variable timeout to timeout_ms in src/client.rs; Rename a struct field across all methods.",
+        description = "AST-aware rename within a single file. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found; fails if kind parameter supplied (reserved, not yet supported). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs; Rename a struct field across all methods.",
         output_schema = schema_for_type::<EditRenameOutput>(),
         annotations(
             title = "Edit Rename",
@@ -2789,7 +2789,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context))]
     #[tool(
         name = "edit_insert",
-        description = "Insert content immediately before or after a named identifier in a source file. position is \"before\" or \"after\"; symbol_name must be an identifier (not a keyword or punctuation). Locates the first matching identifier token and inserts content verbatim at that token's byte boundary -- include leading/trailing newlines as needed. Uses the first occurrence if symbol_name appears multiple times. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Insert a #[instrument] attribute before the handle_request function; Add a derive macro after the MyStruct definition; Insert a docstring before the process method.",
+        description = "Insert content immediately before or after a named identifier in a source file. Returns path, symbol_name, position, byte_offset. position is \"before\" or \"after\"; symbol_name must be an identifier (not a keyword or punctuation). Inserts content verbatim at that token's byte boundary; include leading/trailing newlines as needed. Uses first occurrence if symbol_name appears multiple times. Fails if symbol not found; fails if directory path supplied. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Insert a #[instrument] attribute before the handle_request function; Insert a docstring before the process method.",
         output_schema = schema_for_type::<EditInsertOutput>(),
         annotations(
             title = "Edit Insert",
@@ -2997,7 +2997,7 @@ impl CodeAnalyzer {
 
     #[tool(
         name = "exec_command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, exit_code, timed_out, and output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Example queries: Run the test suite and capture output; Build the project and check exit code; Execute a linter and inspect stderr for warnings.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir is a file or path outside CWD. Example queries: Run the test suite and capture output; Execute a linter and inspect stderr for warnings.",
         output_schema = schema_for_type::<types::ShellOutput>(),
         annotations(
             title = "Exec Command",
