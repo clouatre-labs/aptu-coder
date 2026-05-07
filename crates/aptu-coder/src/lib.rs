@@ -3030,7 +3030,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<types::ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3040,10 +3040,11 @@ impl CodeAnalyzer {
             open_world_hint = true
         )
     )]
+    #[instrument(skip(self, context))]
     pub async fn exec_command(
         &self,
         params: Parameters<types::ExecCommandParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
         let params = params.0;
@@ -3082,6 +3083,37 @@ impl CodeAnalyzer {
 
         let command = params.command.clone();
         let timeout_secs = params.timeout_secs.unwrap_or(30);
+
+        // Acquire peer and progress token for optional progress notifications
+        let peer = self.peer.lock().await.clone();
+        let progress_token = context.meta.get_progress_token();
+
+        // Spawn a progress task that emits every 5s for long-running commands (>10s timeout)
+        let progress_handle: Option<tokio::task::JoinHandle<()>> = if timeout_secs > 10 {
+            if let (Some(token), Some(peer_conn)) = (progress_token.clone(), peer.clone()) {
+                let self_clone = self.clone();
+                Some(tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+                    interval.tick().await; // skip the immediate first tick
+                    loop {
+                        interval.tick().await;
+                        self_clone
+                            .emit_progress(
+                                Some(peer_conn.clone()),
+                                &token,
+                                0.0,
+                                1.0,
+                                "command running".to_string(),
+                            )
+                            .await;
+                    }
+                }))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Spawn the command using tokio::process::Command for proper async handling
         let shell = resolve_shell();
@@ -3161,79 +3193,132 @@ impl CodeAnalyzer {
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
         const MAX_BYTES: usize = 50 * 1024;
 
-        // Allocate shared buffers before the select so timeout arm can read them
-        use std::sync::Arc;
-        use tokio::io::AsyncReadExt;
-        use tokio::sync::Mutex as TokioMutex;
-
-        let stdout_shared: Arc<TokioMutex<Vec<u8>>> = Arc::new(TokioMutex::new(Vec::new()));
-        let stderr_shared: Arc<TokioMutex<Vec<u8>>> = Arc::new(TokioMutex::new(Vec::new()));
-
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
 
-        let stdout_drain = Arc::clone(&stdout_shared);
-        let stderr_drain = Arc::clone(&stderr_shared);
+        use std::sync::Arc;
+        use tokio::io::AsyncBufReadExt as _;
+        use tokio::sync::Mutex as TokioMutex;
+        use tokio_stream::StreamExt as TokioStreamExt;
+        use tokio_stream::wrappers::LinesStream;
 
-        // SAFETY: holding tokio::sync::Mutex across .await during read_to_end is safe here
-        // because this future is inside a tokio::select! arm. When the timeout arm fires,
-        // this arm's future is dropped synchronously, releasing the MutexGuard before the
-        // timeout arm attempts to acquire the lock. No deadlock or starvation is possible.
-        let (stdout_str, stderr_str, exit_code, timed_out, mut output_truncated) = tokio::select! {
-            result = async {
-                // Concurrent drain -- prevents pipe deadlock when command writes > OS buffer (~64KB).
-                // Lock is held during read_to_end; safe because this arm is dropped on timeout (see SAFETY above).
-                tokio::join!(
-                    async {
-                        if let Some(stdout) = stdout_pipe {
-                            let mut reader = stdout.take(MAX_BYTES as u64);
-                            let _ = reader.read_to_end(&mut *stdout_drain.lock().await).await;
-                        }
-                    },
-                    async {
-                        if let Some(stderr) = stderr_pipe {
-                            let mut reader = stderr.take(MAX_BYTES as u64);
-                            let _ = reader.read_to_end(&mut *stderr_drain.lock().await).await;
+        // Shared heap buffers: written per-line (brief lock, not held across await) so the
+        // timeout arm can read partial output even after the drain task is aborted.
+        let stdout_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
+        let stderr_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
+        let interleaved_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
+
+        let so_acc = Arc::clone(&stdout_shared);
+        let se_acc = Arc::clone(&stderr_shared);
+        let il_acc = Arc::clone(&interleaved_shared);
+
+        // Spawn the drain as a separate task so it can be aborted on wall-clock timeout
+        // while shared buffers retain whatever lines were collected before the kill.
+        let mut drain_task = tokio::spawn(async move {
+            let mut so_bytes = 0usize;
+            let mut se_bytes = 0usize;
+
+            let so_stream = stdout_pipe.map(|p| {
+                LinesStream::new(tokio::io::BufReader::new(p).lines())
+                    .map(|l| l.map(|s| (false, s)))
+            });
+            let se_stream = stderr_pipe.map(|p| {
+                LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (true, s)))
+            });
+
+            match (so_stream, se_stream) {
+                (Some(so), Some(se)) => {
+                    let mut merged = so.merge(se);
+                    while let Some(item) = merged.next().await {
+                        if let Ok((is_stderr, line)) = item {
+                            let entry = format!("{line}\n");
+                            if is_stderr {
+                                if se_bytes < MAX_BYTES {
+                                    se_bytes += entry.len();
+                                    se_acc.lock().await.push_str(&entry);
+                                    il_acc.lock().await.push_str(&entry);
+                                }
+                            } else if so_bytes < MAX_BYTES {
+                                so_bytes += entry.len();
+                                so_acc.lock().await.push_str(&entry);
+                                il_acc.lock().await.push_str(&entry);
+                            }
                         }
                     }
-                );
-                // O1: wait for child with post-exit 500ms deadline.
-                // Handles background processes that keep pipes open after the main process exits.
-                let (status, truncated) = match tokio::time::timeout(
+                }
+                (Some(so), None) => {
+                    let mut stream = so;
+                    while let Some(item) = stream.next().await {
+                        if let Ok((_, line)) = item
+                            && so_bytes < MAX_BYTES
+                        {
+                            let entry = format!("{line}\n");
+                            so_bytes += entry.len();
+                            so_acc.lock().await.push_str(&entry);
+                            il_acc.lock().await.push_str(&entry);
+                        }
+                    }
+                }
+                (None, Some(se)) => {
+                    let mut stream = se;
+                    while let Some(item) = stream.next().await {
+                        if let Ok((_, line)) = item
+                            && se_bytes < MAX_BYTES
+                        {
+                            let entry = format!("{line}\n");
+                            se_bytes += entry.len();
+                            se_acc.lock().await.push_str(&entry);
+                            il_acc.lock().await.push_str(&entry);
+                        }
+                    }
+                }
+                (None, None) => {}
+            }
+        });
+
+        let (exit_code, timed_out, mut output_truncated, output_collection_error) = tokio::select! {
+            _ = &mut drain_task => {
+                // Pipes fully drained. Wait up to 500ms for child to exit.
+                // Background processes may hold pipes open after the main work is done.
+                let (status, drain_truncated) = match tokio::time::timeout(
                     std::time::Duration::from_millis(500),
                     child.wait()
                 ).await {
                     Ok(Ok(s)) => (Some(s), false),
                     Ok(Err(_)) => (None, false),
                     Err(_) => {
-                        // Child still alive after post-exit deadline (background process held pipes).
-                        // start_kill() on an already-exited process is a no-op per tokio docs.
                         child.start_kill().ok();
                         let _ = child.wait().await;
                         (None, true)
                     }
                 };
-                (status, truncated)
-            } => {
-                let stdout_bytes = std::mem::take(&mut *stdout_shared.lock().await);
-                let stderr_bytes = std::mem::take(&mut *stderr_shared.lock().await);
-                let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
-                let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
-                let exit_code = result.0.and_then(|s| s.code());
-                (stdout_str, stderr_str, exit_code, false, result.1)
+                let exit_code = status.and_then(|s| s.code());
+                let ocerr = if drain_truncated {
+                    Some("post-exit drain timeout: background process held pipes".to_string())
+                } else {
+                    None
+                };
+                (exit_code, false, drain_truncated, ocerr)
             }
             _ = tokio::time::sleep(timeout_duration) => {
-                // Wall-clock timeout fired. Kill process; pipes will reach EOF, drain future drops.
+                // Wall-clock timeout fired. Kill process; drain task gets EOF and exits.
                 let _ = child.kill().await;
                 let _ = child.wait().await;
-                // Read partial output buffered before the kill (MutexGuard released by dropped arm).
-                let stdout_bytes = std::mem::take(&mut *stdout_shared.lock().await);
-                let stderr_bytes = std::mem::take(&mut *stderr_shared.lock().await);
-                let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
-                let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
-                (stdout_str, stderr_str, None, true, false)
+                drain_task.abort();
+                // Shared buffers retain whatever lines were collected before the kill.
+                (None, true, false, None)
             }
         };
+
+        // Cancel progress task now that drain is complete
+        if let Some(handle) = progress_handle {
+            handle.abort();
+        }
+
+        // Read accumulated output from shared buffers
+        let stdout_str = std::mem::take(&mut *stdout_shared.lock().await);
+        let stderr_str = std::mem::take(&mut *stderr_shared.lock().await);
+        let interleaved_str = std::mem::take(&mut *interleaved_shared.lock().await);
 
         // Handle output overflow with slot isolation
         let slot = seq % 8;
@@ -3241,24 +3326,37 @@ impl CodeAnalyzer {
             handle_output_overflow(stdout_str, stderr_str, slot);
         output_truncated = output_truncated || overflow_notice.is_some();
 
-        let output =
-            types::ShellOutput::new(stdout, stderr, exit_code, timed_out, output_truncated);
+        let mut output = types::ShellOutput::new(
+            stdout,
+            stderr,
+            interleaved_str,
+            exit_code,
+            timed_out,
+            output_truncated,
+        );
+        output.output_collection_error = output_collection_error;
+
+        // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
+        let output_text = if output.interleaved.is_empty() {
+            format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
+        } else {
+            format!("Output:\n{}", output.interleaved)
+        };
 
         let text = format!(
-            "Command: {}\nExit code: {}\nTimed out: {}\nOutput truncated: {}\n\nStdout:\n{}\n\nStderr:\n{}",
+            "Command: {}\nExit code: {}\nTimed out: {}\nOutput truncated: {}\n\n{}",
             params.command,
             exit_code
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "null".to_string()),
             timed_out,
             output_truncated,
-            output.stdout,
-            output.stderr
+            output_text,
         );
 
-        let mut content_blocks = vec![Content::text(text.clone())];
+        let mut content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
         if let Some(notice) = overflow_notice {
-            content_blocks.push(Content::text(notice));
+            content_blocks.push(Content::text(notice).with_priority(0.0));
         }
 
         // Determine if command failed: timeout or non-zero exit code.

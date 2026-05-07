@@ -672,3 +672,86 @@ async fn test_exec_command_slot_isolation() {
         "should have extracted at least one slot identifier"
     );
 }
+
+#[tokio::test]
+async fn test_handler_interleaved_ordering() {
+    // Arrange: command writes to both stdout and stderr
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo stdout_line && echo stderr_line >&2"
+    }))
+    .await;
+
+    // Act: inspect structuredContent.interleaved
+    let sc = &resp["result"]["structuredContent"];
+    let interleaved = sc["interleaved"].as_str().unwrap_or("");
+
+    // Assert: both lines are captured in the single interleaved field.
+    // Exact ordering is non-deterministic (merge polls both streams); we verify
+    // that both streams contribute to the interleaved output.
+    assert!(
+        interleaved.contains("stdout_line"),
+        "interleaved missing stdout_line: {interleaved}"
+    );
+    assert!(
+        interleaved.contains("stderr_line"),
+        "interleaved missing stderr_line: {interleaved}"
+    );
+    // Verify structuredContent.stdout and .stderr are populated separately too
+    assert!(
+        sc["stdout"].as_str().unwrap_or("").contains("stdout_line"),
+        "stdout field missing stdout_line: {sc}"
+    );
+    assert!(
+        sc["stderr"].as_str().unwrap_or("").contains("stderr_line"),
+        "stderr field missing stderr_line: {sc}"
+    );
+}
+
+#[test]
+fn test_handler_output_collection_error() {
+    // Verify ShellOutput can be constructed with output_collection_error set.
+    // The field is populated when a post-exit drain timeout fires; that path
+    // is difficult to trigger deterministically in an integration test, so we
+    // verify the struct-level contract here.
+    use aptu_coder_core::types::ShellOutput;
+    let mut output = ShellOutput::new(
+        "out".into(),
+        "err".into(),
+        "out\nerr\n".into(),
+        Some(0),
+        false,
+        false,
+    );
+    assert!(
+        output.output_collection_error.is_none(),
+        "output_collection_error must be None by default"
+    );
+    output.output_collection_error =
+        Some("post-exit drain timeout: background process held pipes".into());
+    assert!(
+        output.output_collection_error.is_some(),
+        "output_collection_error should be settable"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_content_priority() {
+    // Arrange: run a simple command
+    let resp = call_exec_command_raw(serde_json::json!({"command": "echo hello"})).await;
+
+    // Act: check the first content block for an annotations.priority field
+    let content = &resp["result"]["content"];
+    let first = &content[0];
+    let priority = &first["annotations"]["priority"];
+
+    // Assert: priority annotation present and equals 0.0
+    assert!(
+        !priority.is_null(),
+        "first content block should have annotations.priority: {first}"
+    );
+    let pval = priority.as_f64().unwrap_or(f64::NAN);
+    assert!(
+        (pval - 0.0).abs() < f64::EPSILON,
+        "priority should be 0.0, got: {pval}"
+    );
+}

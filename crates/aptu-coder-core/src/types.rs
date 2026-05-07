@@ -961,6 +961,8 @@ pub struct ShellOutput {
     pub stdout: String,
     /// Standard error from the command.
     pub stderr: String,
+    /// Stdout and stderr interleaved in arrival order.
+    pub interleaved: String,
     /// Exit code; null if killed by timeout.
     pub exit_code: Option<i32>,
     /// True if the command was killed due to timeout.
@@ -969,6 +971,10 @@ pub struct ShellOutput {
     /// When true, any available output is still included; use the overflow file path
     /// from the truncation notice Content block to recover the full output.
     pub output_truncated: bool,
+    /// Set when the post-exit drain timed out because a background process held the
+    /// pipes open. Distinct from `output_truncated` (size cap) -- this indicates a
+    /// drain timeout rather than a size overflow.
+    pub output_collection_error: Option<String>,
 }
 
 impl ShellOutput {
@@ -976,6 +982,7 @@ impl ShellOutput {
     pub fn new(
         stdout: String,
         stderr: String,
+        interleaved: String,
         exit_code: Option<i32>,
         timed_out: bool,
         output_truncated: bool,
@@ -983,9 +990,11 @@ impl ShellOutput {
         Self {
             stdout,
             stderr,
+            interleaved,
             exit_code,
             timed_out,
             output_truncated,
+            output_collection_error: None,
         }
     }
 }

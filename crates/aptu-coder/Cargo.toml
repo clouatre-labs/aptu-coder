@@ -25,6 +25,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 aptu-coder-core = { path = "../aptu-coder-core", version = "0.8", features = ["schemars", "lang-rust", "lang-go", "lang-java", "lang-python", "lang-typescript", "lang-tsx", "lang-fortran", "lang-javascript", "lang-cpp", "lang-csharp"] }
 rmcp = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
