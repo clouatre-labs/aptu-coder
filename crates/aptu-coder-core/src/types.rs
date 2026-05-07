@@ -926,6 +926,8 @@ pub struct ExecCommandParams {
     /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
     /// None = no limit (default).
     pub cpu_limit_secs: Option<u64>,
+    /// UTF-8 content to pipe into the process stdin (max 1 MB). When None, stdin is closed (null).
+    pub stdin: Option<String>,
 }
 
 impl ExecCommandParams {
@@ -949,6 +951,7 @@ impl Default for ExecCommandParams {
             working_dir: None,
             memory_limit_mb: None,
             cpu_limit_secs: None,
+            stdin: None,
         }
     }
 }
