@@ -28,7 +28,7 @@ env:
 jobs:
   changes:
     name: Detect Changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     outputs:
       code: ${{ steps.filter.outputs.code }}
       workflows: ${{ steps.filter.outputs.workflows }}
@@ -53,7 +53,7 @@ jobs:
 
   commitlint:
     name: Lint Commits
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     if: github.event_name == 'pull_request'
     timeout-minutes: 5
     steps:
@@ -85,7 +85,7 @@ jobs:
 
   check-base:
     name: Check Branch Base
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     if: github.event_name == 'pull_request'
     timeout-minutes: 5
     steps:
@@ -108,7 +108,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 10
@@ -144,7 +144,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 15
@@ -184,7 +184,7 @@ jobs:
 
   deny:
     name: Audit Dependencies
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request')
     timeout-minutes: 10
@@ -200,7 +200,7 @@ jobs:
 
   msrv:
     name: MSRV Check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 10
@@ -221,7 +221,7 @@ jobs:
 
   zizmor:
     name: zizmor
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     needs: changes
     timeout-minutes: 10
     if: needs.changes.outputs.workflows == 'true' || github.event_name != 'pull_request'
@@ -237,7 +237,7 @@ jobs:
 
   semver-checks:
     name: semver checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     if: github.event_name == 'pull_request'
     # This PR renames the crate; no published or git baseline exists for aptu-coder-core yet.
     # Re-enable without continue-on-error after aptu-coder-core is first published on crates.io.
@@ -263,7 +263,7 @@ jobs:
 
   ci-result:
     name: CI Result
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm64
     if: always()
     needs: [changes, commitlint, check-base, lint, coverage, deny, msrv, zizmor, semver-checks]
     steps:
