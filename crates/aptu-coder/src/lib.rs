@@ -3091,41 +3091,45 @@ impl CodeAnalyzer {
         let sid = self.session_id.lock().await.clone();
 
         let command = params.command.clone();
-        let timeout_secs = params.timeout_secs.unwrap_or(30);
+        let timeout_secs = params.timeout_secs;
 
         // Acquire peer and progress token for optional progress notifications
         let peer = self.peer.lock().await.clone();
         let progress_token = context.meta.get_progress_token();
 
         // Spawn a progress task that emits every 5s for long-running commands (>10s timeout)
-        let progress_handle: Option<tokio::task::JoinHandle<()>> = if timeout_secs > 10 {
-            if let (Some(token), Some(peer_conn)) = (progress_token.clone(), peer.clone()) {
-                let self_clone = self.clone();
-                Some(tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-                    interval.tick().await; // skip the immediate first tick
-                    let mut tick = 0u64;
-                    loop {
-                        interval.tick().await;
-                        tick += 1;
-                        let progress = ((tick * 5) as f64 / timeout_secs as f64).min(0.99);
-                        self_clone
-                            .emit_progress(
-                                Some(peer_conn.clone()),
-                                &token,
-                                progress,
-                                1.0,
-                                "command running".to_string(),
-                            )
-                            .await;
-                    }
-                }))
+        let progress_handle: Option<tokio::task::JoinHandle<()>> =
+            if timeout_secs.is_none_or(|t| t > 10) {
+                if let (Some(token), Some(peer_conn)) = (progress_token.clone(), peer.clone()) {
+                    let self_clone = self.clone();
+                    Some(tokio::spawn(async move {
+                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+                        interval.tick().await; // skip the immediate first tick
+                        let mut tick = 0u64;
+                        loop {
+                            interval.tick().await;
+                            tick += 1;
+                            let progress = match timeout_secs {
+                                Some(secs) => ((tick * 5) as f64 / secs as f64).min(0.99),
+                                None => 0.0,
+                            };
+                            self_clone
+                                .emit_progress(
+                                    Some(peer_conn.clone()),
+                                    &token,
+                                    progress,
+                                    1.0,
+                                    "command running".to_string(),
+                                )
+                                .await;
+                        }
+                    }))
+                } else {
+                    None
+                }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         // Spawn the command using tokio::process::Command for proper async handling
         let shell = resolve_shell();
@@ -3202,7 +3206,6 @@ impl CodeAnalyzer {
         };
 
         // Wait for the command with timeout using tokio::select! to race wait against sleep
-        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
         const MAX_BYTES: usize = 50 * 1024;
 
         let stdout_pipe = child.stdout.take();
@@ -3325,7 +3328,13 @@ impl CodeAnalyzer {
                 };
                 (exit_code, false, drain_truncated, ocerr)
             }
-            _ = tokio::time::sleep(timeout_duration) => {
+            _ = async {
+                if let Some(secs) = timeout_secs {
+                    tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
                 // Wall-clock timeout fired. Kill process; drain task gets EOF and exits.
                 let _ = child.kill().await;
                 let _ = child.wait().await;

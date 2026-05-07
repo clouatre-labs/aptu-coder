@@ -916,7 +916,7 @@ pub struct EditInsertOutput {
 pub struct ExecCommandParams {
     /// Shell command to execute via sh -c (or $SHELL if set).
     pub command: String,
-    /// Timeout in seconds before SIGKILL (default: 30).
+    /// Timeout in seconds before SIGKILL. None = no timeout (default).
     pub timeout_secs: Option<u64>,
     /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
     pub working_dir: Option<String>,
