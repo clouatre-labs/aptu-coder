@@ -2549,8 +2549,8 @@ impl CodeAnalyzer {
         annotations(
             title = "Edit Rename",
             read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
             open_world_hint = false
         )
     )]
@@ -4306,6 +4306,63 @@ mod tests {
             "Resolved path should be within CWD: {:?} should start with {:?}",
             path,
             canonical_cwd
+        );
+    }
+
+    #[test]
+    fn test_tool_annotations() {
+        // Arrange: get tool list via static method
+        let tools = CodeAnalyzer::list_tools();
+
+        // Act: find specific tools by name
+        let edit_rename = tools.iter().find(|t| t.name == "edit_rename");
+        let analyze_directory = tools.iter().find(|t| t.name == "analyze_directory");
+        let exec_command = tools.iter().find(|t| t.name == "exec_command");
+
+        // Assert: edit_rename has correct annotations
+        let edit_rename_tool = edit_rename.expect("edit_rename tool should exist");
+        let edit_rename_annot = edit_rename_tool
+            .annotations
+            .as_ref()
+            .expect("edit_rename should have annotations");
+        assert_eq!(
+            edit_rename_annot.destructive_hint,
+            Some(false),
+            "edit_rename destructive_hint should be false"
+        );
+        assert_eq!(
+            edit_rename_annot.idempotent_hint,
+            Some(true),
+            "edit_rename idempotent_hint should be true"
+        );
+
+        // Assert: analyze_directory has correct annotations
+        let analyze_dir_tool = analyze_directory.expect("analyze_directory tool should exist");
+        let analyze_dir_annot = analyze_dir_tool
+            .annotations
+            .as_ref()
+            .expect("analyze_directory should have annotations");
+        assert_eq!(
+            analyze_dir_annot.read_only_hint,
+            Some(true),
+            "analyze_directory read_only_hint should be true"
+        );
+        assert_eq!(
+            analyze_dir_annot.destructive_hint,
+            Some(false),
+            "analyze_directory destructive_hint should be false"
+        );
+
+        // Assert: exec_command has correct annotations
+        let exec_cmd_tool = exec_command.expect("exec_command tool should exist");
+        let exec_cmd_annot = exec_cmd_tool
+            .annotations
+            .as_ref()
+            .expect("exec_command should have annotations");
+        assert_eq!(
+            exec_cmd_annot.open_world_hint,
+            Some(true),
+            "exec_command open_world_hint should be true"
         );
     }
 }
