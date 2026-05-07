@@ -2544,7 +2544,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_rename",
         title = "Edit Rename",
-        description = "AST-aware rename within a single file. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found; fails if kind parameter supplied (reserved, not yet supported). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs.",
+        description = "AST-aware rename within a single file. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs.",
         output_schema = schema_for_type::<EditRenameOutput>(),
         annotations(
             title = "Edit Rename",
