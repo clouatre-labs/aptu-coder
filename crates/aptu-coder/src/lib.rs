@@ -3095,13 +3095,16 @@ impl CodeAnalyzer {
                 Some(tokio::spawn(async move {
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
                     interval.tick().await; // skip the immediate first tick
+                    let mut tick = 0u64;
                     loop {
                         interval.tick().await;
+                        tick += 1;
+                        let progress = ((tick * 5) as f64 / timeout_secs as f64).min(0.99);
                         self_clone
                             .emit_progress(
                                 Some(peer_conn.clone()),
                                 &token,
-                                0.0,
+                                progress,
                                 1.0,
                                 "command running".to_string(),
                             )
