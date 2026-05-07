@@ -3217,6 +3217,7 @@ impl CodeAnalyzer {
         let mut drain_task = tokio::spawn(async move {
             let mut so_bytes = 0usize;
             let mut se_bytes = 0usize;
+            let mut il_bytes = 0usize;
 
             let so_stream = stdout_pipe.map(|p| {
                 LinesStream::new(tokio::io::BufReader::new(p).lines())
@@ -3236,12 +3237,18 @@ impl CodeAnalyzer {
                                 if se_bytes < MAX_BYTES {
                                     se_bytes += entry.len();
                                     se_acc.lock().await.push_str(&entry);
-                                    il_acc.lock().await.push_str(&entry);
+                                    if il_bytes < 2 * MAX_BYTES {
+                                        il_bytes += entry.len();
+                                        il_acc.lock().await.push_str(&entry);
+                                    }
                                 }
                             } else if so_bytes < MAX_BYTES {
                                 so_bytes += entry.len();
                                 so_acc.lock().await.push_str(&entry);
-                                il_acc.lock().await.push_str(&entry);
+                                if il_bytes < 2 * MAX_BYTES {
+                                    il_bytes += entry.len();
+                                    il_acc.lock().await.push_str(&entry);
+                                }
                             }
                         }
                     }
@@ -3255,7 +3262,10 @@ impl CodeAnalyzer {
                             let entry = format!("{line}\n");
                             so_bytes += entry.len();
                             so_acc.lock().await.push_str(&entry);
-                            il_acc.lock().await.push_str(&entry);
+                            if il_bytes < 2 * MAX_BYTES {
+                                il_bytes += entry.len();
+                                il_acc.lock().await.push_str(&entry);
+                            }
                         }
                     }
                 }
@@ -3268,7 +3278,10 @@ impl CodeAnalyzer {
                             let entry = format!("{line}\n");
                             se_bytes += entry.len();
                             se_acc.lock().await.push_str(&entry);
-                            il_acc.lock().await.push_str(&entry);
+                            if il_bytes < 2 * MAX_BYTES {
+                                il_bytes += entry.len();
+                                il_acc.lock().await.push_str(&entry);
+                            }
                         }
                     }
                 }
