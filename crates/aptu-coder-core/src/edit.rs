@@ -6,6 +6,7 @@ use crate::types::{
     EditInsertOutput, EditOverwriteOutput, EditRenameOutput, EditReplaceOutput, InsertPosition,
 };
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -46,6 +47,20 @@ pub enum EditError {
 
 const IDENTIFIER_QUERY: &str = "(identifier) @name";
 
+fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
+    let parent = path.parent().ok_or_else(|| {
+        EditError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path has no parent directory",
+        ))
+    })?;
+    let mut temp_file = NamedTempFile::new_in(parent)?;
+    use std::io::Write;
+    temp_file.write_all(content.as_bytes())?;
+    temp_file.persist(path).map_err(|e| e.error)?;
+    Ok(())
+}
+
 pub fn edit_overwrite_content(
     path: &Path,
     content: &str,
@@ -58,7 +73,7 @@ pub fn edit_overwrite_content(
     {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, content)?;
+    write_file_atomic(path, content)?;
     Ok(EditOverwriteOutput {
         path: path.display().to_string(),
         bytes_written: content.len(),
@@ -92,7 +107,7 @@ pub fn edit_replace_block(
     let bytes_before = content.len();
     let updated = content.replacen(old_text, new_text, 1);
     let bytes_after = updated.len();
-    std::fs::write(path, &updated)?;
+    write_file_atomic(path, &updated)?;
     Ok(EditReplaceOutput {
         path: path.display().to_string(),
         bytes_before,
