@@ -1927,7 +1927,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_raw",
         title = "Analyze Raw",
-        description = "Raw UTF-8 file content with line numbers; no AST parsing. Returns path, total_lines, start_line, end_line, content, next_start_line (null at EOF; pass as start_line to continue pagination). Use start_line/end_line (1-indexed, inclusive) to read a range; defaults to full file. Fails if directory path supplied; fails on binary or non-UTF-8 files. Use analyze_file or analyze_module for AST-structured output. Example queries: Show lines 100-150 of src/lib.rs.",
+        description = "Raw UTF-8 file content with line numbers; no AST parsing. Returns path, total_lines, start_line, end_line, content, next_start_line (null at EOF; pass as start_line to continue pagination). Omitting start_line/end_line returns the full file; for files over 100 lines use analyze_module first to locate the range. Fails if directory path supplied; fails on binary or non-UTF-8 files. Use analyze_file or analyze_module for AST-structured output. Example queries: Show lines 100-150 of src/lib.rs.",
         output_schema = schema_for_type::<types::AnalyzeRawOutput>(),
         annotations(
             title = "Analyze Raw",
@@ -2038,6 +2038,33 @@ impl CodeAnalyzer {
                         "validation",
                         false,
                         "provide a file path, not a directory",
+                    )),
+                )));
+            }
+            Ok(Err(aptu_coder_core::AnalyzeError::RangelessLargeFile { total_lines })) => {
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "analyze_raw",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("invalid_params".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                });
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "file has {total_lines} lines; provide start_line and end_line, or call analyze_module first to locate the range"
+                    ),
+                    Some(error_meta(
+                        "validation",
+                        false,
+                        "call analyze_module to get function line numbers, then retry with start_line and end_line",
                     )),
                 )));
             }

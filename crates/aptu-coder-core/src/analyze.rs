@@ -55,6 +55,10 @@ pub enum AnalyzeError {
     },
     #[error("path is a directory, not a file: {0}")]
     NotAFile(PathBuf),
+    #[error(
+        "file has {total_lines} lines; provide start_line and end_line, or call analyze_module first to locate the range"
+    )]
+    RangelessLargeFile { total_lines: usize },
 }
 
 /// Result of directory analysis containing both formatted output and file data.
@@ -1487,6 +1491,11 @@ pub fn analyze_raw_range(
             next_start_line: None,
         });
     }
+    /// Files above this line count require explicit start_line/end_line on rangeless calls.
+    const MAX_RANGELESS_LINES: usize = 100;
+    if start_line.is_none() && end_line.is_none() && total > MAX_RANGELESS_LINES {
+        return Err(AnalyzeError::RangelessLargeFile { total_lines: total });
+    }
     let start = start_line.unwrap_or(1).max(1).min(total.max(1));
     let end = end_line.unwrap_or(total).min(total).max(1);
     if start > end {
@@ -2073,5 +2082,24 @@ fn caller_c() { target(); }
             iterations <= 5,
             "should take at most 5 iterations for 10 lines with page_size=3"
         );
+    }
+
+    #[test]
+    fn test_analyze_raw_rangeless_large_file_rejected() {
+        let content = "line\n".repeat(101);
+        let f = make_temp_file(&content);
+        let err = analyze_raw_range(f.path(), None, None).unwrap_err();
+        assert!(matches!(
+            err,
+            AnalyzeError::RangelessLargeFile { total_lines: 101 }
+        ));
+    }
+
+    #[test]
+    fn test_analyze_raw_rangeless_small_file_allowed() {
+        let content = "line\n".repeat(100);
+        let f = make_temp_file(&content);
+        let out = analyze_raw_range(f.path(), None, None).unwrap();
+        assert_eq!(out.total_lines, 100);
     }
 }
