@@ -379,8 +379,8 @@ async fn test_profile_env_var_fallback() {
 
     // Assert: env var profile should be applied when _meta is absent.
     assert_eq!(
-        tool_count, 4,
-        "env var profile (edit) should enable exactly 4 tools, got: {:?}",
+        tool_count, 3,
+        "env var profile (edit) should enable exactly 3 tools, got: {:?}",
         tool_names
     );
     assert!(
@@ -418,9 +418,9 @@ async fn test_profile_env_var_ignored_when_meta_present() {
         .collect();
 
     // Assert: _meta profile (analyze) should override the env var (edit).
-    // analyze profile enables 6 tools.
+    // analyze profile enables 5 tools.
     assert_eq!(
-        tool_count, 6,
+        tool_count, 5,
         "_meta profile (analyze) should take precedence over env var, got: {:?}",
         tool_names
     );

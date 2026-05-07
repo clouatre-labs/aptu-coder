@@ -3438,7 +3438,7 @@ impl ServerHandler for CodeAnalyzer {
             .store(0, std::sync::atomic::Ordering::Relaxed);
 
         // Parse client profile from stored metadata and disable tools accordingly.
-        // Profiles: "edit" (4 tools), "analyze" (6 tools), absent/unknown (10 tools).
+        // Profiles: "edit" (3 tools), "analyze" (5 tools), absent/unknown (9 tools).
         // _meta takes precedence over APTU_CODER_PROFILE when both are present.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock

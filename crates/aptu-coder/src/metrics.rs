@@ -69,7 +69,7 @@ impl MetricsWriter {
         let mut current_file: Option<PathBuf> = None;
 
         // Accumulate per-tool metrics for export on shutdown (issue #773)
-        let mut tool_counts: std::collections::HashMap<String, (u64, u64)> =
+        let mut tool_counts: std::collections::HashMap<&'static str, (u64, u64)> =
             std::collections::HashMap::new();
         let mut export_session_id: Option<String> = None;
 
@@ -77,7 +77,7 @@ impl MetricsWriter {
             let mut batch = Vec::new();
             if let Some(event) = self.rx.recv().await {
                 // Accumulate metrics for export
-                let entry = tool_counts.entry(event.tool.to_string()).or_insert((0, 0));
+                let entry = tool_counts.entry(event.tool).or_insert((0, 0));
                 entry.0 += 1;
                 entry.1 += event.duration_ms;
                 if export_session_id.is_none() {
@@ -89,7 +89,7 @@ impl MetricsWriter {
                     match self.rx.try_recv() {
                         Ok(e) => {
                             // Accumulate metrics for export
-                            let entry = tool_counts.entry(e.tool.to_string()).or_insert((0, 0));
+                            let entry = tool_counts.entry(e.tool).or_insert((0, 0));
                             entry.0 += 1;
                             entry.1 += e.duration_ms;
                             if export_session_id.is_none() {
