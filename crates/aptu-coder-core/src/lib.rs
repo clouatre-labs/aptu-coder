@@ -65,8 +65,8 @@ pub use analyze::{
 };
 pub use config::AnalysisConfig;
 pub use edit::{
-    EditError, edit_insert_at_symbol, edit_overwrite_content, edit_rename_in_file,
-    edit_replace_block,
+    EditError, edit_insert_at_symbol, edit_overwrite_content, edit_rename_directory,
+    edit_rename_in_file, edit_replace_block,
 };
 pub use lang::{language_for_extension, supported_languages};
 pub use parser::ParserError;

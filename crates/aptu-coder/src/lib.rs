@@ -19,6 +19,7 @@ pub mod logging;
 pub mod metrics;
 
 pub use aptu_coder_core::analyze;
+use aptu_coder_core::types::STDIN_MAX_BYTES;
 use aptu_coder_core::{cache, completion, graph, traversal, types};
 
 pub(crate) const EXCLUDED_DIRS: &[&str] = &[
@@ -50,7 +51,7 @@ use aptu_coder_core::types::{
     EditOverwriteParams, EditRenameOutput, EditRenameParams, EditReplaceOutput, EditReplaceParams,
     SymbolMatchMode,
 };
-use aptu_coder_core::{edit_insert_at_symbol, edit_rename_in_file};
+use aptu_coder_core::{edit_insert_at_symbol, edit_rename_directory, edit_rename_in_file};
 use logging::LogEvent;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
@@ -2544,7 +2545,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_rename",
         title = "Edit Rename",
-        description = "AST-aware rename within a single file. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs.",
+        description = "AST-aware rename within a single file or across a directory tree. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. When path is a file: returns path, old_name, new_name, occurrences_renamed. When path is a directory: renames old_name across all files in the directory tree where it appears as a syntactic identifier; returns files_changed (per-file results) and errors (per-file failures). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs; or rename across all files in src/.",
         output_schema = schema_for_type::<EditRenameOutput>(),
         annotations(
             title = "Edit Rename",
@@ -2571,44 +2572,37 @@ impl CodeAnalyzer {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let sid = self.session_id.lock().await.clone();
 
-        // Guard against directory paths
-        if std::fs::metadata(&params.path)
+        let is_dir = std::fs::metadata(&params.path)
             .map(|m| m.is_dir())
-            .unwrap_or(false)
-        {
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "edit_rename",
-                duration_ms: dur,
-                output_chars: 0,
-                param_path_depth: crate::metrics::path_component_count(&param_path),
-                max_depth: None,
-                result: "error",
-                error_type: Some("invalid_params".to_string()),
-                session_id: sid.clone(),
-                seq: Some(seq),
-                cache_hit: None,
-            });
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "edit_rename operates on a single file — provide a file path, not a directory"
-                    .to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "provide a file path, not a directory",
-                )),
-            )));
-        }
+            .unwrap_or(false);
 
         let path = std::path::PathBuf::from(&params.path);
         let old_name = params.old_name.clone();
         let new_name = params.new_name.clone();
         let kind = params.kind.clone();
-        let handle = tokio::task::spawn_blocking(move || {
-            edit_rename_in_file(&path, &old_name, &new_name, kind.as_deref())
-        });
+
+        let handle = if is_dir {
+            tokio::task::spawn_blocking(move || {
+                edit_rename_directory(&path, &old_name, &new_name, kind.as_deref()).map(
+                    |(results, errors)| {
+                        let total_occurrences: usize =
+                            results.iter().map(|r| r.occurrences_renamed).sum();
+                        aptu_coder_core::types::EditRenameOutput {
+                            path: path.display().to_string(),
+                            old_name,
+                            new_name,
+                            occurrences_renamed: total_occurrences,
+                            files_changed: Some(results),
+                            errors: Some(errors),
+                        }
+                    },
+                )
+            })
+        } else {
+            tokio::task::spawn_blocking(move || {
+                edit_rename_in_file(&path, &old_name, &new_name, kind.as_deref())
+            })
+        };
 
         let output = match handle.await {
             Ok(Ok(v)) => v,
@@ -3092,7 +3086,7 @@ impl CodeAnalyzer {
 
         // Validate stdin size cap (1 MB)
         if let Some(ref stdin_content) = params.stdin
-            && stdin_content.len() > 1_048_576
+            && stdin_content.len() > STDIN_MAX_BYTES
         {
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -4415,19 +4409,19 @@ mod tests {
     fn test_exec_stdin_size_cap_validation() {
         // Test: stdin size cap check (1 MB limit)
         // Arrange: create oversized stdin
-        let oversized_stdin = "x".repeat(1_048_577); // 1 MB + 1 byte
+        let oversized_stdin = "x".repeat(STDIN_MAX_BYTES + 1);
 
         // Act & Assert: verify size exceeds limit
         assert!(
-            oversized_stdin.len() > 1_048_576,
+            oversized_stdin.len() > STDIN_MAX_BYTES,
             "test setup: oversized stdin should exceed 1 MB"
         );
 
         // Verify that a 1 MB stdin is accepted
-        let max_stdin = "y".repeat(1_048_576);
+        let max_stdin = "y".repeat(STDIN_MAX_BYTES);
         assert_eq!(
             max_stdin.len(),
-            1_048_576,
+            STDIN_MAX_BYTES,
             "test setup: max stdin should be exactly 1 MB"
         );
     }
