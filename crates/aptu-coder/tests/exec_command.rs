@@ -429,6 +429,51 @@ async fn test_handler_nonzero_exit() {
     let resp = call_exec_command_raw(serde_json::json!({"command": "exit 42"})).await;
     let sc = &resp["result"]["structuredContent"];
     assert_eq!(sc["exit_code"], 42, "exit_code mismatch: {sc}");
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for non-zero exit: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_timeout_partial_output() {
+    // Command prints output immediately then sleeps longer than timeout
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo partial_output && sleep 10",
+        "timeout_secs": 1
+    }))
+    .await;
+    let sc = &resp["result"]["structuredContent"];
+    assert_eq!(sc["timed_out"], true, "expected timed_out=true: {sc}");
+    let stdout = sc["stdout"].as_str().unwrap_or("");
+    assert!(
+        stdout.contains("partial_output"),
+        "expected partial_output in stdout on timeout, got: {stdout}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_shell_preference() {
+    // Serialize all tests that mutate APTU_SHELL to prevent races when the
+    // test suite runs in parallel (tokio::test spawns concurrent tasks).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    // SAFETY: the static mutex above ensures no other test reads or writes
+    // APTU_SHELL while we hold the guard.
+    unsafe { std::env::set_var("APTU_SHELL", "sh") };
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo $0"
+    }))
+    .await;
+    unsafe { std::env::remove_var("APTU_SHELL") };
+
+    let sc = &resp["result"]["structuredContent"];
+    let stdout = sc["stdout"].as_str().unwrap_or("");
+    assert!(
+        stdout.contains("sh"),
+        "expected sh in $0 output, got: {stdout}"
+    );
 }
 
 #[tokio::test]

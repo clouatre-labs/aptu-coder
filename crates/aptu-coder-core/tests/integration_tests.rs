@@ -4641,8 +4641,20 @@ fn test_regression_analyze_raw_attribute_line() {
         .find(|f| f.name == "analyze_raw")
         .expect("should find analyze_raw function");
 
-    assert_eq!(
-        analyze_raw.line, 1896,
-        "analyze_raw should report the first attribute line 1896, not the fn line 1910"
+    // The extractor must report the first attribute line (#[instrument] or #[tool]),
+    // not the `async fn` keyword line. Verify dynamically so the test stays valid
+    // regardless of how many lines are added above analyze_raw in lib.rs.
+    let fn_line = source
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("async fn analyze_raw"))
+        .map(|(i, _)| i + 1) // 1-indexed
+        .expect("should find `async fn analyze_raw` in lib.rs");
+
+    assert!(
+        analyze_raw.line < fn_line,
+        "analyze_raw should report the first attribute line (got {}), not the `async fn` line ({})",
+        analyze_raw.line,
+        fn_line,
     );
 }

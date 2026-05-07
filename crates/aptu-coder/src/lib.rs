@@ -242,6 +242,26 @@ fn paginate_focus_chains(
     Ok((paginated.items, next))
 }
 
+/// Resolve the preferred shell for command execution.
+/// Priority: APTU_SHELL env var > bash (PATH search) > /bin/sh (unix) / cmd (windows).
+/// APTU_SHELL is honored on all platforms so callers can override the shell uniformly.
+fn resolve_shell() -> String {
+    if let Ok(shell) = std::env::var("APTU_SHELL") {
+        return shell;
+    }
+    #[cfg(unix)]
+    {
+        if which::which("bash").is_ok() {
+            return "bash".to_string();
+        }
+        "/bin/sh".to_string()
+    }
+    #[cfg(not(unix))]
+    {
+        "cmd".to_string()
+    }
+}
+
 /// MCP server handler that wires the four analysis tools to the rmcp transport.
 ///
 /// Holds shared state: tool router, analysis cache, peer connection, log-level filter,
@@ -3064,9 +3084,9 @@ impl CodeAnalyzer {
         let timeout_secs = params.timeout_secs.unwrap_or(30);
 
         // Spawn the command using tokio::process::Command for proper async handling
-        let mut cmd = tokio::process::Command::new(
-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
-        );
+        let shell = resolve_shell();
+
+        let mut cmd = tokio::process::Command::new(shell);
         cmd.arg("-c").arg(&command);
 
         if let Some(ref wd) = working_dir_path {
@@ -3140,43 +3160,78 @@ impl CodeAnalyzer {
         // Wait for the command with timeout using tokio::select! to race wait against sleep
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
         const MAX_BYTES: usize = 50 * 1024;
-        let (stdout_str, stderr_str, exit_code, timed_out) = tokio::select! {
-            result = async {
-                use tokio::io::AsyncReadExt;
 
-                // Concurrent drain -- prevents pipe deadlock when command writes > OS buffer
-                let (stdout_bytes, stderr_bytes) = tokio::join!(
+        // Allocate shared buffers before the select so timeout arm can read them
+        use std::sync::Arc;
+        use tokio::io::AsyncReadExt;
+        use tokio::sync::Mutex as TokioMutex;
+
+        let stdout_shared: Arc<TokioMutex<Vec<u8>>> = Arc::new(TokioMutex::new(Vec::new()));
+        let stderr_shared: Arc<TokioMutex<Vec<u8>>> = Arc::new(TokioMutex::new(Vec::new()));
+
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+
+        let stdout_drain = Arc::clone(&stdout_shared);
+        let stderr_drain = Arc::clone(&stderr_shared);
+
+        // SAFETY: holding tokio::sync::Mutex across .await during read_to_end is safe here
+        // because this future is inside a tokio::select! arm. When the timeout arm fires,
+        // this arm's future is dropped synchronously, releasing the MutexGuard before the
+        // timeout arm attempts to acquire the lock. No deadlock or starvation is possible.
+        let (stdout_str, stderr_str, exit_code, timed_out, mut output_truncated) = tokio::select! {
+            result = async {
+                // Concurrent drain -- prevents pipe deadlock when command writes > OS buffer (~64KB).
+                // Lock is held during read_to_end; safe because this arm is dropped on timeout (see SAFETY above).
+                tokio::join!(
                     async {
-                        let mut buf = Vec::new();
-                        if let Some(stdout) = child.stdout.take() {
+                        if let Some(stdout) = stdout_pipe {
                             let mut reader = stdout.take(MAX_BYTES as u64);
-                            let _ = reader.read_to_end(&mut buf).await;
+                            let _ = reader.read_to_end(&mut *stdout_drain.lock().await).await;
                         }
-                        buf
                     },
                     async {
-                        let mut buf = Vec::new();
-                        if let Some(stderr) = child.stderr.take() {
+                        if let Some(stderr) = stderr_pipe {
                             let mut reader = stderr.take(MAX_BYTES as u64);
-                            let _ = reader.read_to_end(&mut buf).await;
+                            let _ = reader.read_to_end(&mut *stderr_drain.lock().await).await;
                         }
-                        buf
                     }
                 );
-
-                let status = child.wait().await.ok();
-                (stdout_bytes, stderr_bytes, status)
+                // O1: wait for child with post-exit 500ms deadline.
+                // Handles background processes that keep pipes open after the main process exits.
+                let (status, truncated) = match tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    child.wait()
+                ).await {
+                    Ok(Ok(s)) => (Some(s), false),
+                    Ok(Err(_)) => (None, false),
+                    Err(_) => {
+                        // Child still alive after post-exit deadline (background process held pipes).
+                        // start_kill() on an already-exited process is a no-op per tokio docs.
+                        child.start_kill().ok();
+                        let _ = child.wait().await;
+                        (None, true)
+                    }
+                };
+                (status, truncated)
             } => {
-                let stdout_str = String::from_utf8_lossy(&result.0).to_string();
-                let stderr_str = String::from_utf8_lossy(&result.1).to_string();
-                let exit_code = result.2.and_then(|s| s.code());
-                (stdout_str, stderr_str, exit_code, false)
+                let stdout_bytes = std::mem::take(&mut *stdout_shared.lock().await);
+                let stderr_bytes = std::mem::take(&mut *stderr_shared.lock().await);
+                let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
+                let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
+                let exit_code = result.0.and_then(|s| s.code());
+                (stdout_str, stderr_str, exit_code, false, result.1)
             }
             _ = tokio::time::sleep(timeout_duration) => {
-                // Timeout occurred: kill the process and return empty output
+                // Wall-clock timeout fired. Kill process; pipes will reach EOF, drain future drops.
                 let _ = child.kill().await;
                 let _ = child.wait().await;
-                ("".to_string(), "".to_string(), None, true)
+                // Read partial output buffered before the kill (MutexGuard released by dropped arm).
+                let stdout_bytes = std::mem::take(&mut *stdout_shared.lock().await);
+                let stderr_bytes = std::mem::take(&mut *stderr_shared.lock().await);
+                let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
+                let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
+                (stdout_str, stderr_str, None, true, false)
             }
         };
 
@@ -3184,7 +3239,7 @@ impl CodeAnalyzer {
         let slot = seq % 8;
         let (stdout, stderr, overflow_notice) =
             handle_output_overflow(stdout_str, stderr_str, slot);
-        let output_truncated = overflow_notice.is_some();
+        output_truncated = output_truncated || overflow_notice.is_some();
 
         let output =
             types::ShellOutput::new(stdout, stderr, exit_code, timed_out, output_truncated);
@@ -3205,7 +3260,19 @@ impl CodeAnalyzer {
         if let Some(notice) = overflow_notice {
             content_blocks.push(Content::text(notice));
         }
-        let mut result = CallToolResult::success(content_blocks).with_meta(Some(no_cache_meta()));
+
+        // Determine if command failed: timeout or non-zero exit code.
+        // exit_code is None when: (a) process killed by O1 post-exit drain timeout (background child
+        // holding pipes -- command work was done, treat as success) or (b) externally killed; both
+        // cases use unwrap_or(false) to avoid false negatives.
+        let command_failed = timed_out || exit_code.map(|c| c != 0).unwrap_or(false);
+
+        let mut result = if command_failed {
+            CallToolResult::error(content_blocks)
+        } else {
+            CallToolResult::success(content_blocks)
+        }
+        .with_meta(Some(no_cache_meta()));
 
         let structured = match serde_json::to_value(&output).map_err(|e| {
             ErrorData::new(
