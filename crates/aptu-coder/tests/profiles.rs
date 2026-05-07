@@ -1,0 +1,340 @@
+// SPDX-FileCopyrightText: 2026 aptu-coder contributors
+// SPDX-License-Identifier: Apache-2.0
+
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::Mutex as TokioMutex;
+use tracing_subscriber::filter::LevelFilter;
+
+fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
+    let peer = Arc::new(TokioMutex::new(None));
+    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<aptu_coder::logging::LogEvent>();
+    let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
+    aptu_coder::CodeAnalyzer::new(
+        peer,
+        log_level_filter,
+        rx,
+        aptu_coder::metrics::MetricsSender(metrics_tx),
+    )
+}
+
+async fn call_tools_list_with_profile(profile: Option<&str>) -> serde_json::Value {
+    let analyzer = make_test_analyzer();
+    let (client, server) = tokio::io::duplex(65536);
+
+    // Spawn the analyzer server on the server half
+    let mut server_handle = tokio::spawn(async move {
+        let (server_rx, server_tx) = tokio::io::split(server);
+        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
+            let _ = service.waiting().await;
+        }
+    });
+
+    let (client_rx, mut client_tx) = tokio::io::split(client);
+    let mut reader = BufReader::new(client_rx).lines();
+
+    // Step 1: Send initialize request with optional profile in _meta
+    let mut init_params = serde_json::json!({
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "test-client", "version": "0.1.0"}
+    });
+
+    if let Some(p) = profile {
+        init_params["_meta"] = serde_json::json!({
+            "io.clouatre-labs/profile": p
+        });
+    }
+
+    let init = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": init_params
+    })
+    .to_string()
+        + "\n";
+    client_tx.write_all(init.as_bytes()).await.unwrap();
+    client_tx.flush().await.unwrap();
+
+    // Step 2: Read initialize response (discard)
+    let _resp = reader.next_line().await.unwrap().unwrap();
+
+    // Step 3: Send initialized notification (no id)
+    let notif = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    })
+    .to_string()
+        + "\n";
+    client_tx.write_all(notif.as_bytes()).await.unwrap();
+    client_tx.flush().await.unwrap();
+
+    // Step 4: Send tools/list request
+    let list_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    })
+    .to_string()
+        + "\n";
+    client_tx.write_all(list_req.as_bytes()).await.unwrap();
+    client_tx.flush().await.unwrap();
+
+    // Step 5: Race response loop against server handle to surface server panics
+    tokio::select! {
+        result = async {
+            loop {
+                let line = reader.next_line().await.unwrap().unwrap();
+                let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+                if v.get("id") == Some(&serde_json::json!(2)) {
+                    return v;
+                }
+            }
+        } => {
+            server_handle.abort();
+            result
+        }
+        outcome = &mut server_handle => {
+            match outcome {
+                Ok(_) => panic!("server task exited unexpectedly before tools/list response"),
+                Err(e) => panic!("server task panicked: {e}"),
+            }
+        }
+    }
+}
+
+async fn call_tool_with_profile(profile: Option<&str>, tool_name: &str) -> serde_json::Value {
+    let analyzer = make_test_analyzer();
+    let (client, server) = tokio::io::duplex(65536);
+
+    // Spawn the analyzer server on the server half
+    let mut server_handle = tokio::spawn(async move {
+        let (server_rx, server_tx) = tokio::io::split(server);
+        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
+            let _ = service.waiting().await;
+        }
+    });
+
+    let (client_rx, mut client_tx) = tokio::io::split(client);
+    let mut reader = BufReader::new(client_rx).lines();
+
+    // Step 1: Send initialize request with optional profile in _meta
+    let mut init_params = serde_json::json!({
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "test-client", "version": "0.1.0"}
+    });
+
+    if let Some(p) = profile {
+        init_params["_meta"] = serde_json::json!({
+            "io.clouatre-labs/profile": p
+        });
+    }
+
+    let init = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": init_params
+    })
+    .to_string()
+        + "\n";
+    client_tx.write_all(init.as_bytes()).await.unwrap();
+    client_tx.flush().await.unwrap();
+
+    // Step 2: Read initialize response (discard)
+    let _resp = reader.next_line().await.unwrap().unwrap();
+
+    // Step 3: Send initialized notification (no id)
+    let notif = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    })
+    .to_string()
+        + "\n";
+    client_tx.write_all(notif.as_bytes()).await.unwrap();
+    client_tx.flush().await.unwrap();
+
+    // Step 4: Send tools/call request
+    let call = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": {}
+        }
+    })
+    .to_string()
+        + "\n";
+    client_tx.write_all(call.as_bytes()).await.unwrap();
+    client_tx.flush().await.unwrap();
+
+    // Step 5: Race response loop against server handle to surface server panics
+    tokio::select! {
+        result = async {
+            loop {
+                let line = reader.next_line().await.unwrap().unwrap();
+                let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+                if v.get("id") == Some(&serde_json::json!(2)) {
+                    return v;
+                }
+            }
+        } => {
+            server_handle.abort();
+            result
+        }
+        outcome = &mut server_handle => {
+            match outcome {
+                Ok(_) => panic!("server task exited unexpectedly before tool response"),
+                Err(e) => panic!("server task panicked: {e}"),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_edit_profile_tool_count() {
+    // Arrange: initialize with edit profile
+    let resp = call_tools_list_with_profile(Some("edit")).await;
+
+    // Act: extract tool count from response
+    let tools = &resp["result"]["tools"];
+    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
+    let tool_names: Vec<String> = tools
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    // Assert: edit profile should have exactly 4 tools
+    assert_eq!(
+        tool_count, 4,
+        "edit profile should enable exactly 4 tools, got: {:?}",
+        tool_names
+    );
+
+    // Verify the correct tools are present
+    assert!(
+        tool_names.contains(&"analyze_raw".to_string()),
+        "edit profile should include analyze_raw"
+    );
+    assert!(
+        tool_names.contains(&"edit_replace".to_string()),
+        "edit profile should include edit_replace"
+    );
+    assert!(
+        tool_names.contains(&"edit_overwrite".to_string()),
+        "edit profile should include edit_overwrite"
+    );
+    assert!(
+        tool_names.contains(&"exec_command".to_string()),
+        "edit profile should include exec_command"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_profile_tool_count() {
+    // Arrange: initialize with analyze profile
+    let resp = call_tools_list_with_profile(Some("analyze")).await;
+
+    // Act: extract tool count from response
+    let tools = &resp["result"]["tools"];
+    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
+    let tool_names: Vec<String> = tools
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    // Assert: analyze profile should have exactly 6 tools
+    assert_eq!(
+        tool_count, 6,
+        "analyze profile should enable exactly 6 tools, got: {:?}",
+        tool_names
+    );
+
+    // Verify the correct tools are present
+    assert!(
+        tool_names.contains(&"analyze_directory".to_string()),
+        "analyze profile should include analyze_directory"
+    );
+    assert!(
+        tool_names.contains(&"analyze_file".to_string()),
+        "analyze profile should include analyze_file"
+    );
+    assert!(
+        tool_names.contains(&"analyze_module".to_string()),
+        "analyze profile should include analyze_module"
+    );
+    assert!(
+        tool_names.contains(&"analyze_symbol".to_string()),
+        "analyze profile should include analyze_symbol"
+    );
+    assert!(
+        tool_names.contains(&"analyze_raw".to_string()),
+        "analyze profile should include analyze_raw"
+    );
+    assert!(
+        tool_names.contains(&"exec_command".to_string()),
+        "analyze profile should include exec_command"
+    );
+}
+
+#[tokio::test]
+async fn test_no_profile_tool_count() {
+    // Arrange: initialize with no profile metadata
+    let resp = call_tools_list_with_profile(None).await;
+
+    // Act: extract tool count from response
+    let tools = &resp["result"]["tools"];
+    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
+
+    // Assert: no profile should enable all 10 tools
+    assert_eq!(
+        tool_count, 10,
+        "no profile should enable all 10 tools, got: {}",
+        tool_count
+    );
+}
+
+#[tokio::test]
+async fn test_unknown_profile_tool_count() {
+    // Arrange: initialize with unknown profile string
+    let resp = call_tools_list_with_profile(Some("unknown_profile")).await;
+
+    // Act: extract tool count from response
+    let tools = &resp["result"]["tools"];
+    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
+
+    // Assert: unknown profile should enable all 10 tools (lenient fallback)
+    assert_eq!(
+        tool_count, 10,
+        "unknown profile should enable all 10 tools, got: {}",
+        tool_count
+    );
+}
+
+#[tokio::test]
+async fn test_disabled_tool_returns_invalid_params() {
+    // Arrange: initialize with edit profile and try to call a disabled tool
+    let resp = call_tool_with_profile(Some("edit"), "edit_rename").await;
+
+    // Act: extract error code from response
+    let error_code = resp["error"]["code"].as_i64();
+
+    // Assert: calling a disabled tool should return INVALID_PARAMS (-32602)
+    assert_eq!(
+        error_code,
+        Some(-32602),
+        "calling a disabled tool should return INVALID_PARAMS (-32602), got: {:?}",
+        resp
+    );
+}

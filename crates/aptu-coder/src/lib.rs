@@ -56,16 +56,17 @@ use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
-    CompletionInfo, Content, ErrorData, Implementation, InitializeResult, LoggingLevel,
-    LoggingMessageNotificationParam, Meta, Notification, NumberOrString, ProgressNotificationParam,
-    ProgressToken, ServerCapabilities, ServerNotification, SetLevelRequestParams,
+    CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
+    LoggingLevel, LoggingMessageNotificationParam, Meta, Notification, NumberOrString,
+    ProgressNotificationParam, ProgressToken, ServerCapabilities, ServerNotification,
+    SetLevelRequestParams,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex, mpsc};
+use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc};
 use tracing::{instrument, warn};
 use tracing_subscriber::filter::LevelFilter;
 
@@ -268,10 +269,12 @@ fn resolve_shell() -> String {
 /// log event channel, metrics sender, and per-session sequence tracking.
 #[derive(Clone)]
 pub struct CodeAnalyzer {
-    // Accessed by rmcp macro-generated tool dispatch, but this field still triggers
-    // `dead_code` in this crate, so keep the targeted suppression.
+    // Wrapped in Arc<RwLock> to enable interior mutability for profile-based tool routing.
+    // All clones share the same router instance (per-session state).
+    // Read lock acquired by list_tools/call_tool; write lock acquired during on_initialized
+    // to disable tools based on client profile.
     #[allow(dead_code)]
-    pub(crate) tool_router: ToolRouter<Self>,
+    pub(crate) tool_router: Arc<RwLock<ToolRouter<Self>>>,
     cache: AnalysisCache,
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
     log_level_filter: Arc<Mutex<LevelFilter>>,
@@ -279,6 +282,8 @@ pub struct CodeAnalyzer {
     metrics_tx: crate::metrics::MetricsSender,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
     session_id: Arc<TokioMutex<Option<String>>>,
+    // Store profile metadata from initialize request for use in on_initialized
+    profile_meta: Arc<TokioMutex<Option<serde_json::Map<String, serde_json::Value>>>>,
 }
 
 #[tool_router]
@@ -299,7 +304,7 @@ impl CodeAnalyzer {
             .and_then(|v| v.parse().ok())
             .unwrap_or(100);
         CodeAnalyzer {
-            tool_router: Self::tool_router(),
+            tool_router: Arc::new(RwLock::new(Self::tool_router())),
             cache: AnalysisCache::new(file_cap),
             peer,
             log_level_filter,
@@ -307,6 +312,7 @@ impl CodeAnalyzer {
             metrics_tx,
             session_call_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             session_id: Arc::new(TokioMutex::new(None)),
+            profile_meta: Arc::new(TokioMutex::new(None)),
         }
     }
 
@@ -3510,6 +3516,20 @@ struct FocusedAnalysisParams {
 
 #[tool_handler]
 impl ServerHandler for CodeAnalyzer {
+    async fn initialize(
+        &self,
+        _request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        // The _meta field is extracted from params and stored in request extensions.
+        // Extract it and store for use in on_initialized.
+        if let Some(meta) = context.extensions.get::<Meta>() {
+            let mut meta_lock = self.profile_meta.lock().await;
+            *meta_lock = Some(meta.0.clone());
+        }
+        Ok(self.get_info())
+    }
+
     fn get_info(&self) -> InitializeResult {
         let excluded = crate::EXCLUDED_DIRS.join(", ");
         let instructions = format!(
@@ -3534,6 +3554,29 @@ impl ServerHandler for CodeAnalyzer {
             .with_instructions(&instructions)
     }
 
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        let router = self.tool_router.read().await;
+        Ok(rmcp::model::ListToolsResult {
+            tools: router.list_all(),
+            meta: None,
+            next_cursor: None,
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        let router = self.tool_router.read().await;
+        router.call(tcc).await
+    }
+
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
         let mut peer_lock = self.peer.lock().await;
         *peer_lock = Some(context.peer.clone());
@@ -3554,6 +3597,40 @@ impl ServerHandler for CodeAnalyzer {
         }
         self.session_call_seq
             .store(0, std::sync::atomic::Ordering::Relaxed);
+
+        // Parse client profile from stored metadata and disable tools accordingly.
+        // Profiles: "edit" (4 tools), "analyze" (6 tools), absent/unknown (10 tools).
+        let meta_lock = self.profile_meta.lock().await;
+        if let Some(meta) = meta_lock.as_ref()
+            && let Some(profile_val) = meta.get("io.clouatre-labs/profile")
+            && let Some(profile) = profile_val.as_str()
+        {
+            let mut router = self.tool_router.write().await;
+            match profile {
+                "edit" => {
+                    // Enable only: analyze_raw, edit_replace, edit_overwrite, exec_command
+                    router.disable_route("analyze_directory");
+                    router.disable_route("analyze_file");
+                    router.disable_route("analyze_module");
+                    router.disable_route("analyze_symbol");
+                    router.disable_route("edit_rename");
+                    router.disable_route("edit_insert");
+                }
+                "analyze" => {
+                    // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, analyze_raw, exec_command
+                    router.disable_route("edit_replace");
+                    router.disable_route("edit_overwrite");
+                    router.disable_route("edit_rename");
+                    router.disable_route("edit_insert");
+                }
+                _ => {
+                    // Unknown profile: leave all tools enabled (lenient fallback)
+                }
+            }
+            // Bind peer notifier after disabling tools to send tools/list_changed notification
+            router.bind_peer_notifier(&context.peer);
+        }
+        drop(meta_lock);
 
         // Spawn consumer task to drain log events from channel with batching.
         let peer = self.peer.clone();
