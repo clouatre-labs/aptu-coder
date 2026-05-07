@@ -1,6 +1,6 @@
 {
   "benchmark": "wave9-sml",
-  "generated_at": "2026-05-06",
+  "generated_at": "2026-05-07",
   "tokenizer": "cl100k_base",
   "tokenizer_note": "cl100k_base (tiktoken) is an approximation. Claude uses its own internal tokenizer, which is not publicly available. cl100k_base is the closest publicly available proxy and typically agrees within \u00b15% on English/code text.",
   "server_version": "aptu-coder (from PATH)",
@@ -56,10 +56,10 @@
     {
       "name": "analyze_raw",
       "tokens_name": 2,
-      "tokens_desc": 85,
+      "tokens_desc": 127,
       "tokens_input_schema": 168,
       "tokens_output_schema": 143,
-      "tokens_total": 398
+      "tokens_total": 440
     },
     {
       "name": "edit_rename",
@@ -87,16 +87,16 @@
     }
   ],
   "totals": {
-    "full_set_tokens": 7285,
+    "full_set_tokens": 7327,
     "server_instructions_tokens": 182,
-    "full_set_plus_instructions": 7467,
+    "full_set_plus_instructions": 7509,
     "edit_profile_tools": [
       "analyze_raw",
       "edit_overwrite",
       "edit_replace",
       "exec_command"
     ],
-    "edit_profile_tokens": 1430,
+    "edit_profile_tokens": 1472,
     "edit_profile_savings": 5855,
     "analyze_profile_tools": [
       "analyze_directory",

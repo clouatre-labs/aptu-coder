@@ -12,12 +12,12 @@ FORBIDDEN TOOLS: Bash, Glob, Grep, Read, Write, ToolSearch, and any tools not li
 
 Recommended call sequence:
 
-1. `analyze_raw(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/languages/mod.rs")` -- find the typescript arms in get_language_info and get_ts_language to use as template
-2. `edit_replace(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/languages/mod.rs", old_text="...", new_text="...")` -- add tsx arm to get_language_info (after typescript arm)
-3. `edit_replace(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/languages/mod.rs", old_text="...", new_text="...")` -- add tsx arm to get_ts_language (after typescript arm)
-4. `analyze_raw(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/lang.rs")` -- find the typescript entries in EXTENSION_MAP and supported_languages
-5. `edit_replace(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/lang.rs", old_text="...", new_text="...")` -- add tsx extension mapping
-6. `edit_replace(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/lang.rs", old_text="...", new_text="...")` -- add tsx to supported_languages
+1. `analyze_raw(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/languages/mod.rs", start_line=62, end_line=260)` -- find the typescript arms in get_language_info and get_ts_language to use as template
+2. `edit_overwrite(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/languages/mod.rs", content="...")` -- add tsx arm to get_language_info (after typescript arm)
+3. `edit_overwrite(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/languages/mod.rs", content="...")` -- add tsx arm to get_ts_language (after typescript arm)
+4. `analyze_raw(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/lang.rs", start_line=7, end_line=100)` -- find the typescript entries in EXTENSION_MAP and supported_languages
+5. `edit_overwrite(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/lang.rs", content="...")` -- add tsx extension mapping
+6. `edit_overwrite(path="REPO_PATH_PLACEHOLDER/crates/aptu-coder-core/src/lang.rs", content="...")` -- add tsx to supported_languages
 
 Do not run `cargo test`, `cargo build`, or any other build commands. The benchmark infrastructure will verify
 the re-wiring externally after you complete your implementation.

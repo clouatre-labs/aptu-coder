@@ -86,6 +86,21 @@ Post-run verification uses five grep checks (no cargo compilation):
 
 All five checks must pass for the run to be scored as correct.
 
+## Conditions
+
+### Edit Profile Constraint
+
+As of PR #763, the `analyze_raw` tool requires explicit `start_line` and `end_line` parameters for files
+exceeding 100 lines. Bare calls (without line ranges) on large files return a server error. The benchmark
+prompts for conditions A and C (MCP tools) have been updated to include explicit line ranges:
+
+- `analyze_raw(path="...mod.rs", start_line=62, end_line=260)` -- covers the get_language_info and get_ts_language functions
+- `analyze_raw(path="...lang.rs", start_line=7, end_line=100)` -- covers EXTENSION_MAP and supported_languages
+
+Additionally, Wave 9 analysis recommends `edit_overwrite` over `edit_replace` for multi-edit small-file tasks,
+as it avoids the overhead of exact-text matching. Conditions A and C prompts have been updated to use
+`edit_overwrite` for all four edits.
+
 ## Rubric
 
 Scoring uses three dimensions, each 0-3 points (max 9 total):
