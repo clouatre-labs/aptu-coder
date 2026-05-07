@@ -1,10 +1,18 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as TokioMutex;
 use tracing_subscriber::filter::LevelFilter;
+
+/// Serializes tests that mutate process-global env vars to prevent parallel pollution.
+/// Uses `unwrap_or_else` to recover from mutex poison caused by panicking tests.
+fn env_var_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let m = LOCK.get_or_init(|| Mutex::new(()));
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
@@ -200,6 +208,7 @@ async fn call_tool_with_profile(profile: Option<&str>, tool_name: &str) -> serde
 
 #[tokio::test]
 async fn test_edit_profile_tool_count() {
+    let _guard = env_var_lock();
     // Arrange: initialize with edit profile
     let resp = call_tools_list_with_profile(Some("edit")).await;
 
@@ -237,6 +246,7 @@ async fn test_edit_profile_tool_count() {
 
 #[tokio::test]
 async fn test_analyze_profile_tool_count() {
+    let _guard = env_var_lock();
     // Arrange: initialize with analyze profile
     let resp = call_tools_list_with_profile(Some("analyze")).await;
 
@@ -282,7 +292,11 @@ async fn test_analyze_profile_tool_count() {
 
 #[tokio::test]
 async fn test_no_profile_tool_count() {
-    // Arrange: initialize with no profile metadata
+    let _guard = env_var_lock();
+    // Arrange: initialize with no profile metadata; env var must be absent.
+    unsafe {
+        std::env::remove_var("APTU_CODER_PROFILE");
+    }
     let resp = call_tools_list_with_profile(None).await;
 
     // Act: extract tool count from response
@@ -299,7 +313,11 @@ async fn test_no_profile_tool_count() {
 
 #[tokio::test]
 async fn test_unknown_profile_tool_count() {
-    // Arrange: initialize with unknown profile string
+    let _guard = env_var_lock();
+    // Arrange: initialize with unknown profile string; env var must be absent.
+    unsafe {
+        std::env::remove_var("APTU_CODER_PROFILE");
+    }
     let resp = call_tools_list_with_profile(Some("unknown_profile")).await;
 
     // Act: extract tool count from response
@@ -316,6 +334,7 @@ async fn test_unknown_profile_tool_count() {
 
 #[tokio::test]
 async fn test_disabled_tool_returns_invalid_params() {
+    let _guard = env_var_lock();
     // Arrange: initialize with edit profile and try to call a disabled tool
     let resp = call_tool_with_profile(Some("edit"), "edit_rename").await;
 
@@ -328,5 +347,85 @@ async fn test_disabled_tool_returns_invalid_params() {
         Some(-32602),
         "calling a disabled tool should return INVALID_PARAMS (-32602), got: {:?}",
         resp
+    );
+}
+
+#[tokio::test]
+async fn test_profile_env_var_fallback() {
+    // Serialize against other env-var-mutating tests.
+    let _guard = env_var_lock();
+
+    // Arrange: set APTU_CODER_PROFILE env var to "edit", initialize with no _meta.
+    unsafe {
+        std::env::set_var("APTU_CODER_PROFILE", "edit");
+    }
+
+    let resp = call_tools_list_with_profile(None).await;
+
+    // Cleanup before any assertion so panics cannot leave the env var set.
+    unsafe {
+        std::env::remove_var("APTU_CODER_PROFILE");
+    }
+
+    // Act: extract tool count from response.
+    let tools = &resp["result"]["tools"];
+    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
+    let tool_names: Vec<String> = tools
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    // Assert: env var profile should be applied when _meta is absent.
+    assert_eq!(
+        tool_count, 4,
+        "env var profile (edit) should enable exactly 4 tools, got: {:?}",
+        tool_names
+    );
+    assert!(
+        tool_names.contains(&"edit_replace".to_string()),
+        "env var profile should include edit_replace"
+    );
+}
+
+#[tokio::test]
+async fn test_profile_env_var_ignored_when_meta_present() {
+    // Serialize against other env-var-mutating tests.
+    let _guard = env_var_lock();
+
+    // Arrange: set APTU_CODER_PROFILE=edit but initialize with _meta "analyze".
+    // _meta must win.
+    unsafe {
+        std::env::set_var("APTU_CODER_PROFILE", "edit");
+    }
+
+    let resp = call_tools_list_with_profile(Some("analyze")).await;
+
+    // Cleanup before any assertion.
+    unsafe {
+        std::env::remove_var("APTU_CODER_PROFILE");
+    }
+
+    // Act: extract tool count from response.
+    let tools = &resp["result"]["tools"];
+    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
+    let tool_names: Vec<String> = tools
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    // Assert: _meta profile (analyze) should override the env var (edit).
+    // analyze profile enables 6 tools.
+    assert_eq!(
+        tool_count, 6,
+        "_meta profile (analyze) should take precedence over env var, got: {:?}",
+        tool_names
+    );
+    assert!(
+        tool_names.contains(&"analyze_directory".to_string()),
+        "_meta profile should include analyze_directory"
     );
 }

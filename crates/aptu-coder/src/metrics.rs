@@ -68,13 +68,36 @@ impl MetricsWriter {
         let mut current_date = current_date_str();
         let mut current_file: Option<PathBuf> = None;
 
+        // Accumulate per-tool metrics for export on shutdown (issue #773)
+        let mut tool_counts: std::collections::HashMap<String, (u64, u64)> =
+            std::collections::HashMap::new();
+        let mut export_session_id: Option<String> = None;
+
         loop {
             let mut batch = Vec::new();
             if let Some(event) = self.rx.recv().await {
+                // Accumulate metrics for export
+                let entry = tool_counts.entry(event.tool.to_string()).or_insert((0, 0));
+                entry.0 += 1;
+                entry.1 += event.duration_ms;
+                if export_session_id.is_none() {
+                    export_session_id = event.session_id.clone();
+                }
+
                 batch.push(event);
                 for _ in 0..99 {
                     match self.rx.try_recv() {
-                        Ok(e) => batch.push(e),
+                        Ok(e) => {
+                            // Accumulate metrics for export
+                            let entry = tool_counts.entry(e.tool.to_string()).or_insert((0, 0));
+                            entry.0 += 1;
+                            entry.1 += e.duration_ms;
+                            if export_session_id.is_none() {
+                                export_session_id = e.session_id.clone();
+                            }
+
+                            batch.push(e);
+                        }
                         Err(
                             mpsc::error::TryRecvError::Empty
                             | mpsc::error::TryRecvError::Disconnected,
@@ -135,6 +158,34 @@ impl MetricsWriter {
                     }
                 }
                 let _ = file.flush().await;
+            }
+        }
+
+        // Export metrics summary on shutdown (issue #773)
+        if let Ok(export_path) = std::env::var("APTU_CODER_METRICS_EXPORT_FILE") {
+            let mut tool_calls = Vec::new();
+            let mut total_duration_ms = 0u64;
+            for (tool_name, (count, duration)) in tool_counts {
+                tool_calls.push(serde_json::json!({
+                    "tool": tool_name,
+                    "call_count": count,
+                    "total_duration_ms": duration
+                }));
+                total_duration_ms += duration;
+            }
+            let summary = serde_json::json!({
+                "session_id": export_session_id.unwrap_or_default(),
+                "tool_calls": tool_calls,
+                "total_duration_ms": total_duration_ms
+            });
+            if let Ok(json_str) = serde_json::to_string(&summary)
+                && let Err(e) = tokio::fs::write(&export_path, json_str).await
+            {
+                tracing::warn!(
+                    error = %e,
+                    path = %export_path,
+                    "metrics: failed to write export file"
+                );
             }
         }
     }
@@ -300,7 +351,16 @@ fn migrate_legacy_metrics_dir_impl(home: &str) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    /// Serializes tests that mutate `APTU_CODER_METRICS_EXPORT_FILE` to prevent parallel
+    /// pollution. Recovers from poison caused by panicking tests.
+    fn metrics_export_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let m = LOCK.get_or_init(|| Mutex::new(()));
+        m.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     #[test]
     fn test_migrate_legacy_only_old_exists() {
@@ -488,5 +548,139 @@ mod tests {
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
         assert_eq!(serialized, json_str);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_export_file_created() {
+        let _guard = metrics_export_lock();
+        // Arrange: create temp dir and set export env var
+        let dir = TempDir::new().unwrap();
+        let export_file = dir.path().join("metrics_export.json");
+        let export_path_str = export_file.to_string_lossy().to_string();
+
+        unsafe {
+            std::env::set_var("APTU_CODER_METRICS_EXPORT_FILE", &export_path_str);
+        }
+
+        // Create metrics writer and send events
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
+
+        // Act: send a few events with session_id
+        tx.send(MetricEvent {
+            ts: unix_ms(),
+            tool: "analyze_directory",
+            duration_ms: 100,
+            output_chars: 50,
+            param_path_depth: 1,
+            max_depth: None,
+            result: "ok",
+            error_type: None,
+            session_id: Some("test-session-123".to_string()),
+            seq: None,
+            cache_hit: None,
+        })
+        .unwrap();
+        tx.send(MetricEvent {
+            ts: unix_ms(),
+            tool: "analyze_file",
+            duration_ms: 50,
+            output_chars: 100,
+            param_path_depth: 2,
+            max_depth: Some(3),
+            result: "ok",
+            error_type: None,
+            session_id: Some("test-session-123".to_string()),
+            seq: None,
+            cache_hit: None,
+        })
+        .unwrap();
+        drop(tx);
+        writer.run().await;
+
+        // Assert: export file should exist with correct JSON structure
+        assert!(
+            export_file.exists(),
+            "export file should be created at {:?}",
+            export_file
+        );
+        let content = std::fs::read_to_string(&export_file).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(
+            json["session_id"], "test-session-123",
+            "export should contain correct session_id"
+        );
+        assert!(
+            json["tool_calls"].is_array(),
+            "export should contain tool_calls array"
+        );
+        let tool_calls = json["tool_calls"].as_array().unwrap();
+        assert_eq!(tool_calls.len(), 2, "should have 2 tool calls");
+        assert!(
+            json["total_duration_ms"].is_number(),
+            "export should contain total_duration_ms"
+        );
+        assert_eq!(
+            json["total_duration_ms"], 150,
+            "total_duration_ms should be sum of all durations"
+        );
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("APTU_CODER_METRICS_EXPORT_FILE");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_metrics_export_env_var_unset() {
+        let _guard = metrics_export_lock();
+        // Arrange: ensure env var is not set
+        unsafe {
+            std::env::remove_var("APTU_CODER_METRICS_EXPORT_FILE");
+        }
+        let dir = TempDir::new().unwrap();
+        // Use a unique marker to ensure we don't pick up files from other tests
+        let marker = "metrics_export_unset_test";
+
+        // Create metrics writer and send events
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
+
+        // Act: send events and run writer
+        tx.send(MetricEvent {
+            ts: unix_ms(),
+            tool: "analyze_directory",
+            duration_ms: 100,
+            output_chars: 50,
+            param_path_depth: 1,
+            max_depth: None,
+            result: "ok",
+            error_type: None,
+            session_id: Some("test-session-456".to_string()),
+            seq: None,
+            cache_hit: None,
+        })
+        .unwrap();
+        drop(tx);
+        writer.run().await;
+
+        // Assert: no export file should be created
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.contains(marker))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(
+            entries.len(),
+            0,
+            "no export file should be created when env var is unset"
+        );
     }
 }

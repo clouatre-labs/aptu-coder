@@ -3439,13 +3439,21 @@ impl ServerHandler for CodeAnalyzer {
 
         // Parse client profile from stored metadata and disable tools accordingly.
         // Profiles: "edit" (4 tools), "analyze" (6 tools), absent/unknown (10 tools).
+        // _meta takes precedence over APTU_CODER_PROFILE when both are present.
         let meta_lock = self.profile_meta.lock().await;
-        if let Some(meta) = meta_lock.as_ref()
-            && let Some(profile_val) = meta.get("io.clouatre-labs/profile")
-            && let Some(profile) = profile_val.as_str()
-        {
+        let meta_profile = meta_lock
+            .as_ref()
+            .and_then(|m| m.get("io.clouatre-labs/profile"))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        drop(meta_lock);
+
+        // Resolve the active profile: _meta wins; fall back to env var.
+        let active_profile = meta_profile.or_else(|| std::env::var("APTU_CODER_PROFILE").ok());
+
+        if let Some(ref profile) = active_profile {
             let mut router = self.tool_router.write().await;
-            match profile {
+            match profile.as_str() {
                 "edit" => {
                     // Enable only: edit_replace, edit_overwrite, exec_command
                     router.disable_route("analyze_directory");
@@ -3469,7 +3477,6 @@ impl ServerHandler for CodeAnalyzer {
             // Bind peer notifier after disabling tools to send tools/list_changed notification
             router.bind_peer_notifier(&context.peer);
         }
-        drop(meta_lock);
 
         // Spawn consumer task to drain log events from channel with batching.
         let peer = self.peer.clone();
