@@ -2830,7 +2830,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. For raw file content, use: `sed -n 'START,ENDp' FILE` (add `grep -n ''` pipe for line-numbered output). Call analyze_module first to locate function line ranges. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<types::ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3375,7 +3375,7 @@ impl ServerHandler for CodeAnalyzer {
             "Recommended workflow:\n\
             1. Start with analyze_directory(path=<repo_root>, max_depth=2, summary=true) to identify source package (largest by file count; exclude {excluded}).\n\
             2. Re-run analyze_directory(path=<source_package>, max_depth=2, summary=true) for module map. Include test directories (tests/, *_test.go, test_*.py, test_*.rs, *.spec.ts, *.spec.js).\n\
-            3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types. For raw source lines use exec_command: `sed -n 'START,ENDp' FILE` or `grep -n '' FILE | sed -n 'START,ENDp'` for line-numbered output.\n\
+            3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types.\n\
             4. Use analyze_symbol to trace call graphs.\n\
             Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with cursor/page_size. For subagents: DISABLE_PROMPT_CACHING=1."
         );
