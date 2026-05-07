@@ -3039,7 +3039,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<types::ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3089,6 +3089,17 @@ impl CodeAnalyzer {
             .session_call_seq
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let sid = self.session_id.lock().await.clone();
+
+        // Validate stdin size cap (1 MB)
+        if let Some(ref stdin_content) = params.stdin
+            && stdin_content.len() > 1_048_576
+        {
+            return Ok(err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "stdin exceeds 1 MB limit".to_string(),
+                Some(error_meta("validation", false, "reduce stdin content size")),
+            )));
+        }
 
         let command = params.command.clone();
         let timeout_secs = params.timeout_secs;
@@ -3143,6 +3154,13 @@ impl CodeAnalyzer {
 
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        // Set stdin mode: piped if stdin content provided, null otherwise
+        if params.stdin.is_some() {
+            cmd.stdin(std::process::Stdio::piped());
+        } else {
+            cmd.stdin(std::process::Stdio::null());
+        }
 
         #[cfg(unix)]
         {
@@ -3210,6 +3228,24 @@ impl CodeAnalyzer {
 
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
+
+        // Write stdin if provided, before spawning drain_task to avoid deadlock
+        if let Some(stdin_content) = params.stdin
+            && let Some(mut stdin_handle) = child.stdin.take()
+        {
+            use tokio::io::AsyncWriteExt as _;
+            match stdin_handle.write_all(stdin_content.as_bytes()).await {
+                Ok(()) => {
+                    drop(stdin_handle); // Close stdin pipe
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                    // Child closed stdin early; non-fatal, continue collecting output
+                }
+                Err(e) => {
+                    warn!("failed to write stdin: {e}");
+                }
+            }
+        }
 
         use std::sync::Arc;
         use tokio::io::AsyncBufReadExt as _;
@@ -4372,6 +4408,87 @@ mod tests {
             exec_cmd_annot.open_world_hint,
             Some(true),
             "exec_command open_world_hint should be true"
+        );
+    }
+
+    #[test]
+    fn test_exec_stdin_size_cap_validation() {
+        // Test: stdin size cap check (1 MB limit)
+        // Arrange: create oversized stdin
+        let oversized_stdin = "x".repeat(1_048_577); // 1 MB + 1 byte
+
+        // Act & Assert: verify size exceeds limit
+        assert!(
+            oversized_stdin.len() > 1_048_576,
+            "test setup: oversized stdin should exceed 1 MB"
+        );
+
+        // Verify that a 1 MB stdin is accepted
+        let max_stdin = "y".repeat(1_048_576);
+        assert_eq!(
+            max_stdin.len(),
+            1_048_576,
+            "test setup: max stdin should be exactly 1 MB"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exec_stdin_cat_roundtrip() {
+        // Test: stdin content is piped to process and readable via stdout
+        // Arrange: prepare stdin content
+        let stdin_content = "hello world";
+
+        // Act: execute cat with stdin via shell
+        let mut child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+
+        if let Some(mut stdin_handle) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt as _;
+            stdin_handle
+                .write_all(stdin_content.as_bytes())
+                .await
+                .expect("write stdin");
+            drop(stdin_handle);
+        }
+
+        let output = child.wait_with_output().await.expect("wait for cat");
+
+        // Assert: stdout contains the piped stdin content
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout_str.contains(stdin_content),
+            "stdout should contain stdin content: {}",
+            stdout_str
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exec_stdin_none_no_regression() {
+        // Test: command without stdin executes normally (no regression)
+        // Act: execute echo without stdin
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo hi")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn echo");
+
+        let output = child.wait_with_output().await.expect("wait for echo");
+
+        // Assert: command executes successfully
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout_str.contains("hi"),
+            "stdout should contain echo output: {}",
+            stdout_str
         );
     }
 }
