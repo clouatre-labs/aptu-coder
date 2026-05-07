@@ -17,6 +17,8 @@ Core library for code structure analysis using tree-sitter.
 - **File analysis** - Functions, classes, and imports with signatures and line ranges
 - **Symbol call graphs** - Callers and callees across a directory with configurable depth
 - **Module index** - Lightweight function and import index (~75% smaller than full file analysis)
+- **Raw file access** - Line-range file reads via `analyze_raw_range`
+- **Edit operations** - In-file edits: overwrite, exact-block replace, AST-aware rename, before/after insert
 - **In-memory analysis** - `analyze_str` parses source text directly without a file path; returns the same `FileAnalysisOutput` as `analyze_file`
 - **Multi-language** - Rust, Python, TypeScript, TSX, Go, Java, Fortran, JavaScript, C/C++, C#
 - **Pagination** - Cursor-based pagination for large outputs
@@ -60,18 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Supported Languages
 
-| Language | Extensions | Feature flag |
-|----------|------------|--------------|
-| Rust | `.rs` | `lang-rust` |
-| Python | `.py` | `lang-python` |
-| TypeScript | `.ts` | `lang-typescript` |
-| TSX | `.tsx` | `lang-tsx` |
-| Go | `.go` | `lang-go` |
-| Java | `.java` | `lang-java` |
-| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
-| JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
-| C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
-| C# | `.cs` | `lang-csharp` |
+Rust, Python, TypeScript, TSX, Go, Java, Fortran, JavaScript, C/C++, C#. See the [MCP server README](https://github.com/clouatre-labs/aptu-coder/blob/main/README.md#supported-languages) for the full table with file extensions and feature flags.
 
 ## Configuration
 
@@ -81,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 use aptu_coder_core::AnalysisConfig;
 
 let config = AnalysisConfig {
-    max_file_bytes: Some(1_000_000), // skip files > 1 MB
+    max_file_bytes: Some(1_000_000), // reserved, currently a no-op
     parse_timeout_micros: None,      // reserved, currently a no-op
     cache_capacity: None,            // use default LRU capacity
 };

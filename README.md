@@ -17,7 +17,7 @@
 
 ## Benchmarks
 
-Auth migration task on Claude Code against [Django](https://github.com/django/django) (Python) source tree. [Full methodology](docs/benchmarks/v12/methodology.md).
+Auth migration task on Claude Code against [Django](https://github.com/django/django) (Python) source tree. [Full methodology](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/benchmarks/v12/methodology.md).
 
 | Mode | Sonnet 4.6 | Haiku 4.5 |
 |---|---|---|
@@ -25,7 +25,7 @@ Auth migration task on Claude Code against [Django](https://github.com/django/dj
 | Native | 276k tokens, $0.95 | 473k tokens, $0.53 |
 | **Savings** | **59% fewer tokens, 59% cheaper** | **14% fewer tokens, 21% cheaper** |
 
-AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.com/OpenFAST/openfast) (Fortran) source tree. [Full methodology](docs/benchmarks/v13/methodology.md).
+AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.com/OpenFAST/openfast) (Fortran) source tree. [Full methodology](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/benchmarks/v13/methodology.md).
 
 | Mode | Sonnet 4.6 | Haiku 4.5 |
 |---|---|---|
@@ -127,7 +127,7 @@ Or add manually to `.mcp.json` at your project root (shared with your team via v
 
 ## Tools
 
-All optional parameters may be omitted. Shared optional parameters for `analyze_directory`, `analyze_file`, and `analyze_symbol` (`analyze_module` does not support these):
+All optional parameters may be omitted. Shared optional parameters for `analyze_directory`, `analyze_file`, and `analyze_symbol`:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -135,191 +135,24 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `cursor` | string | -- | Pagination cursor from a previous response's `next_cursor` |
 | `page_size` | integer | 100 | Items per page |
 | `force` | boolean | false | Bypass output size warning |
-| `verbose` | boolean | false | true = full output with section headers and imports (Markdown-style headers in `analyze_directory`; adds `I:` section in `analyze_file`); false = compact format |
+| `verbose` | boolean | false | Full output with section headers and imports |
 
 `summary=true` and `cursor` are mutually exclusive. Passing both returns an error.
 
-### `analyze_directory`
+| Tool | Purpose | Languages |
+|------|---------|-----------|
+| `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
+| `analyze_file` | Functions, classes, and imports with signatures and line ranges | all |
+| `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`) | all |
+| `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
+| `analyze_raw` | Raw file content with line numbers; optional start/end line range; paginates via `next_start_line` | any file |
+| `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
+| `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
+| `edit_rename` | AST-aware rename within a file; skips identifiers in strings and comments | all |
+| `edit_insert` | Insert content immediately before or after a named AST node | all |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code, and timeout status; supports progress notifications | any |
 
-Walks a directory tree, counts lines of code, functions, and classes per file. Respects `.gitignore` rules. Default output is a flat `PAGINATED` list. Pass `verbose=true` for `FILES` / `TEST FILES` section headers. Pass `summary=true` for a compact `STRUCTURE` tree with aggregate counts.
-
-**Required:** `path` *(string)* -- directory to analyze
-
-**Additional optional:**
-- `max_depth` *(integer, default unlimited)* -- recursion limit; use 2-3 for large monorepos
-- `git_ref` *(string, optional)* -- Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
-
-
-
-```bash
-analyze_directory path: /path/to/project
-analyze_directory path: /path/to/project max_depth: 2
-analyze_directory path: /path/to/project summary: true
-analyze_directory path: /path/to/project verbose: true
-```
-
-### `analyze_file`
-
-Extracts functions, classes, and imports from a single file.
-
-**Required:** `path` *(string)* -- file to analyze
-
-**Additional optional:**
-- `ast_recursion_limit` *(integer, optional)* -- tree-sitter AST traversal depth cap; leave unset for unlimited depth. Minimum value is 1; 0 is treated as unset.
-- `fields` *(array of strings, optional)* -- limit output to specific sections. Valid values: `"functions"`, `"classes"`, `"imports"`. Omit to return all sections. The FILE header (path, line count, section counts) is always emitted regardless. Ignored when `summary=true`. When `"imports"` is listed explicitly, the `I:` section is rendered regardless of the `verbose` flag.
-
-
-
-```bash
-analyze_file path: /path/to/file.rs
-analyze_file path: /path/to/file.rs page_size: 50
-analyze_file path: /path/to/file.rs cursor: eyJvZmZzZXQiOjUwfQ==
-```
-
-### `analyze_module`
-
-Extracts a minimal function/import index from a single file. ~75% smaller output than `analyze_file`. Use when you need function names and line numbers or the import list, without signatures, types, or call graphs. Returns an actionable error if called on a directory path, steering to `analyze_directory`.
-
-**Required:** `path` *(string)* -- file to analyze
-
-
-
-```bash
-analyze_module path: /path/to/file.rs
-```
-
-### `analyze_symbol`
-
-Builds a call graph for a named symbol across all files in a directory. Uses sentinel values `<module>` (top-level calls) and `<reference>` (type references). Functions called >3 times show `(•N)` notation.
-
-**Required:**
-- `path` *(string)* -- directory to search
-- `symbol` *(string)* -- symbol name, case-sensitive exact-match
-
-**Additional optional:**
-- `follow_depth` *(integer, default 1)* -- call graph traversal depth
-- `max_depth` *(integer, default unlimited)* -- directory recursion limit
-- `ast_recursion_limit` *(integer, optional)* -- tree-sitter AST traversal depth cap; leave unset for unlimited depth. Minimum value is 1; 0 is treated as unset.
-- `impl_only` *(boolean, optional)* -- when true, restrict callers to only those originating from an `impl Trait for Type` block (Rust only). Returns `INVALID_PARAMS` if the path contains no `.rs` files. Emits a `FILTER:` header showing how many callers were retained out of total.
-- `match_mode` *(string, default exact)* -- Symbol lookup strategy:
-  - `exact`: Case-sensitive exact match (default)
-  - `insensitive`: Case-insensitive exact match
-  - `prefix`: Case-insensitive prefix match; returns an error listing candidates when multiple symbols match
-  - `contains`: Case-insensitive substring match; returns an error listing candidates when multiple symbols match
-  All non-exact modes return an error with candidate names when the match is ambiguous; use the listed candidates to refine to a unique match.
-- `import_lookup` *(boolean, optional)* -- When true, find all files in the directory that import the module named by `symbol`. Mutually exclusive with call-graph mode.
-- `git_ref` *(string, optional)* -- Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
-- `def_use` *(boolean, optional)* -- When true, extract definition and use sites for the symbol. The initial response returns callers and callees as usual and includes a cursor that, when followed, pages through `def_use_sites` (each with `kind`, `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`). `def_use_sites` is empty in `structuredContent` until the client follows that cursor into def-use pagination mode.
-
-The tool also returns `structuredContent` with typed arrays for programmatic consumption: `callers` (production callers), `test_callers` (callers from test files), and `callees` (direct callees), each as `Option<Vec<CallChainEntry>>`. A `CallChainEntry` has three fields: `symbol` (string), `file` (string), and `line` (JSON integer; `usize` in the Rust API). These arrays represent depth-1 relationships only; `follow_depth` does not affect them.
-
-**Example output:**
-
-```
-FOCUS: format_structure_paginated (1 defs, 1 callers, 3 callees)
-CALLERS (1-1 of 1):
-  format_structure_paginated <- analyze_directory
-    <- format_structure_paginated
-CALLEES: 3 (use cursor for callee pagination)
-```
-
-```bash
-analyze_symbol path: /path/to/project symbol: my_function
-analyze_symbol path: /path/to/project symbol: my_function follow_depth: 3
-analyze_symbol path: /path/to/project symbol: my_function max_depth: 3 follow_depth: 2
-```
-
-### `analyze_raw`
-
-Read a file or range of lines from a file. Returns the file content with line numbers. Specify start_line and end_line (1-indexed, inclusive) to read a range; omit for full file.
-
-**Required:** `path` *(string)* -- file to read
-
-**Additional optional:**
-- `start_line` *(integer, optional)* -- starting line number (1-indexed, inclusive). Defaults to 1 if omitted.
-- `end_line` *(integer, optional)* -- ending line number (1-indexed, inclusive). Defaults to the last line if omitted.
-
-```bash
-analyze_raw path: /path/to/file.rs
-analyze_raw path: /path/to/file.rs start_line: 1 end_line: 50
-analyze_raw path: /path/to/file.rs start_line: 100 end_line: 150
-```
-
-### `edit_overwrite`
-
-Create or overwrite a file at path with content. Creates parent directories if needed. Overwrites without confirmation; use `edit_replace` to replace a specific block instead of the whole file.
-
-**Required:**
-- `path` *(string)* -- file to create or overwrite
-- `content` *(string)* -- UTF-8 content to write
-
-```bash
-edit_overwrite path: tests/foo_test.rs content: "..."
-edit_overwrite path: src/config.rs content: "..."
-```
-
-### `edit_replace`
-
-Replace a unique exact text block in a file. Errors if `old_text` appears zero times or more than once; fix by making `old_text` longer and more specific. Use `edit_overwrite` to replace the whole file.
-
-**Required:**
-- `path` *(string)* -- file to edit
-- `old_text` *(string)* -- exact text block to find and replace (must appear exactly once)
-- `new_text` *(string)* -- replacement text
-
-```bash
-edit_replace path: src/main.rs old_text: "..." new_text: "..."
-```
-
-### `edit_rename`
-
-AST-aware rename within a single file. Matches only syntactic identifiers -- identifiers in string literals and comments are excluded. Errors if `old_name` not found. Note: the `kind` parameter is reserved for future use; supplying it currently returns an error.
-
-**Required:**
-- `path` *(string)* -- file to modify
-- `old_name` *(string)* -- current name of the symbol (identifier) to rename
-- `new_name` *(string)* -- new name for the symbol
-
-**Additional optional:** `kind` *(string, optional)* -- reserved for future use; currently returns an error if supplied.
-
-```bash
-edit_rename path: src/config.rs old_name: parse_config new_name: load_config
-edit_rename path: src/client.rs old_name: timeout new_name: timeout_ms
-```
-
-### `edit_insert`
-
-Insert content immediately before or after a named AST node. `position` is `before` or `after`. The caller is responsible for including necessary newlines in `content`. Uses the first occurrence if `symbol_name` appears multiple times.
-
-**Required:**
-- `path` *(string)* -- file to modify
-- `symbol_name` *(string)* -- name of the symbol (identifier) to locate
-- `position` *(string)* -- `before` or `after`
-- `content` *(string)* -- content to insert verbatim; include leading/trailing newlines as needed
-
-```bash
-edit_insert path: src/lib.rs symbol_name: handle_request position: before content: "#[instrument]\n"
-edit_insert path: src/types.rs symbol_name: MyStruct position: after content: "\n#[derive(Debug)]\n"
-```
-
-### `exec_command`
-
-> [!WARNING]
-> This tool executes arbitrary shell commands via `sh -c` (or `$SHELL` if set). The `working_dir` parameter restricts the initial process working directory only -- it does not prevent shell-level escape via `cd` or absolute paths within the command string. Set `open_world_hint=true` in your MCP client configuration to surface this warning.
-
-Run a shell command and return its combined stdout/stderr output. Intended for orchestrator BUILD agents that need to compile, test, or lint without a separate shell tool. Annotations: `destructive_hint=true`, `open_world_hint=true`.
-
-**Required:** `command` *(string)* -- shell command to execute via `sh -c` (or `$SHELL` if set)
-
-**Additional optional:**
-- `timeout_secs` *(integer, default 30)* -- seconds before SIGKILL is sent to the process
-- `working_dir` *(string, optional)* -- initial working directory for the process; path-validated and relative to the server's CWD. Does not restrict shell-level escapes.
-
-```bash
-exec_command command: "cargo test --workspace"
-exec_command command: "cargo clippy -- -D warnings" working_dir: "crates/aptu-coder"
-exec_command command: "cargo build --release" timeout_secs: 120
-```
+Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
 ## Output Management
 
@@ -366,18 +199,18 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 
 ## Observability
 
-All ten tools emit metrics to daily-rotated JSONL files at `$XDG_DATA_HOME/aptu-coder/` (fallback: `~/.local/share/aptu-coder/`). Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) for the full schema.
+All ten tools emit metrics to daily-rotated JSONL files at `$XDG_DATA_HOME/aptu-coder/` (fallback: `~/.local/share/aptu-coder/`). Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full schema.
 
 ## Documentation
 
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Design goals, module map, data flow, language handler system, caching strategy
-- **[MCP Best Practices](docs/MCP-BEST-PRACTICES.md)** - Best practices for agentic loops, orchestration patterns, MCP tool design, memory management, and safety controls
-- **[OBSERVABILITY.md](docs/OBSERVABILITY.md)** - Metrics schema, JSONL format, and retention policy
-- **[ROADMAP.md](docs/ROADMAP.md)** - Development history and future direction
-- **[DESIGN-GUIDE.md](docs/DESIGN-GUIDE.md)** - Design decisions, rationale, and replication guide for building high-performance MCP servers
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development workflow, commit conventions, PR checklist
-- **[SECURITY.md](SECURITY.md)** - Security policy and vulnerability reporting
+- **[ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)** - Design goals, module map, data flow, language handler system, caching strategy
+- **[MCP Best Practices](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/MCP-BEST-PRACTICES.md)** - Best practices for agentic loops, orchestration patterns, MCP tool design, memory management, and safety controls
+- **[OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md)** - Metrics schema, JSONL format, and retention policy
+- **[ROADMAP.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ROADMAP.md)** - Development history and future direction
+- **[DESIGN-GUIDE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/DESIGN-GUIDE.md)** - Design decisions, rationale, and replication guide for building high-performance MCP servers
+- **[CONTRIBUTING.md](https://github.com/clouatre-labs/aptu-coder/blob/main/CONTRIBUTING.md)** - Development workflow, commit conventions, PR checklist
+- **[SECURITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/SECURITY.md)** - Security policy and vulnerability reporting
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) for details.
+Apache-2.0. See [LICENSE](https://github.com/clouatre-labs/aptu-coder/blob/main/LICENSE) for details.
