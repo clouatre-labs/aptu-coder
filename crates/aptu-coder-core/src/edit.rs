@@ -3,7 +3,8 @@
 //! File write utilities for the `edit_overwrite`, `edit_replace`, `edit_rename`, and `edit_insert` tools.
 
 use crate::types::{
-    EditInsertOutput, EditOverwriteOutput, EditRenameOutput, EditReplaceOutput, InsertPosition,
+    EditInsertOutput, EditOverwriteOutput, EditRenameOutput, EditReplaceOutput, FileRenameError,
+    FileRenameResult, InsertPosition,
 };
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -175,7 +176,64 @@ pub fn edit_rename_in_file(
         old_name: old_name.to_string(),
         new_name: new_name.to_string(),
         occurrences_renamed: matching_captures.len(),
+        files_changed: None,
+        errors: None,
     })
+}
+
+pub fn edit_rename_directory(
+    root: &Path,
+    old_name: &str,
+    new_name: &str,
+    kind: Option<&str>,
+) -> Result<(Vec<FileRenameResult>, Vec<FileRenameError>), EditError> {
+    if kind.is_some() {
+        return Err(EditError::KindFilterUnsupported);
+    }
+
+    let entries = crate::traversal::walk_directory(root, None).map_err(|e| {
+        EditError::Io(std::io::Error::other(format!(
+            "directory traversal failed: {}",
+            e
+        )))
+    })?;
+
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+
+    for entry in entries {
+        if entry.is_dir {
+            continue;
+        }
+
+        let ext = match entry.path.extension().and_then(|e| e.to_str()) {
+            Some(e) => e,
+            None => continue,
+        };
+
+        if crate::lang::language_for_extension(ext).is_none() {
+            continue;
+        }
+
+        match edit_rename_in_file(&entry.path, old_name, new_name, None) {
+            Ok(output) => {
+                if output.occurrences_renamed > 0 {
+                    results.push(FileRenameResult {
+                        path: entry.path.display().to_string(),
+                        occurrences_renamed: output.occurrences_renamed,
+                    });
+                }
+            }
+            Err(e) => {
+                errors.push(FileRenameError {
+                    path: entry.path.display().to_string(),
+                    error: e.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok((results, errors))
 }
 
 pub fn edit_insert_at_symbol(
@@ -395,5 +453,45 @@ mod tests {
         let f = write_temp("foo bar\n", ".txt");
         let err = edit_insert_at_symbol(f.path(), "foo", InsertPosition::Before, "x").unwrap_err();
         assert!(matches!(err, EditError::UnsupportedLanguage(_)));
+    }
+
+    #[test]
+    fn edit_rename_directory_multi_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file1 = dir.path().join("file1.rs");
+        let file2 = dir.path().join("file2.rs");
+        std::fs::write(&file1, "fn foo() {}\n").unwrap();
+        std::fs::write(&file2, "fn foo() { foo(); }\n").unwrap();
+
+        let (results, errors) = edit_rename_directory(dir.path(), "foo", "bar", None).unwrap();
+
+        assert_eq!(errors.len(), 0);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].occurrences_renamed, 1);
+        assert_eq!(results[1].occurrences_renamed, 2);
+
+        let content1 = std::fs::read_to_string(&file1).unwrap();
+        let content2 = std::fs::read_to_string(&file2).unwrap();
+        assert!(content1.contains("fn bar()"));
+        assert!(content2.contains("fn bar() { bar(); }"));
+    }
+
+    #[test]
+    fn edit_rename_directory_partial_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let file1 = dir.path().join("file1.rs");
+        let file2 = dir.path().join("file2.rs");
+        std::fs::write(&file1, "fn foo() {}\n").unwrap();
+        std::fs::write(&file2, "fn foo() {}\n").unwrap();
+
+        let (results, errors) = edit_rename_directory(dir.path(), "foo", "bar", None).unwrap();
+
+        assert_eq!(errors.len(), 0);
+        assert_eq!(results.len(), 2);
+
+        let content1 = std::fs::read_to_string(&file1).unwrap();
+        let content2 = std::fs::read_to_string(&file2).unwrap();
+        assert!(content1.contains("fn bar()"));
+        assert!(content2.contains("fn bar()"));
     }
 }

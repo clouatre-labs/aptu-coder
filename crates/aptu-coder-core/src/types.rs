@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::PathBuf;
 
+/// Maximum byte length for stdin content passed to exec_command.
+pub const STDIN_MAX_BYTES: usize = 1_048_576;
+
 /// A single edge in the call graph with impl-trait metadata.
 /// `neighbor_name` holds the caller name in `callers` maps and the callee name in `callees` maps.
 #[derive(Debug, Clone, PartialEq)]
@@ -867,7 +870,20 @@ pub struct EditRenameParams {
     pub kind: Option<String>,
 }
 
-#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct FileRenameResult {
+    pub path: String,
+    pub occurrences_renamed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct FileRenameError {
+    pub path: String,
+    pub error: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct EditRenameOutput {
@@ -875,6 +891,10 @@ pub struct EditRenameOutput {
     pub old_name: String,
     pub new_name: String,
     pub occurrences_renamed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_changed: Option<Vec<FileRenameResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errors: Option<Vec<FileRenameError>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -926,7 +946,7 @@ pub struct ExecCommandParams {
     /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
     /// None = no limit (default).
     pub cpu_limit_secs: Option<u64>,
-    /// UTF-8 content to pipe into the process stdin (max 1 MB). When None, stdin is closed (null).
+    /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
 }
 
