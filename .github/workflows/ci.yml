@@ -102,7 +102,9 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: workspace
+          cache-targets: false
+          save-if: true
       - name: Check formatting
         run: cargo fmt --check
       - name: Run Clippy lints
@@ -137,7 +139,8 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: workspace
+          save-if: true
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
         with:
@@ -191,7 +194,8 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-targets: false
+          save-if: true
       - name: Check MSRV
         run: cargo check
 
@@ -214,7 +218,6 @@ jobs:
   semver-checks:
     name: semver checks
     runs-on: ubuntu-24.04
-    needs: [lint]
     if: github.event_name == 'pull_request'
     # This PR renames the crate; no published or git baseline exists for aptu-coder-core yet.
     # Re-enable without continue-on-error after aptu-coder-core is first published on crates.io.
