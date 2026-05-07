@@ -1493,7 +1493,12 @@ pub fn analyze_raw_range(
     }
     /// Files above this line count require explicit start_line/end_line on rangeless calls.
     const MAX_RANGELESS_LINES: usize = 100;
-    if start_line.is_none() && end_line.is_none() && total > MAX_RANGELESS_LINES {
+    let ext = path.extension().and_then(|e| e.to_str());
+    if ext.and_then(language_for_extension).is_some()
+        && start_line.is_none()
+        && end_line.is_none()
+        && total > MAX_RANGELESS_LINES
+    {
         return Err(AnalyzeError::RangelessLargeFile { total_lines: total });
     }
     let start = start_line.unwrap_or(1).max(1).min(total.max(1));
@@ -2087,8 +2092,12 @@ fn caller_c() { target(); }
     #[test]
     fn test_analyze_raw_rangeless_large_file_rejected() {
         let content = "line\n".repeat(101);
-        let f = make_temp_file(&content);
-        let err = analyze_raw_range(f.path(), None, None).unwrap_err();
+        let f = tempfile::Builder::new().suffix(".rs").tempfile().unwrap();
+        use std::io::Write;
+        let mut f_mut = f;
+        f_mut.write_all(content.as_bytes()).unwrap();
+        f_mut.flush().unwrap();
+        let err = analyze_raw_range(f_mut.path(), None, None).unwrap_err();
         assert!(matches!(
             err,
             AnalyzeError::RangelessLargeFile { total_lines: 101 }
@@ -2101,5 +2110,17 @@ fn caller_c() { target(); }
         let f = make_temp_file(&content);
         let out = analyze_raw_range(f.path(), None, None).unwrap();
         assert_eq!(out.total_lines, 100);
+    }
+
+    #[test]
+    fn test_analyze_raw_rangeless_large_noncode_file_allowed() {
+        let content = "line\n".repeat(101);
+        let f = tempfile::Builder::new().suffix(".md").tempfile().unwrap();
+        use std::io::Write;
+        let mut f_mut = f;
+        f_mut.write_all(content.as_bytes()).unwrap();
+        f_mut.flush().unwrap();
+        let out = analyze_raw_range(f_mut.path(), None, None).unwrap();
+        assert_eq!(out.total_lines, 101);
     }
 }
