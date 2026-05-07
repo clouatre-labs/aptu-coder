@@ -2544,7 +2544,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_rename",
         title = "Edit Rename",
-        description = "Use this instead of edit_replace when renaming a symbol. edit_replace is a text search-and-replace that will incorrectly modify occurrences inside string literals and comments. edit_rename is AST-aware and renames syntactic identifiers only, making it safe for symbol renames. AST-aware rename within a single file. Matches syntactic identifiers only; occurrences in string literals and comments are excluded. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs.",
+        description = "Use this instead of edit_replace when renaming a symbol. edit_replace is a text search-and-replace that will incorrectly modify occurrences inside string literals and comments. edit_rename is AST-aware and renames syntactic identifiers only, making it safe for symbol renames. Returns path, old_name, new_name, occurrences_renamed. Fails if old_name not found. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: Rename function parse_config to load_config in src/config.rs.",
         output_schema = schema_for_type::<EditRenameOutput>(),
         annotations(
             title = "Edit Rename",
