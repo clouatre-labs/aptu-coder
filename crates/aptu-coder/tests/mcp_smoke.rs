@@ -337,3 +337,112 @@ fn test_mcp_server_exec_command() {
         "Expected valid response for exec_command tool call with id=2"
     );
 }
+
+#[test]
+fn test_analyze_raw_rangeless_large_file_rejected() {
+    let bin = std::env::var("CARGO_BIN_EXE_aptu_coder").unwrap_or_else(|_| {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let workspace_root = std::path::Path::new(manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("manifest dir has grandparent");
+        workspace_root
+            .join("target/debug/aptu-coder")
+            .to_string_lossy()
+            .to_string()
+    });
+
+    let mut child = std::process::Command::new(&bin)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap_or_else(|e| panic!("failed to spawn server at {}: {}", bin, e));
+
+    let mut stdin = child.stdin.take().expect("failed to get stdin");
+
+    // Use a file known to exceed 100 lines: src/lib.rs in this workspace.
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let workspace_root = std::path::Path::new(manifest_dir)
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("manifest dir has grandparent");
+    let large_file = workspace_root
+        .join("crates/aptu-coder/src/lib.rs")
+        .to_string_lossy()
+        .to_string();
+
+    let writer = thread::spawn(move || {
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#;
+        stdin.write_all(init.as_bytes()).expect("write init");
+        stdin.write_all(b"\n").expect("newline");
+
+        let notif = r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#;
+        stdin.write_all(notif.as_bytes()).expect("write notif");
+        stdin.write_all(b"\n").expect("newline");
+
+        thread::sleep(Duration::from_millis(500));
+
+        let call = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"analyze_raw","arguments":{{"path":"{}","start_line":null,"end_line":null}}}}}}"#,
+            large_file
+        );
+        stdin.write_all(call.as_bytes()).expect("write call");
+        stdin.write_all(b"\n").expect("newline");
+
+        thread::sleep(Duration::from_millis(3000));
+    });
+
+    let stdout = child.stdout.take().expect("failed to get stdout");
+    let reader = std::io::BufReader::new(stdout);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader_thread = thread::spawn(move || {
+        use std::io::BufRead;
+        for line in reader.lines().flatten() {
+            let _ = tx.send(line);
+        }
+    });
+
+    let timeout = Duration::from_secs(10);
+    let start = std::time::Instant::now();
+    let mut got_response = false;
+
+    while start.elapsed() < timeout && !got_response {
+        match rx.try_recv() {
+            Ok(line) => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if json.get("id") == Some(&serde_json::json!(2)) {
+                        assert!(
+                            json.get("error").is_none(),
+                            "must not be a JSON-RPC protocol error: {}",
+                            line
+                        );
+                        let is_error = json["result"]["isError"].as_bool().unwrap_or(false);
+                        assert!(
+                            is_error,
+                            "rangeless analyze_raw on large file must return isError=true: {}",
+                            line
+                        );
+                        let content = json["result"]["content"][0]["text"].as_str().unwrap_or("");
+                        assert!(
+                            content.contains("analyze_module"),
+                            "error message must mention analyze_module: {}",
+                            content
+                        );
+                        got_response = true;
+                    }
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+        }
+    }
+
+    let _ = writer.join();
+    let _ = child.wait();
+    let _ = reader_thread.join();
+
+    assert!(got_response, "Did not receive response for id:2");
+}

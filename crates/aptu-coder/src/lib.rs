@@ -2041,6 +2041,33 @@ impl CodeAnalyzer {
                     )),
                 )));
             }
+            Ok(Err(aptu_coder_core::AnalyzeError::RangelessLargeFile { total_lines })) => {
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "analyze_raw",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("invalid_params".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                });
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "file has {total_lines} lines; provide start_line and end_line, or call analyze_module first to locate the range"
+                    ),
+                    Some(error_meta(
+                        "validation",
+                        false,
+                        "call analyze_module to get function line numbers, then retry with start_line and end_line",
+                    )),
+                )));
+            }
             Ok(Err(e)) => {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
