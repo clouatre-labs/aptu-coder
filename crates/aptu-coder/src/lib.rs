@@ -273,6 +273,9 @@ pub struct CodeAnalyzer {
     // All clones share the same router instance (per-session state).
     // Read lock acquired by list_tools/call_tool; write lock acquired during on_initialized
     // to disable tools based on client profile.
+    // IMPORTANT: Do not perform long-running I/O while holding the write lock in
+    // on_initialized. The write lock blocks all concurrent list_tools/call_tool calls
+    // for the duration. Keep the critical section to disable_route() calls only.
     #[allow(dead_code)]
     pub(crate) tool_router: Arc<RwLock<ToolRouter<Self>>>,
     cache: AnalysisCache,
