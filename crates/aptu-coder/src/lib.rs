@@ -314,7 +314,13 @@ fn validate_path_in_dir(
         canonical_base.join(&suffix)
     };
 
-    // Verify the resolved path is within working_dir
+    // Verify the resolved path is within working_dir.
+    // PathBuf::starts_with compares path *components*, not raw bytes, so
+    // a sibling directory whose name shares our prefix (e.g. "/work_evil"
+    // when the allowed root is "/work") is correctly rejected -- this is
+    // the exact prefix-confusion vector exploited in CVE-2025-53110 against
+    // @modelcontextprotocol/server-filesystem.  Do not replace this check
+    // with a string-level prefix comparison.
     if !canonical_path.starts_with(&canonical_working_dir) {
         return Err(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -4121,6 +4127,38 @@ mod tests {
             stdout_str.contains("hi"),
             "stdout should contain echo output: {}",
             stdout_str
+        );
+    }
+
+    #[test]
+    fn test_validate_path_in_dir_rejects_sibling_prefix() {
+        // Arrange: create a parent temp dir, then two subdirs:
+        //   allowed/   -- the working_dir
+        //   allowed_sibling/  -- a sibling whose name shares the prefix
+        // This mirrors CVE-2025-53110: "/work_evil" must not match "/work".
+        let cwd = std::env::current_dir().expect("should get cwd");
+        let parent = tempfile::TempDir::new_in(&cwd).expect("should create parent temp dir");
+        let allowed = parent.path().join("allowed");
+        let sibling = parent.path().join("allowed_sibling");
+        std::fs::create_dir_all(&allowed).expect("should create allowed dir");
+        std::fs::create_dir_all(&sibling).expect("should create sibling dir");
+
+        // Act: ask for a file inside the sibling dir, using a path that
+        // traverses from allowed/ into allowed_sibling/
+        let result = validate_path_in_dir("../allowed_sibling/secret.txt", false, &allowed);
+
+        // Assert: must be rejected even though "allowed_sibling" starts with "allowed"
+        assert!(
+            result.is_err(),
+            "validate_path_in_dir must reject a path resolving to a sibling directory \
+             sharing the working_dir name prefix (CVE-2025-53110 pattern)"
+        );
+        let err = result.unwrap_err();
+        let msg = err.message.to_lowercase();
+        assert!(
+            msg.contains("outside") || msg.contains("working"),
+            "Error should mention 'outside' or 'working', got: {}",
+            err.message
         );
     }
 }
