@@ -64,21 +64,17 @@ pub use analyze::{
     analyze_module_file, analyze_str,
 };
 pub use config::AnalysisConfig;
-pub use edit::{
-    EditError, edit_insert_at_symbol, edit_overwrite_content, edit_rename_directory,
-    edit_rename_in_file, edit_replace_block,
-};
+pub use edit::{EditError, edit_overwrite_content, edit_replace_block};
 pub use lang::{language_for_extension, supported_languages};
 pub use parser::ParserError;
 pub use types::{
     AnalysisMode, AnalysisResult, AnalyzeDirectoryParams, AnalyzeFileField, AnalyzeFileParams,
     AnalyzeModuleParams, AnalyzeSymbolParams, CallChain, CallEdge, CallInfo, ClassInfo, DefUseKind,
-    DefUseSite, EditInsertOutput, EditInsertParams, EditOverwriteOutput, EditOverwriteParams,
-    EditRenameOutput, EditRenameParams, EditReplaceOutput, EditReplaceParams, ErrorMeta,
-    ExecCommandParams, FileInfo, FileRenameError, FileRenameResult, FocusedAnalysisData,
-    FunctionInfo, ImplTraitInfo, ImportInfo, InsertPosition, ModuleFunctionInfo, ModuleImportInfo,
-    ModuleInfo, OutputControlParams, PaginationParams, ReferenceInfo, ReferenceType,
-    STDIN_MAX_BYTES, SemanticAnalysis, ShellOutput, SymbolMatchMode,
+    DefUseSite, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
+    ErrorMeta, ExecCommandParams, FileInfo, FocusedAnalysisData, FunctionInfo, ImplTraitInfo,
+    ImportInfo, ModuleFunctionInfo, ModuleImportInfo, ModuleInfo, OutputControlParams,
+    PaginationParams, ReferenceInfo, ReferenceType, STDIN_MAX_BYTES, SemanticAnalysis, ShellOutput,
+    SymbolMatchMode,
 };
 
 /// Captures from a custom tree-sitter query.

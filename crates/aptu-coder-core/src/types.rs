@@ -742,33 +742,6 @@ mod tests {
             "ast_recursion_limit in AnalyzeSymbolParams must have minimum: 0"
         );
     }
-
-    #[test]
-    fn test_edit_insert_output_position_serde() {
-        let before = EditInsertOutput {
-            path: "test.rs".to_string(),
-            symbol_name: "foo".to_string(),
-            position: InsertPosition::Before,
-            byte_offset: 42,
-        };
-        let json = serde_json::to_string(&before).unwrap();
-        assert!(
-            json.contains("\"before\""),
-            "InsertPosition::Before should serialize to 'before', got: {json}"
-        );
-
-        let after = EditInsertOutput {
-            path: "test.rs".to_string(),
-            symbol_name: "foo".to_string(),
-            position: InsertPosition::After,
-            byte_offset: 42,
-        };
-        let json = serde_json::to_string(&after).unwrap();
-        assert!(
-            json.contains("\"after\""),
-            "InsertPosition::After should serialize to 'after', got: {json}"
-        );
-    }
 }
 
 /// Structured error metadata for MCP error responses.
@@ -862,80 +835,6 @@ pub struct EditReplaceOutput {
     pub bytes_before: usize,
     /// File size in bytes after the edit.
     pub bytes_after: usize,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct EditRenameParams {
-    /// File path to modify.
-    pub path: String,
-    /// Current name of the symbol (identifier) to rename.
-    pub old_name: String,
-    /// New name for the symbol.
-    pub new_name: String,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct FileRenameResult {
-    pub path: String,
-    pub occurrences_renamed: usize,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct FileRenameError {
-    pub path: String,
-    pub error: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct EditRenameOutput {
-    pub path: String,
-    pub old_name: String,
-    pub new_name: String,
-    pub occurrences_renamed: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub files_changed: Option<Vec<FileRenameResult>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub errors: Option<Vec<FileRenameError>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub enum InsertPosition {
-    #[serde(rename = "before")]
-    Before,
-    #[serde(rename = "after")]
-    After,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct EditInsertParams {
-    /// File path to modify.
-    pub path: String,
-    /// Name of the symbol (identifier) to locate.
-    pub symbol_name: String,
-    /// Insert before or after the symbol.
-    pub position: InsertPosition,
-    /// Content to insert verbatim; include leading/trailing newlines as needed.
-    pub content: String,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct EditInsertOutput {
-    pub path: String,
-    pub symbol_name: String,
-    pub position: InsertPosition,
-    pub byte_offset: usize,
 }
 
 #[non_exhaustive]
