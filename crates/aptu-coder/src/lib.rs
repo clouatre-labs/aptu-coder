@@ -626,6 +626,7 @@ impl CodeAnalyzer {
         let use_summary = analysis_params.use_summary;
         let impl_only = analysis_params.impl_only;
         let def_use = analysis_params.def_use;
+        let parse_timeout_micros = analysis_params.parse_timeout_micros;
         let handle = tokio::task::spawn_blocking(move || {
             let params = analyze::FocusedAnalysisConfig {
                 focus: symbol_owned,
@@ -636,6 +637,7 @@ impl CodeAnalyzer {
                 use_summary,
                 impl_only,
                 def_use,
+                parse_timeout_micros,
             };
             analyze::analyze_focused_with_progress_with_entries(
                 &path_owned,
@@ -873,6 +875,7 @@ impl CodeAnalyzer {
             use_summary: false,
             impl_only: params.impl_only,
             def_use: params.def_use.unwrap_or(false),
+            parse_timeout_micros: None,
         };
 
         let mut output = self
@@ -3351,6 +3354,7 @@ struct FocusedAnalysisParams {
     use_summary: bool,
     impl_only: Option<bool>,
     def_use: bool,
+    parse_timeout_micros: Option<u64>,
 }
 
 #[tool_handler]

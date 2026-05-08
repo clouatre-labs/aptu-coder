@@ -33,6 +33,8 @@ pub enum ParserError {
     InvalidUtf8,
     #[error("Query error: {0}")]
     QueryError(String),
+    #[error("Parse timeout exceeded: {0} microseconds")]
+    Timeout(u64),
 }
 
 /// Compiled tree-sitter queries for a language.
@@ -484,7 +486,15 @@ impl SemanticExtractor {
         source: &str,
         language: &str,
         ast_recursion_limit: Option<usize>,
+        deadline: Option<std::time::Instant>,
     ) -> Result<SemanticAnalysis, ParserError> {
+        // Check deadline at the start
+        #[allow(clippy::collapsible_if)]
+        if let Some(d) = deadline {
+            if std::time::Instant::now() >= d {
+                return Err(ParserError::Timeout(0));
+            }
+        }
         let lang_info = get_language_info(language)
             .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
 
@@ -531,7 +541,8 @@ impl SemanticExtractor {
             &lang_info,
             &mut functions,
             &mut classes,
-        );
+            deadline,
+        )?;
         Self::extract_calls(
             source,
             compiled,
@@ -539,14 +550,15 @@ impl SemanticExtractor {
             max_depth,
             &mut calls,
             &mut call_frequency,
-        );
-        Self::extract_imports(source, compiled, root, max_depth, &mut imports);
-        Self::extract_impl_methods(source, compiled, root, max_depth, &mut classes);
-        Self::extract_references(source, compiled, root, max_depth, &mut references);
+            deadline,
+        )?;
+        Self::extract_imports(source, compiled, root, max_depth, &mut imports, deadline)?;
+        Self::extract_impl_methods(source, compiled, root, max_depth, &mut classes, deadline)?;
+        Self::extract_references(source, compiled, root, max_depth, &mut references, deadline)?;
 
         // Extract impl-trait blocks for Rust files (empty for other languages)
         let impl_traits = if language == "rust" {
-            Self::extract_impl_traits_from_tree(source, compiled, root)
+            Self::extract_impl_traits_from_tree(source, compiled, root, deadline)?
         } else {
             vec![]
         };
@@ -565,6 +577,7 @@ impl SemanticExtractor {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn extract_elements(
         source: &str,
         compiled: &CompiledQueries,
@@ -573,8 +586,10 @@ impl SemanticExtractor {
         lang_info: &crate::languages::LanguageInfo,
         functions: &mut Vec<FunctionInfo>,
         classes: &mut Vec<ClassInfo>,
-    ) {
+        deadline: Option<std::time::Instant>,
+    ) -> Result<(), ParserError> {
         let mut seen_functions = std::collections::HashSet::new();
+        let mut timed_out = false;
 
         QUERY_CURSOR.with(|c| {
             let mut cursor = c.borrow_mut();
@@ -582,9 +597,19 @@ impl SemanticExtractor {
             if let Some(depth) = max_depth {
                 cursor.set_max_start_depth(Some(depth));
             }
+
             let mut matches = cursor.matches(&compiled.element, root, source.as_bytes());
 
             while let Some(mat) = matches.next() {
+                // Check if we've hit the deadline
+                #[allow(clippy::collapsible_if)]
+                #[allow(clippy::collapsible_if)]
+                if let Some(d) = deadline {
+                    if std::time::Instant::now() >= d {
+                        timed_out = true;
+                        break;
+                    }
+                }
                 let mut func_node: Option<Node> = None;
                 let mut func_name_text: Option<String> = None;
                 let mut class_node: Option<Node> = None;
@@ -724,6 +749,12 @@ impl SemanticExtractor {
                 }
             }
         });
+
+        if timed_out {
+            return Err(ParserError::Timeout(0));
+        }
+
+        Ok(())
     }
 
     /// Returns the name of the enclosing function/method/subroutine for a given AST node,
@@ -782,16 +813,28 @@ impl SemanticExtractor {
         max_depth: Option<u32>,
         calls: &mut Vec<CallInfo>,
         call_frequency: &mut HashMap<String, usize>,
-    ) {
+        deadline: Option<std::time::Instant>,
+    ) -> Result<(), ParserError> {
+        let mut timed_out = false;
+
         QUERY_CURSOR.with(|c| {
             let mut cursor = c.borrow_mut();
             cursor.set_max_start_depth(None);
             if let Some(depth) = max_depth {
                 cursor.set_max_start_depth(Some(depth));
             }
+
             let mut matches = cursor.matches(&compiled.call, root, source.as_bytes());
 
             while let Some(mat) = matches.next() {
+                // Check if we've hit the deadline
+                #[allow(clippy::collapsible_if)]
+                if let Some(d) = deadline {
+                    if std::time::Instant::now() >= d {
+                        timed_out = true;
+                        break;
+                    }
+                }
                 for capture in mat.captures {
                     let capture_name = compiled.call.capture_names()[capture.index as usize];
                     if capture_name != "call" {
@@ -842,6 +885,12 @@ impl SemanticExtractor {
                 }
             }
         });
+
+        if timed_out {
+            return Err(ParserError::Timeout(0));
+        }
+
+        Ok(())
     }
 
     fn extract_imports(
@@ -850,19 +899,31 @@ impl SemanticExtractor {
         root: Node<'_>,
         max_depth: Option<u32>,
         imports: &mut Vec<ImportInfo>,
-    ) {
+        deadline: Option<std::time::Instant>,
+    ) -> Result<(), ParserError> {
         let Some(ref import_query) = compiled.import else {
-            return;
+            return Ok(());
         };
+        let mut timed_out = false;
+
         QUERY_CURSOR.with(|c| {
             let mut cursor = c.borrow_mut();
             cursor.set_max_start_depth(None);
             if let Some(depth) = max_depth {
                 cursor.set_max_start_depth(Some(depth));
             }
+
             let mut matches = cursor.matches(import_query, root, source.as_bytes());
 
             while let Some(mat) = matches.next() {
+                // Check if we've hit the deadline
+                #[allow(clippy::collapsible_if)]
+                if let Some(d) = deadline {
+                    if std::time::Instant::now() >= d {
+                        timed_out = true;
+                        break;
+                    }
+                }
                 for capture in mat.captures {
                     let capture_name = import_query.capture_names()[capture.index as usize];
                     if capture_name == "import_path" {
@@ -873,6 +934,12 @@ impl SemanticExtractor {
                 }
             }
         });
+
+        if timed_out {
+            return Err(ParserError::Timeout(0));
+        }
+
+        Ok(())
     }
 
     fn extract_impl_methods(
@@ -881,19 +948,32 @@ impl SemanticExtractor {
         root: Node<'_>,
         max_depth: Option<u32>,
         classes: &mut [ClassInfo],
-    ) {
+        deadline: Option<std::time::Instant>,
+    ) -> Result<(), ParserError> {
         let Some(ref impl_query) = compiled.impl_block else {
-            return;
+            return Ok(());
         };
+        let mut timed_out = false;
+
         QUERY_CURSOR.with(|c| {
             let mut cursor = c.borrow_mut();
             cursor.set_max_start_depth(None);
             if let Some(depth) = max_depth {
                 cursor.set_max_start_depth(Some(depth));
             }
+
             let mut matches = cursor.matches(impl_query, root, source.as_bytes());
 
             while let Some(mat) = matches.next() {
+                // Check if we've hit the deadline
+                #[allow(clippy::collapsible_if)]
+                if let Some(d) = deadline {
+                    if std::time::Instant::now() >= d {
+                        timed_out = true;
+                        break;
+                    }
+                }
+
                 let mut impl_type_name = String::new();
                 let mut method_name = String::new();
                 let mut method_line = 0usize;
@@ -956,6 +1036,12 @@ impl SemanticExtractor {
                 }
             }
         });
+
+        if timed_out {
+            return Err(ParserError::Timeout(0));
+        }
+
+        Ok(())
     }
 
     fn extract_references(
@@ -964,20 +1050,33 @@ impl SemanticExtractor {
         root: Node<'_>,
         max_depth: Option<u32>,
         references: &mut Vec<ReferenceInfo>,
-    ) {
+        deadline: Option<std::time::Instant>,
+    ) -> Result<(), ParserError> {
         let Some(ref ref_query) = compiled.reference else {
-            return;
+            return Ok(());
         };
         let mut seen_refs = std::collections::HashSet::new();
+        let mut timed_out = false;
+
         QUERY_CURSOR.with(|c| {
             let mut cursor = c.borrow_mut();
             cursor.set_max_start_depth(None);
             if let Some(depth) = max_depth {
                 cursor.set_max_start_depth(Some(depth));
             }
+
             let mut matches = cursor.matches(ref_query, root, source.as_bytes());
 
             while let Some(mat) = matches.next() {
+                // Check if we've hit the deadline
+                #[allow(clippy::collapsible_if)]
+                if let Some(d) = deadline {
+                    if std::time::Instant::now() >= d {
+                        timed_out = true;
+                        break;
+                    }
+                }
+
                 for capture in mat.captures {
                     let capture_name = ref_query.capture_names()[capture.index as usize];
                     if capture_name == "type_ref" {
@@ -996,6 +1095,12 @@ impl SemanticExtractor {
                 }
             }
         });
+
+        if timed_out {
+            return Err(ParserError::Timeout(0));
+        }
+
+        Ok(())
     }
 
     /// Extract impl-trait blocks from an already-parsed tree.
@@ -1006,18 +1111,31 @@ impl SemanticExtractor {
         source: &str,
         compiled: &CompiledQueries,
         root: Node<'_>,
-    ) -> Vec<ImplTraitInfo> {
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Vec<ImplTraitInfo>, ParserError> {
         let Some(query) = &compiled.impl_trait else {
-            return vec![];
+            return Ok(vec![]);
         };
 
         let mut results = Vec::new();
+        let mut timed_out = false;
+
         QUERY_CURSOR.with(|c| {
             let mut cursor = c.borrow_mut();
             cursor.set_max_start_depth(None);
+
             let mut matches = cursor.matches(query, root, source.as_bytes());
 
             while let Some(mat) = matches.next() {
+                // Check if we've hit the deadline
+                #[allow(clippy::collapsible_if)]
+                if let Some(d) = deadline {
+                    if std::time::Instant::now() >= d {
+                        timed_out = true;
+                        break;
+                    }
+                }
+
                 let mut trait_name = String::new();
                 let mut impl_type = String::new();
                 let mut line = 0usize;
@@ -1049,7 +1167,11 @@ impl SemanticExtractor {
             }
         });
 
-        results
+        if timed_out {
+            return Err(ParserError::Timeout(0));
+        }
+
+        Ok(results)
     }
 
     /// Extract def-use sites (write/read locations) for a given symbol within a file.
@@ -1336,8 +1458,8 @@ mod tests {
     #[test]
     fn test_ast_recursion_limit_zero_is_unlimited() {
         let source = r#"fn hello() -> u32 { 42 }"#;
-        let result_none = SemanticExtractor::extract(source, "rust", None);
-        let result_zero = SemanticExtractor::extract(source, "rust", Some(0));
+        let result_none = SemanticExtractor::extract(source, "rust", None, None);
+        let result_zero = SemanticExtractor::extract(source, "rust", Some(0), None);
         assert!(result_none.is_ok(), "extract with None failed");
         assert!(result_zero.is_ok(), "extract with Some(0) failed");
         let analysis_none = result_none.unwrap();
@@ -1358,7 +1480,7 @@ mod tests {
         // Arrange
         let source = "use std::io as stdio;";
         // Act
-        let result = SemanticExtractor::extract(source, "rust", None).unwrap();
+        let result = SemanticExtractor::extract(source, "rust", None, None).unwrap();
         // Assert: alias "stdio" is captured as an import item
         assert!(
             result
@@ -1376,7 +1498,7 @@ mod tests {
         // exercises the _ => prefix.to_string() arm
         let source = "use io as stdio;";
         // Act
-        let result = SemanticExtractor::extract(source, "rust", None).unwrap();
+        let result = SemanticExtractor::extract(source, "rust", None, None).unwrap();
         // Assert: alias "stdio" is captured as an import item
         assert!(
             result
@@ -1393,7 +1515,7 @@ mod tests {
         // Arrange: scoped_use_list with non-empty prefix
         let source = "use std::{io::Read, io::Write};";
         // Act
-        let result = SemanticExtractor::extract(source, "rust", None).unwrap();
+        let result = SemanticExtractor::extract(source, "rust", None, None).unwrap();
         // Assert: both Read and Write appear as items with std::io module
         let items: Vec<String> = result
             .imports
@@ -1413,7 +1535,7 @@ mod tests {
         // Arrange
         let source = "use std::{fs, io};";
         // Act
-        let result = SemanticExtractor::extract(source, "rust", None).unwrap();
+        let result = SemanticExtractor::extract(source, "rust", None, None).unwrap();
         // Assert: both "fs" and "io" appear as import items under module "std"
         let items: Vec<&str> = result
             .imports
@@ -1433,7 +1555,7 @@ mod tests {
         // Arrange
         let source = "use std::io::*;";
         // Act
-        let result = SemanticExtractor::extract(source, "rust", None).unwrap();
+        let result = SemanticExtractor::extract(source, "rust", None, None).unwrap();
         // Assert: wildcard import with module "std::io"
         let wildcard = result
             .imports
@@ -1474,7 +1596,7 @@ impl Display for Foo {}
         let source = "fn foo() {}";
         let big_limit = usize::try_from(u32::MAX).unwrap() + 1;
         // Act
-        let result = SemanticExtractor::extract(source, "rust", Some(big_limit));
+        let result = SemanticExtractor::extract(source, "rust", Some(big_limit), None);
         // Assert
         assert!(
             matches!(result, Err(ParserError::ParseError(_))),
@@ -1488,7 +1610,7 @@ impl Display for Foo {}
         // Arrange: ast_recursion_limit with Some(depth) to exercise max_depth Some branch
         let source = r#"fn hello() -> u32 { 42 }"#;
         // Act
-        let result = SemanticExtractor::extract(source, "rust", Some(5));
+        let result = SemanticExtractor::extract(source, "rust", Some(5), None);
         // Assert: should succeed without error and extract functions
         assert!(result.is_ok(), "extract with Some(5) failed: {:?}", result);
         let analysis = result.unwrap();
@@ -1561,7 +1683,7 @@ mod tests_python {
         // Arrange: relative import (from . import foo)
         let source = "from . import foo\n";
         // Act
-        let result = SemanticExtractor::extract(source, "python", None).unwrap();
+        let result = SemanticExtractor::extract(source, "python", None, None).unwrap();
         // Assert: relative import should be captured
         let relative = result.imports.iter().find(|imp| imp.module.contains("."));
         assert!(
@@ -1577,7 +1699,7 @@ mod tests_python {
         // Note: tree-sitter-python extracts "path" (the original name), not the alias "p"
         let source = "from os import path as p\n";
         // Act
-        let result = SemanticExtractor::extract(source, "python", None).unwrap();
+        let result = SemanticExtractor::extract(source, "python", None, None).unwrap();
         // Assert: "path" should be in items (alias is captured separately by aliased_import node)
         let path_import = result
             .imports
@@ -1587,6 +1709,36 @@ mod tests_python {
             path_import.is_some(),
             "expected import 'path' from module 'os' in {:?}",
             result.imports
+        );
+    }
+
+    #[test]
+    fn test_parse_no_timeout_when_none() {
+        // Arrange: simple Rust source with no deadline
+        let source = r#"fn hello() -> u32 { 42 }"#;
+        // Act: extract with deadline=None (no timeout)
+        let result = SemanticExtractor::extract(source, "rust", None, None);
+        // Assert: should succeed normally
+        assert!(result.is_ok(), "extract with deadline=None should succeed");
+        let analysis = result.unwrap();
+        assert!(
+            analysis.functions.len() >= 1,
+            "should find at least one function"
+        );
+    }
+
+    #[test]
+    fn test_parse_timeout_triggers_error() {
+        // Arrange: simple Rust source with a deadline in the past (1 microsecond ago)
+        let source = r#"fn hello() -> u32 { 42 }"#;
+        let deadline = Some(std::time::Instant::now() - std::time::Duration::from_micros(1));
+        // Act: extract with an already-expired deadline
+        let result = SemanticExtractor::extract(source, "rust", None, deadline);
+        // Assert: should return a Timeout error
+        assert!(
+            matches!(result, Err(ParserError::Timeout(_))),
+            "expected Timeout error, got {:?}",
+            result
         );
     }
 }
@@ -1611,7 +1763,7 @@ mod tests_unsupported {
     #[test]
     fn test_semantic_extractor_unsupported_language() {
         // Arrange + Act
-        let result = SemanticExtractor::extract("x = 1", "cobol", None);
+        let result = SemanticExtractor::extract("x = 1", "cobol", None, None);
         // Assert
         assert!(
             matches!(result, Err(ParserError::UnsupportedLanguage(ref lang)) if lang == "cobol"),

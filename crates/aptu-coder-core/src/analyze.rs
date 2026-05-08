@@ -59,6 +59,8 @@ pub enum AnalyzeError {
         "file has {total_lines} lines; provide start_line and end_line, or call analyze_module first to locate the range"
     )]
     RangelessLargeFile { total_lines: usize },
+    #[error("parse timeout exceeded for {path}: {micros} microseconds")]
+    ParseTimeout { path: PathBuf, micros: u64 },
 }
 
 /// Result of directory analysis containing both formatted output and file data.
@@ -307,7 +309,7 @@ pub fn analyze_file(
         .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string);
 
     // Extract semantic information
-    let mut semantic = SemanticExtractor::extract(&source, &ext, ast_recursion_limit)?;
+    let mut semantic = SemanticExtractor::extract(&source, &ext, ast_recursion_limit, None)?;
 
     // Populate the file path on references now that the path is known
     for r in &mut semantic.references {
@@ -379,7 +381,7 @@ pub fn analyze_str(
     let lang = lang.ok_or_else(|| AnalyzeError::UnsupportedLanguage(language.to_string()))?;
 
     // Extract semantic information
-    let mut semantic = SemanticExtractor::extract(source, lang, ast_recursion_limit)?;
+    let mut semantic = SemanticExtractor::extract(source, lang, ast_recursion_limit, None)?;
 
     // Populate a stable in-memory sentinel on all reference locations
     for r in &mut semantic.references {
@@ -491,6 +493,7 @@ pub struct FocusedAnalysisConfig {
     pub use_summary: bool,
     pub impl_only: Option<bool>,
     pub def_use: bool,
+    pub parse_timeout_micros: Option<u64>,
 }
 
 /// Internal parameters for focused analysis phases.
@@ -503,6 +506,7 @@ struct InternalFocusedParams {
     use_summary: bool,
     impl_only: Option<bool>,
     def_use: bool,
+    parse_timeout_micros: Option<u64>,
 }
 
 /// Type alias for analysis results: (`file_path`, `semantic_analysis`) pairs and impl-trait info.
@@ -514,6 +518,7 @@ fn collect_file_analysis(
     progress: &Arc<AtomicUsize>,
     ct: &CancellationToken,
     ast_recursion_limit: Option<usize>,
+    parse_timeout_micros: Option<u64>,
 ) -> Result<FileAnalysisBatch, AnalyzeError> {
     // Check if already cancelled
     if ct.is_cancelled() {
@@ -558,22 +563,36 @@ fn collect_file_analysis(
                 "unknown".to_string()
             };
 
-            if let Ok(mut semantic) =
-                SemanticExtractor::extract(&source, &language, ast_recursion_limit)
-            {
-                // Populate file path on references
-                for r in &mut semantic.references {
-                    r.location = entry.path.display().to_string();
+            // Compute deadline for this file if parse_timeout_micros is set
+            let deadline = parse_timeout_micros
+                .map(|micros| std::time::Instant::now() + std::time::Duration::from_micros(micros));
+
+            match SemanticExtractor::extract(&source, &language, ast_recursion_limit, deadline) {
+                Ok(mut semantic) => {
+                    // Populate file path on references
+                    for r in &mut semantic.references {
+                        r.location = entry.path.display().to_string();
+                    }
+                    // Populate file path on impl_traits (already extracted during SemanticExtractor::extract)
+                    for trait_info in &mut semantic.impl_traits {
+                        trait_info.path.clone_from(&entry.path);
+                    }
+                    progress.fetch_add(1, Ordering::Relaxed);
+                    Some((entry.path.clone(), semantic))
                 }
-                // Populate file path on impl_traits (already extracted during SemanticExtractor::extract)
-                for trait_info in &mut semantic.impl_traits {
-                    trait_info.path.clone_from(&entry.path);
+                Err(crate::parser::ParserError::Timeout(micros)) => {
+                    tracing::warn!(
+                        "parse timeout exceeded for {}: {} microseconds",
+                        entry.path.display(),
+                        micros
+                    );
+                    progress.fetch_add(1, Ordering::Relaxed);
+                    None
                 }
-                progress.fetch_add(1, Ordering::Relaxed);
-                Some((entry.path.clone(), semantic))
-            } else {
-                progress.fetch_add(1, Ordering::Relaxed);
-                None
+                Err(_) => {
+                    progress.fetch_add(1, Ordering::Relaxed);
+                    None
+                }
             }
         })
         .collect();
@@ -794,6 +813,7 @@ pub fn analyze_focused_with_progress(
         use_summary: params.use_summary,
         impl_only: params.impl_only,
         def_use: params.def_use,
+        parse_timeout_micros: params.parse_timeout_micros,
     };
     analyze_focused_with_progress_with_entries_internal(
         root,
@@ -842,8 +862,13 @@ fn analyze_focused_with_progress_with_entries_internal(
     }
 
     // Phase 1: Collect file analysis
-    let (analysis_results, all_impl_traits) =
-        collect_file_analysis(entries, progress, ct, params.ast_recursion_limit)?;
+    let (analysis_results, all_impl_traits) = collect_file_analysis(
+        entries,
+        progress,
+        ct,
+        params.ast_recursion_limit,
+        params.parse_timeout_micros,
+    )?;
 
     // Check for cancellation before building the call graph (phase 2)
     if ct.is_cancelled() {
@@ -1082,6 +1107,7 @@ pub fn analyze_focused_with_progress_with_entries(
         use_summary: params.use_summary,
         impl_only: params.impl_only,
         def_use: params.def_use,
+        parse_timeout_micros: params.parse_timeout_micros,
     };
     analyze_focused_with_progress_with_entries_internal(
         root,
@@ -1113,6 +1139,7 @@ pub fn analyze_focused(
         use_summary: false,
         impl_only: None,
         def_use: false,
+        parse_timeout_micros: None,
     };
     analyze_focused_with_progress_with_entries(root, &params, &counter, &ct, &entries)
 }
@@ -1151,7 +1178,7 @@ pub fn analyze_module_file(path: &str) -> Result<crate::types::ModuleInfo, Analy
             ))
         })?;
 
-    let semantic = SemanticExtractor::extract(&source, language, None)?;
+    let semantic = SemanticExtractor::extract(&source, language, None, None)?;
 
     let functions = semantic
         .functions
@@ -1204,7 +1231,8 @@ pub fn analyze_import_lookup(
                 .and_then(|e| e.to_str())
                 .and_then(crate::lang::language_for_extension)?;
             let source = std::fs::read_to_string(&entry.path).ok()?;
-            let semantic = SemanticExtractor::extract(&source, ext, ast_recursion_limit).ok()?;
+            let semantic =
+                SemanticExtractor::extract(&source, ext, ast_recursion_limit, None).ok()?;
             for import in &semantic.imports {
                 if import.module == module || import.items.iter().any(|item| item == module) {
                     return Some((entry.path.clone(), import.line));
@@ -1759,6 +1787,7 @@ fn regular_caller() {
             use_summary: false,
             impl_only: Some(true),
             def_use: false,
+            parse_timeout_micros: None,
         };
         let output = analyze_focused_with_progress(
             temp_dir.path(),
@@ -1868,6 +1897,7 @@ fn caller_c() { target(); }
             use_summary: false,
             impl_only: None,
             def_use: true,
+            parse_timeout_micros: None,
         };
 
         let output = analyze_focused_with_progress_with_entries(
