@@ -44,16 +44,15 @@ graph TD
 | `analyze_file` | Functions with signatures, classes, imports, type references | Call graph traversal, directory walking |
 | `analyze_module` | Minimal function/import index (~75% smaller than `analyze_file`) | Signatures, types, class details, call graphs |
 | `analyze_symbol` | Call graph for a named function/method across a directory | File-level details, directory counts |
-| `analyze_raw` | Raw file content with optional line range | AST parsing, structure extraction |
 | `edit_overwrite` | Create or overwrite a file | AST awareness, incremental updates |
 | `edit_replace` | Replace exact text block in a file | AST awareness, directory-wide changes |
 | `exec_command` | Execute arbitrary shell commands | Output parsing, scripting language support, interactive sessions |
 
-*Table 1: The ten tools, their purpose, and what each intentionally excludes.*
+*Table 1: The seven tools, their purpose, and what each intentionally excludes.*
 
 ### Single Responsibility Trade-off
 
-Splitting into ten tools adds surface area (ten tool descriptions to maintain, ten output schemas). The benefit is deterministic routing: an agent that asks about a symbol never accidentally triggers a directory walk, and an agent orienting on a codebase never waits for a full semantic parse. Write tools are separated from analysis tools to allow clients to apply different confirmation policies.
+Splitting into seven tools adds surface area (seven tool descriptions to maintain, seven output schemas). The benefit is deterministic routing: an agent that asks about a symbol never accidentally triggers a directory walk, and an agent orienting on a codebase never waits for a full semantic parse. Write tools are separated from analysis tools to allow clients to apply different confirmation policies.
 
 ## 3. Designing for Small Models
 
