@@ -194,6 +194,142 @@ fn validate_path(path: &str, require_exists: bool) -> Result<std::path::PathBuf,
     Ok(canonical_path)
 }
 
+/// Maps an io::Error to an ErrorData with kind-specific message and preserved context.
+fn io_error_to_path_error(
+    err: &std::io::Error,
+    path_context: &str,
+    suggested_action: &'static str,
+) -> ErrorData {
+    let msg = match err.kind() {
+        std::io::ErrorKind::NotFound => format!("{path_context} not found"),
+        std::io::ErrorKind::PermissionDenied => format!("permission denied: {path_context}"),
+        _ => format!("{path_context} is invalid"),
+    };
+    let mut meta = error_meta("validation", false, suggested_action);
+    // Preserve io::Error context in data field
+    if let Some(obj) = meta.as_object_mut() {
+        obj.insert(
+            "ioErrorKind".to_string(),
+            serde_json::json!(format!("{:?}", err.kind())),
+        );
+        obj.insert(
+            "ioErrorSource".to_string(),
+            serde_json::json!(err.to_string()),
+        );
+    }
+    ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, msg, Some(meta))
+}
+
+/// Validates a path relative to a working directory.
+/// The working_dir itself must be within the server CWD.
+/// The resolved path must also be within the working_dir.
+fn validate_path_in_dir(
+    path: &str,
+    require_exists: bool,
+    working_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, ErrorData> {
+    // Canonicalize the working_dir to resolve symlinks
+    let canonical_working_dir = std::fs::canonicalize(working_dir).map_err(|e| {
+        io_error_to_path_error(&e, "working_dir", "provide a valid working directory")
+    })?;
+
+    // Verify working_dir is actually a directory
+    if !std::fs::metadata(&canonical_working_dir)
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+    {
+        return Err(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "working_dir must be a directory".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a valid directory path",
+            )),
+        ));
+    }
+
+    // Verify working_dir is within the server CWD (same bounds check as validate_path)
+    let allowed_root = std::fs::canonicalize(std::env::current_dir().map_err(|_| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path is outside the allowed root".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "ensure the working directory is accessible",
+            )),
+        )
+    })?)
+    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+
+    if !canonical_working_dir.starts_with(&allowed_root) {
+        return Err(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "working_dir is outside the allowed root".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a working directory within the current working directory",
+            )),
+        ));
+    }
+
+    // Now resolve the target path relative to working_dir
+    let canonical_path = if require_exists {
+        let target_path = canonical_working_dir.join(path);
+        std::fs::canonicalize(&target_path).map_err(|e| {
+            io_error_to_path_error(
+                &e,
+                path,
+                "provide a valid path within the working directory",
+            )
+        })?
+    } else {
+        // For non-existent files, walk up the path until we find an existing ancestor
+        let p = std::path::Path::new(path);
+        let mut ancestor = p.to_path_buf();
+        let mut suffix = std::path::PathBuf::new();
+
+        loop {
+            let full_path = canonical_working_dir.join(&ancestor);
+            if full_path.exists() {
+                break;
+            }
+            if let Some(parent) = ancestor.parent() {
+                if let Some(file_name) = ancestor.file_name() {
+                    suffix = std::path::PathBuf::from(file_name).join(&suffix);
+                }
+                ancestor = parent.to_path_buf();
+            } else {
+                // No existing ancestor found — use working_dir as anchor
+                ancestor = std::path::PathBuf::new();
+                break;
+            }
+        }
+
+        let canonical_base = canonical_working_dir.join(&ancestor);
+        let canonical_base =
+            std::fs::canonicalize(&canonical_base).unwrap_or(canonical_working_dir.clone());
+        canonical_base.join(&suffix)
+    };
+
+    // Verify the resolved path is within working_dir
+    if !canonical_path.starts_with(&canonical_working_dir) {
+        return Err(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path is outside the working directory".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a path within the working directory",
+            )),
+        ));
+    }
+
+    Ok(canonical_path)
+}
+
 /// Helper function for paginating focus chains (callers or callees).
 /// Returns (items, re-encoded_cursor_option).
 fn paginate_focus_chains(
@@ -1942,7 +2078,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_overwrite",
         title = "Edit Overwrite",
-        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Returns path, bytes_written. Fails if directory path supplied. AST-unaware (no language constraint). Use edit_replace for targeted single-block edits. Example queries: Overwrite src/config.rs with updated content.",
+        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Returns path, bytes_written. Fails if directory path supplied. AST-unaware (no language constraint). Use edit_replace for targeted single-block edits. working_dir sets the base directory for path resolution (default: server CWD). Example queries: Overwrite src/config.rs with updated content.",
         output_schema = schema_for_type::<EditOverwriteOutput>(),
         annotations(
             title = "Edit Overwrite",
@@ -1958,9 +2094,16 @@ impl CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
-        let _validated_path = match validate_path(&params.path, false) {
-            Ok(p) => p,
-            Err(e) => return Ok(err_to_tool_result(e)),
+        let _validated_path = if let Some(ref wd) = params.working_dir {
+            match validate_path_in_dir(&params.path, false, std::path::Path::new(wd)) {
+                Ok(p) => p,
+                Err(e) => return Ok(err_to_tool_result(e)),
+            }
+        } else {
+            match validate_path(&params.path, false) {
+                Ok(p) => p,
+                Err(e) => return Ok(err_to_tool_result(e)),
+            }
         };
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
@@ -2121,7 +2264,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file. Example queries: Update the function signature in lib.rs.",
+        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD). Example queries: Update the function signature in lib.rs.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
@@ -2137,9 +2280,16 @@ impl CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
-        let _validated_path = match validate_path(&params.path, true) {
-            Ok(p) => p,
-            Err(e) => return Ok(err_to_tool_result(e)),
+        let _validated_path = if let Some(ref wd) = params.working_dir {
+            match validate_path_in_dir(&params.path, true, std::path::Path::new(wd)) {
+                Ok(p) => p,
+                Err(e) => return Ok(err_to_tool_result(e)),
+            }
+        } else {
+            match validate_path(&params.path, true) {
+                Ok(p) => p,
+                Err(e) => return Ok(err_to_tool_result(e)),
+            }
         };
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
@@ -3737,6 +3887,120 @@ mod tests {
             "Resolved path should be within CWD: {:?} should start with {:?}",
             path,
             canonical_cwd
+        );
+    }
+
+    #[test]
+    fn test_edit_overwrite_with_working_dir() {
+        // Arrange: create a temporary directory within CWD to use as working_dir
+        let cwd = std::env::current_dir().expect("should get cwd");
+        let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+        let temp_path = temp_dir.path();
+
+        // Act: call validate_path_in_dir with a relative path
+        let result = validate_path_in_dir("test_file.txt", false, temp_path);
+
+        // Assert: path should be resolved relative to working_dir
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept relative path in valid working_dir: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        assert!(
+            resolved.starts_with(temp_path),
+            "Resolved path should be within working_dir: {:?} should start with {:?}",
+            resolved,
+            temp_path
+        );
+    }
+
+    #[test]
+    fn test_edit_overwrite_working_dir_traversal() {
+        // Arrange: create a temporary directory within CWD to use as working_dir
+        let cwd = std::env::current_dir().expect("should get cwd");
+        let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+        let temp_path = temp_dir.path();
+
+        // Act: try to traverse outside working_dir with ../../../etc/passwd
+        let result = validate_path_in_dir("../../../etc/passwd", false, temp_path);
+
+        // Assert: should reject path traversal attack
+        assert!(
+            result.is_err(),
+            "validate_path_in_dir should reject path traversal outside working_dir"
+        );
+        let err = result.unwrap_err();
+        let err_msg = err.message.to_lowercase();
+        assert!(
+            err_msg.contains("outside") || err_msg.contains("working"),
+            "Error message should mention 'outside' or 'working': {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_edit_replace_with_working_dir() {
+        // Arrange: create a temporary directory within CWD and file
+        let cwd = std::env::current_dir().expect("should get cwd");
+        let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+        let temp_path = temp_dir.path();
+        let file_path = temp_path.join("test.txt");
+        std::fs::write(&file_path, "hello world").expect("should write test file");
+
+        // Act: call validate_path_in_dir with require_exists=true
+        let result = validate_path_in_dir("test.txt", true, temp_path);
+
+        // Assert: should find the file relative to working_dir
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should find existing file in working_dir: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        assert_eq!(
+            resolved, file_path,
+            "Resolved path should match the actual file path"
+        );
+    }
+
+    #[test]
+    fn test_edit_overwrite_no_working_dir() {
+        // Arrange: use validate_path without working_dir (existing behavior)
+        // Use Cargo.toml which exists in the crate root
+
+        // Act: call validate_path with require_exists=true
+        let result = validate_path("Cargo.toml", true);
+
+        // Assert: should work as before
+        assert!(
+            result.is_ok(),
+            "validate_path should still work without working_dir"
+        );
+    }
+
+    #[test]
+    fn test_edit_overwrite_working_dir_is_file() {
+        // Arrange: create a temporary file (not directory) to use as working_dir
+        let cwd = std::env::current_dir().expect("should get cwd");
+        let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+        let temp_file = temp_dir.path().join("test_file.txt");
+        std::fs::write(&temp_file, "test content").expect("should write test file");
+
+        // Act: call validate_path_in_dir with a file as working_dir
+        let result = validate_path_in_dir("some_file.txt", false, &temp_file);
+
+        // Assert: should reject because working_dir is not a directory
+        assert!(
+            result.is_err(),
+            "validate_path_in_dir should reject a file as working_dir"
+        );
+        let err = result.unwrap_err();
+        let err_msg = err.message.to_lowercase();
+        assert!(
+            err_msg.contains("directory"),
+            "Error message should mention 'directory': {}",
+            err.message
         );
     }
 

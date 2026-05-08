@@ -799,6 +799,8 @@ mod error_meta_tests {
 pub struct EditOverwriteParams {
     /// Path to the file to create or overwrite.
     pub path: String,
+    /// Optional base directory for path resolution (default: server CWD).
+    pub working_dir: Option<String>,
     /// UTF-8 content to write.
     pub content: String,
 }
@@ -819,6 +821,8 @@ pub struct EditOverwriteOutput {
 pub struct EditReplaceParams {
     /// Path to the file to edit.
     pub path: String,
+    /// Optional base directory for path resolution (default: server CWD).
+    pub working_dir: Option<String>,
     /// Exact text block to find and replace. Must appear exactly once in the file.
     pub old_text: String,
     /// Replacement text.
