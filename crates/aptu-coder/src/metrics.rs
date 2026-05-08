@@ -63,6 +63,20 @@ impl MetricsWriter {
         }
     }
 
+    /// Accumulate a metric event into tool_counts and export_session_id.
+    fn accumulate_event(
+        tool_counts: &mut std::collections::HashMap<&'static str, (u64, u64)>,
+        export_session_id: &mut Option<String>,
+        event: &MetricEvent,
+    ) {
+        let entry = tool_counts.entry(event.tool).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += event.duration_ms;
+        if export_session_id.is_none() {
+            *export_session_id = event.session_id.clone();
+        }
+    }
+
     pub async fn run(mut self) {
         cleanup_old_files(&self.base_dir).await;
         let mut current_date = current_date_str();
@@ -76,26 +90,12 @@ impl MetricsWriter {
         loop {
             let mut batch = Vec::new();
             if let Some(event) = self.rx.recv().await {
-                // Accumulate metrics for export
-                let entry = tool_counts.entry(event.tool).or_insert((0, 0));
-                entry.0 += 1;
-                entry.1 += event.duration_ms;
-                if export_session_id.is_none() {
-                    export_session_id = event.session_id.clone();
-                }
-
+                Self::accumulate_event(&mut tool_counts, &mut export_session_id, &event);
                 batch.push(event);
                 for _ in 0..99 {
                     match self.rx.try_recv() {
                         Ok(e) => {
-                            // Accumulate metrics for export
-                            let entry = tool_counts.entry(e.tool).or_insert((0, 0));
-                            entry.0 += 1;
-                            entry.1 += e.duration_ms;
-                            if export_session_id.is_none() {
-                                export_session_id = e.session_id.clone();
-                            }
-
+                            Self::accumulate_event(&mut tool_counts, &mut export_session_id, &e);
                             batch.push(e);
                         }
                         Err(
