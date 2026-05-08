@@ -40,7 +40,7 @@ async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": "2025-11-25",
             "capabilities": {},
             "clientInfo": {"name": "test-client", "version": "0.1.0"}
         }

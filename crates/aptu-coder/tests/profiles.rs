@@ -44,7 +44,7 @@ async fn call_tools_list_with_profile(profile: Option<&str>) -> serde_json::Valu
 
     // Step 1: Send initialize request with optional profile in _meta
     let mut init_params = serde_json::json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": "2025-11-25",
         "capabilities": {},
         "clientInfo": {"name": "test-client", "version": "0.1.0"}
     });
@@ -132,7 +132,7 @@ async fn call_tool_with_profile(profile: Option<&str>, tool_name: &str) -> serde
 
     // Step 1: Send initialize request with optional profile in _meta
     let mut init_params = serde_json::json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": "2025-11-25",
         "capabilities": {},
         "clientInfo": {"name": "test-client", "version": "0.1.0"}
     });
