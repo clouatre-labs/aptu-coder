@@ -4,10 +4,11 @@
   "design": "2x1 (model_tier x edit_profile); baselines from wave9-sml conditions A and C",
   "task": "tsx re-wiring (4 edits to 2 files) -- identical to wave9-sml",
   "randomization_seed": 42,
-  "hypothesis": "edit profile (3 tools) reduces cost and turn count vs full tool set (9 tools, 7348 tokens/turn) for targeted-edit tasks",
+  "hypothesis": "edit profile (3 tools) reduces cost and turn count vs full tool set (7 tools) for targeted-edit tasks",
   "confounds": [
     "binary version: wave9 ran on 0.9.x; wave10 runs on 0.10.1",
-    "tool descriptions improved in 0.10.1 (#732, #729, #763)"
+    "tool descriptions improved in 0.10.1 (#732, #729, #763)",
+    "tool surface reduced from 9 to 7 between wave9 and wave10: analyze_raw removed (#775), edit_rename and edit_insert removed (#782)"
   ],
   "conditions": {
     "E": {
