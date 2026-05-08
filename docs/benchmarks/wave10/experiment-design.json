@@ -1,0 +1,54 @@
+{
+  "experiment": "wave10",
+  "generated_at": "2026-05-07",
+  "design": "2x1 (model_tier x edit_profile); baselines from wave9-sml conditions A and C",
+  "task": "tsx re-wiring (4 edits to 2 files) -- identical to wave9-sml",
+  "randomization_seed": 42,
+  "hypothesis": "edit profile (3 tools) reduces cost and turn count vs full tool set (9 tools, 7348 tokens/turn) for targeted-edit tasks",
+  "confounds": [
+    "binary version: wave9 ran on 0.9.x; wave10 runs on 0.10.1",
+    "tool descriptions improved in 0.10.1 (#732, #729, #763)"
+  ],
+  "conditions": {
+    "E": {
+      "model": "global.anthropic.claude-sonnet-4-6",
+      "tools": "mcp",
+      "profile": "edit",
+      "n_scored": 5,
+      "baseline": "A"
+    },
+    "F": {
+      "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "tools": "mcp",
+      "profile": "edit",
+      "n_scored": 5,
+      "baseline": "C"
+    }
+  },
+  "baselines": {
+    "A": {
+      "wave": "wave9-sml",
+      "model": "global.anthropic.claude-sonnet-4-6",
+      "tools": "mcp",
+      "profile": "full",
+      "mean_cost_usd": 0.779056,
+      "mean_input_tokens": 244840.2,
+      "mean_turns": 11.2
+    },
+    "C": {
+      "wave": "wave9-sml",
+      "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "tools": "mcp",
+      "profile": "full",
+      "mean_cost_usd": 0.524807,
+      "mean_input_tokens": 502637.2,
+      "mean_turns": 17.0
+    }
+  },
+  "rubric_dimensions": [
+    "namespace_correctness",
+    "extension_registration",
+    "structural_fidelity"
+  ],
+  "max_score_per_run": 9
+}

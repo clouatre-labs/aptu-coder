@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "aptu-coder": {
+      "type": "stdio",
+      "command": "aptu-coder",
+      "args": [],
+      "env": {
+        "APTU_CODER_PROFILE": "edit",
+        "APTU_CODER_METRICS_EXPORT_FILE": "/tmp/wave10-metrics-METRICS_RUN_ID_PLACEHOLDER.json"
+      }
+    }
+  }
+}
