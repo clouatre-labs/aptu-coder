@@ -240,6 +240,7 @@ pub fn another_caller() {
         use_summary: true,
         impl_only: None,
         def_use: false,
+        parse_timeout_micros: None,
     };
     let output = analyze_focused_with_progress(root, &params, counter, ct).unwrap();
 
@@ -306,6 +307,7 @@ pub fn another_caller() {
         use_summary: false,
         impl_only: None,
         def_use: false,
+        parse_timeout_micros: None,
     };
     let output = analyze_focused_with_progress(root, &params, counter, ct).unwrap();
 

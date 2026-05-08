@@ -72,7 +72,7 @@ use aptu_coder_core::AnalysisConfig;
 
 let config = AnalysisConfig {
     max_file_bytes: Some(1_000_000), // reserved, currently a no-op
-    parse_timeout_micros: None,      // reserved, currently a no-op
+    parse_timeout_micros: None,      // parse timeout in microseconds; None disables timeout
     cache_capacity: None,            // use default LRU capacity
 };
 ```

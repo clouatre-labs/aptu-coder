@@ -4512,7 +4512,7 @@ fn test_rust_function_attribute_line_reported() {
 
     let source = "#[instrument]\nfn foo() {}";
     let result =
-        SemanticExtractor::extract(source, "rust", None).expect("should extract Rust code");
+        SemanticExtractor::extract(source, "rust", None, None).expect("should extract Rust code");
 
     assert!(
         !result.functions.is_empty(),
@@ -4532,7 +4532,7 @@ fn test_rust_function_no_attribute_unchanged() {
 
     let source = "fn foo() {}";
     let result =
-        SemanticExtractor::extract(source, "rust", None).expect("should extract Rust code");
+        SemanticExtractor::extract(source, "rust", None, None).expect("should extract Rust code");
 
     assert!(!result.functions.is_empty());
     assert_eq!(result.functions[0].name, "foo");
@@ -4549,7 +4549,7 @@ fn test_rust_function_multiple_stacked_attributes() {
 
     let source = "#[a]\n#[b]\nfn foo() {}";
     let result =
-        SemanticExtractor::extract(source, "rust", None).expect("should extract Rust code");
+        SemanticExtractor::extract(source, "rust", None, None).expect("should extract Rust code");
 
     assert!(!result.functions.is_empty());
     assert_eq!(result.functions[0].name, "foo");
@@ -4566,7 +4566,7 @@ fn test_rust_impl_method_attribute_line_reported() {
 
     let source = "struct Foo;\nimpl Foo {\n  #[attr]\n  fn bar() {}\n}";
     let result =
-        SemanticExtractor::extract(source, "rust", None).expect("should extract Rust code");
+        SemanticExtractor::extract(source, "rust", None, None).expect("should extract Rust code");
 
     assert!(!result.classes.is_empty());
     let class = &result.classes[0];
@@ -4585,8 +4585,8 @@ fn test_python_decorated_function_reports_decorator_line() {
     use aptu_coder_core::parser::SemanticExtractor;
 
     let source = "@decorator\ndef foo(): pass";
-    let result =
-        SemanticExtractor::extract(source, "python", None).expect("should extract Python code");
+    let result = SemanticExtractor::extract(source, "python", None, None)
+        .expect("should extract Python code");
 
     assert!(!result.functions.is_empty());
     assert_eq!(result.functions[0].name, "foo");
@@ -4602,8 +4602,8 @@ fn test_python_plain_function_reports_def_line() {
     use aptu_coder_core::parser::SemanticExtractor;
 
     let source = "def foo(): pass";
-    let result =
-        SemanticExtractor::extract(source, "python", None).expect("should extract Python code");
+    let result = SemanticExtractor::extract(source, "python", None, None)
+        .expect("should extract Python code");
 
     assert!(!result.functions.is_empty());
     assert_eq!(result.functions[0].name, "foo");
