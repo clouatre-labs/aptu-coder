@@ -122,7 +122,7 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: workspace
+          shared-key: workspace-lint
           cache-targets: false
           save-if: true
       - name: Check formatting
@@ -159,7 +159,7 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: workspace
+          shared-key: workspace-cov
           save-if: true
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
@@ -172,14 +172,17 @@ jobs:
       - name: Coverage
         run: |
           cargo llvm-cov nextest --no-report --all-features \
+            --cargo-profile coverage \
             --workspace \
             -E 'not binary(mcp_smoke)'
           cargo llvm-cov report -p aptu-coder-core \
+            --profile coverage \
             --fail-under-lines 90 \
             --fail-under-regions 80 \
             --lcov --output-path lcov-core.info
           # aptu-coder coverage tracked but not gated (transport/logging/metrics layer)
           cargo llvm-cov report -p aptu-coder \
+            --profile coverage \
             --lcov --output-path lcov-mcp.info || true
 
   deny:
@@ -242,6 +245,7 @@ jobs:
     # This PR renames the crate; no published or git baseline exists for aptu-coder-core yet.
     # Re-enable without continue-on-error after aptu-coder-core is first published on crates.io.
     continue-on-error: true
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
