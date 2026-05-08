@@ -532,6 +532,9 @@ fn collect_file_analysis(
         .filter(|e| !e.is_dir && !e.is_symlink)
         .collect();
 
+    // Collect per-file timeout events so they can be surfaced as AnalyzeError::ParseTimeout.
+    let timed_out: std::sync::Mutex<Vec<(PathBuf, u64)>> = std::sync::Mutex::new(Vec::new());
+
     let analysis_results: Vec<(PathBuf, SemanticAnalysis)> = file_entries
         .par_iter()
         .filter_map(|entry| {
@@ -586,6 +589,9 @@ fn collect_file_analysis(
                         entry.path.display(),
                         micros
                     );
+                    if let Ok(mut v) = timed_out.lock() {
+                        v.push((entry.path.clone(), micros));
+                    }
                     progress.fetch_add(1, Ordering::Relaxed);
                     None
                 }
@@ -600,6 +606,13 @@ fn collect_file_analysis(
     // Check if cancelled after parallel processing
     if ct.is_cancelled() {
         return Err(AnalyzeError::Cancelled);
+    }
+
+    // Surface the first timeout as AnalyzeError::ParseTimeout so callers can detect it.
+    if let Ok(mut v) = timed_out.lock()
+        && let Some((path, micros)) = v.drain(..).next()
+    {
+        return Err(AnalyzeError::ParseTimeout { path, micros });
     }
 
     // Collect all impl-trait info from analysis results
