@@ -755,3 +755,130 @@ async fn test_handler_content_priority() {
         "priority should be 0.0, got: {pval}"
     );
 }
+
+#[tokio::test]
+async fn test_exec_cache_hit_on_sequential_repeat() {
+    // Arrange: run the same command twice sequentially
+    let cmd = "echo cache_test_123";
+    let params1 = serde_json::json!({"command": cmd});
+    let params2 = serde_json::json!({"command": cmd});
+
+    // Act: first call executes the command
+    let resp1 = call_exec_command_raw(params1).await;
+    let sc1 = &resp1["result"]["structuredContent"];
+    let stdout1 = sc1["stdout"].as_str().unwrap_or("").to_string();
+
+    // Second call should hit the cache (same command, no stdin)
+    let resp2 = call_exec_command_raw(params2).await;
+    let sc2 = &resp2["result"]["structuredContent"];
+    let stdout2 = sc2["stdout"].as_str().unwrap_or("").to_string();
+
+    // Assert: both calls succeeded and returned the same output
+    assert_eq!(sc1["exit_code"], 0, "first call should succeed: {sc1}");
+    assert_eq!(sc2["exit_code"], 0, "second call should succeed: {sc2}");
+    assert_eq!(stdout1, stdout2, "cached output should match original");
+    assert!(
+        stdout1.contains("cache_test_123"),
+        "output should contain the echo string"
+    );
+}
+
+#[tokio::test]
+async fn test_exec_cache_skipped_with_stdin() {
+    // Arrange: run a command with stdin (should bypass cache)
+    let cmd = "cat";
+    let stdin_content = "test_stdin_data";
+    let params = serde_json::json!({
+        "command": cmd,
+        "stdin": stdin_content
+    });
+
+    // Act: call with stdin
+    let resp = call_exec_command_raw(params).await;
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: command executed and stdin was passed through
+    assert_eq!(sc["exit_code"], 0, "cat with stdin should succeed: {sc}");
+    assert!(
+        sc["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .contains("test_stdin_data"),
+        "stdout should contain the stdin content: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_exec_cache_not_populated_on_failure() {
+    // Arrange: run a command that fails (non-zero exit)
+    let cmd = "false";
+    let params1 = serde_json::json!({"command": cmd});
+    let params2 = serde_json::json!({"command": cmd});
+
+    // Act: first call executes and fails
+    let resp1 = call_exec_command_raw(params1).await;
+    let sc1 = &resp1["result"]["structuredContent"];
+
+    // Second call should re-execute (not cached because first failed)
+    let resp2 = call_exec_command_raw(params2).await;
+    let sc2 = &resp2["result"]["structuredContent"];
+
+    // Assert: both calls failed (non-zero exit)
+    assert_ne!(sc1["exit_code"], 0, "false command should fail: {sc1}");
+    assert_ne!(
+        sc2["exit_code"], 0,
+        "false command should fail on second call too: {sc2}"
+    );
+}
+
+#[tokio::test]
+async fn test_exec_cache_bypassed_with_false_param() {
+    // Arrange: run a command with cache: false parameter
+    let cmd = "echo bypass_cache";
+    let params = serde_json::json!({
+        "command": cmd,
+        "cache": false
+    });
+
+    // Act: call with cache disabled
+    let resp = call_exec_command_raw(params).await;
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: command executed successfully
+    assert_eq!(sc["exit_code"], 0, "command should succeed: {sc}");
+    assert!(
+        sc["stdout"].as_str().unwrap_or("").contains("bypass_cache"),
+        "output should contain the echo string: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_exec_slot_files_always_written() {
+    // Arrange: run a command that produces output
+    let cmd = "echo slot_file_test";
+    let params = serde_json::json!({"command": cmd});
+
+    // Act: execute the command
+    let resp = call_exec_command_raw(params).await;
+    let sc = &resp["result"]["structuredContent"];
+    let stdout_path = sc["stdout_path"].as_str();
+    let stderr_path = sc["stderr_path"].as_str();
+
+    // Assert: slot file paths are present in structuredContent
+    assert!(
+        stdout_path.is_some(),
+        "stdout_path should be present in structuredContent: {sc}"
+    );
+    assert!(
+        stderr_path.is_some(),
+        "stderr_path should be present in structuredContent: {sc}"
+    );
+    assert!(
+        stdout_path.unwrap().contains("aptu-coder-overflow"),
+        "stdout_path should reference the overflow directory: {sc}"
+    );
+    assert!(
+        stderr_path.unwrap().contains("aptu-coder-overflow"),
+        "stderr_path should reference the overflow directory: {sc}"
+    );
+}

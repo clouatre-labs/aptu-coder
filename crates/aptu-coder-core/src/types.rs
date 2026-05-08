@@ -855,6 +855,10 @@ pub struct ExecCommandParams {
     pub cpu_limit_secs: Option<u64>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
+    /// Enable caching of command results. None or true = enabled (default); false = disabled.
+    /// Caching is skipped if stdin is provided, regardless of this setting.
+    #[serde(default)]
+    pub cache: Option<bool>,
 }
 
 impl ExecCommandParams {
@@ -879,6 +883,7 @@ impl Default for ExecCommandParams {
             memory_limit_mb: None,
             cpu_limit_secs: None,
             stdin: None,
+            cache: None,
         }
     }
 }
@@ -905,6 +910,12 @@ pub struct ShellOutput {
     /// pipes open. Distinct from `output_truncated` (size cap) -- this indicates a
     /// drain timeout rather than a size overflow.
     pub output_collection_error: Option<String>,
+    /// Path to the slot file containing full stdout (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_path: Option<String>,
+    /// Path to the slot file containing full stderr (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_path: Option<String>,
 }
 
 impl ShellOutput {
@@ -925,6 +936,8 @@ impl ShellOutput {
             timed_out,
             output_truncated,
             output_collection_error: None,
+            stdout_path: None,
+            stderr_path: None,
         }
     }
 }

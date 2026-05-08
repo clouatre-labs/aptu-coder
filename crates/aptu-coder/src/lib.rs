@@ -278,6 +278,7 @@ pub struct CodeAnalyzer {
     #[allow(dead_code)]
     pub(crate) tool_router: Arc<RwLock<ToolRouter<Self>>>,
     cache: AnalysisCache,
+    exec_cache: moka::future::Cache<(String, String), types::ShellOutput>,
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
     log_level_filter: Arc<Mutex<LevelFilter>>,
     event_rx: Arc<TokioMutex<Option<mpsc::UnboundedReceiver<LogEvent>>>>,
@@ -305,9 +306,22 @@ impl CodeAnalyzer {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(100);
+        let exec_cache_ttl_secs: u64 = std::env::var("APTU_CODER_EXEC_CACHE_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+        let exec_cache_capacity: u64 = std::env::var("APTU_CODER_EXEC_CACHE_CAPACITY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(64);
+        let exec_cache = moka::future::Cache::builder()
+            .max_capacity(exec_cache_capacity)
+            .time_to_live(std::time::Duration::from_secs(exec_cache_ttl_secs))
+            .build();
         CodeAnalyzer {
             tool_router: Arc::new(RwLock::new(Self::tool_router())),
             cache: AnalysisCache::new(file_cap),
+            exec_cache,
             peer,
             log_level_filter,
             event_rx: Arc::new(TokioMutex::new(Some(event_rx))),
@@ -2406,13 +2420,31 @@ impl CodeAnalyzer {
         let command = params.command.clone();
         let timeout_secs = params.timeout_secs;
 
+        // Determine cache key and whether to use cache
+        let cache_key = (
+            command.clone(),
+            working_dir_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+        );
+        let use_cache = params.cache.unwrap_or(true) && params.stdin.is_none();
+
+        // Check if result is already cached (for metrics)
+        let was_cached = if use_cache {
+            self.exec_cache.contains_key(&cache_key)
+        } else {
+            false
+        };
+
         // Acquire peer and progress token for optional progress notifications
         let peer = self.peer.lock().await.clone();
         let progress_token = context.meta.get_progress_token();
 
         // Spawn a progress task that emits every 5s for long-running commands (>10s timeout)
+        // But cancel it immediately on cache hit
         let progress_handle: Option<tokio::task::JoinHandle<()>> =
-            if timeout_secs.is_none_or(|t| t > 10) {
+            if timeout_secs.is_none_or(|t| t > 10) && !was_cached {
                 if let (Some(token), Some(peer_conn)) = (progress_token.clone(), peer.clone()) {
                     let self_clone = self.clone();
                     Some(tokio::spawn(async move {
@@ -2444,269 +2476,62 @@ impl CodeAnalyzer {
                 None
             };
 
-        // Spawn the command using tokio::process::Command for proper async handling
-        let shell = resolve_shell();
-
-        let mut cmd = tokio::process::Command::new(shell);
-        cmd.arg("-c").arg(&command);
-
-        if let Some(ref wd) = working_dir_path {
-            cmd.current_dir(wd);
-        }
-
-        cmd.stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-
-        // Set stdin mode: piped if stdin content provided, null otherwise
-        if params.stdin.is_some() {
-            cmd.stdin(std::process::Stdio::piped());
+        // Execute command with caching
+        let output = if use_cache {
+            self.exec_cache
+                .get_with(cache_key.clone(), async {
+                    run_exec_impl(
+                        command.clone(),
+                        working_dir_path.clone(),
+                        timeout_secs,
+                        params.memory_limit_mb,
+                        params.cpu_limit_secs,
+                        params.stdin.clone(),
+                        seq,
+                    )
+                    .await
+                })
+                .await
         } else {
-            cmd.stdin(std::process::Stdio::null());
-        }
-
-        #[cfg(unix)]
-        {
-            let memory_limit_mb = params.memory_limit_mb;
-            let cpu_limit_secs = params.cpu_limit_secs;
-            #[cfg(not(target_os = "linux"))]
-            if memory_limit_mb.is_some() {
-                warn!("memory_limit_mb is not enforced on this platform (Linux only)");
-            }
-            if memory_limit_mb.is_some() || cpu_limit_secs.is_some() {
-                // SAFETY: pre_exec runs in the forked child process before exec.
-                // nix::sys::resource::setrlimit is a safe Rust API.
-                // The unsafe block is required by tokio::process::Command::pre_exec API contract.
-                unsafe {
-                    cmd.pre_exec(move || {
-                        #[cfg(target_os = "linux")]
-                        if let Some(mb) = memory_limit_mb {
-                            let bytes = mb.saturating_mul(1024 * 1024);
-                            setrlimit(Resource::RLIMIT_AS, bytes, bytes)
-                                .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                        }
-                        if let Some(cpu) = cpu_limit_secs {
-                            setrlimit(Resource::RLIMIT_CPU, cpu, cpu)
-                                .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                        }
-                        Ok(())
-                    });
-                }
-            }
-        }
-
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "exec_command",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                });
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("failed to spawn command: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check command syntax and permissions",
-                    )),
-                )));
-            }
+            run_exec_impl(
+                command.clone(),
+                working_dir_path.clone(),
+                timeout_secs,
+                params.memory_limit_mb,
+                params.cpu_limit_secs,
+                params.stdin.clone(),
+                seq,
+            )
+            .await
         };
 
-        // Wait for the command with timeout using tokio::select! to race wait against sleep
-        const MAX_BYTES: usize = 50 * 1024;
-
-        let stdout_pipe = child.stdout.take();
-        let stderr_pipe = child.stderr.take();
-
-        // Write stdin if provided, before spawning drain_task to avoid deadlock
-        if let Some(stdin_content) = params.stdin
-            && let Some(mut stdin_handle) = child.stdin.take()
-        {
-            use tokio::io::AsyncWriteExt as _;
-            match stdin_handle.write_all(stdin_content.as_bytes()).await {
-                Ok(()) => {
-                    drop(stdin_handle); // Close stdin pipe
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                    // Child closed stdin early; non-fatal, continue collecting output
-                }
-                Err(e) => {
-                    warn!("failed to write stdin: {e}");
-                }
-            }
+        // Invalidate cache entry if command failed (non-zero exit)
+        if use_cache && output.exit_code.map(|c| c != 0).unwrap_or(false) {
+            self.exec_cache.invalidate(&cache_key).await;
         }
 
-        use std::sync::Arc;
-        use tokio::io::AsyncBufReadExt as _;
-        use tokio::sync::Mutex as TokioMutex;
-        use tokio_stream::StreamExt as TokioStreamExt;
-        use tokio_stream::wrappers::LinesStream;
-
-        // Shared heap buffers: written per-line (brief lock, not held across await) so the
-        // timeout arm can read partial output even after the drain task is aborted.
-        let stdout_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
-        let stderr_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
-        let interleaved_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
-
-        let so_acc = Arc::clone(&stdout_shared);
-        let se_acc = Arc::clone(&stderr_shared);
-        let il_acc = Arc::clone(&interleaved_shared);
-
-        // Spawn the drain as a separate task so it can be aborted on wall-clock timeout
-        // while shared buffers retain whatever lines were collected before the kill.
-        let mut drain_task = tokio::spawn(async move {
-            let mut so_bytes = 0usize;
-            let mut se_bytes = 0usize;
-            let mut il_bytes = 0usize;
-
-            let so_stream = stdout_pipe.map(|p| {
-                LinesStream::new(tokio::io::BufReader::new(p).lines())
-                    .map(|l| l.map(|s| (false, s)))
-            });
-            let se_stream = stderr_pipe.map(|p| {
-                LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (true, s)))
-            });
-
-            match (so_stream, se_stream) {
-                (Some(so), Some(se)) => {
-                    let mut merged = so.merge(se);
-                    while let Some(item) = merged.next().await {
-                        if let Ok((is_stderr, line)) = item {
-                            let entry = format!("{line}\n");
-                            if is_stderr {
-                                if se_bytes < MAX_BYTES {
-                                    se_bytes += entry.len();
-                                    se_acc.lock().await.push_str(&entry);
-                                    if il_bytes < 2 * MAX_BYTES {
-                                        il_bytes += entry.len();
-                                        il_acc.lock().await.push_str(&entry);
-                                    }
-                                }
-                            } else if so_bytes < MAX_BYTES {
-                                so_bytes += entry.len();
-                                so_acc.lock().await.push_str(&entry);
-                                if il_bytes < 2 * MAX_BYTES {
-                                    il_bytes += entry.len();
-                                    il_acc.lock().await.push_str(&entry);
-                                }
-                            }
-                        }
-                    }
-                }
-                (Some(so), None) => {
-                    let mut stream = so;
-                    while let Some(item) = stream.next().await {
-                        if let Ok((_, line)) = item
-                            && so_bytes < MAX_BYTES
-                        {
-                            let entry = format!("{line}\n");
-                            so_bytes += entry.len();
-                            so_acc.lock().await.push_str(&entry);
-                            if il_bytes < 2 * MAX_BYTES {
-                                il_bytes += entry.len();
-                                il_acc.lock().await.push_str(&entry);
-                            }
-                        }
-                    }
-                }
-                (None, Some(se)) => {
-                    let mut stream = se;
-                    while let Some(item) = stream.next().await {
-                        if let Ok((_, line)) = item
-                            && se_bytes < MAX_BYTES
-                        {
-                            let entry = format!("{line}\n");
-                            se_bytes += entry.len();
-                            se_acc.lock().await.push_str(&entry);
-                            if il_bytes < 2 * MAX_BYTES {
-                                il_bytes += entry.len();
-                                il_acc.lock().await.push_str(&entry);
-                            }
-                        }
-                    }
-                }
-                (None, None) => {}
-            }
-        });
-
-        let (exit_code, timed_out, mut output_truncated, output_collection_error) = tokio::select! {
-            _ = &mut drain_task => {
-                // Pipes fully drained. Wait up to 500ms for child to exit.
-                // Background processes may hold pipes open after the main work is done.
-                let (status, drain_truncated) = match tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
-                    child.wait()
-                ).await {
-                    Ok(Ok(s)) => (Some(s), false),
-                    Ok(Err(_)) => (None, false),
-                    Err(_) => {
-                        child.start_kill().ok();
-                        let _ = child.wait().await;
-                        (None, true)
-                    }
-                };
-                let exit_code = status.and_then(|s| s.code());
-                let ocerr = if drain_truncated {
-                    Some("post-exit drain timeout: background process held pipes".to_string())
-                } else {
-                    None
-                };
-                (exit_code, false, drain_truncated, ocerr)
-            }
-            _ = async {
-                if let Some(secs) = timeout_secs {
-                    tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
-                } else {
-                    std::future::pending::<()>().await;
-                }
-            } => {
-                // Wall-clock timeout fired. Kill process; drain task gets EOF and exits.
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                drain_task.abort();
-                // Shared buffers retain whatever lines were collected before the kill.
-                (None, true, false, None)
-            }
-        };
-
-        // Cancel progress task now that drain is complete
+        // Cancel progress task now that execution is complete
         if let Some(handle) = progress_handle {
             handle.abort();
         }
 
-        // Read accumulated output from shared buffers
-        let stdout_str = std::mem::take(&mut *stdout_shared.lock().await);
-        let stderr_str = std::mem::take(&mut *stderr_shared.lock().await);
-        let interleaved_str = std::mem::take(&mut *interleaved_shared.lock().await);
-
-        // Handle output overflow with slot isolation
-        let slot = seq % 8;
-        let (stdout, stderr, overflow_notice) =
-            handle_output_overflow(stdout_str, stderr_str, slot);
-        output_truncated = output_truncated || overflow_notice.is_some();
-
-        let mut output = types::ShellOutput::new(
-            stdout,
-            stderr,
-            interleaved_str,
-            exit_code,
-            timed_out,
-            output_truncated,
-        );
-        output.output_collection_error = output_collection_error;
+        let exit_code = output.exit_code;
+        let timed_out = output.timed_out;
+        let output_truncated = output.output_truncated;
+        let overflow_notice = if output.stdout_path.is_some() || output.stderr_path.is_some() {
+            // Check if there was an overflow notice
+            if output_truncated && (output.stdout.len() < 1000 || output.stderr.len() < 1000) {
+                Some(format!(
+                    "Output was saved to:\n  stdout: {}\n  stderr: {}",
+                    output.stdout_path.as_deref().unwrap_or(""),
+                    output.stderr_path.as_deref().unwrap_or("")
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
         let output_text = if output.interleaved.is_empty() {
@@ -2767,7 +2592,7 @@ impl CodeAnalyzer {
                     error_type: Some("internal_error".to_string()),
                     session_id: sid.clone(),
                     seq: Some(seq),
-                    cache_hit: None,
+                    cache_hit: Some(was_cached),
                 });
                 return Ok(err_to_tool_result(e));
             }
@@ -2788,33 +2613,270 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: None,
+            cache_hit: Some(was_cached),
         });
         Ok(result)
     }
 }
 
-/// Handles output overflow by writing to temp files and returning preview + notice.
-/// If output exceeds 2000 lines, writes full stdout/stderr to:
+/// Executes a shell command and returns the output.
+/// This is a free async function (not a method) to allow use in moka::future::Cache::get_with().
+/// It spawns the command, collects output with timeout handling, and persists output to slot files.
+async fn run_exec_impl(
+    command: String,
+    working_dir_path: Option<std::path::PathBuf>,
+    timeout_secs: Option<u64>,
+    memory_limit_mb: Option<u64>,
+    cpu_limit_secs: Option<u64>,
+    stdin: Option<String>,
+    seq: u32,
+) -> types::ShellOutput {
+    use std::sync::Arc;
+    use tokio::io::AsyncBufReadExt as _;
+    use tokio::sync::Mutex as TokioMutex;
+    use tokio_stream::StreamExt as TokioStreamExt;
+    use tokio_stream::wrappers::LinesStream;
+
+    let shell = resolve_shell();
+    let mut cmd = tokio::process::Command::new(shell);
+    cmd.arg("-c").arg(&command);
+
+    if let Some(ref wd) = working_dir_path {
+        cmd.current_dir(wd);
+    }
+
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if stdin.is_some() {
+        cmd.stdin(std::process::Stdio::piped());
+    } else {
+        cmd.stdin(std::process::Stdio::null());
+    }
+
+    #[cfg(unix)]
+    {
+        #[cfg(not(target_os = "linux"))]
+        if memory_limit_mb.is_some() {
+            warn!("memory_limit_mb is not enforced on this platform (Linux only)");
+        }
+        if memory_limit_mb.is_some() || cpu_limit_secs.is_some() {
+            unsafe {
+                cmd.pre_exec(move || {
+                    #[cfg(target_os = "linux")]
+                    if let Some(mb) = memory_limit_mb {
+                        let bytes = mb.saturating_mul(1024 * 1024);
+                        setrlimit(Resource::RLIMIT_AS, bytes, bytes)
+                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                    }
+                    if let Some(cpu) = cpu_limit_secs {
+                        setrlimit(Resource::RLIMIT_CPU, cpu, cpu)
+                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                    }
+                    Ok(())
+                });
+            }
+        }
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return types::ShellOutput::new(
+                String::new(),
+                format!("failed to spawn command: {e}"),
+                format!("failed to spawn command: {e}"),
+                None,
+                false,
+                false,
+            );
+        }
+    };
+
+    const MAX_BYTES: usize = 50 * 1024;
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+
+    if let Some(stdin_content) = stdin
+        && let Some(mut stdin_handle) = child.stdin.take()
+    {
+        use tokio::io::AsyncWriteExt as _;
+        match stdin_handle.write_all(stdin_content.as_bytes()).await {
+            Ok(()) => {
+                drop(stdin_handle);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(e) => {
+                warn!("failed to write stdin: {e}");
+            }
+        }
+    }
+
+    let stdout_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
+    let stderr_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
+    let interleaved_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
+
+    let so_acc = Arc::clone(&stdout_shared);
+    let se_acc = Arc::clone(&stderr_shared);
+    let il_acc = Arc::clone(&interleaved_shared);
+
+    let mut drain_task = tokio::spawn(async move {
+        let mut so_bytes = 0usize;
+        let mut se_bytes = 0usize;
+        let mut il_bytes = 0usize;
+
+        let so_stream = stdout_pipe.map(|p| {
+            LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (false, s)))
+        });
+        let se_stream = stderr_pipe.map(|p| {
+            LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (true, s)))
+        });
+
+        match (so_stream, se_stream) {
+            (Some(so), Some(se)) => {
+                let mut merged = so.merge(se);
+                while let Some(item) = merged.next().await {
+                    if let Ok((is_stderr, line)) = item {
+                        let entry = format!("{line}\n");
+                        if is_stderr {
+                            if se_bytes < MAX_BYTES {
+                                se_bytes += entry.len();
+                                se_acc.lock().await.push_str(&entry);
+                                if il_bytes < 2 * MAX_BYTES {
+                                    il_bytes += entry.len();
+                                    il_acc.lock().await.push_str(&entry);
+                                }
+                            }
+                        } else if so_bytes < MAX_BYTES {
+                            so_bytes += entry.len();
+                            so_acc.lock().await.push_str(&entry);
+                            if il_bytes < 2 * MAX_BYTES {
+                                il_bytes += entry.len();
+                                il_acc.lock().await.push_str(&entry);
+                            }
+                        }
+                    }
+                }
+            }
+            (Some(so), None) => {
+                let mut stream = so;
+                while let Some(item) = stream.next().await {
+                    if let Ok((_, line)) = item
+                        && so_bytes < MAX_BYTES
+                    {
+                        let entry = format!("{line}\n");
+                        so_bytes += entry.len();
+                        so_acc.lock().await.push_str(&entry);
+                        if il_bytes < 2 * MAX_BYTES {
+                            il_bytes += entry.len();
+                            il_acc.lock().await.push_str(&entry);
+                        }
+                    }
+                }
+            }
+            (None, Some(se)) => {
+                let mut stream = se;
+                while let Some(item) = stream.next().await {
+                    if let Ok((_, line)) = item
+                        && se_bytes < MAX_BYTES
+                    {
+                        let entry = format!("{line}\n");
+                        se_bytes += entry.len();
+                        se_acc.lock().await.push_str(&entry);
+                        if il_bytes < 2 * MAX_BYTES {
+                            il_bytes += entry.len();
+                            il_acc.lock().await.push_str(&entry);
+                        }
+                    }
+                }
+            }
+            (None, None) => {}
+        }
+    });
+
+    let (exit_code, timed_out, mut output_truncated, output_collection_error) = tokio::select! {
+        _ = &mut drain_task => {
+            let (status, drain_truncated) = match tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                child.wait()
+            ).await {
+                Ok(Ok(s)) => (Some(s), false),
+                Ok(Err(_)) => (None, false),
+                Err(_) => {
+                    child.start_kill().ok();
+                    let _ = child.wait().await;
+                    (None, true)
+                }
+            };
+            let exit_code = status.and_then(|s| s.code());
+            let ocerr = if drain_truncated {
+                Some("post-exit drain timeout: background process held pipes".to_string())
+            } else {
+                None
+            };
+            (exit_code, false, drain_truncated, ocerr)
+        }
+        _ = async {
+            if let Some(secs) = timeout_secs {
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        } => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            drain_task.abort();
+            (None, true, false, None)
+        }
+    };
+
+    let stdout_str = std::mem::take(&mut *stdout_shared.lock().await);
+    let stderr_str = std::mem::take(&mut *stderr_shared.lock().await);
+    let interleaved_str = std::mem::take(&mut *interleaved_shared.lock().await);
+
+    let slot = seq % 8;
+    let (stdout, stderr, stdout_path, stderr_path, overflow_notice) =
+        handle_output_persist(stdout_str, stderr_str, slot);
+    output_truncated = output_truncated || overflow_notice.is_some();
+
+    let mut output = types::ShellOutput::new(
+        stdout,
+        stderr,
+        interleaved_str,
+        exit_code,
+        timed_out,
+        output_truncated,
+    );
+    output.output_collection_error = output_collection_error;
+    output.stdout_path = stdout_path;
+    output.stderr_path = stderr_path;
+
+    output
+}
+
+/// Handles output persistence by always writing to temp files and returning paths + preview.
+/// Writes full stdout/stderr to:
 ///   {temp_dir}/aptu-coder-overflow/slot-{slot}/{stdout,stderr}
-/// Returns (stdout_preview, stderr_preview, overflow_notice).
-/// If no overflow: returns (stdout, stderr, None).
-fn handle_output_overflow(
+/// Returns (stdout_preview, stderr_preview, stdout_path, stderr_path, overflow_notice).
+/// If output exceeds 2000 lines, overflow_notice is Some; otherwise None.
+fn handle_output_persist(
     stdout: String,
     stderr: String,
     slot: u32,
-) -> (String, String, Option<String>) {
+) -> (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     const MAX_OUTPUT_LINES: usize = 2000;
     const OVERFLOW_PREVIEW_LINES: usize = 50;
 
     let stdout_lines: Vec<&str> = stdout.lines().collect();
     let stderr_lines: Vec<&str> = stderr.lines().collect();
 
-    if stdout_lines.len() <= MAX_OUTPUT_LINES && stderr_lines.len() <= MAX_OUTPUT_LINES {
-        return (stdout, stderr, None);
-    }
-
-    // Write overflow to temp file
+    // Always write to slot files
     let base = std::env::temp_dir()
         .join("aptu-coder-overflow")
         .join(format!("slot-{slot}"));
@@ -2825,6 +2887,20 @@ fn handle_output_overflow(
 
     let _ = std::fs::write(&stdout_path, stdout.as_bytes());
     let _ = std::fs::write(&stderr_path, stderr.as_bytes());
+
+    let stdout_path_str = stdout_path.display().to_string();
+    let stderr_path_str = stderr_path.display().to_string();
+
+    // Check if overflow occurred
+    if stdout_lines.len() <= MAX_OUTPUT_LINES && stderr_lines.len() <= MAX_OUTPUT_LINES {
+        return (
+            stdout,
+            stderr,
+            Some(stdout_path_str),
+            Some(stderr_path_str),
+            None,
+        );
+    }
 
     // Last 50 lines as preview
     let stdout_preview = if stdout_lines.len() > MAX_OUTPUT_LINES {
@@ -2840,12 +2916,16 @@ fn handle_output_overflow(
 
     let notice = format!(
         "Output exceeded {MAX_OUTPUT_LINES} lines and was saved to:\n  stdout: {}\n  stderr: {}\nThe last {OVERFLOW_PREVIEW_LINES} lines are included above. To read the full output:\n  cat {}",
-        stdout_path.display(),
-        stderr_path.display(),
-        stdout_path.display(),
+        stdout_path_str, stderr_path_str, stdout_path_str,
     );
 
-    (stdout_preview, stderr_preview, Some(notice))
+    (
+        stdout_preview,
+        stderr_preview,
+        Some(stdout_path_str),
+        Some(stderr_path_str),
+        Some(notice),
+    )
 }
 
 /// Truncates output to a maximum number of lines and bytes.
