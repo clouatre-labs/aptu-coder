@@ -55,10 +55,6 @@ codegen-units = 16
 panic = "unwind"
 strip = false
 
-[profile.coverage]
-inherits = "dev"
-codegen-units = 16
-
 [profile.fuzz]
 inherits = "dev"
 opt-level = 1
