@@ -7,7 +7,7 @@ Rust workspace with two crates:
 - `crates/aptu-coder-core` -- parsing, analysis, formatting, graph, pagination, types
 - `crates/aptu-coder` -- MCP server, tool handlers, logging, metrics
 
-Nine MCP tools: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace`, `edit_rename`, `edit_insert` (edit_* family); `exec_command` (exec_* family).
+Seven MCP tools: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family).
 Rust edition 2024, async with tokio, MCP protocol via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
 
 ## Commands

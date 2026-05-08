@@ -6,7 +6,7 @@ in the aptu-coder repository.
 Repository: clouatre-labs/aptu-coder at REPO_PATH_PLACEHOLDER
 
 ALLOWED TOOLS: mcp__aptu-coder__edit_replace, mcp__aptu-coder__edit_overwrite, mcp__aptu-coder__exec_command
-FORBIDDEN TOOLS: Bash, Glob, Grep, Read, Write, ToolSearch, mcp__aptu-coder__analyze_directory, mcp__aptu-coder__analyze_file, mcp__aptu-coder__analyze_module, mcp__aptu-coder__analyze_symbol, mcp__aptu-coder__edit_rename, mcp__aptu-coder__edit_insert, and any tools not listed above
+FORBIDDEN TOOLS: Bash, Glob, Grep, Read, Write, ToolSearch, mcp__aptu-coder__analyze_directory, mcp__aptu-coder__analyze_file, mcp__aptu-coder__analyze_module, mcp__aptu-coder__analyze_symbol, and any tools not listed above
 
 ## MCP Tool Workflow
 

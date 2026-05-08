@@ -10,7 +10,7 @@
 
 - **Minimize token usage**: Return only structured, relevant context - no prose, no noise
 - **Language-agnostic parsing via tree-sitter**: Support 11 languages (Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C, C++, C#) with a unified query-based extraction system; TypeScript and TSX use distinct grammars (`LANGUAGE_TYPESCRIPT` and `LANGUAGE_TSX`) but share the same queries in `crates/aptu-coder-core/src/languages/typescript.rs`
-- **Ten focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `analyze_raw` (analyze_* family); `edit_overwrite`, `edit_replace`, `edit_rename`, `edit_insert` (edit_* family); `exec_command` (exec_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
+- **Seven focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
 - **Compatible with any MCP orchestrator**: Designed to work with any standards-compliant MCP host
 - **Performance via parallelism**: Use rayon for parallel file processing and ignore crate for efficient .gitignore-aware directory walking
 
@@ -21,14 +21,14 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | Module | File | Responsibility |
 |--------|------|-----------------|
 | `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing and stdio transport |
-| `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `analyze_raw`, `edit_overwrite`, `edit_replace`, `edit_rename`, `edit_insert`, `exec_command` |
+| `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command` |
 | `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients |
 | `schema_helpers` | `crates/aptu-coder-core/src/schema_helpers.rs` | Core JSON Schema helpers for integer and page_size field validation |
 | `metrics` | `crates/aptu-coder/src/metrics.rs` | Metrics collection and daily-rotating JSONL emission; `MetricEvent`, `MetricsSender`, `MetricsWriter` |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
 | `parser` | `crates/aptu-coder-core/src/parser.rs` | Tree-sitter parsing; ElementExtractor and SemanticExtractor |
-| `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all ten tools |
+| `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all seven tools |
 | `traversal` | `crates/aptu-coder-core/src/traversal.rs` | Directory walking with .gitignore support via ignore crate |
 | `types` | `crates/aptu-coder-core/src/types.rs` | Shared data structures (`AnalyzeDirectoryParams`, `AnalyzeFileParams`, `AnalyzeModuleParams`, `AnalyzeSymbolParams`, `AnalysisResult`, etc.) |
 | `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
@@ -48,11 +48,8 @@ graph TD
     A --> B2["analyze_file"]
     A --> B4["analyze_module"]
     A --> B3["analyze_symbol"]
-    A --> B5["analyze_raw"]
     A --> B6["edit_overwrite"]
     A --> B7["edit_replace"]
-    A --> B8["edit_rename"]
-    A --> B9["edit_insert"]
     A --> B10["exec_command"]
     B1 --> M["walk_directory"]
     M --> N["Parallel Parse rayon"]
@@ -67,21 +64,15 @@ graph TD
     B3 --> G["walk_directory"]
     G --> H["Build CallGraph BFS"]
     H --> I["format_focused"]
-    B5 --> F1["analyze_raw_range"]
     B6 --> F2["edit_overwrite_content"]
     B7 --> F3["edit_replace_block"]
-    B8 --> F4["edit_rename_in_file"]
-    B9 --> F5["edit_insert_at_symbol"]
     B10 --> F6["exec_sh_command"]
     P --> Q["MCP Response"]
     L --> Q
     T --> Q
     I --> Q
-    F1 --> Q
     F2 --> Q
     F3 --> Q
-    F4 --> Q
-    F5 --> Q
     F6 --> Q
 ```
 

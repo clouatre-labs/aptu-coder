@@ -555,8 +555,6 @@ ALL_MCP_TOOLS = {
     "mcp__aptu-coder__analyze_symbol",
     "mcp__aptu-coder__edit_overwrite",
     "mcp__aptu-coder__edit_replace",
-    "mcp__aptu-coder__edit_rename",
-    "mcp__aptu-coder__edit_insert",
 }
 
 # Disabled MCP tools (should not be used in edit profile)

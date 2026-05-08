@@ -17,11 +17,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the module map, [MCP-BEST-PRACTICES.m
 
 ## 2. Tool Architecture Decisions
 
-### Why Ten Tools Instead of One
+### Why Seven Tools Instead of One
 
 **Principle:** Each tool does one thing well. Non-overlapping interfaces eliminate ambiguous routing. When two tools can satisfy the same request, the model must guess; that is a reliability failure, not a model failure. (See [MCP-BEST-PRACTICES.md](MCP-BEST-PRACTICES.md), section 3.2.)
 
-*Example: This server has ten tools — `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `analyze_raw` (analysis family); `edit_overwrite`, `edit_replace`, `edit_rename`, `edit_insert` (editing family); `exec_command` (exec family) — each with a distinct, non-overlapping responsibility. A single auto-detecting tool was rejected because it required the model to infer the correct mode from context, which failed under small models.*
+*Example: This server has seven tools — `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analysis family); `edit_overwrite`, `edit_replace` (editing family); `exec_command` (exec family) — each with a distinct, non-overlapping responsibility. A single auto-detecting tool was rejected because it required the model to infer the correct mode from context, which failed under small models.*
 
 ```mermaid
 graph TD
@@ -47,8 +47,6 @@ graph TD
 | `analyze_raw` | Raw file content with optional line range | AST parsing, structure extraction |
 | `edit_overwrite` | Create or overwrite a file | AST awareness, incremental updates |
 | `edit_replace` | Replace exact text block in a file | AST awareness, directory-wide changes |
-| `edit_rename` | AST-aware rename within a single file | Directory-wide rename, type-aware refactoring |
-| `edit_insert` | Insert content before/after a named identifier | Directory-wide insertion, AST-unaware insertion |
 | `exec_command` | Execute arbitrary shell commands | Output parsing, scripting language support, interactive sessions |
 
 *Table 1: The ten tools, their purpose, and what each intentionally excludes.*

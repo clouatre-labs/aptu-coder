@@ -113,7 +113,7 @@ Current settings are stable and reflect ground truth:
 | `idempotentHint` | `true` | Same input produces same output (verified by #347) |
 | `openWorldHint` | `false` | Results are bounded by the input path |
 
-**Exception:** The four `edit_*` tools (Wave 9) and the `exec_command` tool deviate from the default posture. Write tools (`edit_overwrite`, `edit_replace`, `edit_rename`, and `edit_insert`) carry `readOnlyHint=false`, `destructiveHint=true`, and `idempotentHint=false` to accurately reflect their write-capable, non-idempotent nature. The `exec_command` tool additionally sets `openWorldHint=true` to surface the shell-execution safety warning to MCP clients.
+**Exception:** The two `edit_*` tools (`edit_overwrite`, `edit_replace`) and the `exec_command` tool deviate from the default posture. Write tools (`edit_overwrite`, `edit_replace`) carry `readOnlyHint=false`, `destructiveHint=true`, and `idempotentHint=false` to accurately reflect their write-capable, non-idempotent nature. The `exec_command` tool additionally sets `openWorldHint=true` to surface the shell-execution safety warning to MCP clients.
 
 No annotation changes until new MCP SEPs land (tracked in #1913, #1984, #1561, #1560, #1487). Validated against external MCP Blog 2 reference (2026-03-16).
 
@@ -126,9 +126,11 @@ Unimplemented and pertinent:
 - MCP SEP adoption: #1487 (`trustedHint`), #1561 (`unsafeOutputHint`), #1913 (trust/sensitivity annotations), #1984 (governance annotations) -- open upstream; no action until specs stabilize. #1560 (`secretHint`) closed 2026-03-23; evaluate adoption once merged into spec.
 - Streamable HTTP transport: add `--http` flag exposing `StreamableHttpService` (axum + rmcp `transport-streamable-http-server` + `transport-streamable-http-server-session` features) alongside existing stdio. Tower middleware: `RequestBodyLimitLayer` (4 MB) + `tower-governor` (per-token rate limit) + static Bearer token from env var. Target deployment: GCP e2-micro Always Free (us-central1) behind Cloudflare proxy (free tier, TLS termination, WAF, 5 rate-limit rules). No changes to tool handlers or session logic required.
 
-## Wave 9: Editing Tools [Complete]
+## Wave 9: Editing Tools [Complete, Partially Removed]
 
-Augmented aptu-coder with five tools in two phases: one read-only file-content tool (`analyze_raw`) and four mechanical code-editing tools (`edit_overwrite`, `edit_replace`, `edit_rename`, `edit_insert`). The existing analysis tools and composition API remain unchanged. This wave completes the read-analyze-write loop that the coder-build agent (#664, #665) requires without introducing a second MCP server.
+Augmented aptu-coder with five tools in two phases: one read-only file-content tool (`analyze_raw`) and four mechanical code-editing tools (`edit_overwrite`, `edit_replace`, `edit_rename`, `edit_insert`). The existing analysis tools and composition API remain unchanged. This wave completed the read-analyze-write loop that the coder-build agent (#664, #665) required without introducing a second MCP server.
+
+Note: `edit_rename` and `edit_insert` were removed in issue #779 due to limited adoption and maintenance burden. The two remaining edit tools (`edit_overwrite`, `edit_replace`) continue to support the core write workflow.
 
 ### Rationale
 
@@ -146,21 +148,21 @@ Three tools with no tree-sitter dependency. These validated the BUILD agent work
 
 Cache invalidation: `edit_overwrite` and `edit_replace` call `cache.invalidate_file(path)` after every write. mtime-based cache keys self-invalidate in the common case, but mtime granularity is 1 second on some filesystems (HFS+, some ext4 configurations); explicit invalidation prevents stale reads within the same second.
 
-### Phase 2: AST-backed tools [Complete]
+### Phase 2: AST-backed tools [Removed in issue #779]
 
-Two tools that require `aptu-coder-core` (formerly `code-analyze-core`) capture data. These are the primary justification for keeping editing in the same crate rather than a separate repository.
+Two tools that required `aptu-coder-core` (formerly `code-analyze-core`) capture data were implemented but later removed due to limited adoption and maintenance burden.
 
-- `edit_rename(path, old_name, new_name, kind?)` -- "AST-aware rename within a single file. Matches by node kind, not string -- identifiers in string literals and comments are excluded. Errors if old_name not found; supply kind to disambiguate (function, variable, type). Directory-wide rename not supported in v1. Example queries: Rename function parse_config to load_config in src/config.rs; Rename struct field timeout to timeout_ms." `read_only_hint=false`, `destructive_hint=true`, `idempotent_hint=false`
-- `edit_insert(path, symbol_name, position, content)` -- "Insert content immediately before or after a named AST node. position is before|after. Uses start_byte/end_byte from the capture pipeline; errors if symbol_name not found in file. Example queries: Insert a tracing span before the handle_request function; Add a derive macro after the MyStruct definition." `read_only_hint=false`, `destructive_hint=true`, `idempotent_hint=false`
+- `edit_rename(path, old_name, new_name, kind?)` -- [REMOVED] AST-aware rename within a single file. Matched by node kind, not string -- identifiers in string literals and comments were excluded.
+- `edit_insert(path, symbol_name, position, content)` -- [REMOVED] Insert content immediately before or after a named AST node. Used start_byte/end_byte from the capture pipeline.
 
 ### Annotation posture update
 
-Wave 9 write tools are the exception to the annotation freeze established in the Annotation Posture Policy section. Write tools (`edit_overwrite`, `edit_replace`, `edit_rename`, and `edit_insert`) carry `read_only_hint=false`, `destructive_hint=true`, `idempotent_hint=false`. Read tools (`analyze_raw`, and all existing analysis tools) retain `read_only_hint=true`. The per-tool `#[tool(annotations(...))]` macro attribute in rmcp 1.5.0 is confirmed to support mixed postures within one server.
+Wave 9 write tools were the exception to the annotation freeze established in the Annotation Posture Policy section. Write tools (`edit_overwrite`, `edit_replace`) carry `read_only_hint=false`, `destructive_hint=true`, `idempotent_hint=false`. Read tools (all existing analysis tools) retain `read_only_hint=true`. The per-tool `#[tool(annotations(...))]` macro attribute in rmcp 1.5.0 is confirmed to support mixed postures within one server.
 
 Note: `read_only_hint` is a hint surfaced to MCP clients in `tools/list`; rmcp 1.5.0 has no per-tool access control enforcement.
 
 ### SML validation requirement
 
-Per the Small-Model-First Constraint: all five tools must be evaluated against Haiku, Mistral-small-2603, and MiniMax-M2.5 before Sonnet in a Wave 9 benchmark. Tool descriptions must follow literal-instruction style -- SML models follow tool descriptions literally.
+Per the Small-Model-First Constraint: the editing tools were evaluated against Haiku, Mistral-small-2603, and MiniMax-M2.5 before Sonnet in a Wave 9 benchmark. Tool descriptions followed literal-instruction style -- SML models follow tool descriptions literally.
 
 

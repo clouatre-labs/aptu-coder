@@ -147,8 +147,6 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
-| `edit_rename` | AST-aware rename within a file; skips identifiers in strings and comments | all |
-| `edit_insert` | Insert content immediately before or after a named AST node | all |
 | `exec_command` | Run a shell command; returns stdout, stderr, exit code, and timeout status; supports progress notifications | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.

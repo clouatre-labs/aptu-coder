@@ -7,7 +7,7 @@ use serde_json::Value;
 fn test_all_tools_have_correct_annotations() {
     let tools = CodeAnalyzer::list_tools();
 
-    assert_eq!(tools.len(), 9, "expected 9 registered tools");
+    assert_eq!(tools.len(), 7, "expected 7 registered tools");
 
     let expected_names = [
         "analyze_directory",
@@ -16,8 +16,6 @@ fn test_all_tools_have_correct_annotations() {
         "analyze_symbol",
         "edit_overwrite",
         "edit_replace",
-        "edit_rename",
-        "edit_insert",
         "exec_command",
     ];
 
@@ -34,12 +32,8 @@ fn test_all_tools_have_correct_annotations() {
             .as_ref()
             .unwrap_or_else(|| panic!("tool {} is missing annotations", name));
 
-        // edit_overwrite, edit_replace, edit_insert, and exec_command are destructive; edit_rename is idempotent; others are read-only
-        if name == "edit_overwrite"
-            || name == "edit_replace"
-            || name == "edit_insert"
-            || name == "exec_command"
-        {
+        // edit_overwrite, edit_replace, and exec_command are destructive; others are read-only
+        if name == "edit_overwrite" || name == "edit_replace" || name == "exec_command" {
             assert_eq!(
                 annotations.read_only_hint,
                 Some(false),
@@ -56,25 +50,6 @@ fn test_all_tools_have_correct_annotations() {
                 annotations.idempotent_hint,
                 Some(false),
                 "tool {} must have idempotent_hint=false",
-                name
-            );
-        } else if name == "edit_rename" {
-            assert_eq!(
-                annotations.read_only_hint,
-                Some(false),
-                "tool {} must have read_only_hint=false",
-                name
-            );
-            assert_eq!(
-                annotations.destructive_hint,
-                Some(false),
-                "tool {} must have destructive_hint=false",
-                name
-            );
-            assert_eq!(
-                annotations.idempotent_hint,
-                Some(true),
-                "tool {} must have idempotent_hint=true",
                 name
             );
         } else {
