@@ -37,6 +37,33 @@ pub enum ParserError {
     Timeout(u64),
 }
 
+/// Groups a query deadline with the configured timeout duration for use in private extract helpers.
+/// Avoids threading two separate values through every helper signature.
+#[derive(Clone, Copy)]
+struct TimeoutConfig {
+    /// Absolute deadline; `None` means no timeout.
+    deadline: Option<std::time::Instant>,
+    /// The configured timeout in microseconds (used in `ParserError::Timeout`).
+    micros: u64,
+}
+
+impl TimeoutConfig {
+    fn new(timeout_micros: Option<u64>) -> Self {
+        let deadline = timeout_micros
+            .map(|us| std::time::Instant::now() + std::time::Duration::from_micros(us));
+        Self {
+            deadline,
+            micros: timeout_micros.unwrap_or(0),
+        }
+    }
+
+    /// Returns `true` if the deadline has been reached.
+    fn is_exceeded(self) -> bool {
+        self.deadline
+            .is_some_and(|d| std::time::Instant::now() >= d)
+    }
+}
+
 /// Compiled tree-sitter queries for a language.
 /// Stores all query types: mandatory (element, call) and optional (import, impl, reference).
 struct CompiledQueries {
@@ -488,15 +515,11 @@ impl SemanticExtractor {
         ast_recursion_limit: Option<usize>,
         timeout_micros: Option<u64>,
     ) -> Result<SemanticAnalysis, ParserError> {
-        let deadline = timeout_micros
-            .map(|us| std::time::Instant::now() + std::time::Duration::from_micros(us));
+        let tc = TimeoutConfig::new(timeout_micros);
 
-        // Check deadline at the start
-        #[allow(clippy::collapsible_if)]
-        if let Some(d) = deadline {
-            if std::time::Instant::now() >= d {
-                return Err(ParserError::Timeout(timeout_micros.unwrap_or(0)));
-            }
+        // Check deadline at the start before any parsing work.
+        if tc.is_exceeded() {
+            return Err(ParserError::Timeout(tc.micros));
         }
         let lang_info = get_language_info(language)
             .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
@@ -544,8 +567,7 @@ impl SemanticExtractor {
             &lang_info,
             &mut functions,
             &mut classes,
-            deadline,
-            timeout_micros.unwrap_or(0),
+            tc,
         )?;
         Self::extract_calls(
             source,
@@ -554,46 +576,15 @@ impl SemanticExtractor {
             max_depth,
             &mut calls,
             &mut call_frequency,
-            deadline,
-            timeout_micros.unwrap_or(0),
+            tc,
         )?;
-        Self::extract_imports(
-            source,
-            compiled,
-            root,
-            max_depth,
-            &mut imports,
-            deadline,
-            timeout_micros.unwrap_or(0),
-        )?;
-        Self::extract_impl_methods(
-            source,
-            compiled,
-            root,
-            max_depth,
-            &mut classes,
-            deadline,
-            timeout_micros.unwrap_or(0),
-        )?;
-        Self::extract_references(
-            source,
-            compiled,
-            root,
-            max_depth,
-            &mut references,
-            deadline,
-            timeout_micros.unwrap_or(0),
-        )?;
+        Self::extract_imports(source, compiled, root, max_depth, &mut imports, tc)?;
+        Self::extract_impl_methods(source, compiled, root, max_depth, &mut classes, tc)?;
+        Self::extract_references(source, compiled, root, max_depth, &mut references, tc)?;
 
         // Extract impl-trait blocks for Rust files (empty for other languages)
         let impl_traits = if language == "rust" {
-            Self::extract_impl_traits_from_tree(
-                source,
-                compiled,
-                root,
-                deadline,
-                timeout_micros.unwrap_or(0),
-            )?
+            Self::extract_impl_traits_from_tree(source, compiled, root, tc)?
         } else {
             vec![]
         };
@@ -613,6 +604,7 @@ impl SemanticExtractor {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn extract_elements(
         source: &str,
         compiled: &CompiledQueries,
@@ -621,8 +613,7 @@ impl SemanticExtractor {
         lang_info: &crate::languages::LanguageInfo,
         functions: &mut Vec<FunctionInfo>,
         classes: &mut Vec<ClassInfo>,
-        deadline: Option<std::time::Instant>,
-        timeout_micros: u64,
+        tc: TimeoutConfig,
     ) -> Result<(), ParserError> {
         let mut seen_functions = std::collections::HashSet::new();
         let mut timed_out = false;
@@ -638,13 +629,9 @@ impl SemanticExtractor {
 
             while let Some(mat) = matches.next() {
                 // Check if we've hit the deadline
-                #[allow(clippy::collapsible_if)]
-                #[allow(clippy::collapsible_if)]
-                if let Some(d) = deadline {
-                    if std::time::Instant::now() >= d {
-                        timed_out = true;
-                        break;
-                    }
+                if tc.is_exceeded() {
+                    timed_out = true;
+                    break;
                 }
                 let mut func_node: Option<Node> = None;
                 let mut func_name_text: Option<String> = None;
@@ -787,7 +774,7 @@ impl SemanticExtractor {
         });
 
         if timed_out {
-            return Err(ParserError::Timeout(timeout_micros));
+            return Err(ParserError::Timeout(tc.micros));
         }
 
         Ok(())
@@ -850,8 +837,7 @@ impl SemanticExtractor {
         max_depth: Option<u32>,
         calls: &mut Vec<CallInfo>,
         call_frequency: &mut HashMap<String, usize>,
-        deadline: Option<std::time::Instant>,
-        timeout_micros: u64,
+        tc: TimeoutConfig,
     ) -> Result<(), ParserError> {
         let mut timed_out = false;
 
@@ -866,12 +852,9 @@ impl SemanticExtractor {
 
             while let Some(mat) = matches.next() {
                 // Check if we've hit the deadline
-                #[allow(clippy::collapsible_if)]
-                if let Some(d) = deadline {
-                    if std::time::Instant::now() >= d {
-                        timed_out = true;
-                        break;
-                    }
+                if tc.is_exceeded() {
+                    timed_out = true;
+                    break;
                 }
                 for capture in mat.captures {
                     let capture_name = compiled.call.capture_names()[capture.index as usize];
@@ -925,7 +908,7 @@ impl SemanticExtractor {
         });
 
         if timed_out {
-            return Err(ParserError::Timeout(timeout_micros));
+            return Err(ParserError::Timeout(tc.micros));
         }
 
         Ok(())
@@ -937,8 +920,7 @@ impl SemanticExtractor {
         root: Node<'_>,
         max_depth: Option<u32>,
         imports: &mut Vec<ImportInfo>,
-        deadline: Option<std::time::Instant>,
-        timeout_micros: u64,
+        tc: TimeoutConfig,
     ) -> Result<(), ParserError> {
         let Some(ref import_query) = compiled.import else {
             return Ok(());
@@ -956,12 +938,9 @@ impl SemanticExtractor {
 
             while let Some(mat) = matches.next() {
                 // Check if we've hit the deadline
-                #[allow(clippy::collapsible_if)]
-                if let Some(d) = deadline {
-                    if std::time::Instant::now() >= d {
-                        timed_out = true;
-                        break;
-                    }
+                if tc.is_exceeded() {
+                    timed_out = true;
+                    break;
                 }
                 for capture in mat.captures {
                     let capture_name = import_query.capture_names()[capture.index as usize];
@@ -975,7 +954,7 @@ impl SemanticExtractor {
         });
 
         if timed_out {
-            return Err(ParserError::Timeout(timeout_micros));
+            return Err(ParserError::Timeout(tc.micros));
         }
 
         Ok(())
@@ -987,8 +966,7 @@ impl SemanticExtractor {
         root: Node<'_>,
         max_depth: Option<u32>,
         classes: &mut [ClassInfo],
-        deadline: Option<std::time::Instant>,
-        timeout_micros: u64,
+        tc: TimeoutConfig,
     ) -> Result<(), ParserError> {
         let Some(ref impl_query) = compiled.impl_block else {
             return Ok(());
@@ -1006,12 +984,9 @@ impl SemanticExtractor {
 
             while let Some(mat) = matches.next() {
                 // Check if we've hit the deadline
-                #[allow(clippy::collapsible_if)]
-                if let Some(d) = deadline {
-                    if std::time::Instant::now() >= d {
-                        timed_out = true;
-                        break;
-                    }
+                if tc.is_exceeded() {
+                    timed_out = true;
+                    break;
                 }
 
                 let mut impl_type_name = String::new();
@@ -1078,7 +1053,7 @@ impl SemanticExtractor {
         });
 
         if timed_out {
-            return Err(ParserError::Timeout(timeout_micros));
+            return Err(ParserError::Timeout(tc.micros));
         }
 
         Ok(())
@@ -1090,8 +1065,7 @@ impl SemanticExtractor {
         root: Node<'_>,
         max_depth: Option<u32>,
         references: &mut Vec<ReferenceInfo>,
-        deadline: Option<std::time::Instant>,
-        timeout_micros: u64,
+        tc: TimeoutConfig,
     ) -> Result<(), ParserError> {
         let Some(ref ref_query) = compiled.reference else {
             return Ok(());
@@ -1110,12 +1084,9 @@ impl SemanticExtractor {
 
             while let Some(mat) = matches.next() {
                 // Check if we've hit the deadline
-                #[allow(clippy::collapsible_if)]
-                if let Some(d) = deadline {
-                    if std::time::Instant::now() >= d {
-                        timed_out = true;
-                        break;
-                    }
+                if tc.is_exceeded() {
+                    timed_out = true;
+                    break;
                 }
 
                 for capture in mat.captures {
@@ -1138,7 +1109,7 @@ impl SemanticExtractor {
         });
 
         if timed_out {
-            return Err(ParserError::Timeout(timeout_micros));
+            return Err(ParserError::Timeout(tc.micros));
         }
 
         Ok(())
@@ -1152,8 +1123,7 @@ impl SemanticExtractor {
         source: &str,
         compiled: &CompiledQueries,
         root: Node<'_>,
-        deadline: Option<std::time::Instant>,
-        timeout_micros: u64,
+        tc: TimeoutConfig,
     ) -> Result<Vec<ImplTraitInfo>, ParserError> {
         let Some(query) = &compiled.impl_trait else {
             return Ok(vec![]);
@@ -1170,12 +1140,9 @@ impl SemanticExtractor {
 
             while let Some(mat) = matches.next() {
                 // Check if we've hit the deadline
-                #[allow(clippy::collapsible_if)]
-                if let Some(d) = deadline {
-                    if std::time::Instant::now() >= d {
-                        timed_out = true;
-                        break;
-                    }
+                if tc.is_exceeded() {
+                    timed_out = true;
+                    break;
                 }
 
                 let mut trait_name = String::new();
@@ -1210,7 +1177,7 @@ impl SemanticExtractor {
         });
 
         if timed_out {
-            return Err(ParserError::Timeout(timeout_micros));
+            return Err(ParserError::Timeout(tc.micros));
         }
 
         Ok(results)
