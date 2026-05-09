@@ -1,0 +1,9 @@
+{
+  "grep_mod_rs_tsx_arm": true,
+  "grep_mod_rs_language_tsx": true,
+  "grep_lang_rs_extension": true,
+  "grep_lang_rs_supported": true,
+  "grep_no_spurious_pub_mod": true,
+  "git_diff_stat": "",
+  "changed_files": []
+}

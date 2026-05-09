@@ -1,0 +1,10 @@
+{
+  "wall_time_ms": 32358,
+  "api_time_ms": 32253,
+  "num_turns": 8,
+  "cost_usd": 0.338628,
+  "input_tokens": 100991,
+  "output_tokens": 2377,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0
+}
