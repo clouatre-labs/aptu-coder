@@ -19,6 +19,13 @@ fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
     )
 }
 
+/// Extract a string field from a structuredContent JSON value.
+/// Returns `""` when the field is absent or not a string, matching the
+/// `.as_str().unwrap_or("")` pattern used throughout this test file.
+fn sc_str<'a>(sc: &'a serde_json::Value, key: &str) -> &'a str {
+    sc[key].as_str().unwrap_or("")
+}
+
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     let analyzer = make_test_analyzer();
     let (client, server) = tokio::io::duplex(65536);
@@ -853,5 +860,86 @@ async fn test_exec_slot_files_not_written_for_small_output() {
     assert!(
         sc["stderr_path"].is_null(),
         "stderr_path must be absent for small output: {sc}"
+    );
+}
+
+// --- Output collection regression tests (PR #804 / fix #806) ---
+// These four tests cover the behaviors that were silently broken by the
+// premature rx.close() regression: non-empty stdout, non-empty stderr,
+// empty output (no output at all), and partial output captured before timeout.
+
+#[tokio::test]
+async fn test_output_collection_stdout_nonempty() {
+    // Arrange: command that prints a known string to stdout
+    let resp =
+        call_exec_command_raw(serde_json::json!({"command": "echo regression_marker"})).await;
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: stdout must contain the printed string
+    assert_eq!(sc["exit_code"], 0, "command should succeed: {sc}");
+    assert!(
+        sc_str(sc, "stdout").contains("regression_marker"),
+        "stdout must contain echoed string: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_output_collection_stderr_nonempty() {
+    // Arrange: command that writes to stderr only
+    let resp =
+        call_exec_command_raw(serde_json::json!({"command": "echo stderr_marker >&2"})).await;
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: stderr must be non-empty; stdout must be empty
+    assert_eq!(sc["exit_code"], 0, "command should succeed: {sc}");
+    assert!(
+        sc_str(sc, "stderr").contains("stderr_marker"),
+        "stderr must contain the marker -- regression guard: {sc}"
+    );
+    assert!(
+        sc_str(sc, "stdout").is_empty(),
+        "stdout must be empty when command only writes to stderr: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_output_collection_empty_output() {
+    // Arrange: command that produces no output (exit 0, empty stdout+stderr)
+    let resp = call_exec_command_raw(serde_json::json!({"command": "true"})).await;
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: fields present and correct; no overflow paths set
+    assert_eq!(sc["exit_code"], 0, "true must exit 0: {sc}");
+    assert_eq!(
+        sc["output_truncated"], false,
+        "empty output must not be truncated: {sc}"
+    );
+    assert!(
+        sc["stdout_path"].is_null(),
+        "stdout_path must be null for empty output: {sc}"
+    );
+    assert!(
+        sc["stderr_path"].is_null(),
+        "stderr_path must be null for empty output: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_output_collection_partial_before_timeout() {
+    // Arrange: command prints immediately then sleeps past the timeout;
+    // the output printed before the timeout must be captured.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo before_timeout_marker; sleep 30",
+        "timeout_secs": 2
+    }))
+    .await;
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: timed out, but the pre-timeout line is in the output
+    assert_eq!(sc["timed_out"], true, "command should have timed out: {sc}");
+    assert!(
+        sc_str(sc, "interleaved").contains("before_timeout_marker")
+            || sc_str(sc, "stdout").contains("before_timeout_marker"),
+        "output printed before timeout must be captured -- regression guard: {sc}"
     );
 }
