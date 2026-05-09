@@ -1,5 +1,5 @@
+// SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025 Hugues Clouatre and contributors
 
 /// Tree-sitter query for extracting Kotlin elements (functions and classes).
 pub const ELEMENT_QUERY: &str = r"
