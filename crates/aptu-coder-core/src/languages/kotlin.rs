@@ -36,6 +36,8 @@ pub const DEFUSE_QUERY: &str = r"
 
 use tree_sitter::Node;
 
+use crate::languages::get_node_text;
+
 /// Extract inheritance information from a Kotlin class node.
 #[must_use]
 pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
@@ -62,15 +64,17 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
                 "constructor_invocation" => {
                     // Superclass: constructor_invocation = type + value_arguments.
                     // The first child is the type node.
-                    if let Some(type_node) = spec_child.child(0) {
-                        let text = &source[type_node.start_byte()..type_node.end_byte()];
+                    if let Some(type_node) = spec_child.child(0)
+                        && let Some(text) = get_node_text(&type_node, source)
+                    {
                         inherits.push(format!("extends {text}"));
                     }
                 }
                 "type" | "user_type" => {
                     // Interface: direct type without constructor call.
-                    let text = &source[spec_child.start_byte()..spec_child.end_byte()];
-                    inherits.push(format!("implements {text}"));
+                    if let Some(text) = get_node_text(&spec_child, source) {
+                        inherits.push(format!("implements {text}"));
+                    }
                 }
                 _ => {}
             }
