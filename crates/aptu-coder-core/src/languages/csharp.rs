@@ -3,20 +3,16 @@
 
 use tree_sitter::Node;
 
+use super::get_node_text;
+
 /// Extract function name from a C# method or constructor declaration.
 #[must_use]
 pub fn extract_function_name(node: &Node, source: &str, _lang: &str) -> Option<String> {
     if node.kind() != "method_declaration" && node.kind() != "constructor_declaration" {
         return None;
     }
-    node.child_by_field_name("name").and_then(|n| {
-        let end = n.end_byte();
-        if end <= source.len() {
-            Some(source[n.start_byte()..end].to_string())
-        } else {
-            None
-        }
-    })
+    node.child_by_field_name("name")
+        .and_then(|n| get_node_text(&n, source))
 }
 
 /// Find receiver type (enclosing class/struct/interface/record/enum) for a C# method.
@@ -36,14 +32,9 @@ pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
             | "struct_declaration"
             | "enum_declaration" => {
                 // Found the enclosing type, extract its name
-                return parent.child_by_field_name("name").and_then(|n| {
-                    let end = n.end_byte();
-                    if end <= source.len() {
-                        Some(source[n.start_byte()..end].to_string())
-                    } else {
-                        None
-                    }
-                });
+                return parent
+                    .child_by_field_name("name")
+                    .and_then(|n| get_node_text(&n, source));
             }
             _ => {
                 current = parent;
@@ -192,14 +183,8 @@ pub fn find_method_for_receiver(
         return None;
     }
 
-    node.child_by_field_name("name").and_then(|n| {
-        let end = n.end_byte();
-        if end <= source.len() {
-            Some(source[n.start_byte()..end].to_string())
-        } else {
-            None
-        }
-    })
+    node.child_by_field_name("name")
+        .and_then(|n| get_node_text(&n, source))
 }
 
 #[cfg(all(test, feature = "lang-csharp"))]

@@ -87,14 +87,13 @@ pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
                     }
                     "pointer_type" => {
                         // pointer_type wraps the actual type_identifier
-                        for j in 0..type_node.named_child_count() {
-                            if let Some(inner) = type_node.named_child(j as u32)
-                                && inner.kind() == "type_identifier"
-                            {
-                                let end = inner.end_byte();
-                                if end <= source.len() {
-                                    return Some(source[inner.start_byte()..end].to_string());
-                                }
+                        if let Some(inner) = (0..type_node.named_child_count())
+                            .filter_map(|j| type_node.named_child(j as u32))
+                            .find(|n| n.kind() == "type_identifier")
+                        {
+                            let end = inner.end_byte();
+                            if end <= source.len() {
+                                return Some(source[inner.start_byte()..end].to_string());
                             }
                         }
                     }

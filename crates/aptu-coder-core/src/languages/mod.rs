@@ -28,6 +28,19 @@ pub mod typescript;
 
 use tree_sitter::{Language, Node};
 
+/// Extract the source text for a node with a bounds check.
+///
+/// Returns `None` if the node's byte range falls outside `source`.
+#[must_use]
+pub fn get_node_text(node: &Node, source: &str) -> Option<String> {
+    let end = node.end_byte();
+    if end <= source.len() {
+        Some(source[node.start_byte()..end].to_string())
+    } else {
+        None
+    }
+}
+
 /// Handler to extract function name from a node.
 pub type ExtractFunctionNameHandler = fn(&Node, &str, &str) -> Option<String>;
 
