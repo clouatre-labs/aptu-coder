@@ -73,7 +73,7 @@ pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
 
     // Iterate through receiver's children to find parameter_declaration
     for i in 0..receiver.named_child_count() {
-        if let Some(param) = receiver.named_child(u32::try_from(i).unwrap_or(u32::MAX))
+        if let Some(param) = receiver.named_child(i as u32)
             && param.kind() == "parameter_declaration"
         {
             // Get the type field from parameter_declaration
@@ -88,8 +88,7 @@ pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
                     "pointer_type" => {
                         // pointer_type wraps the actual type_identifier
                         for j in 0..type_node.named_child_count() {
-                            if let Some(inner) =
-                                type_node.named_child(u32::try_from(j).unwrap_or(u32::MAX))
+                            if let Some(inner) = type_node.named_child(j as u32)
                                 && inner.kind() == "type_identifier"
                             {
                                 let end = inner.end_byte();
@@ -140,14 +139,12 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
             "struct_type" => {
                 // For struct embedding, walk children for field_declaration_list
                 for i in 0..type_field.named_child_count() {
-                    if let Some(field_list) =
-                        type_field.named_child(u32::try_from(i).unwrap_or(u32::MAX))
+                    if let Some(field_list) = type_field.named_child(i as u32)
                         && field_list.kind() == "field_declaration_list"
                     {
                         // Walk field_declaration_list for field_declaration without name
                         for j in 0..field_list.named_child_count() {
-                            if let Some(field) =
-                                field_list.named_child(u32::try_from(j).unwrap_or(u32::MAX))
+                            if let Some(field) = field_list.named_child(j as u32)
                                 && field.kind() == "field_declaration"
                                 && field.child_by_field_name("name").is_none()
                             {
@@ -165,7 +162,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
             "interface_type" => {
                 // For interface embedding, walk children for type_elem
                 for i in 0..type_field.named_child_count() {
-                    if let Some(elem) = type_field.named_child(u32::try_from(i).unwrap_or(u32::MAX))
+                    if let Some(elem) = type_field.named_child(i as u32)
                         && elem.kind() == "type_elem"
                     {
                         let text = &source[elem.start_byte()..elem.end_byte()];
