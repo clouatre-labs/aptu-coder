@@ -1,0 +1,20 @@
+{
+  "run_id": "H-pilot",
+  "condition": "H",
+  "files_modified": [
+    {
+      "path": "crates/aptu-coder-core/src/languages/mod.rs",
+      "changes_description": "Added tsx arms to get_language_info and get_ts_language"
+    },
+    {
+      "path": "crates/aptu-coder-core/src/lang.rs",
+      "changes_description": "Added tsx extension mapping and supported language entry"
+    }
+  ],
+  "tsx_wiring_complete": true,
+  "mod_rs_get_language_info_arm_added": true,
+  "mod_rs_get_ts_language_arm_added": true,
+  "lang_rs_extension_map_added": true,
+  "lang_rs_supported_languages_added": true,
+  "tool_calls_total": 3
+}
