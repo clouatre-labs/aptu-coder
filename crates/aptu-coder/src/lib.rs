@@ -2873,7 +2873,6 @@ async fn run_exec_impl(
         }
     };
 
-    rx.close();
     let mut lines: Vec<(bool, String)> = Vec::new();
     while let Some(item) = rx.recv().await {
         lines.push(item);
