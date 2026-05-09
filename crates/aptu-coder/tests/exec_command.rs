@@ -598,47 +598,35 @@ async fn test_exec_command_backgrounded_process() {
 
 #[tokio::test]
 async fn test_exec_command_overflow_to_temp_file() {
-    // Test that output >2000 lines creates temp file and second Content block
+    // Test that output >2000 lines sets output_truncated and populates slot file paths.
     let resp = call_exec_command_raw(serde_json::json!({
         "command": "seq 1 3000",
         "timeout_secs": 10
     }))
     .await;
 
-    // Check that we have content array with multiple blocks
-    let content = resp["result"]["content"].as_array();
-    assert!(
-        content.is_some(),
-        "response should have content array: {resp}"
-    );
-
-    let content_arr = content.unwrap();
-    assert!(
-        content_arr.len() >= 2,
-        "overflow must produce at least 2 Content blocks, got: {}",
-        content_arr.len()
-    );
-
-    // Verify second block is the notice
-    let notice_text = content_arr[1]["text"].as_str().unwrap_or("");
-    assert!(
-        notice_text.contains("aptu-coder-overflow"),
-        "notice must contain overflow path: {notice_text}"
-    );
-    assert!(
-        notice_text.contains("slot-"),
-        "notice must contain slot identifier: {notice_text}"
-    );
-
-    // Verify the structured content indicates truncation
+    // Structured content must indicate truncation and expose slot file paths.
     let sc = &resp["result"]["structuredContent"];
     assert_eq!(sc["output_truncated"], true, "should be truncated: {sc}");
+
+    let stdout_path = sc["stdout_path"].as_str();
+    assert!(
+        stdout_path.is_some(),
+        "stdout_path should be set on overflow: {sc}"
+    );
+    assert!(
+        stdout_path.unwrap().contains("aptu-coder-overflow"),
+        "stdout_path should reference the overflow directory: {sc}"
+    );
+    assert!(
+        stdout_path.unwrap().contains("slot-"),
+        "stdout_path should contain slot identifier: {sc}"
+    );
 }
 
 #[tokio::test]
 async fn test_exec_command_slot_isolation() {
-    // Test that calls use slot identifiers (0-7)
-    // Run 8 sequential calls each with large output
+    // Test that overflow calls use slot identifiers (0-7) visible in structuredContent.stdout_path.
     let mut slot_ids = std::collections::HashSet::new();
 
     for _ in 0..8 {
@@ -648,25 +636,18 @@ async fn test_exec_command_slot_isolation() {
         }))
         .await;
 
-        let content = resp["result"]["content"].as_array();
-        if let Some(arr) = content {
-            if arr.len() >= 2 {
-                if let Some(notice_str) = arr[1]["text"].as_str() {
-                    // Extract slot-N from the notice
-                    if let Some(slot_start) = notice_str.find("slot-") {
-                        let slot_end = notice_str[slot_start..]
-                            .find('/')
-                            .unwrap_or(5)
-                            .saturating_add(slot_start);
-                        let slot_id = &notice_str[slot_start..slot_end];
-                        slot_ids.insert(slot_id.to_string());
-                    }
-                }
+        let sc = &resp["result"]["structuredContent"];
+        if let Some(path_str) = sc["stdout_path"].as_str() {
+            if let Some(slot_start) = path_str.find("slot-") {
+                let rest = &path_str[slot_start..];
+                let slot_end = rest.find('/').unwrap_or(rest.len());
+                let slot_id = &rest[..slot_end];
+                slot_ids.insert(slot_id.to_string());
             }
         }
     }
 
-    // We should have collected at least one slot (could reuse due to sequential execution)
+    // Sequential overflow calls must produce at least one slot identifier.
     assert!(
         !slot_ids.is_empty(),
         "should have extracted at least one slot identifier"
@@ -853,32 +834,24 @@ async fn test_exec_cache_bypassed_with_false_param() {
 }
 
 #[tokio::test]
-async fn test_exec_slot_files_always_written() {
-    // Arrange: run a command that produces output
+async fn test_exec_slot_files_not_written_for_small_output() {
+    // Slot files must NOT be written when output is under the 2000-line limit.
     let cmd = "echo slot_file_test";
     let params = serde_json::json!({"command": cmd});
 
-    // Act: execute the command
     let resp = call_exec_command_raw(params).await;
     let sc = &resp["result"]["structuredContent"];
-    let stdout_path = sc["stdout_path"].as_str();
-    let stderr_path = sc["stderr_path"].as_str();
 
-    // Assert: slot file paths are present in structuredContent
-    assert!(
-        stdout_path.is_some(),
-        "stdout_path should be present in structuredContent: {sc}"
+    assert_eq!(
+        sc["output_truncated"], false,
+        "small output must not be truncated: {sc}"
     );
     assert!(
-        stderr_path.is_some(),
-        "stderr_path should be present in structuredContent: {sc}"
+        sc["stdout_path"].is_null(),
+        "stdout_path must be absent for small output: {sc}"
     );
     assert!(
-        stdout_path.unwrap().contains("aptu-coder-overflow"),
-        "stdout_path should reference the overflow directory: {sc}"
-    );
-    assert!(
-        stderr_path.unwrap().contains("aptu-coder-overflow"),
-        "stderr_path should reference the overflow directory: {sc}"
+        sc["stderr_path"].is_null(),
+        "stderr_path must be absent for small output: {sc}"
     );
 }

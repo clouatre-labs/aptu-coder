@@ -2521,11 +2521,11 @@ impl CodeAnalyzer {
             open_world_hint = true
         )
     )]
-    #[instrument(skip(self, context))]
+    #[instrument(skip(self, _context))]
     pub async fn exec_command(
         &self,
         params: Parameters<types::ExecCommandParams>,
-        context: RequestContext<RoleServer>,
+        _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
         let params = params.0;
@@ -2593,45 +2593,6 @@ impl CodeAnalyzer {
             false
         };
 
-        // Acquire peer and progress token for optional progress notifications
-        let peer = self.peer.lock().await.clone();
-        let progress_token = context.meta.get_progress_token();
-
-        // Spawn a progress task that emits every 5s for long-running commands (>10s timeout)
-        // But cancel it immediately on cache hit
-        let progress_handle: Option<tokio::task::JoinHandle<()>> =
-            if timeout_secs.is_none_or(|t| t > 10) && !was_cached {
-                if let (Some(token), Some(peer_conn)) = (progress_token.clone(), peer.clone()) {
-                    let self_clone = self.clone();
-                    Some(tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-                        interval.tick().await; // skip the immediate first tick
-                        let mut tick = 0u64;
-                        loop {
-                            interval.tick().await;
-                            tick += 1;
-                            let progress = match timeout_secs {
-                                Some(secs) => ((tick * 5) as f64 / secs as f64).min(0.99),
-                                None => 0.0,
-                            };
-                            self_clone
-                                .emit_progress(
-                                    Some(peer_conn.clone()),
-                                    &token,
-                                    progress,
-                                    1.0,
-                                    "command running".to_string(),
-                                )
-                                .await;
-                        }
-                    }))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
         // Execute command with caching
         let output = if use_cache {
             self.exec_cache
@@ -2666,28 +2627,9 @@ impl CodeAnalyzer {
             self.exec_cache.invalidate(&cache_key).await;
         }
 
-        // Cancel progress task now that execution is complete
-        if let Some(handle) = progress_handle {
-            handle.abort();
-        }
-
         let exit_code = output.exit_code;
         let timed_out = output.timed_out;
         let output_truncated = output.output_truncated;
-        let overflow_notice = if output.stdout_path.is_some() || output.stderr_path.is_some() {
-            // Check if there was an overflow notice
-            if output_truncated && (output.stdout.len() < 1000 || output.stderr.len() < 1000) {
-                Some(format!(
-                    "Output was saved to:\n  stdout: {}\n  stderr: {}",
-                    output.stdout_path.as_deref().unwrap_or(""),
-                    output.stderr_path.as_deref().unwrap_or("")
-                ))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
         // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
         let output_text = if output.interleaved.is_empty() {
@@ -2707,10 +2649,7 @@ impl CodeAnalyzer {
             output_text,
         );
 
-        let mut content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
-        if let Some(notice) = overflow_notice {
-            content_blocks.push(Content::text(notice).with_priority(0.0));
-        }
+        let content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
 
         // Determine if command failed: timeout or non-zero exit code.
         // exit_code is None when: (a) process killed by O1 post-exit drain timeout (background child
@@ -2787,9 +2726,7 @@ async fn run_exec_impl(
     stdin: Option<String>,
     seq: u32,
 ) -> types::ShellOutput {
-    use std::sync::Arc;
     use tokio::io::AsyncBufReadExt as _;
-    use tokio::sync::Mutex as TokioMutex;
     use tokio_stream::StreamExt as TokioStreamExt;
     use tokio_stream::wrappers::LinesStream;
 
@@ -2849,7 +2786,6 @@ async fn run_exec_impl(
         }
     };
 
-    const MAX_BYTES: usize = 50 * 1024;
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
 
@@ -2868,19 +2804,9 @@ async fn run_exec_impl(
         }
     }
 
-    let stdout_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
-    let stderr_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
-    let interleaved_shared: Arc<TokioMutex<String>> = Arc::new(TokioMutex::new(String::new()));
-
-    let so_acc = Arc::clone(&stdout_shared);
-    let se_acc = Arc::clone(&stderr_shared);
-    let il_acc = Arc::clone(&interleaved_shared);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, String)>();
 
     let mut drain_task = tokio::spawn(async move {
-        let mut so_bytes = 0usize;
-        let mut se_bytes = 0usize;
-        let mut il_bytes = 0usize;
-
         let so_stream = stdout_pipe.map(|p| {
             LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (false, s)))
         });
@@ -2891,59 +2817,20 @@ async fn run_exec_impl(
         match (so_stream, se_stream) {
             (Some(so), Some(se)) => {
                 let mut merged = so.merge(se);
-                while let Some(item) = merged.next().await {
-                    if let Ok((is_stderr, line)) = item {
-                        let entry = format!("{line}\n");
-                        if is_stderr {
-                            if se_bytes < MAX_BYTES {
-                                se_bytes += entry.len();
-                                se_acc.lock().await.push_str(&entry);
-                                if il_bytes < 2 * MAX_BYTES {
-                                    il_bytes += entry.len();
-                                    il_acc.lock().await.push_str(&entry);
-                                }
-                            }
-                        } else if so_bytes < MAX_BYTES {
-                            so_bytes += entry.len();
-                            so_acc.lock().await.push_str(&entry);
-                            if il_bytes < 2 * MAX_BYTES {
-                                il_bytes += entry.len();
-                                il_acc.lock().await.push_str(&entry);
-                            }
-                        }
-                    }
+                while let Some(Ok((is_stderr, line))) = merged.next().await {
+                    let _ = tx.send((is_stderr, line));
                 }
             }
             (Some(so), None) => {
                 let mut stream = so;
-                while let Some(item) = stream.next().await {
-                    if let Ok((_, line)) = item
-                        && so_bytes < MAX_BYTES
-                    {
-                        let entry = format!("{line}\n");
-                        so_bytes += entry.len();
-                        so_acc.lock().await.push_str(&entry);
-                        if il_bytes < 2 * MAX_BYTES {
-                            il_bytes += entry.len();
-                            il_acc.lock().await.push_str(&entry);
-                        }
-                    }
+                while let Some(Ok((_, line))) = stream.next().await {
+                    let _ = tx.send((false, line));
                 }
             }
             (None, Some(se)) => {
                 let mut stream = se;
-                while let Some(item) = stream.next().await {
-                    if let Ok((_, line)) = item
-                        && se_bytes < MAX_BYTES
-                    {
-                        let entry = format!("{line}\n");
-                        se_bytes += entry.len();
-                        se_acc.lock().await.push_str(&entry);
-                        if il_bytes < 2 * MAX_BYTES {
-                            il_bytes += entry.len();
-                            il_acc.lock().await.push_str(&entry);
-                        }
-                    }
+                while let Some(Ok((_, line))) = stream.next().await {
+                    let _ = tx.send((true, line));
                 }
             }
             (None, None) => {}
@@ -2986,14 +2873,41 @@ async fn run_exec_impl(
         }
     };
 
-    let stdout_str = std::mem::take(&mut *stdout_shared.lock().await);
-    let stderr_str = std::mem::take(&mut *stderr_shared.lock().await);
-    let interleaved_str = std::mem::take(&mut *interleaved_shared.lock().await);
+    rx.close();
+    let mut lines: Vec<(bool, String)> = Vec::new();
+    while let Some(item) = rx.recv().await {
+        lines.push(item);
+    }
+
+    // Split tagged lines into stdout, stderr, interleaved post-facto (no locks needed).
+    const MAX_BYTES: usize = 50 * 1024;
+    let mut stdout_str = String::new();
+    let mut stderr_str = String::new();
+    let mut interleaved_str = String::new();
+    let mut so_bytes = 0usize;
+    let mut se_bytes = 0usize;
+    let mut il_bytes = 0usize;
+    for (is_stderr, line) in &lines {
+        let entry = format!("{line}\n");
+        if il_bytes < 2 * MAX_BYTES {
+            il_bytes += entry.len();
+            interleaved_str.push_str(&entry);
+        }
+        if *is_stderr {
+            if se_bytes < MAX_BYTES {
+                se_bytes += entry.len();
+                stderr_str.push_str(&entry);
+            }
+        } else if so_bytes < MAX_BYTES {
+            so_bytes += entry.len();
+            stdout_str.push_str(&entry);
+        }
+    }
 
     let slot = seq % 8;
-    let (stdout, stderr, stdout_path, stderr_path, overflow_notice) =
+    let (stdout, stderr, stdout_path, stderr_path) =
         handle_output_persist(stdout_str, stderr_str, slot);
-    output_truncated = output_truncated || overflow_notice.is_some();
+    output_truncated = output_truncated || stdout_path.is_some();
 
     let mut output = types::ShellOutput::new(
         stdout,
@@ -3010,29 +2924,29 @@ async fn run_exec_impl(
     output
 }
 
-/// Handles output persistence by always writing to temp files and returning paths + preview.
+/// Handles output persistence by writing to slot files only when output overflows the line limit.
 /// Writes full stdout/stderr to:
 ///   {temp_dir}/aptu-coder-overflow/slot-{slot}/{stdout,stderr}
-/// Returns (stdout_preview, stderr_preview, stdout_path, stderr_path, overflow_notice).
-/// If output exceeds 2000 lines, overflow_notice is Some; otherwise None.
+/// Returns (stdout_out, stderr_out, stdout_path, stderr_path).
+/// On overflow: truncates to last 50 lines and sets paths to Some.
+/// Under limit: returns output unchanged and paths as None (no I/O).
 fn handle_output_persist(
     stdout: String,
     stderr: String,
     slot: u32,
-) -> (
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+) -> (String, String, Option<String>, Option<String>) {
     const MAX_OUTPUT_LINES: usize = 2000;
     const OVERFLOW_PREVIEW_LINES: usize = 50;
 
     let stdout_lines: Vec<&str> = stdout.lines().collect();
     let stderr_lines: Vec<&str> = stderr.lines().collect();
 
-    // Always write to slot files
+    // No overflow: return as-is with no I/O.
+    if stdout_lines.len() <= MAX_OUTPUT_LINES && stderr_lines.len() <= MAX_OUTPUT_LINES {
+        return (stdout, stderr, None, None);
+    }
+
+    // Overflow: write slot files and return last-N-lines preview.
     let base = std::env::temp_dir()
         .join("aptu-coder-overflow")
         .join(format!("slot-{slot}"));
@@ -3047,18 +2961,6 @@ fn handle_output_persist(
     let stdout_path_str = stdout_path.display().to_string();
     let stderr_path_str = stderr_path.display().to_string();
 
-    // Check if overflow occurred
-    if stdout_lines.len() <= MAX_OUTPUT_LINES && stderr_lines.len() <= MAX_OUTPUT_LINES {
-        return (
-            stdout,
-            stderr,
-            Some(stdout_path_str),
-            Some(stderr_path_str),
-            None,
-        );
-    }
-
-    // Last 50 lines as preview
     let stdout_preview = if stdout_lines.len() > MAX_OUTPUT_LINES {
         stdout_lines[stdout_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
     } else {
@@ -3070,17 +2972,11 @@ fn handle_output_persist(
         stderr
     };
 
-    let notice = format!(
-        "Output exceeded {MAX_OUTPUT_LINES} lines and was saved to:\n  stdout: {}\n  stderr: {}\nThe last {OVERFLOW_PREVIEW_LINES} lines are included above. To read the full output:\n  cat {}",
-        stdout_path_str, stderr_path_str, stdout_path_str,
-    );
-
     (
         stdout_preview,
         stderr_preview,
         Some(stdout_path_str),
         Some(stderr_path_str),
-        Some(notice),
     )
 }
 
