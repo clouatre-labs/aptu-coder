@@ -38,6 +38,94 @@ pub const DEFUSE_QUERY: &str = r"
 
 use tree_sitter::Node;
 
+/// Extract function name from a Java method declaration.
+#[must_use]
+pub fn extract_function_name(node: &Node, source: &str, _lang: &str) -> Option<String> {
+    if node.kind() != "method_declaration" {
+        return None;
+    }
+    node.child_by_field_name("name").and_then(|n| {
+        let end = n.end_byte();
+        if end <= source.len() {
+            Some(source[n.start_byte()..end].to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Find receiver type (enclosing class/interface/enum) for a Java method.
+#[must_use]
+pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "method_declaration" {
+        return None;
+    }
+
+    // Walk ancestors to find enclosing class, interface, or enum
+    let mut current = *node;
+    while let Some(parent) = current.parent() {
+        match parent.kind() {
+            "class_declaration" | "interface_declaration" | "enum_declaration" => {
+                // Found the enclosing type, extract its name
+                return parent.child_by_field_name("name").and_then(|n| {
+                    let end = n.end_byte();
+                    if end <= source.len() {
+                        Some(source[n.start_byte()..end].to_string())
+                    } else {
+                        None
+                    }
+                });
+            }
+            _ => {
+                current = parent;
+            }
+        }
+    }
+
+    None
+}
+
+/// Find method name when inside a class/interface/enum body.
+#[must_use]
+pub fn find_method_for_receiver(
+    node: &Node,
+    source: &str,
+    _depth: Option<usize>,
+) -> Option<String> {
+    if node.kind() != "method_declaration" {
+        return None;
+    }
+
+    // Verify that the method is inside a class, interface, or enum
+    let mut current = *node;
+    let mut in_type_body = false;
+    while let Some(parent) = current.parent() {
+        match parent.kind() {
+            "class_declaration" | "interface_declaration" | "enum_declaration" => {
+                in_type_body = true;
+                break;
+            }
+            _ => {
+                current = parent;
+            }
+        }
+    }
+
+    if !in_type_body {
+        return None;
+    }
+
+    // Return the method name
+    node.child_by_field_name("name").and_then(|n| {
+        let end = n.end_byte();
+        if end <= source.len() {
+            Some(source[n.start_byte()..end].to_string())
+        } else {
+            None
+        }
+    })
+}
+
 /// Extract inheritance information from a Java class node.
 #[must_use]
 pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
@@ -88,6 +176,96 @@ mod tests {
             .set_language(&tree_sitter_java::LANGUAGE.into())
             .expect("Error loading Java language");
         parser.parse(src, None).expect("Failed to parse Java")
+    }
+
+    #[test]
+    fn test_extract_function_name() {
+        // Arrange: method inside a class
+        let src = "class C { void foo() {} }";
+        let tree = parse_java(src);
+        let root = tree.root_node();
+
+        // Find method_declaration node using stack traversal
+        let mut method_node = None;
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if node.kind() == "method_declaration" {
+                method_node = Some(node);
+                break;
+            }
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                    stack.push(child);
+                }
+            }
+        }
+        let method_node = method_node.expect("expected method_declaration");
+
+        // Act
+        let result = extract_function_name(&method_node, src, "java");
+
+        // Assert
+        assert_eq!(result, Some("foo".to_string()));
+    }
+
+    #[test]
+    fn test_find_receiver_type() {
+        // Arrange: method inside a class
+        let src = "class MyClass { void bar() {} }";
+        let tree = parse_java(src);
+        let root = tree.root_node();
+
+        // Find method_declaration node using stack traversal
+        let mut method_node = None;
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if node.kind() == "method_declaration" {
+                method_node = Some(node);
+                break;
+            }
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                    stack.push(child);
+                }
+            }
+        }
+        let method_node = method_node.expect("expected method_declaration");
+
+        // Act
+        let result = find_receiver_type(&method_node, src);
+
+        // Assert
+        assert_eq!(result, Some("MyClass".to_string()));
+    }
+
+    #[test]
+    fn test_find_method_for_receiver() {
+        // Arrange: method inside a class
+        let src = "class C { void baz() {} }";
+        let tree = parse_java(src);
+        let root = tree.root_node();
+
+        // Find method_declaration node using stack traversal
+        let mut method_node = None;
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if node.kind() == "method_declaration" {
+                method_node = Some(node);
+                break;
+            }
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                    stack.push(child);
+                }
+            }
+        }
+        let method_node = method_node.expect("expected method_declaration");
+
+        // Act
+        let result = find_method_for_receiver(&method_node, src, None);
+
+        // Assert
+        assert_eq!(result, Some("baz".to_string()));
     }
 
     #[test]

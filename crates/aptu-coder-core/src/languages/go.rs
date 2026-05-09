@@ -44,6 +44,70 @@ pub const DEFUSE_QUERY: &str = r"
 (identifier) @read.usage
 ";
 
+/// Extract function or method name from a Go function or method declaration.
+#[must_use]
+pub fn extract_function_name(node: &Node, source: &str, _lang: &str) -> Option<String> {
+    if node.kind() != "function_declaration" && node.kind() != "method_declaration" {
+        return None;
+    }
+    node.child_by_field_name("name").and_then(|n| {
+        let end = n.end_byte();
+        if end <= source.len() {
+            Some(source[n.start_byte()..end].to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Find receiver type for a Go method declaration.
+/// Walks the method_declaration.receiver field to find the type.
+#[must_use]
+pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "method_declaration" {
+        return None;
+    }
+
+    // Get the receiver field
+    let receiver = node.child_by_field_name("receiver")?;
+
+    // Iterate through receiver's children to find parameter_declaration
+    for i in 0..receiver.named_child_count() {
+        if let Some(param) = receiver.named_child(u32::try_from(i).unwrap_or(u32::MAX))
+            && param.kind() == "parameter_declaration"
+        {
+            // Get the type field from parameter_declaration
+            if let Some(type_node) = param.child_by_field_name("type") {
+                match type_node.kind() {
+                    "type_identifier" => {
+                        let end = type_node.end_byte();
+                        if end <= source.len() {
+                            return Some(source[type_node.start_byte()..end].to_string());
+                        }
+                    }
+                    "pointer_type" => {
+                        // pointer_type wraps the actual type_identifier
+                        for j in 0..type_node.named_child_count() {
+                            if let Some(inner) =
+                                type_node.named_child(u32::try_from(j).unwrap_or(u32::MAX))
+                                && inner.kind() == "type_identifier"
+                            {
+                                let end = inner.end_byte();
+                                if end <= source.len() {
+                                    return Some(source[inner.start_byte()..end].to_string());
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Find method name for a receiver type.
 #[must_use]
 pub fn find_method_for_receiver(
@@ -171,6 +235,87 @@ mod tests {
         let result = find_method_for_receiver(&node, source, None);
         // Assert
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_function_name() {
+        // Arrange: free function declaration
+        let source = "package p\nfunc Foo() {}";
+        let tree = parse_go(source);
+        let root = tree.root_node();
+        // Find function_declaration node
+        let func_node = (0..root.named_child_count())
+            .filter_map(|i| root.named_child(i as u32))
+            .find(|n| n.kind() == "function_declaration")
+            .expect("expected function_declaration");
+        // Act
+        let result = extract_function_name(&func_node, source, "go");
+        // Assert
+        assert_eq!(result, Some("Foo".to_string()));
+    }
+
+    #[test]
+    fn test_extract_method_name() {
+        // Arrange: method declaration
+        let source = "package p\nfunc (r *Receiver) Bar() {}";
+        let tree = parse_go(source);
+        let root = tree.root_node();
+        // Find method_declaration node
+        let method_node = (0..root.named_child_count())
+            .filter_map(|i| root.named_child(i as u32))
+            .find(|n| n.kind() == "method_declaration")
+            .expect("expected method_declaration");
+        // Act
+        let result = extract_function_name(&method_node, source, "go");
+        // Assert
+        assert_eq!(result, Some("Bar".to_string()));
+    }
+
+    #[test]
+    fn test_extract_function_name_wrong_kind() {
+        // Arrange: use a struct node (not a function or method declaration)
+        let source = "package p\ntype Baz struct {}";
+        let tree = parse_go(source);
+        let root = tree.root_node();
+        let node = root.named_child(0).expect("expected child");
+        // Act
+        let result = extract_function_name(&node, source, "go");
+        // Assert
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_receiver_type() {
+        // Arrange: method with value receiver
+        let source = "package p\nfunc (r Receiver) Foo() {}";
+        let tree = parse_go(source);
+        let root = tree.root_node();
+        // Find method_declaration node
+        let method_node = (0..root.named_child_count())
+            .filter_map(|i| root.named_child(i as u32))
+            .find(|n| n.kind() == "method_declaration")
+            .expect("expected method_declaration");
+        // Act
+        let result = find_receiver_type(&method_node, source);
+        // Assert
+        assert_eq!(result, Some("Receiver".to_string()));
+    }
+
+    #[test]
+    fn test_find_receiver_type_pointer() {
+        // Arrange: method with pointer receiver
+        let source = "package p\nfunc (r *Receiver) Foo() {}";
+        let tree = parse_go(source);
+        let root = tree.root_node();
+        // Find method_declaration node
+        let method_node = (0..root.named_child_count())
+            .filter_map(|i| root.named_child(i as u32))
+            .find(|n| n.kind() == "method_declaration")
+            .expect("expected method_declaration");
+        // Act
+        let result = find_receiver_type(&method_node, source);
+        // Assert
+        assert_eq!(result, Some("Receiver".to_string()));
     }
 
     #[test]

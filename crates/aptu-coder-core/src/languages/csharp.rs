@@ -3,6 +3,57 @@
 
 use tree_sitter::Node;
 
+/// Extract function name from a C# method or constructor declaration.
+#[must_use]
+pub fn extract_function_name(node: &Node, source: &str, _lang: &str) -> Option<String> {
+    if node.kind() != "method_declaration" && node.kind() != "constructor_declaration" {
+        return None;
+    }
+    node.child_by_field_name("name").and_then(|n| {
+        let end = n.end_byte();
+        if end <= source.len() {
+            Some(source[n.start_byte()..end].to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Find receiver type (enclosing class/struct/interface/record/enum) for a C# method.
+#[must_use]
+pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "method_declaration" && node.kind() != "constructor_declaration" {
+        return None;
+    }
+
+    // Walk ancestors to find enclosing type declaration
+    let mut current = *node;
+    while let Some(parent) = current.parent() {
+        match parent.kind() {
+            "class_declaration"
+            | "interface_declaration"
+            | "record_declaration"
+            | "struct_declaration"
+            | "enum_declaration" => {
+                // Found the enclosing type, extract its name
+                return parent.child_by_field_name("name").and_then(|n| {
+                    let end = n.end_byte();
+                    if end <= source.len() {
+                        Some(source[n.start_byte()..end].to_string())
+                    } else {
+                        None
+                    }
+                });
+            }
+            _ => {
+                current = parent;
+            }
+        }
+    }
+
+    None
+}
+
 /// Tree-sitter query for extracting C# elements (methods, constructors, classes,
 /// interfaces, records, structs, and enums).
 pub const ELEMENT_QUERY: &str = r"
@@ -164,6 +215,66 @@ mod tests {
             .set_language(&tree_sitter_c_sharp::LANGUAGE.into())
             .expect("Error loading C# language");
         parser.parse(src, None).expect("Failed to parse C#")
+    }
+
+    #[test]
+    fn test_extract_function_name() {
+        // Arrange: method inside a class
+        let src = "class C { void foo() {} }";
+        let tree = parse_csharp(src);
+        let root = tree.root_node();
+
+        // Find method_declaration node using stack traversal
+        let mut method_node = None;
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if node.kind() == "method_declaration" {
+                method_node = Some(node);
+                break;
+            }
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                    stack.push(child);
+                }
+            }
+        }
+        let method_node = method_node.expect("expected method_declaration");
+
+        // Act
+        let result = extract_function_name(&method_node, src, "csharp");
+
+        // Assert
+        assert_eq!(result, Some("foo".to_string()));
+    }
+
+    #[test]
+    fn test_find_receiver_type() {
+        // Arrange: method inside a class
+        let src = "class MyClass { void bar() {} }";
+        let tree = parse_csharp(src);
+        let root = tree.root_node();
+
+        // Find method_declaration node using stack traversal
+        let mut method_node = None;
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            if node.kind() == "method_declaration" {
+                method_node = Some(node);
+                break;
+            }
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                    stack.push(child);
+                }
+            }
+        }
+        let method_node = method_node.expect("expected method_declaration");
+
+        // Act
+        let result = find_receiver_type(&method_node, src);
+
+        // Assert
+        assert_eq!(result, Some("MyClass".to_string()));
     }
 
     #[test]

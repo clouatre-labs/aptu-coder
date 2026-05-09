@@ -42,6 +42,86 @@ pub const DEFUSE_QUERY: &str = r"
 
 use tree_sitter::Node;
 
+/// Extract function name from a JavaScript function or method declaration.
+#[must_use]
+pub fn extract_function_name(node: &Node, source: &str, _lang: &str) -> Option<String> {
+    if node.kind() != "function_declaration" && node.kind() != "method_definition" {
+        return None;
+    }
+    node.child_by_field_name("name").and_then(|n| {
+        let end = n.end_byte();
+        if end <= source.len() {
+            Some(source[n.start_byte()..end].to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Find receiver type (enclosing class) for a JavaScript method.
+#[must_use]
+pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "method_definition" {
+        return None;
+    }
+
+    // Walk ancestors to find enclosing class_declaration
+    let mut current = *node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "class_declaration" {
+            // Found the enclosing class, extract its name
+            return parent.child_by_field_name("name").and_then(|n| {
+                let end = n.end_byte();
+                if end <= source.len() {
+                    Some(source[n.start_byte()..end].to_string())
+                } else {
+                    None
+                }
+            });
+        }
+        current = parent;
+    }
+
+    None
+}
+
+/// Find method name when inside a class body.
+#[must_use]
+pub fn find_method_for_receiver(
+    node: &Node,
+    source: &str,
+    _depth: Option<usize>,
+) -> Option<String> {
+    if node.kind() != "method_definition" {
+        return None;
+    }
+
+    // Verify that the method is inside a class_declaration
+    let mut current = *node;
+    let mut in_class = false;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "class_declaration" {
+            in_class = true;
+            break;
+        }
+        current = parent;
+    }
+
+    if !in_class {
+        return None;
+    }
+
+    // Return the method name
+    node.child_by_field_name("name").and_then(|n| {
+        let end = n.end_byte();
+        if end <= source.len() {
+            Some(source[n.start_byte()..end].to_string())
+        } else {
+            None
+        }
+    })
+}
+
 /// Extract inheritance information from a JavaScript class node.
 #[must_use]
 pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
@@ -95,6 +175,78 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn test_extract_function_name() {
+        // Arrange: free function declaration
+        let src = "function foo() {}";
+        let tree = parse_js(src);
+        let root = tree.root_node();
+
+        // Find function_declaration node
+        let func_node =
+            find_node_by_kind(root, "function_declaration").expect("expected function_declaration");
+
+        // Act
+        let result = super::extract_function_name(&func_node, src, "javascript");
+
+        // Assert
+        assert_eq!(result, Some("foo".to_string()));
+    }
+
+    #[test]
+    fn test_extract_method_name() {
+        // Arrange: method inside a class
+        let src = "class C { bar() {} }";
+        let tree = parse_js(src);
+        let root = tree.root_node();
+
+        // Find method_definition node
+        let method_node =
+            find_node_by_kind(root, "method_definition").expect("expected method_definition");
+
+        // Act
+        let result = super::extract_function_name(&method_node, src, "javascript");
+
+        // Assert
+        assert_eq!(result, Some("bar".to_string()));
+    }
+
+    #[test]
+    fn test_find_receiver_type() {
+        // Arrange: method inside a class
+        let src = "class MyClass { baz() {} }";
+        let tree = parse_js(src);
+        let root = tree.root_node();
+
+        // Find method_definition node
+        let method_node =
+            find_node_by_kind(root, "method_definition").expect("expected method_definition");
+
+        // Act
+        let result = super::find_receiver_type(&method_node, src);
+
+        // Assert
+        assert_eq!(result, Some("MyClass".to_string()));
+    }
+
+    #[test]
+    fn test_find_method_for_receiver() {
+        // Arrange: method inside a class
+        let src = "class C { qux() {} }";
+        let tree = parse_js(src);
+        let root = tree.root_node();
+
+        // Find method_definition node
+        let method_node =
+            find_node_by_kind(root, "method_definition").expect("expected method_definition");
+
+        // Act
+        let result = super::find_method_for_receiver(&method_node, src, None);
+
+        // Assert
+        assert_eq!(result, Some("qux".to_string()));
     }
 
     #[test]
