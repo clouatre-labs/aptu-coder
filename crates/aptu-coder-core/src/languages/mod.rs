@@ -17,6 +17,8 @@ pub mod fortran;
 pub mod go;
 #[cfg(feature = "lang-java")]
 pub mod java;
+#[cfg(feature = "lang-kotlin")]
+pub mod kotlin;
 #[cfg(feature = "lang-javascript")]
 pub mod javascript;
 #[cfg(feature = "lang-python")]
@@ -186,6 +188,22 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(java::find_receiver_type),
             extract_inheritance: Some(java::extract_inheritance),
         }),
+        #[cfg(feature = "lang-kotlin")]
+        "kotlin" => Some(LanguageInfo {
+            name: "kotlin",
+            language: tree_sitter_kotlin_ng::LANGUAGE.into(),
+            element_query: kotlin::ELEMENT_QUERY,
+            call_query: kotlin::CALL_QUERY,
+            reference_query: Some(kotlin::REFERENCE_QUERY),
+            import_query: Some(kotlin::IMPORT_QUERY),
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: Some(kotlin::DEFUSE_QUERY),
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: Some(kotlin::extract_inheritance),
+        }),
         #[cfg(feature = "lang-fortran")]
         "fortran" => Some(LanguageInfo {
             name: "fortran",
@@ -258,6 +276,8 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
         "c" | "cpp" => Some(tree_sitter_cpp::LANGUAGE.into()),
         #[cfg(feature = "lang-java")]
         "java" => Some(tree_sitter_java::LANGUAGE.into()),
+        #[cfg(feature = "lang-kotlin")]
+        "kotlin" => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
         #[cfg(feature = "lang-fortran")]
         "fortran" => Some(tree_sitter_fortran::LANGUAGE.into()),
         #[cfg(feature = "lang-csharp")]
