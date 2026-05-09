@@ -1,0 +1,73 @@
+{
+  "experiment": "wave11",
+  "generated_at": "2026-05-09",
+  "design": "2x1 (model_tier x full_7_tools); baselines from wave9-sml conditions A and C (MCP full) and wave10 conditions E and F (edit profile)",
+  "task": "tsx re-wiring (4 edits to 2 files) -- identical to wave9-sml and wave10",
+  "randomization_seed": 42,
+  "hypothesis": "full 7-tool set (no profile) matches or beats edit profile for both models; haiku recovers relative to wave10 F when given analyze tools",
+  "confounds": [
+    "binary version: wave9 ran on 0.9.x; wave10/11 run on 0.10.4",
+    "tool descriptions improved in 0.10.1 (#732, #729, #763)",
+    "tool surface: wave9 had 9 tools; wave11 has 7 (analyze_raw removed #775, edit_rename and edit_insert removed #782)"
+  ],
+  "conditions": {
+    "G": {
+      "model": "global.anthropic.claude-sonnet-4-6",
+      "tools": "mcp",
+      "profile": "full",
+      "n_scored": 5,
+      "baselines": ["A", "E"]
+    },
+    "H": {
+      "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "tools": "mcp",
+      "profile": "full",
+      "n_scored": 5,
+      "baselines": ["C", "F"]
+    }
+  },
+  "baselines": {
+    "A": {
+      "wave": "wave9-sml",
+      "model": "global.anthropic.claude-sonnet-4-6",
+      "tools": "mcp",
+      "profile": "full_9_tools",
+      "mean_cost_usd": 0.779056,
+      "mean_input_tokens": 244840.2,
+      "mean_turns": 11.2
+    },
+    "C": {
+      "wave": "wave9-sml",
+      "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "tools": "mcp",
+      "profile": "full_9_tools",
+      "mean_cost_usd": 0.524807,
+      "mean_input_tokens": 502637.2,
+      "mean_turns": 17.0
+    },
+    "E": {
+      "wave": "wave10",
+      "model": "global.anthropic.claude-sonnet-4-6",
+      "tools": "mcp",
+      "profile": "edit_3_tools",
+      "mean_cost_usd": 0.455,
+      "mean_input_tokens": 139561.0,
+      "mean_turns": 8.2
+    },
+    "F": {
+      "wave": "wave10",
+      "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "tools": "mcp",
+      "profile": "edit_3_tools",
+      "mean_cost_usd": 0.668,
+      "mean_input_tokens": 626774.0,
+      "mean_turns": 17.0
+    }
+  },
+  "rubric_dimensions": [
+    "namespace_correctness",
+    "extension_registration",
+    "structural_fidelity"
+  ],
+  "max_score_per_run": 9
+}

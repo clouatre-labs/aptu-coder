@@ -3081,9 +3081,15 @@ impl ServerHandler for CodeAnalyzer {
         self.session_call_seq
             .store(0, std::sync::atomic::Ordering::Relaxed);
 
-        // Parse client profile from stored metadata and disable tools accordingly.
-        // Profiles: "edit" (3 tools), "analyze" (5 tools), absent/unknown (7 tools).
-        // _meta takes precedence over APTU_CODER_PROFILE when both are present.
+        // NON-STANDARD VENDOR EXTENSION: profile-based tool filtering.
+        // The MCP 2025-11-25 spec has no profile or tool-subset concept; tools/list returns
+        // all tools with no filtering parameters. This mechanism is retained solely for
+        // controlled benchmarking (wave10/11). Do not promote or document it as a product
+        // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
+        // a filtered `tools` array in the API call, or for clients to use tool annotations
+        // (readOnlyHint/destructiveHint) to apply their own policy.
+        // Profiles: "edit" (3 tools), "analyze" (5 tools), absent/unknown (all 7 tools).
+        // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock
             .as_ref()
