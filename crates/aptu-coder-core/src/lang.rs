@@ -47,6 +47,10 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
     ("go", "go"),
     #[cfg(feature = "lang-java")]
     ("java", "java"),
+    #[cfg(feature = "lang-kotlin")]
+    ("kt", "kotlin"),
+    #[cfg(feature = "lang-kotlin")]
+    ("kts", "kotlin"),
     #[cfg(feature = "lang-python")]
     ("py", "python"),
     #[cfg(feature = "lang-rust")]
@@ -83,6 +87,8 @@ pub fn supported_languages() -> &'static [&'static str] {
         "go",
         #[cfg(feature = "lang-java")]
         "java",
+        #[cfg(feature = "lang-kotlin")]
+        "kotlin",
         #[cfg(feature = "lang-python")]
         "python",
         #[cfg(feature = "lang-typescript")]
@@ -136,6 +142,10 @@ mod tests {
         assert_eq!(language_for_extension("hpp"), Some("cpp"));
         #[cfg(feature = "lang-cpp")]
         assert_eq!(language_for_extension("cc"), Some("cpp"));
+        #[cfg(feature = "lang-kotlin")]
+        assert_eq!(language_for_extension("kt"), Some("kotlin"));
+        #[cfg(feature = "lang-kotlin")]
+        assert_eq!(language_for_extension("kts"), Some("kotlin"));
     }
 
     #[test]
