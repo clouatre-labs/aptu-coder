@@ -84,6 +84,62 @@ pub fn summary_cursor_conflict(summary: Option<bool>, cursor: Option<&str>) -> b
     summary == Some(true) && cursor.is_some()
 }
 
+/// Extract W3C Trace Context from MCP request _meta field and set as parent span context.
+///
+/// Attempts to extract traceparent and tracestate from the request's _meta field.
+/// If successful, calls `set_parent` on the current tracing span so the OTel layer
+/// re-parents it to the caller's trace. This must be called after the `#[instrument]`
+/// span has been entered (i.e., inside the function body) for `set_parent` to take effect.
+/// If extraction fails or _meta is absent, silently proceeds with root context (no panic).
+pub fn extract_and_set_trace_context(meta: Option<&rmcp::model::Meta>) {
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let Some(meta) = meta else { return };
+
+    let mut propagation_map = std::collections::HashMap::new();
+
+    // Extract traceparent if present
+    if let Some(traceparent) = meta.0.get("traceparent")
+        && let Some(tp_str) = traceparent.as_str()
+    {
+        propagation_map.insert("traceparent".to_string(), tp_str.to_string());
+    }
+
+    // Extract tracestate if present
+    if let Some(tracestate) = meta.0.get("tracestate")
+        && let Some(ts_str) = tracestate.as_str()
+    {
+        propagation_map.insert("tracestate".to_string(), ts_str.to_string());
+    }
+
+    // Only attempt extraction if we have at least traceparent
+    if propagation_map.is_empty() {
+        return;
+    }
+
+    // Extract context via the globally registered propagator (TraceContextPropagator by default)
+    let parent_cx = opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.extract(&ExtractMap(&propagation_map))
+    });
+
+    // Re-parent the current tracing span (already entered via #[instrument]) to the
+    // extracted OTel context. set_parent is a no-op if the OTel layer is not installed.
+    let _ = tracing::Span::current().set_parent(parent_cx);
+}
+
+/// Helper struct for W3C Trace Context extraction from HashMap
+struct ExtractMap<'a>(&'a std::collections::HashMap<String, String>);
+
+impl<'a> opentelemetry::propagation::Extractor for ExtractMap<'a> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(|s| s.as_str())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|k| k.as_str()).collect()
+    }
+}
+
 #[must_use]
 fn error_meta(
     category: &'static str,
@@ -1087,6 +1143,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -1249,7 +1307,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
@@ -1266,9 +1324,11 @@ impl CodeAnalyzer {
     async fn analyze_file(
         &self,
         params: Parameters<AnalyzeFileParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -1508,6 +1568,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -1907,7 +1969,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
@@ -1924,9 +1986,11 @@ impl CodeAnalyzer {
     async fn analyze_module(
         &self,
         params: Parameters<AnalyzeModuleParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -2157,7 +2221,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "edit_overwrite",
         title = "Edit Overwrite",
@@ -2174,9 +2238,11 @@ impl CodeAnalyzer {
     async fn edit_overwrite(
         &self,
         params: Parameters<EditOverwriteParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -2364,7 +2430,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
@@ -2381,9 +2447,11 @@ impl CodeAnalyzer {
     async fn edit_replace(
         &self,
         params: Parameters<EditReplaceParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -2644,14 +2712,16 @@ impl CodeAnalyzer {
             open_world_hint = true
         )
     )]
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, command = tracing::field::Empty, exit_code = tracing::field::Empty, timed_out = tracing::field::Empty, output_truncated = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, command = tracing::field::Empty, exit_code = tracing::field::Empty, timed_out = tracing::field::Empty, output_truncated = tracing::field::Empty))]
     pub async fn exec_command(
         &self,
         params: Parameters<types::ExecCommandParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
         let params = params.0;
+        // Extract W3C Trace Context from request _meta if present
+        extract_and_set_trace_context(Some(&context.meta));
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");

@@ -424,6 +424,9 @@ impl CallGraph {
                 continue;
             }
 
+            // Child span for graph traversal at this depth level
+            let _traverse_span = tracing::info_span!("graph.traverse", depth = depth).entered();
+
             if let Some(neighbors) = graph_map.get(&current) {
                 for edge in neighbors {
                     let path = &edge.path;

@@ -152,6 +152,10 @@ impl MetricsWriter {
 
             if let Ok(mut file) = file {
                 for event in batch {
+                    // Record to OTel metrics if available
+                    record_otel_metrics(&event);
+
+                    // Always write to JSONL as fallback
                     if let Ok(mut json) = serde_json::to_string(&event) {
                         json.push('\n');
                         let _ = file.write_all(json.as_bytes()).await;
@@ -749,4 +753,44 @@ mod tests {
             std::env::remove_var("APTU_CODER_METRICS_EXPORT_FILE");
         }
     }
+}
+
+/// Record a metric event to OTel metrics if the global meter provider is available.
+///
+/// Records:
+/// - Histogram: mcp.server.operation.duration (in milliseconds)
+/// - Counter: mcp.server.tool.calls (incremented by 1)
+///
+/// Labels: gen_ai.tool.name, error.type (or "none" if no error)
+///
+/// Instruments are initialized once via OnceLock to avoid rebuilding them on every call.
+fn record_otel_metrics(event: &MetricEvent) {
+    use opentelemetry::metrics::{Counter, Histogram};
+    use opentelemetry::{KeyValue, global};
+    use std::sync::OnceLock;
+
+    static DURATION_HISTOGRAM: OnceLock<Histogram<f64>> = OnceLock::new();
+    static CALL_COUNTER: OnceLock<Counter<u64>> = OnceLock::new();
+
+    let histogram = DURATION_HISTOGRAM.get_or_init(|| {
+        global::meter("aptu-coder")
+            .f64_histogram("mcp.server.operation.duration")
+            .with_unit("ms")
+            .build()
+    });
+
+    let counter = CALL_COUNTER.get_or_init(|| {
+        global::meter("aptu-coder")
+            .u64_counter("mcp.server.tool.calls")
+            .build()
+    });
+
+    let error_type = event.error_type.as_deref().unwrap_or("success");
+    let attributes = [
+        KeyValue::new("gen_ai.tool.name", event.tool.to_string()),
+        KeyValue::new("error.type", error_type.to_string()),
+    ];
+
+    histogram.record(event.duration_ms as f64, &attributes);
+    counter.add(1, &attributes);
 }

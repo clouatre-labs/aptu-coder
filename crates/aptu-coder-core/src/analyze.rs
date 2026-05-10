@@ -170,6 +170,8 @@ pub fn analyze_directory_with_progress(
     let start = Instant::now();
     tracing::debug!(file_count = file_entries.len(), root = %root.display(), "analysis start");
 
+    let _parse_span = tracing::info_span!("ast.parse_batch", count = file_entries.len()).entered();
+
     // Parallel analysis of files
     let analysis_results: Vec<FileInfo> = file_entries
         .par_iter()
@@ -240,6 +242,8 @@ pub fn analyze_directory_with_progress(
         duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
         "analysis complete"
     );
+
+    let _format_span = tracing::info_span!("output.format").entered();
 
     // Format output
     let formatted = format_structure(&entries, &analysis_results, None);
