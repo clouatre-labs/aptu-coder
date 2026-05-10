@@ -53,7 +53,7 @@ Key changes:
 
 Full observability stack shipped across #820–#824:
 
-- **#820**: Span attribute policy and never-record list defined; see [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md).
+- **#820**: Span attribute policy and never-record list defined; see [OBSERVABILITY.md](../OBSERVABILITY.md).
 - **#821**: All 7 tool handlers enriched with OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`) and key parameters as span fields. Behavioral decisions (`auto_summary`, `cache_hit`, `truncated`) emitted as span events.
 - **#822**: `tracing-opentelemetry` bridge added. Conditional OTLP export via `BatchSpanProcessor` gated on `OTEL_EXPORTER_OTLP_ENDPOINT`. Noop providers when unset; zero overhead. OTel Metrics SDK initialized in parallel (JSONL channel retained as always-on local trail).
 - **#823**: Log-trace correlation via `opentelemetry-appender-tracing`; every `info!`/`error!` callsite gains `trace_id` and `span_id` automatically. W3C Trace Context (`traceparent`, `tracestate`) extracted from MCP `params._meta` and propagated as span parent -- tool spans become children in the calling agent's distributed trace. Child spans added for key sub-operations: `ast.parse_batch` (directory parse batch), `graph.traverse` (BFS per depth), `walk_directory` (traversal). Graceful shutdown flushes all three OTel providers.
