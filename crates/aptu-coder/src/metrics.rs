@@ -793,7 +793,7 @@ fn record_otel_metrics(event: &MetricEvent) {
         KeyValue::new("gen_ai.tool.name", event.tool.to_string()),
         KeyValue::new("error.type", error_type.to_string()),
         KeyValue::new("mcp.method.name", "tools/call"),
-        KeyValue::new("mcp.protocol.version", "2024-11-05"),
+        KeyValue::new("mcp.protocol.version", "2025-11-25"),
         KeyValue::new("network.transport", "pipe"),
     ];
 
