@@ -544,6 +544,7 @@ impl CodeAnalyzer {
 
         // Check cache
         if let Some(cached) = self.cache.get_directory(&cache_key) {
+            tracing::debug!(cache_hit = true, message = "returning cached result");
             return Ok((cached, true));
         }
 
@@ -692,6 +693,7 @@ impl CodeAnalyzer {
         if let Some(ref key) = cache_key
             && let Some(cached) = self.cache.get(key)
         {
+            tracing::debug!(cache_hit = true, message = "returning cached result");
             return Ok((cached, true));
         }
 
@@ -905,6 +907,10 @@ impl CodeAnalyzer {
             && params.output_control.force != Some(true)
             && output.formatted.len() > SIZE_LIMIT
         {
+            tracing::debug!(
+                auto_summary = true,
+                message = "output exceeded size limit, retrying with summary"
+            );
             let counter2 = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let analysis_params_retry = FocusedAnalysisParams {
                 use_summary: true,
@@ -1060,7 +1066,7 @@ impl CodeAnalyzer {
         Ok(output)
     }
 
-    #[instrument(skip(self, context))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
@@ -1080,9 +1086,18 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "analyze_directory");
+        span.record("path", &params.path);
         let _validated_path = match validate_path(&params.path, true) {
             Ok(p) => p,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                return Ok(err_to_tool_result(e));
+            }
         };
         let ct = context.ct.clone();
         let t_start = std::time::Instant::now();
@@ -1096,7 +1111,11 @@ impl CodeAnalyzer {
         // Call handler for analysis and progress tracking
         let (arc_output, dir_cache_hit) = match self.handle_overview_mode(&params, ct).await {
             Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                return Ok(err_to_tool_result(e));
+            }
         };
         // Extract the value from Arc for modification. On a cache hit the Arc is shared,
         // so try_unwrap may fail; fall back to cloning the underlying value in that case.
@@ -1111,6 +1130,8 @@ impl CodeAnalyzer {
             params.output_control.summary,
             params.pagination.cursor.as_deref(),
         ) {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -1154,7 +1175,11 @@ impl CodeAnalyzer {
                 )
             }) {
                 Ok(v) => v,
-                Err(e) => return Ok(err_to_tool_result(e)),
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
             };
             cursor_data.offset
         } else {
@@ -1166,6 +1191,8 @@ impl CodeAnalyzer {
             match paginate_slice(&output.files, offset, page_size, PaginationMode::Default) {
                 Ok(v) => v,
                 Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "internal_error");
                     return Ok(err_to_tool_result(ErrorData::new(
                         rmcp::model::ErrorCode::INTERNAL_ERROR,
                         e.to_string(),
@@ -1221,7 +1248,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context))]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
@@ -1241,9 +1268,18 @@ impl CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "analyze_file");
+        span.record("path", &params.path);
         let _validated_path = match validate_path(&params.path, true) {
             Ok(p) => p,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                return Ok(err_to_tool_result(e));
+            }
         };
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
@@ -1254,6 +1290,8 @@ impl CodeAnalyzer {
 
         // Check if path is a directory (not allowed for analyze_file)
         if std::path::Path::new(&params.path).is_dir() {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 format!(
@@ -1273,6 +1311,8 @@ impl CodeAnalyzer {
             params.output_control.summary,
             params.pagination.cursor.as_deref(),
         ) {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -1288,7 +1328,11 @@ impl CodeAnalyzer {
         // Call handler for analysis and caching
         let (arc_output, file_cache_hit) = match self.handle_file_details_mode(&params).await {
             Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                return Ok(err_to_tool_result(e));
+            }
         };
 
         // Clone only the two fields that may be mutated per-request (formatted and
@@ -1311,6 +1355,8 @@ impl CodeAnalyzer {
         if use_summary {
             formatted = format_file_details_summary(&arc_output.semantic, &params.path, line_count);
         } else if formatted.len() > SIZE_LIMIT && params.output_control.force != Some(true) {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             let estimated_tokens = formatted.len() / 4;
             let message = format!(
                 "Output exceeds 50K chars ({} chars, ~{} tokens). Use one of:\n\
@@ -1342,7 +1388,11 @@ impl CodeAnalyzer {
                 )
             }) {
                 Ok(v) => v,
-                Err(e) => return Ok(err_to_tool_result(e)),
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
             };
             cursor_data.offset
         } else {
@@ -1437,7 +1487,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, context))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, symbol = tracing::field::Empty))]
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
@@ -1457,9 +1507,18 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "analyze_symbol");
+        span.record("symbol", &params.symbol);
         let _validated_path = match validate_path(&params.path, true) {
             Ok(p) => p,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                return Ok(err_to_tool_result(e));
+            }
         };
         let ct = context.ct.clone();
         let t_start = std::time::Instant::now();
@@ -1472,6 +1531,8 @@ impl CodeAnalyzer {
 
         // Check if path is a file (not allowed for analyze_symbol)
         if std::path::Path::new(&params.path).is_file() {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 format!(
@@ -1491,6 +1552,8 @@ impl CodeAnalyzer {
             params.output_control.summary,
             params.pagination.cursor.as_deref(),
         ) {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -1505,6 +1568,8 @@ impl CodeAnalyzer {
 
         // import_lookup=true is mutually exclusive with a non-empty symbol.
         if let Err(e) = Self::validate_import_lookup(params.import_lookup, &params.symbol) {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(e));
         }
 
@@ -1841,7 +1906,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context))]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
@@ -1861,9 +1926,18 @@ impl CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "analyze_module");
+        span.record("path", &params.path);
         let _validated_path = match validate_path(&params.path, true) {
             Ok(p) => p,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                return Ok(err_to_tool_result(e));
+            }
         };
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
@@ -1877,6 +1951,8 @@ impl CodeAnalyzer {
             .map(|m| m.is_dir())
             .unwrap_or(false)
         {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             self.metrics_tx.send(crate::metrics::MetricEvent {
                 ts: crate::metrics::unix_ms(),
@@ -2080,7 +2156,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context))]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "edit_overwrite",
         title = "Edit Overwrite",
@@ -2100,15 +2176,28 @@ impl CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "edit_overwrite");
+        span.record("path", &params.path);
         let _validated_path = if let Some(ref wd) = params.working_dir {
             match validate_path_in_dir(&params.path, false, std::path::Path::new(wd)) {
                 Ok(p) => p,
-                Err(e) => return Ok(err_to_tool_result(e)),
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
             }
         } else {
             match validate_path(&params.path, false) {
                 Ok(p) => p,
-                Err(e) => return Ok(err_to_tool_result(e)),
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
             }
         };
         let t_start = std::time::Instant::now();
@@ -2123,6 +2212,8 @@ impl CodeAnalyzer {
             .map(|m| m.is_dir())
             .unwrap_or(false)
         {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             self.metrics_tx.send(crate::metrics::MetricEvent {
                 ts: crate::metrics::unix_ms(),
@@ -2157,6 +2248,8 @@ impl CodeAnalyzer {
         let output = match handle.await {
             Ok(Ok(v)) => v,
             Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2182,6 +2275,8 @@ impl CodeAnalyzer {
                 )));
             }
             Ok(Err(e)) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2207,6 +2302,8 @@ impl CodeAnalyzer {
                 )));
             }
             Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2266,7 +2363,7 @@ impl CodeAnalyzer {
         Ok(result)
     }
 
-    #[instrument(skip(self, _context))]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty))]
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
@@ -2286,15 +2383,28 @@ impl CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "edit_replace");
+        span.record("path", &params.path);
         let _validated_path = if let Some(ref wd) = params.working_dir {
             match validate_path_in_dir(&params.path, true, std::path::Path::new(wd)) {
                 Ok(p) => p,
-                Err(e) => return Ok(err_to_tool_result(e)),
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
             }
         } else {
             match validate_path(&params.path, true) {
                 Ok(p) => p,
-                Err(e) => return Ok(err_to_tool_result(e)),
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
             }
         };
         let t_start = std::time::Instant::now();
@@ -2309,6 +2419,8 @@ impl CodeAnalyzer {
             .map(|m| m.is_dir())
             .unwrap_or(false)
         {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             self.metrics_tx.send(crate::metrics::MetricEvent {
                 ts: crate::metrics::unix_ms(),
@@ -2344,6 +2456,8 @@ impl CodeAnalyzer {
         let output = match handle.await {
             Ok(Ok(v)) => v,
             Ok(Err(aptu_coder_core::EditError::NotFound { path: _ })) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2369,6 +2483,8 @@ impl CodeAnalyzer {
                 )));
             }
             Ok(Err(aptu_coder_core::EditError::Ambiguous { count, path: _ })) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2396,6 +2512,8 @@ impl CodeAnalyzer {
                 )));
             }
             Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2421,6 +2539,8 @@ impl CodeAnalyzer {
                 )));
             }
             Ok(Err(e)) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2446,6 +2566,8 @@ impl CodeAnalyzer {
                 )));
             }
             Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2521,7 +2643,7 @@ impl CodeAnalyzer {
             open_world_hint = true
         )
     )]
-    #[instrument(skip(self, _context))]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, command = tracing::field::Empty, exit_code = tracing::field::Empty, timed_out = tracing::field::Empty, output_truncated = tracing::field::Empty))]
     pub async fn exec_command(
         &self,
         params: Parameters<types::ExecCommandParams>,
@@ -2529,6 +2651,11 @@ impl CodeAnalyzer {
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
         let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "exec_command");
+        span.record("command", &params.command);
 
         // Validate working_dir if provided
         let working_dir_path = if let Some(ref wd) = params.working_dir {
@@ -2536,6 +2663,8 @@ impl CodeAnalyzer {
                 Ok(p) => {
                     // Verify it's a directory
                     if !std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
+                        span.record("error", true);
+                        span.record("error.type", "invalid_params");
                         return Ok(err_to_tool_result(ErrorData::new(
                             rmcp::model::ErrorCode::INVALID_PARAMS,
                             "working_dir must be a directory".to_string(),
@@ -2549,6 +2678,8 @@ impl CodeAnalyzer {
                     Some(p)
                 }
                 Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
                     return Ok(err_to_tool_result(e));
                 }
             }
@@ -2566,6 +2697,8 @@ impl CodeAnalyzer {
         if let Some(ref stdin_content) = params.stdin
             && stdin_content.len() > STDIN_MAX_BYTES
         {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "stdin exceeds 1 MB limit".to_string(),
@@ -2631,6 +2764,18 @@ impl CodeAnalyzer {
         let timed_out = output.timed_out;
         let output_truncated = output.output_truncated;
 
+        // Record execution results on span
+        if let Some(code) = exit_code {
+            span.record("exit_code", code);
+        }
+        span.record("timed_out", timed_out);
+        span.record("output_truncated", output_truncated);
+
+        // Emit debug event for truncation
+        if output_truncated {
+            tracing::debug!(truncated = true, message = "output truncated");
+        }
+
         // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
         let output_text = if output.interleaved.is_empty() {
             format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
@@ -2673,6 +2818,8 @@ impl CodeAnalyzer {
         }) {
             Ok(v) => v,
             Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2998,11 +3145,16 @@ struct FocusedAnalysisParams {
 
 #[tool_handler]
 impl ServerHandler for CodeAnalyzer {
+    #[instrument(skip(self, context), fields(service.name = tracing::field::Empty, service.version = tracing::field::Empty))]
     async fn initialize(
         &self,
         _request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
+        let span = tracing::Span::current();
+        span.record("service.name", "aptu-coder");
+        span.record("service.version", env!("CARGO_PKG_VERSION"));
+
         // The _meta field is extracted from params and stored in request extensions.
         // Extract it and store for use in on_initialized.
         if let Some(meta) = context.extensions.get::<Meta>() {
