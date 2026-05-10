@@ -35,6 +35,10 @@ serde_json = { workspace = true }
 moka = { workspace = true }
 nix = { version = "0.31", features = ["resource"] }
 which = "8"
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
