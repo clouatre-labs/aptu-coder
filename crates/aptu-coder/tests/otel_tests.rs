@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use serial_test::serial;
 use std::env;
 
 #[test]
+#[serial]
 fn test_init_otel_no_env_var_returns_none() {
     // Arrange: ensure OTEL_EXPORTER_OTLP_ENDPOINT is not set
     unsafe {
@@ -21,6 +23,7 @@ fn test_init_otel_no_env_var_returns_none() {
 }
 
 #[test]
+#[serial]
 fn test_init_otel_invalid_url_returns_none() {
     // Arrange: set env var to an invalid/unreachable URL
     unsafe {
@@ -46,6 +49,7 @@ fn test_init_otel_invalid_url_returns_none() {
 }
 
 #[test]
+#[serial]
 fn test_noop_layer_composition_no_panic() {
     // Arrange: ensure OTEL_EXPORTER_OTLP_ENDPOINT is not set
     unsafe {

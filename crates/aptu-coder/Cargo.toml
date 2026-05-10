@@ -43,3 +43,4 @@ tracing-opentelemetry = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = { workspace = true }
+serial_test = "3"
