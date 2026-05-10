@@ -20,11 +20,12 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 
 | Module | File | Responsibility |
 |--------|------|-----------------|
-| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing and stdio transport |
+| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel, and stdio transport |
 | `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command` |
-| `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients |
+| `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients via `notifications/message` |
+| `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
 | `schema_helpers` | `crates/aptu-coder-core/src/schema_helpers.rs` | Core JSON Schema helpers for integer and page_size field validation |
-| `metrics` | `crates/aptu-coder/src/metrics.rs` | Metrics collection and daily-rotating JSONL emission; `MetricEvent`, `MetricsSender`, `MetricsWriter` |
+| `metrics` | `crates/aptu-coder/src/metrics.rs` | Always-on JSONL metrics: daily-rotating files, `MetricEvent`, `MetricsSender`, `MetricsWriter`; includes `migrate_legacy_metrics_dir` for the `code-analyze-mcp` → `aptu-coder` XDG path migration |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
 | `parser` | `crates/aptu-coder-core/src/parser.rs` | Tree-sitter parsing; ElementExtractor and SemanticExtractor |
@@ -35,6 +36,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `languages/mod` | `crates/aptu-coder-core/src/languages/mod.rs` | LanguageInfo registry and handler function types |
 | `languages/rust` | `crates/aptu-coder-core/src/languages/rust.rs` | Rust-specific queries and semantic handlers |
 | `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
+| `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
 | `cache` | `crates/aptu-coder-core/src/cache.rs` | LRU cache with mtime invalidation and lock_or_recover pattern |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
 | `test_detection` | `crates/aptu-coder-core/src/test_detection.rs` | Test file detection by path heuristics (directory and filename patterns) |
@@ -75,6 +77,10 @@ graph TD
     F2 --> Q
     F3 --> Q
     F6 --> Q
+    Q --> Z1["MetricEvent channel"]
+    Z1 --> Z2["MetricsWriter JSONL"]
+    Q --> Z3["OTel span end"]
+    Z3 --> Z4["BatchSpanProcessor OTLP"]
 ```
 
 ## Analysis Modes
@@ -130,6 +136,34 @@ Exported from `aptu_coder_core` as a public API for library consumers that hold 
 **Git ref filtering:** When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the set of changed files, and `filter_entries_by_git_ref()` restricts the analysis to those files before the graph is built.
 
 **Def-use mode:** When `def_use=true`, the tool computes definition and use sites alongside the call graph. However, `def_use_sites` is cleared (`Vec::new()`) in `structuredContent` on the initial response. Once the callers and callees pages are exhausted, the handler automatically emits a `{mode: defuse, offset: 0}` cursor. Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
+
+## Observability Architecture
+
+### Dual-stream model
+
+Two independent telemetry channels run in parallel; neither blocks tool execution.
+
+**JSONL metrics (always-on):** Every tool handler fires a `MetricEvent` into an unbounded Tokio channel at return. `MetricsWriter` drains the channel in a background task and appends to a daily-rotated JSONL file at `$XDG_DATA_HOME/aptu-coder/metrics/`. File retention is 30 days. `migrate_legacy_metrics_dir()` runs on startup to rename the old `code-analyze-mcp` directory to `aptu-coder` if the new path does not yet exist.
+
+**OpenTelemetry (opt-in):** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `otel.rs` initializes three providers (trace, log, meter) via OTLP/HTTP with `BatchSpanProcessor` / `PeriodicReader` export. The `tracing-opentelemetry` bridge wires `#[instrument]` spans into the OTel trace provider. `opentelemetry-appender-tracing` forwards log events as OTel `LogRecord`s, injecting `trace_id` and `span_id`. When the env var is unset, noop providers are used with zero runtime overhead; noop span creation costs ~6.6 µs.
+
+### W3C Trace Context propagation
+
+The server extracts `traceparent` and `tracestate` from `MCP params._meta` on every tool call and sets them as the span parent context. Tool spans appear as children of the calling agent's distributed trace (goose session, Claude turn). This requires no changes to tool handlers -- context extraction is done at the handler dispatch layer in `lib.rs`.
+
+### Child spans for sub-operations
+
+Key sub-operations are wrapped in named child spans so P95 breakdowns are visible per-operation from real traffic:
+
+| Span name | Location | Sub-operation |
+|---|---|---|
+| `ast.parse_batch` | `analyze.rs` | Rayon parallel parse batch for `analyze_directory` |
+| `graph.traverse` | `graph.rs` | BFS traversal per depth level in `analyze_symbol` |
+| `walk_directory` | `traversal.rs` | .gitignore-aware directory walk |
+
+### Span attribute policy
+
+All tool handlers record bounded, safe-to-emit span attributes (tool name, path, symbol, result status, error category). Secrets, file content, command output, and stdin are in the never-record list. See [OBSERVABILITY.md](../OBSERVABILITY.md) at the repository root for the full policy and PR review checklist.
 
 ## Language Handler System
 

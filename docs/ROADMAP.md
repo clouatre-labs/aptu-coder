@@ -41,13 +41,42 @@ Key changes:
 - #624: `CallChainEntry { symbol, file, line }` public type; `callers`, `test_callers`, `callees` fields on `FocusedAnalysisOutput`; MCP clients can now consume caller/callee relationships from `structuredContent` without text parsing
 - #625: `analyze_symbol` tool description updated to accurately reflect `FocusedAnalysisOutput` schema
 
-### [Benchmarking] Wave 7: OpenFAST Fortran Analysis (v13)
+### [Complete] Wave 7: OpenFAST Fortran Analysis (v13)
 
-2x2 factorial design (model x tool_set) on Fortran scientific HPC code (OpenFAST). See [v13 methodology](docs/benchmarks/v13/methodology.md).
+2x2 factorial design (model x tool_set) on Fortran scientific HPC code (OpenFAST). See [v13 methodology](benchmarks/v13/methodology.md). Haiku savings: 68% fewer tokens, 68% cheaper. Sonnet savings: 46% fewer tokens, 42% cheaper. Validated Fortran language support for scientific HPC repositories.
 
-### [Benchmarking] Wave 8: Rust Trait Dispatch Analysis (v14)
+### [Complete] Wave 8: Rust Trait Dispatch Analysis (v14)
 
-2x2 factorial design (model x tool_set) on Rust trait implementations (ripgrep). See [v14 methodology](docs/benchmarks/v14/methodology.md).
+2x2 factorial design (model x tool_set) on Rust trait implementations (ripgrep). See [v14 methodology](benchmarks/v14/methodology.md).
+
+### [Complete] observability-v1
+
+Full observability stack shipped across #820–#824:
+
+- **#820**: Span attribute policy and never-record list defined; see [OBSERVABILITY.md](../OBSERVABILITY.md).
+- **#821**: All 7 tool handlers enriched with OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`) and key parameters as span fields. Behavioral decisions (`auto_summary`, `cache_hit`, `truncated`) emitted as span events.
+- **#822**: `tracing-opentelemetry` bridge added. Conditional OTLP export via `BatchSpanProcessor` gated on `OTEL_EXPORTER_OTLP_ENDPOINT`. Noop providers when unset; zero overhead. OTel Metrics SDK initialized in parallel (JSONL channel retained as always-on local trail).
+- **#823**: Log-trace correlation via `opentelemetry-appender-tracing`; every `info!`/`error!` callsite gains `trace_id` and `span_id` automatically. W3C Trace Context (`traceparent`, `tracestate`) extracted from MCP `params._meta` and propagated as span parent -- tool spans become children in the calling agent's distributed trace. Child spans added for key sub-operations: `ast.parse_batch` (directory parse batch), `graph.traverse` (BFS per depth), `walk_directory` (traversal). Graceful shutdown flushes all three OTel providers.
+- **#824**: Observability documentation updated in [docs/OBSERVABILITY.md](OBSERVABILITY.md).
+
+### [Complete] Project rename: code-analyze-mcp to aptu-coder (#826)
+
+All source, docs, benchmark tooling, env vars, and binary references updated. Env vars renamed (breaking for users who had these set):
+
+- `CODE_ANALYZE_DIR_CACHE_CAPACITY` → `APTU_CODER_DIR_CACHE_CAPACITY`
+- `CODE_ANALYZE_FILE_CACHE_CAPACITY` → `APTU_CODER_FILE_CACHE_CAPACITY`
+
+`migrate_legacy_metrics_dir()` handles XDG data path migration at runtime for existing users with metrics data in the old directory.
+
+### [Complete] Fortran handler: module extraction and call graph (#828)
+
+Completes the Fortran language handler that was partially implemented:
+
+- Fixed `ELEMENT_QUERY` to capture module constructs via `internal_procedures` for `CONTAINS` sections; corrected stale comment about `module_statement` (name child is required in tree-sitter-fortran 0.6.0).
+- Added `derived_type_member_expression` pattern to `CALL_QUERY` for Fortran 2003+ `obj%method()` bound procedure calls.
+- Implemented `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` handlers to unblock call graph traversal and module-scoped procedure tracking.
+- Added `extract_module_name` private helper for the two-level child walk on `module_statement`.
+- 16 AAA-pattern tests: module extraction, subroutine/function name extraction, USE import detection, direct CALL and OOP member call patterns, module-scoped vs top-level procedure distinction, CONTAINS sections, empty modules.
 
 ---
 
