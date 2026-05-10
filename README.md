@@ -52,18 +52,8 @@ All languages are enabled by default. Disable individual languages at compile ti
 | Kotlin | `.kt`, `.kts` | `lang-kotlin` |
 | Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
 | JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
-| C | `.c` | `lang-cpp` |
-| C++ | `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
+| C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
 | C# | `.cs` | `lang-csharp` |
-
-To build with a subset of languages, disable default features and opt in:
-
-```toml
-[dependencies]
-aptu-coder-core = { version = "*", default-features = false, features = ["lang-rust", "lang-python"] }
-```
-
-The current version is published on [crates.io](https://crates.io/crates/aptu-coder-core). Replace `"*"` with the latest version string if you prefer a pinned dependency.
 
 ## Installation
 
@@ -138,8 +128,6 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `force` | boolean | false | Bypass output size warning |
 | `verbose` | boolean | false | Full output with section headers and imports |
 
-`summary=true` and `cursor` are mutually exclusive. Passing both returns an error.
-
 | Tool | Purpose | Languages |
 |------|---------|-----------|
 | `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
@@ -168,18 +156,6 @@ NEXT_CURSOR: eyJvZmZzZXQiOjUwfQ==
 analyze_symbol path: /my/project symbol: my_function cursor: eyJvZmZzZXQiOjUwfQ==
 ```
 
-**Summary Mode**
-
-When output exceeds 50K chars, the server auto-compacts results using aggregate statistics. Override with `summary: true` (force compact) or `summary: false` (disable).
-
-```bash
-# Force summary for large project
-analyze_directory path: /huge/codebase summary: true
-
-# Disable summary (get full details, may be large)
-analyze_directory path: /project summary: false
-```
-
 ## Non-Interactive Pipelines
 
 In single-pass subagent sessions, prompt caches are written but never reused. Benchmarks showed MCP responses writing ~2x more to cache than native-only workflows, adding cost with no quality gain. Set `DISABLE_PROMPT_CACHING=1` (or `DISABLE_PROMPT_CACHING_HAIKU=1` for Haiku-specific pipelines) to avoid this overhead.
@@ -188,20 +164,27 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 
 ## Environment Variables
 
+### Cache and runtime
+
 | Variable | Default | Description |
 |---|---|---|
-| `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | Maximum number of directory-analysis results held in the in-process LRU cache. |
-| `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | Maximum number of cached `exec_command` results held in memory. |
-| `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result caching. Increase for stable, slow commands. |
-| `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | Maximum number of file-analysis results held in the in-process LRU cache. Increase for large repos where many files are queried repeatedly. |
-| `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export written on server shutdown. Relative paths are ignored. |
-| `APTU_CODER_PROFILE` | unset | Tool subset profile. `edit` enables only edit tools and `exec_command`; `analyze` enables only analyze tools and `exec_command`; unknown values leave all tools enabled. Can also be set per-session via `io.clouatre-labs/profile` in the MCP `_meta` field. |
-| `APTU_SHELL` | unset | Shell used by `exec_command`. Defaults to `bash` (PATH search) then `/bin/sh`. Override to use a different shell. |
+| `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
+| `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | LRU cache size for `exec_command` results. |
+| `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result cache. |
+| `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
+| `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
+| `APTU_CODER_PROFILE` | unset | Tool subset: `edit` (edit tools + `exec_command` only), `analyze` (analyze tools + `exec_command` only). Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
+| `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
+
+### Telemetry
+
+| Variable | Default | Description |
+|---|---|---|
 | `DISABLE_PROMPT_CACHING` | unset | Set to `1` to disable prompt caching (recommended for single-pass subagent sessions). |
 | `DISABLE_PROMPT_CACHING_HAIKU` | unset | Set to `1` to disable prompt caching for Haiku-specific pipelines only. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OpenTelemetry OTLP HTTP endpoint URL (e.g., `http://localhost:4318`). When set, enables export of traces, logs, and metrics via OTLP/HTTP. When unset, noop providers are used with zero overhead. |
-| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | unset | Reserved per OpenTelemetry GenAI semantic conventions for opt-in capture of full tool arguments and results as blobs. aptu-coder does not implement this: raw file content, command output, and stdin are never recorded. Individual bounded parameters (path, symbol, depth) are recorded as span attributes instead. |
-| `XDG_DATA_HOME` | `~/.local/share` | Base directory for daily-rotated JSONL metrics files. The server writes to `$XDG_DATA_HOME/aptu-coder/metrics/` and retains files for 30 days. Defaults to `~/.local/share` if unset. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP HTTP endpoint URL (e.g., `http://localhost:4318`). When set, enables trace, log, and metric export via OTLP/HTTP; noop providers when unset. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | unset | Reserved per OTel GenAI conventions; aptu-coder does not implement this -- bounded parameters are recorded as span attributes instead. |
+| `XDG_DATA_HOME` | `~/.local/share` | Base directory for daily-rotated JSONL metrics files (`$XDG_DATA_HOME/aptu-coder/metrics/`, 30-day retention). |
 
 ## Observability
 
