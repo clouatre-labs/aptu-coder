@@ -185,6 +185,13 @@ impl AnalysisCache {
         });
     }
 
+    /// Returns the configured file-cache capacity.
+    /// Exposed for testing across crate boundaries; not part of the stable API.
+    #[doc(hidden)]
+    pub fn file_capacity(&self) -> usize {
+        self.file_capacity
+    }
+
     /// Invalidate all cache entries for a given file path.
     /// Removes all entries regardless of modification time or analysis mode.
     #[instrument(skip(self), fields(path = ?path))]
@@ -312,5 +319,39 @@ mod tests {
         // Assert: both entries should be removed
         assert!(cache.get(&key1).is_none());
         assert!(cache.get(&key2).is_none());
+    }
+
+    // Mutex serialises the two dir-cache-capacity tests to prevent env var races.
+    static DIR_CACHE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_dir_cache_capacity_default() {
+        let _guard = DIR_CACHE_ENV_LOCK.lock().unwrap();
+
+        // Arrange: ensure the env var is not set
+        unsafe { std::env::remove_var("APTU_CODER_DIR_CACHE_CAPACITY") };
+
+        // Act
+        let cache = AnalysisCache::new(100);
+
+        // Assert: default dir capacity is 20
+        assert_eq!(cache.dir_capacity, 20);
+    }
+
+    #[test]
+    fn test_dir_cache_capacity_from_env() {
+        let _guard = DIR_CACHE_ENV_LOCK.lock().unwrap();
+
+        // Arrange
+        unsafe { std::env::set_var("APTU_CODER_DIR_CACHE_CAPACITY", "7") };
+
+        // Act
+        let cache = AnalysisCache::new(100);
+
+        // Cleanup before assertions to minimise env pollution window
+        unsafe { std::env::remove_var("APTU_CODER_DIR_CACHE_CAPACITY") };
+
+        // Assert
+        assert_eq!(cache.dir_capacity, 7);
     }
 }

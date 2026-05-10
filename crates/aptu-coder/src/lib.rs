@@ -4285,4 +4285,32 @@ mod tests {
             err.message
         );
     }
+
+    #[test]
+    fn test_file_cache_capacity_default() {
+        // Arrange: ensure the env var is not set
+        unsafe { std::env::remove_var("APTU_CODER_FILE_CACHE_CAPACITY") };
+
+        // Act
+        let analyzer = make_analyzer();
+
+        // Assert: default file cache capacity is 100
+        assert_eq!(analyzer.cache.file_capacity(), 100);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_file_cache_capacity_from_env() {
+        // Arrange
+        unsafe { std::env::set_var("APTU_CODER_FILE_CACHE_CAPACITY", "42") };
+
+        // Act
+        let analyzer = make_analyzer();
+
+        // Cleanup before assertions to minimise env pollution window
+        unsafe { std::env::remove_var("APTU_CODER_FILE_CACHE_CAPACITY") };
+
+        // Assert
+        assert_eq!(analyzer.cache.file_capacity(), 42);
+    }
 }
