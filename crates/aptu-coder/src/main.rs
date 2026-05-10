@@ -13,12 +13,17 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+mod otel;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|a| a == "--version") {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+
+    // Initialize OpenTelemetry (returns None if OTEL_EXPORTER_OTLP_ENDPOINT is unset)
+    let otel_provider = otel::init_otel();
 
     // Create shared peer Arc for logging layer
     // Migrate legacy metrics directory if needed
@@ -36,11 +41,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create MCP logging layer with event sender
     let mcp_logging_layer = McpLoggingLayer::new(event_tx, log_level_filter.clone());
 
-    // Build layered subscriber: fmt + MCP logging
-    tracing_subscriber::registry()
+    // Build layered subscriber: fmt + MCP logging + optional OpenTelemetry
+    use opentelemetry::trace::TracerProvider;
+
+    let subscriber = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(mcp_logging_layer)
-        .init();
+        .with(mcp_logging_layer);
+
+    if let Some(provider) = &otel_provider {
+        let tracer = provider.tracer("aptu-coder");
+        subscriber
+            .with(tracing_opentelemetry::layer().with_tracer(tracer))
+            .init();
+    } else {
+        subscriber.init();
+    }
 
     // Create metrics channel and spawn writer
     let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
@@ -51,6 +66,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let service = serve_server(analyzer, (stdin, stdout)).await?;
     service.waiting().await?;
+
+    // Shutdown OpenTelemetry provider to flush spans
+    #[allow(clippy::collapsible_if)]
+    if let Some(provider) = otel_provider {
+        if let Err(e) = provider.shutdown() {
+            tracing::warn!("Failed to shutdown OpenTelemetry provider: {e}");
+        }
+    }
 
     Ok(())
 }

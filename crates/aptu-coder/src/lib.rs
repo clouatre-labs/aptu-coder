@@ -17,6 +17,7 @@
 
 pub mod logging;
 pub mod metrics;
+pub mod otel;
 
 pub use aptu_coder_core::analyze;
 use aptu_coder_core::types::STDIN_MAX_BYTES;
