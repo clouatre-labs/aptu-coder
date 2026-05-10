@@ -775,7 +775,10 @@ fn record_otel_metrics(event: &MetricEvent) {
     let histogram = DURATION_HISTOGRAM.get_or_init(|| {
         global::meter("aptu-coder")
             .f64_histogram("mcp.server.operation.duration")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(vec![
+                0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
+            ])
             .build()
     });
 
@@ -789,8 +792,11 @@ fn record_otel_metrics(event: &MetricEvent) {
     let attributes = [
         KeyValue::new("gen_ai.tool.name", event.tool.to_string()),
         KeyValue::new("error.type", error_type.to_string()),
+        KeyValue::new("mcp.method.name", "tools/call"),
+        KeyValue::new("mcp.protocol.version", "2024-11-05"),
+        KeyValue::new("network.transport", "pipe"),
     ];
 
-    histogram.record(event.duration_ms as f64, &attributes);
+    histogram.record(event.duration_ms as f64 / 1000.0, &attributes);
     counter.add(1, &attributes);
 }
