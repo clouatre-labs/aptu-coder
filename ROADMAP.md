@@ -25,14 +25,17 @@ This document captures planned work and its rationale. Issues are the authoritat
 
 **Issues (in dependency order):**
 
+Span attribute policy: [OBSERVABILITY.md](OBSERVABILITY.md). Every PR adding span attributes must comply with the never-record list defined there. The policy issue (#820) is a prerequisite for all attribute enrichment work.
+
 | Issue | Title | Tier | Depends on |
 |---|---|---|---|
-| #812 | enrich tool spans with GenAI semantic attributes and error recording | 1 | - |
-| #813 | emit behavioral decisions as span events | 1 | - |
+| #820 | define span attribute policy and never-record list | 0 (prerequisite) | - |
+| #812 | enrich tool spans with GenAI semantic attributes and error recording | 1 | #820 |
+| #813 | emit behavioral decisions as span events | 1 | #820 |
 | #814 | add tracing-opentelemetry bridge with conditional OTLP export | 2 (keystone) | - |
-| #815 | add log-trace correlation via opentelemetry-appender-tracing | 2 | #814 |
-| #816 | extract W3C Trace Context from MCP params._meta | 2 | #814 |
-| #817 | add child spans for sub-operations in analyze_symbol and analyze_directory | 3 | #814 |
+| #815 | add log-trace correlation via opentelemetry-appender-tracing | 2 | #814, #820 |
+| #816 | extract W3C Trace Context from MCP params._meta | 2 | #814, #820 |
+| #817 | add child spans for sub-operations in analyze_symbol and analyze_directory | 3 | #814, #820 |
 | #818 | migrate JSONL metrics to OTel Metrics SDK | 3 | #814 |
 
 **Spec reference:** [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (Development status, May 2026), [MCP-specific OTel conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/).
