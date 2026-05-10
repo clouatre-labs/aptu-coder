@@ -1,5 +1,15 @@
 # Observability
 
+## Overview
+
+This document covers two parallel telemetry streams and their implementation details.
+
+- **JSONL Metrics** (always-on): Daily-rotated audit trail with tool name, duration, output size, and result status. Files retained for 30 days. Implementation details below.
+
+- **OpenTelemetry Export** (opt-in): When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, traces, logs, and metrics are exported asynchronously via OTLP/HTTP. Noop providers when unset; zero overhead. Parallel and independent from JSONL.
+
+For span attribute policy, the never-record list, and trace context propagation details, see [OBSERVABILITY.md](../OBSERVABILITY.md) at the repository root.
+
 ## Channel Pattern
 
 The metrics channel mirrors the `McpLoggingLayer` pattern exactly:

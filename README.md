@@ -190,19 +190,30 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 
 | Variable | Default | Description |
 |---|---|---|
-| `CODE_ANALYZE_FILE_CACHE_CAPACITY` | `100` | Maximum number of file-analysis results held in the in-process LRU cache. Increase for large repos where many files are queried repeatedly. |
+| `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | Maximum number of cached `exec_command` results held in memory. |
+| `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result caching. Increase for stable, slow commands. |
+| `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export written on server shutdown. Relative paths are ignored. |
+| `APTU_CODER_PROFILE` | unset | Tool subset profile. `edit` enables only edit tools and `exec_command`; `analyze` enables only analyze tools and `exec_command`; unknown values leave all tools enabled. Can also be set per-session via `io.clouatre-labs/profile` in the MCP `_meta` field. |
+| `APTU_SHELL` | unset | Shell used by `exec_command`. Defaults to `bash` (PATH search) then `/bin/sh`. Override to use a different shell. |
 | `CODE_ANALYZE_DIR_CACHE_CAPACITY` | `20` | Maximum number of directory-analysis results held in the in-process LRU cache. |
+| `CODE_ANALYZE_FILE_CACHE_CAPACITY` | `100` | Maximum number of file-analysis results held in the in-process LRU cache. Increase for large repos where many files are queried repeatedly. |
 | `DISABLE_PROMPT_CACHING` | unset | Set to `1` to disable prompt caching (recommended for single-pass subagent sessions). |
 | `DISABLE_PROMPT_CACHING_HAIKU` | unset | Set to `1` to disable prompt caching for Haiku-specific pipelines only. |
-| `APTU_SHELL` | unset | Shell used by `exec_command`. Defaults to `bash` (PATH search) then `/bin/sh`. Override to use a different shell. |
-| `APTU_CODER_PROFILE` | unset | Tool subset profile. `edit` enables only edit tools and `exec_command`; `analyze` enables only analyze tools and `exec_command`; unknown values leave all tools enabled. Can also be set per-session via `io.clouatre-labs/profile` in the MCP `_meta` field. |
-| `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result caching. Increase for stable, slow commands. |
-| `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | Maximum number of cached `exec_command` results held in memory. |
-| `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export written on server shutdown. Relative paths are ignored. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OpenTelemetry OTLP HTTP endpoint URL (e.g., `http://localhost:4318`). When set, enables export of traces, logs, and metrics via OTLP/HTTP. When unset, noop providers are used with zero overhead. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | unset | Reserved per OpenTelemetry GenAI semantic conventions for opt-in capture of full tool arguments and results as blobs. aptu-coder does not implement this: raw file content, command output, and stdin are never recorded. Individual bounded parameters (path, symbol, depth) are recorded as span attributes instead. |
+| `XDG_DATA_HOME` | `~/.local/share` | Base directory for daily-rotated JSONL metrics files. The server writes to `$XDG_DATA_HOME/aptu-coder/metrics/` and retains files for 30 days. Defaults to `~/.local/share` if unset. |
 
 ## Observability
 
-All seven tools emit metrics to daily-rotated JSONL files at `$XDG_DATA_HOME/aptu-coder/` (fallback: `~/.local/share/aptu-coder/`). Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full schema.
+The server emits two parallel, independent telemetry streams.
+
+**JSONL metrics (always-on)** are written daily-rotated to `$XDG_DATA_HOME/aptu-coder/metrics/` (fallback: `~/.local/share/aptu-coder/metrics/`) regardless of configuration. Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full schema.
+
+**OpenTelemetry export (opt-in)** is enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set to an OTLP HTTP endpoint URL. When set, the server initializes OpenTelemetry trace, log, and meter providers and exports asynchronously via OTLP/HTTP. When unset, noop providers are used with zero runtime overhead.
+
+Each tool invocation is wrapped in a span carrying OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`). W3C Trace Context is extracted from the MCP `_meta` field on each call, allowing MCP clients to propagate their trace context so tool spans appear as children in a distributed trace.
+
+For the span attribute policy, the never-record list, and details on what is instrumented, see [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) at the repository root.
 
 ## Documentation
 

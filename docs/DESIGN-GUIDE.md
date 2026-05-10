@@ -147,7 +147,13 @@ graph TD
 
 *Code Snippet 2: Illustrative metric record shape. See [OBSERVABILITY.md](OBSERVABILITY.md) for the normative field list and schema.*
 
-The writer task is isolated from the tool execution path. If disk I/O is slow or the JSONL file is locked, the channel grows; the tool call is unaffected. See [OBSERVABILITY.md](OBSERVABILITY.md) for the full implementation including daily rotation, 30-day retention, and testability via `base_dir` injection.
+The writer task is isolated from the tool execution path. If disk I/O is slow or the JSONL file is locked, the channel grows; the tool call is unaffected.
+
+**OpenTelemetry bridge:** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the server additionally initializes OpenTelemetry trace, log, and meter providers and exports via OTLP/HTTP. When unset, noop providers incur zero overhead. Both channels (JSONL and OTel) operate independently: JSONL is always-on audit trail and performance baseline; OTel is opt-in distributed tracing.
+
+**W3C Trace Context extraction:** The MCP `_meta` field can carry W3C Trace Context (`traceparent` header). The server extracts this on every tool call and propagates it as the span parent, allowing tool spans to appear as children in the client's distributed trace. This enables end-to-end tracing across MCP client → server → downstream collectors.
+
+**Span attributes:** Span attributes follow OpenTelemetry GenAI semantic conventions (gen_ai.system, gen_ai.operation.name, gen_ai.tool.name) and include only bounded, safe-to-record values (tool name, path, symbol, parameters, result status, error category). Secrets, file content, command output, and stdin are never recorded. See [OBSERVABILITY.md](OBSERVABILITY.md) for the full span attribute policy and never-record list.
 
 ## 6. Benchmark-Driven Development
 

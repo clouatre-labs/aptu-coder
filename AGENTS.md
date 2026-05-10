@@ -25,6 +25,24 @@ cargo deny check advisories licenses
 cargo bench
 ```
 
+## Observability
+
+By default, the server operates with noop telemetry providers (zero overhead). Telemetry export is opt-in via environment variables:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` -- Set to an OTLP HTTP endpoint URL (e.g., `http://localhost:4318`) to enable export of traces, logs, and metrics via OTLP/HTTP. When unset, the OpenTelemetry SDK is initialized with noop providers incurring no cost. Exports are asynchronous and do not block tool execution.
+
+- `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` -- Reserved per OpenTelemetry GenAI semantic conventions for opt-in capture of tool arguments and results. aptu-coder does not implement this: individual bounded parameters (path, symbol, depth) are recorded as span attributes instead of serializing the full tool call arguments or results, ensuring credentials and file content are never emitted.
+
+- `XDG_DATA_HOME` -- Base directory for the always-on JSONL metrics channel. The server writes daily-rotated metrics to `$XDG_DATA_HOME/aptu-coder/metrics/` and retains them for 30 days. Defaults to `~/.local/share` if unset.
+
+**Instrumentation:** Each tool invocation is wrapped in a span carrying OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`). W3C Trace Context is extracted from the MCP `_meta` field, allowing MCP clients to propagate their trace context so tool spans become children in a distributed trace.
+
+**Metrics:**
+- JSONL channel: always-on, fire-and-forget, zero latency cost. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the metric record schema and 30-day retention policy.
+- OpenTelemetry: optional, parallel to JSONL. Configured at server init; no runtime reconfiguration.
+
+For span attribute policy and the never-record list, see [OBSERVABILITY.md](OBSERVABILITY.md) at the repository root.
+
 ## API verification (critical)
 
 Do not rely on training data for `rmcp`, `schemars`, or `thiserror` APIs. **Read `crates/aptu-coder/src/lib.rs` before adding or modifying any tool** -- it is the authoritative reference for tool handler patterns.
@@ -67,3 +85,4 @@ Canonical parameter lists live in the `types` module (`crates/aptu-coder-core/sr
 - Reference host-specific tools or clients in tool descriptions or server instructions (e.g. Claude Code's Grep, Glob, Read)
 - Use `gh release create` to tag releases; always create a GPG-signed annotated tag and push it to trigger the release workflow
 - Remove `DISABLE_PROMPT_CACHING=1` from server instructions; caching data never read again is detrimental
+- Use relative links in `README.md`; all links must be absolute (`https://github.com/clouatre-labs/aptu-coder/blob/main/...`) so they resolve correctly when README is rendered on crates.io, docs.rs, and other mirrors
