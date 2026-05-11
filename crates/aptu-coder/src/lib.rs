@@ -781,12 +781,26 @@ impl CodeAnalyzer {
                 output.subtree_counts = subtree_counts;
                 let arc_output = std::sync::Arc::new(output);
                 self.cache.put_directory(cache_key, arc_output.clone());
-                // Spawn L2 write-behind
+                // Spawn L2 write-behind; drain failure counter after write completes.
                 {
                     let dc = self.disk_cache.clone();
                     let k = disk_key;
                     let v = arc_output.as_ref().clone();
-                    tokio::task::spawn_blocking(move || dc.put("analyze_directory", &k, &v));
+                    let handle = tokio::task::spawn_blocking(move || {
+                        dc.put("analyze_directory", &k, &v);
+                        dc.drain_write_failures()
+                    });
+                    tokio::spawn(async move {
+                        if let Ok(failures) = handle.await
+                            && failures > 0
+                        {
+                            tracing::warn!(
+                                tool = "analyze_directory",
+                                failures,
+                                "L2 disk cache write failed"
+                            );
+                        }
+                    });
                 }
                 Ok((arc_output, CacheTier::Miss))
             }
@@ -859,12 +873,26 @@ impl CodeAnalyzer {
                 if let Some(key) = cache_key {
                     self.cache.put(key, arc_output.clone());
                 }
-                // Spawn L2 write-behind
+                // Spawn L2 write-behind; drain failure counter after write completes.
                 {
                     let dc = self.disk_cache.clone();
                     let k = disk_key;
                     let v = arc_output.as_ref().clone();
-                    tokio::task::spawn_blocking(move || dc.put("analyze_file", &k, &v));
+                    let handle = tokio::task::spawn_blocking(move || {
+                        dc.put("analyze_file", &k, &v);
+                        dc.drain_write_failures()
+                    });
+                    tokio::spawn(async move {
+                        if let Ok(failures) = handle.await
+                            && failures > 0
+                        {
+                            tracing::warn!(
+                                tool = "analyze_file",
+                                failures,
+                                "L2 disk cache write failed"
+                            );
+                        }
+                    });
                 }
                 Ok((arc_output, CacheTier::Miss))
             }
