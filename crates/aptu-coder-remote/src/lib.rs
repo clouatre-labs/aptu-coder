@@ -62,6 +62,14 @@ pub enum RemoteError {
 /// not `gitlab.com` or `github.com`.
 pub fn detect_platform(url: &str) -> Result<(Platform, String, String), RemoteError> {
     let parsed = url::Url::parse(url).map_err(|e| RemoteError::InvalidUrl(e.to_string()))?;
+
+    if parsed.scheme() != "https" {
+        return Err(RemoteError::InvalidUrl(format!(
+            "only https:// URLs are supported, got: {}://",
+            parsed.scheme()
+        )));
+    }
+
     let host = parsed
         .host_str()
         .ok_or_else(|| RemoteError::InvalidUrl("no host in URL".to_string()))?

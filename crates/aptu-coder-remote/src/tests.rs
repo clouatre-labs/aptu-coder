@@ -73,6 +73,20 @@ fn test_detect_platform_invalid() {
     );
 }
 
+#[test]
+fn test_detect_platform_rejects_non_https() {
+    let err = detect_platform("http://github.com/o/r").expect_err("should fail");
+    assert!(
+        matches!(err, RemoteError::InvalidUrl(_)),
+        "expected InvalidUrl for http://, got: {err}"
+    );
+    let err = detect_platform("ssh://github.com/o/r").expect_err("should fail");
+    assert!(
+        matches!(err, RemoteError::InvalidUrl(_)),
+        "expected InvalidUrl for ssh://, got: {err}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Line range slicing tests
 // ---------------------------------------------------------------------------
