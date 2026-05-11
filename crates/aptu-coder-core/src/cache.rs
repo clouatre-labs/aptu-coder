@@ -386,12 +386,19 @@ pub struct DiskCache {
 
 impl DiskCache {
     /// Creates the cache directory (mode 0700) and returns a new instance.
-    /// If `disabled` is true, all operations are no-ops.
+    /// If `disabled` is true, or if directory creation fails, all operations are no-ops.
     pub fn new(base: std::path::PathBuf, disabled: bool) -> Self {
-        if !disabled && std::fs::create_dir_all(&base).is_ok() {
-            let _ = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700));
+        if disabled {
+            return Self { base, disabled: true };
         }
-        Self { base, disabled }
+        if let Err(e) = std::fs::create_dir_all(&base) {
+            warn!(path = %base.display(), error = %e, "disk cache disabled: failed to create cache directory");
+            return Self { base, disabled: true };
+        }
+        if let Err(e) = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)) {
+            warn!(path = %base.display(), error = %e, "disk cache: failed to set directory permissions to 0700");
+        }
+        Self { base, disabled: false }
     }
 
     pub fn entry_path(&self, tool: &str, key: &blake3::Hash) -> std::path::PathBuf {
