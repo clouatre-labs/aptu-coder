@@ -408,9 +408,24 @@ impl DiskCache {
             return None;
         }
         let path = self.entry_path(tool, key);
-        let compressed = std::fs::read(&path).ok()?;
-        let bytes = snap::raw::Decoder::new().decompress_vec(&compressed).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        let compressed = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => return None,
+        };
+        let bytes = match snap::raw::Decoder::new().decompress_vec(&compressed) {
+            Ok(b) => b,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache decompression failed");
+                return None;
+            }
+        };
+        match serde_json::from_slice(&bytes) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache deserialization failed");
+                None
+            }
+        }
     }
 
     /// Atomic write via NamedTempFile::persist (rename(2)). Silently drops all errors.
@@ -426,21 +441,33 @@ impl DiskCache {
         let _ = std::fs::create_dir_all(&dir);
         let bytes = match serde_json::to_vec(value) {
             Ok(b) => b,
-            Err(_) => return,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache serialization failed");
+                return;
+            }
         };
         let compressed = match snap::raw::Encoder::new().compress_vec(&bytes) {
             Ok(c) => c,
-            Err(_) => return,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache compression failed");
+                return;
+            }
         };
         let mut tmp = match NamedTempFile::new_in(&dir) {
             Ok(f) => f,
-            Err(_) => return,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache tempfile creation failed");
+                return;
+            }
         };
         use std::io::Write;
-        if tmp.write_all(&compressed).is_err() {
+        if let Err(e) = tmp.write_all(&compressed) {
+            debug!(tool, error = %e, "disk cache write failed");
             return;
         }
-        let _ = tmp.persist(&path);
+        if let Err(e) = tmp.persist(&path) {
+            debug!(tool, error = %e, "disk cache persist failed");
+        }
     }
 
     /// Removes files not accessed within retention_days. Best-effort; silently drops errors.
