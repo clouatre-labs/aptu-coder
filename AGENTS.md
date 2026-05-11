@@ -8,7 +8,7 @@ Rust workspace with two crates:
 - `crates/aptu-coder` -- MCP server, tool handlers, logging, metrics
 
 Seven MCP tools: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family).
-Rust edition 2024, async with tokio, MCP protocol via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
+Rust edition 2024, async with tokio, MCP protocol 2025-11-25 via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
 
 ## CI runners
 
@@ -23,6 +23,7 @@ cargo clippy -- -D warnings
 cargo fmt --check
 cargo deny check advisories licenses
 cargo bench
+cargo install --path crates/aptu-coder --profile release   # local install; binary lands in ~/.cargo/bin/
 ```
 
 ## Observability
