@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-//! aptu-remote: async helpers for fetching GitLab and GitHub repository trees and files
+//! aptu-coder-remote: async helpers for fetching GitLab and GitHub repository trees and files
 //! without cloning.
 
 pub mod types;

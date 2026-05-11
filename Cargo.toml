@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/aptu-coder-core", "crates/aptu-coder", "crates/aptu-remote"]
+members = ["crates/aptu-coder-core", "crates/aptu-coder", "crates/aptu-coder-remote"]
 exclude = ["fuzz"]
 resolver = "2"
 

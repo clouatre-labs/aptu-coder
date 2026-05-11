@@ -73,7 +73,7 @@ name = "aptu-coder"
 version = "0.11.0"
 dependencies = [
  "aptu-coder-core",
- "aptu-remote",
+ "aptu-coder-remote",
  "async-trait",
  "blake3",
  "nix",
@@ -129,7 +129,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aptu-remote"
+name = "aptu-coder-remote"
 version = "0.11.0"
 dependencies = [
  "base64",

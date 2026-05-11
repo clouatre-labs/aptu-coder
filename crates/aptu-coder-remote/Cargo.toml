@@ -1,10 +1,21 @@
 [package]
-name = "aptu-remote"
+name = "aptu-coder-remote"
 version = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+description = "Remote repository exploration tools for GitLab and GitHub via MCP"
+readme = "README.md"
+keywords = ["mcp", "gitlab", "github", "remote", "code-analysis"]
+categories = ["development-tools", "api-bindings"]
+publish = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 gitlab = { workspace = true }

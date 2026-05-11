@@ -467,6 +467,17 @@ jobs:
           echo "Timeout waiting for aptu-coder-core to appear in crates.io index"
           exit 1
 
+      - name: Publish aptu-coder-remote to crates.io
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder-remote/${VERSION}" > /dev/null; then
+            echo "aptu-coder-remote ${VERSION} already published to crates.io, skipping"
+          else
+            cargo publish -p aptu-coder-remote
+          fi
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
       - name: Publish aptu-coder to crates.io
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"

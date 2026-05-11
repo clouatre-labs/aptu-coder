@@ -3289,7 +3289,7 @@ impl CodeAnalyzer {
         name = "remote_tree",
         title = "Remote Tree",
         description = "Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Example queries: List top-level files in https://github.com/org/repo; Explore the src/ directory of a GitLab project.",
-        output_schema = schema_for_type::<aptu_remote::types::RemoteTreeOutput>(),
+        output_schema = schema_for_type::<aptu_coder_remote::types::RemoteTreeOutput>(),
         annotations(
             title = "Remote Tree",
             read_only_hint = true,
@@ -3301,7 +3301,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, url = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
     pub async fn remote_tree(
         &self,
-        params: Parameters<aptu_remote::types::RemoteTreeParams>,
+        params: Parameters<aptu_coder_remote::types::RemoteTreeParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
@@ -3312,7 +3312,7 @@ impl CodeAnalyzer {
         span.record("url", &params.url);
 
         let depth = params.depth.unwrap_or(2);
-        let output = aptu_remote::fetch_tree(
+        let output = aptu_coder_remote::fetch_tree(
             &params.url,
             params.path.as_deref(),
             params.git_ref.as_deref(),
@@ -3344,26 +3344,26 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "remote_error");
                 let (code, category, retryable, action) = match &e {
-                    aptu_remote::RemoteError::MissingGitLabToken
-                    | aptu_remote::RemoteError::MissingGitHubToken => (
+                    aptu_coder_remote::RemoteError::MissingGitLabToken
+                    | aptu_coder_remote::RemoteError::MissingGitHubToken => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "auth",
                         false,
                         "Set GITLAB_TOKEN or GITHUB_TOKEN env var",
                     ),
-                    aptu_remote::RemoteError::UnsupportedHost(_) => (
+                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "params",
                         false,
                         "Use gitlab.com or github.com URL",
                     ),
-                    aptu_remote::RemoteError::NotFound(_) => (
+                    aptu_coder_remote::RemoteError::NotFound(_) => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "params",
                         false,
                         "Check path and ref",
                     ),
-                    aptu_remote::RemoteError::InvalidLineRange(_) => (
+                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "params",
                         false,
@@ -3389,7 +3389,7 @@ impl CodeAnalyzer {
         name = "remote_file",
         title = "Remote File",
         description = "Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Supports optional line range slicing (START-END format). Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
-        output_schema = schema_for_type::<aptu_remote::types::RemoteFileOutput>(),
+        output_schema = schema_for_type::<aptu_coder_remote::types::RemoteFileOutput>(),
         annotations(
             title = "Remote File",
             read_only_hint = true,
@@ -3401,7 +3401,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, url = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
     pub async fn remote_file(
         &self,
-        params: Parameters<aptu_remote::types::RemoteFileParams>,
+        params: Parameters<aptu_coder_remote::types::RemoteFileParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
@@ -3411,7 +3411,7 @@ impl CodeAnalyzer {
         span.record("gen_ai.tool.name", "remote_file");
         span.record("url", &params.url);
 
-        let output = aptu_remote::fetch_file(
+        let output = aptu_coder_remote::fetch_file(
             &params.url,
             &params.path,
             params.git_ref.as_deref(),
@@ -3443,26 +3443,26 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "remote_error");
                 let (code, category, retryable, action) = match &e {
-                    aptu_remote::RemoteError::MissingGitLabToken
-                    | aptu_remote::RemoteError::MissingGitHubToken => (
+                    aptu_coder_remote::RemoteError::MissingGitLabToken
+                    | aptu_coder_remote::RemoteError::MissingGitHubToken => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "auth",
                         false,
                         "Set GITLAB_TOKEN or GITHUB_TOKEN env var",
                     ),
-                    aptu_remote::RemoteError::UnsupportedHost(_) => (
+                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "params",
                         false,
                         "Use gitlab.com or github.com URL",
                     ),
-                    aptu_remote::RemoteError::NotFound(_) => (
+                    aptu_coder_remote::RemoteError::NotFound(_) => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "params",
                         false,
                         "Check path and ref",
                     ),
-                    aptu_remote::RemoteError::InvalidLineRange(_) => (
+                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => (
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         "params",
                         false,
