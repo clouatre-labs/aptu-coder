@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tempfile::NamedTempFile;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, error, instrument, warn};
 
 /// Indicates which cache tier served the result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,19 +379,35 @@ mod tests {
 
 /// Persistent content-addressable disk cache for analyze_* tools.
 /// All methods are infallible from the caller's perspective: errors are silently dropped.
+/// Number of consecutive L2 write failures that triggers an `error!` log escalation.
+/// Below this threshold each failure logs at `warn!`. At or above it the cache is
+/// considered degraded and a single `error!` is emitted so operators are alerted
+/// without flooding logs on a sustained disk-full condition.
+const DISK_CACHE_DEGRADED_THRESHOLD: u64 = 3;
+
 pub struct DiskCache {
     base: std::path::PathBuf,
     disabled: bool,
-    /// Counts L2 write failures since last drain. Incremented inside `put` on any I/O error.
+    /// Counts write failures since last drain. Incremented inside `put` on any I/O error.
     write_failures: std::sync::atomic::AtomicU64,
+    /// Cumulative write failures across all drains. Never reset; used for threshold checks.
+    total_write_failures: std::sync::atomic::AtomicU64,
 }
 
 impl DiskCache {
-    /// Returns the number of write failures accumulated since the last call and resets the counter.
-    /// Call sites use this to emit `cache_write_failure` in MetricEvent after a write-behind task.
+    /// Returns the number of write failures accumulated since the last call and resets the
+    /// per-drain counter. The cumulative `total_write_failures` is never reset.
     pub fn drain_write_failures(&self) -> u64 {
         self.write_failures
             .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns true when cumulative write failures have reached `DISK_CACHE_DEGRADED_THRESHOLD`.
+    /// Callers can use this to emit a degraded health signal without polling the counter.
+    pub fn is_degraded(&self) -> bool {
+        self.total_write_failures
+            .load(std::sync::atomic::Ordering::Relaxed)
+            >= DISK_CACHE_DEGRADED_THRESHOLD
     }
 }
 
@@ -404,6 +420,7 @@ impl DiskCache {
                 base,
                 disabled: true,
                 write_failures: std::sync::atomic::AtomicU64::new(0),
+                total_write_failures: std::sync::atomic::AtomicU64::new(0),
             };
         }
         if let Err(e) = std::fs::create_dir_all(&base) {
@@ -412,6 +429,7 @@ impl DiskCache {
                 base,
                 disabled: true,
                 write_failures: std::sync::atomic::AtomicU64::new(0),
+                total_write_failures: std::sync::atomic::AtomicU64::new(0),
             };
         }
         if let Err(e) = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)) {
@@ -421,6 +439,7 @@ impl DiskCache {
             base,
             disabled: false,
             write_failures: std::sync::atomic::AtomicU64::new(0),
+            total_write_failures: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -470,8 +489,7 @@ impl DiskCache {
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             warn!(tool, error = %e, "disk cache: failed to create cache directory");
-            self.write_failures
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.record_write_failure();
             return;
         }
         let bytes = match serde_json::to_vec(value) {
@@ -492,22 +510,40 @@ impl DiskCache {
             Ok(f) => f,
             Err(e) => {
                 warn!(tool, error = %e, "disk cache: failed to create temp file");
-                self.write_failures
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.record_write_failure();
                 return;
             }
         };
         use std::io::Write;
         if let Err(e) = tmp.write_all(&compressed) {
             warn!(tool, error = %e, "disk cache: write failed");
-            self.write_failures
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.record_write_failure();
             return;
         }
         if let Err(e) = tmp.persist(&path) {
             warn!(tool, error = %e, "disk cache: atomic rename failed");
-            self.write_failures
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.record_write_failure();
+        }
+    }
+
+    /// Increments both the per-drain and cumulative failure counters. Escalates to `error!`
+    /// once cumulative failures reach `DISK_CACHE_DEGRADED_THRESHOLD` so a sustained
+    /// disk-full or permission problem surfaces above the noise of individual `warn!` entries.
+    fn record_write_failure(&self) {
+        self.write_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let total = self
+            .total_write_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if total == DISK_CACHE_DEGRADED_THRESHOLD {
+            error!(
+                path = %self.base.display(),
+                total,
+                threshold = DISK_CACHE_DEGRADED_THRESHOLD,
+                "disk cache is degraded: consecutive write failures have reached the alert threshold; \
+                 check disk space and permissions at the cache directory"
+            );
         }
     }
 
