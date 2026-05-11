@@ -88,17 +88,35 @@ pub fn detect_platform(url: &str) -> Result<(Platform, String, String), RemoteEr
         ));
     }
 
-    let owner = segments[0].to_string();
-    // Strip .git suffix from repo name
-    let repo = segments[1].trim_end_matches(".git").to_string();
-
     let platform = match host.as_str() {
-        "gitlab.com" => Platform::GitLab {
-            host: "gitlab.com".to_string(),
-        },
-        "github.com" => Platform::GitHub,
+        "gitlab.com" => Platform::GitLab { host: host.clone() },
+        "github.com" => {
+            // GitHub does not support nested namespaces; reject URLs with more than 2 segments
+            if segments.len() > 2 {
+                return Err(RemoteError::InvalidUrl(
+                    "GitHub URLs must contain exactly owner/repo path (no extra segments)"
+                        .to_string(),
+                ));
+            }
+            Platform::GitHub
+        }
         other => return Err(RemoteError::UnsupportedHost(other.to_string())),
     };
+
+    // Extract owner and repo based on platform
+    let owner = segments[0].to_string();
+    let repo = match platform {
+        Platform::GitLab { .. } => {
+            // For GitLab, join all segments after the first (owner) to support nested namespaces
+            segments[1..].join("/")
+        }
+        Platform::GitHub => {
+            // For GitHub, use only the second segment (no nested namespaces)
+            segments[1].to_string()
+        }
+    }
+    .trim_end_matches(".git")
+    .to_string();
 
     Ok((platform, owner, repo))
 }

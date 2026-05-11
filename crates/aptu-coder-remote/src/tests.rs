@@ -87,6 +87,63 @@ fn test_detect_platform_rejects_non_https() {
     );
 }
 
+#[test]
+fn test_detect_platform_gitlab_3segment() {
+    let (platform, owner, repo) =
+        detect_platform("https://gitlab.com/group/subgroup/project").expect("should parse");
+    assert!(
+        matches!(platform, Platform::GitLab { host } if host == "gitlab.com"),
+        "expected GitLab platform"
+    );
+    assert_eq!(owner, "group");
+    assert_eq!(repo, "subgroup/project");
+}
+
+#[test]
+fn test_detect_platform_gitlab_4segment() {
+    let (platform, owner, repo) =
+        detect_platform("https://gitlab.com/a/b/c/d").expect("should parse");
+    assert!(
+        matches!(platform, Platform::GitLab { host } if host == "gitlab.com"),
+        "expected GitLab platform"
+    );
+    assert_eq!(owner, "a");
+    assert_eq!(repo, "b/c/d");
+}
+
+#[test]
+fn test_detect_platform_gitlab_3segment_git_suffix() {
+    let (platform, owner, repo) =
+        detect_platform("https://gitlab.com/group/subgroup/project.git").expect("should parse");
+    assert!(
+        matches!(platform, Platform::GitLab { host } if host == "gitlab.com"),
+        "expected GitLab platform"
+    );
+    assert_eq!(owner, "group");
+    assert_eq!(repo, "subgroup/project");
+}
+
+#[test]
+fn test_detect_platform_gitlab_trailing_slash() {
+    let (platform, owner, repo) =
+        detect_platform("https://gitlab.com/group/subgroup/project/").expect("should parse");
+    assert!(
+        matches!(platform, Platform::GitLab { host } if host == "gitlab.com"),
+        "expected GitLab platform"
+    );
+    assert_eq!(owner, "group");
+    assert_eq!(repo, "subgroup/project");
+}
+
+#[test]
+fn test_detect_platform_github_extra_segment_rejected() {
+    let err = detect_platform("https://github.com/org/repo/extra").expect_err("should fail");
+    assert!(
+        matches!(err, RemoteError::InvalidUrl(_)),
+        "expected InvalidUrl for extra segment, got: {err}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Line range slicing tests
 // ---------------------------------------------------------------------------
