@@ -34,7 +34,7 @@ pub(crate) const EXCLUDED_DIRS: &[&str] = &[
     ".venv",
 ];
 
-use aptu_coder_core::cache::AnalysisCache;
+use aptu_coder_core::cache::{AnalysisCache, CacheTier};
 use aptu_coder_core::formatter::{
     format_file_details_paginated, format_file_details_summary, format_focused_paginated,
     format_module_info, format_structure_paginated, format_summary,
@@ -505,7 +505,7 @@ pub struct CodeAnalyzer {
     #[allow(dead_code)]
     pub(crate) tool_router: Arc<RwLock<ToolRouter<Self>>>,
     cache: AnalysisCache,
-    exec_cache: moka::future::Cache<(String, String), types::ShellOutput>,
+    disk_cache: std::sync::Arc<cache::DiskCache>,
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
     log_level_filter: Arc<Mutex<LevelFilter>>,
     event_rx: Arc<TokioMutex<Option<mpsc::UnboundedReceiver<LogEvent>>>>,
@@ -535,22 +535,30 @@ impl CodeAnalyzer {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(100);
-        let exec_cache_ttl_secs: u64 = std::env::var("APTU_CODER_EXEC_CACHE_TTL_SECS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10);
-        let exec_cache_capacity: u64 = std::env::var("APTU_CODER_EXEC_CACHE_CAPACITY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(64);
-        let exec_cache = moka::future::Cache::builder()
-            .max_capacity(exec_cache_capacity)
-            .time_to_live(std::time::Duration::from_secs(exec_cache_ttl_secs))
-            .build();
+
+        // Initialize disk cache
+        let xdg_data_home = if let Ok(xdg_data_home) = std::env::var("XDG_DATA_HOME")
+            && !xdg_data_home.is_empty()
+        {
+            std::path::PathBuf::from(xdg_data_home)
+        } else if let Ok(home) = std::env::var("HOME") {
+            std::path::PathBuf::from(home).join(".local").join("share")
+        } else {
+            std::path::PathBuf::from(".")
+        };
+        let disk_cache_disabled = std::env::var("APTU_CODER_DISK_CACHE_DISABLED")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let disk_cache_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| xdg_data_home.join("aptu-coder").join("analysis-cache"));
+        let disk_cache =
+            std::sync::Arc::new(cache::DiskCache::new(disk_cache_dir, disk_cache_disabled));
+
         CodeAnalyzer {
             tool_router: Arc::new(RwLock::new(Self::tool_router())),
             cache: AnalysisCache::new(file_cap),
-            exec_cache,
+            disk_cache,
             peer,
             log_level_filter,
             event_rx: Arc::new(TokioMutex::new(Some(event_rx))),
@@ -597,7 +605,7 @@ impl CodeAnalyzer {
         &self,
         params: &AnalyzeDirectoryParams,
         ct: tokio_util::sync::CancellationToken,
-    ) -> Result<(std::sync::Arc<analyze::AnalysisOutput>, bool), ErrorData> {
+    ) -> Result<(std::sync::Arc<analyze::AnalysisOutput>, CacheTier), ErrorData> {
         let path = Path::new(&params.path);
         let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter_clone = counter.clone();
@@ -631,10 +639,45 @@ impl CodeAnalyzer {
             git_ref_val,
         );
 
-        // Check cache
+        // Check L1 cache
         if let Some(cached) = self.cache.get_directory(&cache_key) {
             tracing::debug!(cache_hit = true, message = "returning cached result");
-            return Ok((cached, true));
+            return Ok((cached, CacheTier::L1Memory));
+        }
+
+        // Compute disk cache key from canonical relative paths + mtime + params
+        let root = std::path::Path::new(&params.path);
+        let disk_key = {
+            let mut hasher = blake3::Hasher::new();
+            let mut sorted_entries: Vec<_> = all_entries.iter().collect();
+            sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
+            for entry in &sorted_entries {
+                let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path);
+                hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
+                let mtime_secs = entry
+                    .mtime
+                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                hasher.update(&mtime_secs.to_le_bytes());
+            }
+            if let Some(depth) = canonical_max_depth {
+                hasher.update(depth.to_string().as_bytes());
+            }
+            if let Some(ref git_ref) = params.git_ref {
+                hasher.update(git_ref.as_bytes());
+            }
+            hasher.finalize()
+        };
+
+        // Check L2 cache
+        if let Some(cached) = self
+            .disk_cache
+            .get::<analyze::AnalysisOutput>("analyze_directory", &disk_key)
+        {
+            let arc = std::sync::Arc::new(cached);
+            self.cache.put_directory(cache_key.clone(), arc.clone());
+            return Ok((arc, CacheTier::L2Disk));
         }
 
         // Apply git_ref filter when requested (non-empty string only).
@@ -738,7 +781,47 @@ impl CodeAnalyzer {
                 output.subtree_counts = subtree_counts;
                 let arc_output = std::sync::Arc::new(output);
                 self.cache.put_directory(cache_key, arc_output.clone());
-                Ok((arc_output, false))
+                // Spawn L2 write-behind; drain failure counter after write completes.
+                {
+                    let dc = self.disk_cache.clone();
+                    let k = disk_key;
+                    let v = arc_output.as_ref().clone();
+                    let handle = tokio::task::spawn_blocking(move || {
+                        dc.put("analyze_directory", &k, &v);
+                        dc.drain_write_failures()
+                    });
+                    let metrics_tx = self.metrics_tx.clone();
+                    let sid = self.session_id.lock().await.clone();
+                    tokio::spawn(async move {
+                        if let Ok(failures) = handle.await
+                            && failures > 0
+                        {
+                            tracing::warn!(
+                                tool = "analyze_directory",
+                                failures,
+                                "L2 disk cache write failed"
+                            );
+                            metrics_tx.send(crate::metrics::MetricEvent {
+                                ts: crate::metrics::unix_ms(),
+                                tool: "analyze_directory",
+                                duration_ms: 0,
+                                output_chars: 0,
+                                param_path_depth: 0,
+                                max_depth: None,
+                                result: "ok",
+                                error_type: None,
+                                session_id: sid,
+                                seq: None,
+                                cache_hit: None,
+                                cache_write_failure: Some(true),
+                                cache_tier: None,
+                                exit_code: None,
+                                timed_out: false,
+                            });
+                        }
+                    });
+                }
+                Ok((arc_output, CacheTier::Miss))
             }
             Ok(Err(analyze::AnalyzeError::Cancelled)) => Err(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -763,12 +846,12 @@ impl CodeAnalyzer {
     }
 
     /// Private helper: Extract analysis logic for file details mode (`analyze_file`).
-    /// Returns the cached or newly analyzed file output along with a cache_hit bool.
+    /// Returns the cached or newly analyzed file output along with a CacheTier.
     #[instrument(skip(self, params))]
     async fn handle_file_details_mode(
         &self,
         params: &AnalyzeFileParams,
-    ) -> Result<(std::sync::Arc<analyze::FileAnalysisOutput>, bool), ErrorData> {
+    ) -> Result<(std::sync::Arc<analyze::FileAnalysisOutput>, CacheTier), ErrorData> {
         // Build cache key from file metadata
         let cache_key = std::fs::metadata(&params.path).ok().and_then(|meta| {
             meta.modified().ok().map(|mtime| cache::CacheKey {
@@ -778,12 +861,28 @@ impl CodeAnalyzer {
             })
         });
 
-        // Check cache first
+        // Check L1 cache first
         if let Some(ref key) = cache_key
             && let Some(cached) = self.cache.get(key)
         {
             tracing::debug!(cache_hit = true, message = "returning cached result");
-            return Ok((cached, true));
+            return Ok((cached, CacheTier::L1Memory));
+        }
+
+        // Compute disk cache key from file content
+        let file_bytes = std::fs::read(&params.path).unwrap_or_default();
+        let disk_key = blake3::hash(&file_bytes);
+
+        // Check L2 cache
+        if let Some(cached) = self
+            .disk_cache
+            .get::<analyze::FileAnalysisOutput>("analyze_file", &disk_key)
+        {
+            let arc = std::sync::Arc::new(cached);
+            if let Some(ref key) = cache_key {
+                self.cache.put(key.clone(), arc.clone());
+            }
+            return Ok((arc, CacheTier::L2Disk));
         }
 
         // Cache miss or no cache key, analyze and optionally store
@@ -793,7 +892,47 @@ impl CodeAnalyzer {
                 if let Some(key) = cache_key {
                     self.cache.put(key, arc_output.clone());
                 }
-                Ok((arc_output, false))
+                // Spawn L2 write-behind; drain failure counter after write completes.
+                {
+                    let dc = self.disk_cache.clone();
+                    let k = disk_key;
+                    let v = arc_output.as_ref().clone();
+                    let handle = tokio::task::spawn_blocking(move || {
+                        dc.put("analyze_file", &k, &v);
+                        dc.drain_write_failures()
+                    });
+                    let metrics_tx = self.metrics_tx.clone();
+                    let sid = self.session_id.lock().await.clone();
+                    tokio::spawn(async move {
+                        if let Ok(failures) = handle.await
+                            && failures > 0
+                        {
+                            tracing::warn!(
+                                tool = "analyze_file",
+                                failures,
+                                "L2 disk cache write failed"
+                            );
+                            metrics_tx.send(crate::metrics::MetricEvent {
+                                ts: crate::metrics::unix_ms(),
+                                tool: "analyze_file",
+                                duration_ms: 0,
+                                output_chars: 0,
+                                param_path_depth: 0,
+                                max_depth: None,
+                                result: "ok",
+                                error_type: None,
+                                session_id: sid,
+                                seq: None,
+                                cache_hit: None,
+                                cache_write_failure: Some(true),
+                                cache_tier: None,
+                                exit_code: None,
+                                timed_out: false,
+                            });
+                        }
+                    });
+                }
+                Ok((arc_output, CacheTier::Miss))
             }
             Err(e) => Err(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -1155,7 +1294,7 @@ impl CodeAnalyzer {
         Ok(output)
     }
 
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
@@ -1328,8 +1467,20 @@ impl CodeAnalyzer {
             final_text.push_str(&cursor);
         }
 
-        let mut result = CallToolResult::success(vec![Content::text(final_text.clone())])
-            .with_meta(Some(no_cache_meta()));
+        // Record cache tier in span
+        tracing::Span::current().record("cache_tier", dir_cache_hit.as_str());
+
+        // Add content_hash to _meta
+        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+        let mut meta = no_cache_meta().0;
+        meta.insert(
+            "content_hash".to_string(),
+            serde_json::Value::String(content_hash),
+        );
+        let meta = rmcp::model::Meta(meta);
+
+        let mut result =
+            CallToolResult::success(vec![Content::text(final_text.clone())]).with_meta(Some(meta));
         let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -1344,14 +1495,16 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(dir_cache_hit),
+            cache_hit: Some(dir_cache_hit != CacheTier::Miss),
+            cache_write_failure: None,
+            cache_tier: Some(dir_cache_hit.as_str()),
             exit_code: None,
             timed_out: false,
         });
         Ok(result)
     }
 
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
@@ -1581,8 +1734,20 @@ impl CodeAnalyzer {
             next_cursor,
         );
 
-        let mut result = CallToolResult::success(vec![Content::text(final_text.clone())])
-            .with_meta(Some(no_cache_meta()));
+        // Record cache tier in span
+        tracing::Span::current().record("cache_tier", file_cache_hit.as_str());
+
+        // Add content_hash to _meta
+        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+        let mut meta = no_cache_meta().0;
+        meta.insert(
+            "content_hash".to_string(),
+            serde_json::Value::String(content_hash),
+        );
+        let meta = rmcp::model::Meta(meta);
+
+        let mut result =
+            CallToolResult::success(vec![Content::text(final_text.clone())]).with_meta(Some(meta));
         let structured = serde_json::to_value(&response_output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -1597,14 +1762,16 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(file_cache_hit),
+            cache_hit: Some(file_cache_hit != CacheTier::Miss),
+            cache_write_failure: None,
+            cache_tier: Some(file_cache_hit.as_str()),
             exit_code: None,
             timed_out: false,
         });
         Ok(result)
     }
 
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, symbol = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, symbol = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
@@ -1783,8 +1950,20 @@ impl CodeAnalyzer {
             };
 
             let final_text = output.formatted.clone();
+
+            // Record cache tier in span
+            tracing::Span::current().record("cache_tier", "Miss");
+
+            // Add content_hash to _meta
+            let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+            let mut meta = no_cache_meta().0;
+            meta.insert(
+                "content_hash".to_string(),
+                serde_json::Value::String(content_hash),
+            );
+
             let mut result = CallToolResult::success(vec![Content::text(final_text.clone())])
-                .with_meta(Some(no_cache_meta()));
+                .with_meta(Some(Meta(meta)));
             let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
             result.structured_content = Some(structured);
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -1799,7 +1978,9 @@ impl CodeAnalyzer {
                 error_type: None,
                 session_id: sid,
                 seq: Some(seq),
-                cache_hit: None,
+                cache_hit: Some(false),
+                cache_tier: Some(CacheTier::Miss.as_str()),
+                cache_write_failure: None,
                 exit_code: None,
                 timed_out: false,
             });
@@ -2010,8 +2191,19 @@ impl CodeAnalyzer {
             final_text.push_str(&cursor);
         }
 
+        // Record cache tier in span
+        tracing::Span::current().record("cache_tier", "Miss");
+
+        // Add content_hash to _meta
+        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+        let mut meta = no_cache_meta().0;
+        meta.insert(
+            "content_hash".to_string(),
+            serde_json::Value::String(content_hash),
+        );
+
         let mut result = CallToolResult::success(vec![Content::text(final_text.clone())])
-            .with_meta(Some(no_cache_meta()));
+            .with_meta(Some(Meta(meta)));
         // Only include def_use_sites in structuredContent when in DefUse mode.
         // In Callers/Callees modes, clearing the vec prevents large def-use
         // payloads from leaking into paginated non-def-use responses.
@@ -2032,14 +2224,16 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: None,
+            cache_hit: Some(false),
+            cache_tier: Some(CacheTier::Miss.as_str()),
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
         });
         Ok(result)
     }
 
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
@@ -2111,6 +2305,8 @@ impl CodeAnalyzer {
                 session_id: sid.clone(),
                 seq: Some(seq),
                 cache_hit: None,
+                cache_write_failure: None,
+                cache_tier: None,
                 exit_code: None,
                 timed_out: false,
             });
@@ -2273,8 +2469,25 @@ impl CodeAnalyzer {
         };
 
         let text = format_module_info(&module_info);
-        let mut result = CallToolResult::success(vec![Content::text(text.clone())])
-            .with_meta(Some(no_cache_meta()));
+
+        // Record cache tier in span
+        let module_tier = if module_cache_hit {
+            CacheTier::L1Memory
+        } else {
+            CacheTier::Miss
+        };
+        tracing::Span::current().record("cache_tier", module_tier.as_str());
+
+        // Add content_hash to _meta
+        let content_hash = format!("{}", blake3::hash(text.as_bytes()));
+        let mut meta = no_cache_meta().0;
+        meta.insert(
+            "content_hash".to_string(),
+            serde_json::Value::String(content_hash),
+        );
+
+        let mut result =
+            CallToolResult::success(vec![Content::text(text.clone())]).with_meta(Some(Meta(meta)));
         let structured = match serde_json::to_value(&module_info).map_err(|e| {
             ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2298,7 +2511,9 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(module_cache_hit),
+            cache_hit: Some(module_tier != CacheTier::Miss),
+            cache_tier: Some(module_tier.as_str()),
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
         });
@@ -2388,6 +2603,8 @@ impl CodeAnalyzer {
                 session_id: sid.clone(),
                 seq: Some(seq),
                 cache_hit: None,
+                cache_write_failure: None,
+                cache_tier: None,
                 exit_code: None,
                 timed_out: false,
             });
@@ -2426,6 +2643,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2455,6 +2674,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2484,6 +2705,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2528,6 +2751,8 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: None,
+            cache_write_failure: None,
+            cache_tier: None,
             exit_code: None,
             timed_out: false,
         });
@@ -2617,6 +2842,8 @@ impl CodeAnalyzer {
                 session_id: sid.clone(),
                 seq: Some(seq),
                 cache_hit: None,
+                cache_write_failure: None,
+                cache_tier: None,
                 exit_code: None,
                 timed_out: false,
             });
@@ -2656,6 +2883,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2685,6 +2914,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2716,6 +2947,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2745,6 +2978,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2774,6 +3009,8 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code: None,
                     timed_out: false,
                 });
@@ -2821,6 +3058,8 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: None,
+            cache_write_failure: None,
+            cache_tier: None,
             exit_code: None,
             timed_out: false,
         });
@@ -2919,55 +3158,24 @@ impl CodeAnalyzer {
         let timeout_secs = params.timeout_secs;
 
         // Determine cache key and whether to use cache
-        let cache_key = (
+        let _cache_key = (
             command.clone(),
             working_dir_path
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
         );
-        let use_cache = params.cache.unwrap_or(true) && params.stdin.is_none();
-
-        // Check if result is already cached (for metrics)
-        let was_cached = if use_cache {
-            self.exec_cache.contains_key(&cache_key)
-        } else {
-            false
-        };
-
-        // Execute command with caching
-        let output = if use_cache {
-            self.exec_cache
-                .get_with(cache_key.clone(), async {
-                    run_exec_impl(
-                        command.clone(),
-                        working_dir_path.clone(),
-                        timeout_secs,
-                        params.memory_limit_mb,
-                        params.cpu_limit_secs,
-                        params.stdin.clone(),
-                        seq,
-                    )
-                    .await
-                })
-                .await
-        } else {
-            run_exec_impl(
-                command.clone(),
-                working_dir_path.clone(),
-                timeout_secs,
-                params.memory_limit_mb,
-                params.cpu_limit_secs,
-                params.stdin.clone(),
-                seq,
-            )
-            .await
-        };
-
-        // Invalidate cache entry if command failed (non-zero exit)
-        if use_cache && output.exit_code.map(|c| c != 0).unwrap_or(false) {
-            self.exec_cache.invalidate(&cache_key).await;
-        }
+        // Execute command (caching disabled; explicit opt-in via cache=true not implemented)
+        let output = run_exec_impl(
+            command.clone(),
+            working_dir_path.clone(),
+            timeout_secs,
+            params.memory_limit_mb,
+            params.cpu_limit_secs,
+            params.stdin.clone(),
+            seq,
+        )
+        .await;
 
         let exit_code = output.exit_code;
         let timed_out = output.timed_out;
@@ -3043,7 +3251,9 @@ impl CodeAnalyzer {
                     error_type: Some("internal_error".to_string()),
                     session_id: sid.clone(),
                     seq: Some(seq),
-                    cache_hit: Some(was_cached),
+                    cache_hit: Some(false),
+                    cache_write_failure: None,
+                    cache_tier: None,
                     exit_code,
                     timed_out,
                 });
@@ -3066,7 +3276,9 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(was_cached),
+            cache_hit: Some(false),
+            cache_write_failure: None,
+            cache_tier: None,
             exit_code,
             timed_out,
         });
@@ -3827,8 +4039,8 @@ mod tests {
         let (_out2, hit2) = analyzer.handle_overview_mode(&params, ct2).await.unwrap();
 
         // Assert
-        assert!(!hit1, "first call must be a cache miss");
-        assert!(hit2, "second call must be a cache hit");
+        assert_eq!(hit1, CacheTier::Miss, "first call must be a cache miss");
+        assert_eq!(hit2, CacheTier::L1Memory, "second call must be a cache hit");
     }
 
     #[tokio::test]

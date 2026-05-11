@@ -64,7 +64,7 @@ pub enum AnalyzeError {
 }
 
 /// Result of directory analysis containing both formatted output and file data.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[non_exhaustive]
 pub struct AnalysisOutput {
@@ -80,10 +80,12 @@ pub struct AnalysisOutput {
     pub files: Vec<FileInfo>,
     /// Walk entries used internally for summary generation; not serialized.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub entries: Vec<WalkEntry>,
     /// Subtree file counts computed from an unbounded walk; used by `format_summary`; not serialized.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub subtree_counts: Option<Vec<(std::path::PathBuf, usize)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,7 +99,7 @@ pub struct AnalysisOutput {
 }
 
 /// Result of file-level semantic analysis.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[non_exhaustive]
 pub struct FileAnalysisOutput {
@@ -429,7 +431,7 @@ pub struct CallChainEntry {
 }
 
 /// Result of focused symbol analysis.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[non_exhaustive]
 pub struct FocusedAnalysisOutput {
@@ -449,26 +451,32 @@ pub struct FocusedAnalysisOutput {
     /// Production caller chains (partitioned from incoming chains, excluding test callers).
     /// Not serialized; used for pagination in lib.rs.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub prod_chains: Vec<InternalCallChain>,
     /// Test caller chains. Not serialized; used for pagination summary in lib.rs.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub test_chains: Vec<InternalCallChain>,
     /// Outgoing (callee) chains. Not serialized; used for pagination in lib.rs.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub outgoing_chains: Vec<InternalCallChain>,
     /// Number of definitions for the symbol. Not serialized; used for pagination headers.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub def_count: usize,
     /// Total unique callers before `impl_only` filter. Not serialized; used for FILTER header.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub unfiltered_caller_count: usize,
     /// Unique callers after `impl_only` filter. Not serialized; used for FILTER header.
     #[serde(skip)]
+    #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub impl_trait_caller_count: usize,
     /// Direct (depth-1) production callers. `follow_depth` does not affect this field.

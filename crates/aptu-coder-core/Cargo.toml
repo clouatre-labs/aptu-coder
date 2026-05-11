@@ -40,6 +40,8 @@ tree-sitter = { workspace = true }
 rayon = { workspace = true }
 ignore = { workspace = true }
 lru = { workspace = true }
+blake3 = { workspace = true }
+snap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = { workspace = true }

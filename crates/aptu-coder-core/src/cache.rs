@@ -10,11 +10,32 @@ use crate::traversal::WalkEntry;
 use crate::types::AnalysisMode;
 use lru::LruCache;
 use rayon::prelude::*;
+use serde::{Serialize, de::DeserializeOwned};
 use std::num::NonZeroUsize;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use tracing::{debug, instrument};
+use tempfile::NamedTempFile;
+use tracing::{debug, error, instrument, warn};
+
+/// Indicates which cache tier served the result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheTier {
+    L1Memory,
+    L2Disk,
+    Miss,
+}
+
+impl CacheTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CacheTier::L1Memory => "l1_memory",
+            CacheTier::L2Disk => "l2_disk",
+            CacheTier::Miss => "miss",
+        }
+    }
+}
 
 /// Cache key combining path, modification time, and analysis mode.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -353,5 +374,270 @@ mod tests {
 
         // Assert
         assert_eq!(cache.dir_capacity, 7);
+    }
+}
+
+/// Persistent content-addressable disk cache for analyze_* tools.
+/// All methods are infallible from the caller's perspective: errors are silently dropped.
+/// Number of consecutive L2 write failures that triggers an `error!` log escalation.
+/// Below this threshold each failure logs at `warn!`. At or above it the cache is
+/// considered degraded and a single `error!` is emitted so operators are alerted
+/// without flooding logs on a sustained disk-full condition.
+const DISK_CACHE_DEGRADED_THRESHOLD: u64 = 3;
+
+pub struct DiskCache {
+    base: std::path::PathBuf,
+    disabled: bool,
+    /// Counts write failures since last drain. Incremented inside `put` on any I/O error.
+    write_failures: std::sync::atomic::AtomicU64,
+    /// Cumulative write failures across all drains. Never reset; used for threshold checks.
+    total_write_failures: std::sync::atomic::AtomicU64,
+}
+
+impl DiskCache {
+    /// Returns the number of write failures accumulated since the last call and resets the
+    /// per-drain counter. The cumulative `total_write_failures` is never reset.
+    pub fn drain_write_failures(&self) -> u64 {
+        self.write_failures
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns true when cumulative write failures have reached `DISK_CACHE_DEGRADED_THRESHOLD`.
+    /// Callers can use this to emit a degraded health signal without polling the counter.
+    pub fn is_degraded(&self) -> bool {
+        self.total_write_failures
+            .load(std::sync::atomic::Ordering::Relaxed)
+            >= DISK_CACHE_DEGRADED_THRESHOLD
+    }
+}
+
+impl DiskCache {
+    /// Creates the cache directory (mode 0700) and returns a new instance.
+    /// If `disabled` is true, or if directory creation fails, all operations are no-ops.
+    pub fn new(base: std::path::PathBuf, disabled: bool) -> Self {
+        if disabled {
+            return Self {
+                base,
+                disabled: true,
+                write_failures: std::sync::atomic::AtomicU64::new(0),
+                total_write_failures: std::sync::atomic::AtomicU64::new(0),
+            };
+        }
+        if let Err(e) = std::fs::create_dir_all(&base) {
+            warn!(path = %base.display(), error = %e, "disk cache disabled: failed to create cache directory");
+            return Self {
+                base,
+                disabled: true,
+                write_failures: std::sync::atomic::AtomicU64::new(0),
+                total_write_failures: std::sync::atomic::AtomicU64::new(0),
+            };
+        }
+        if let Err(e) = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)) {
+            warn!(path = %base.display(), error = %e, "disk cache: failed to set directory permissions to 0700");
+        }
+        Self {
+            base,
+            disabled: false,
+            write_failures: std::sync::atomic::AtomicU64::new(0),
+            total_write_failures: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    pub fn entry_path(&self, tool: &str, key: &blake3::Hash) -> std::path::PathBuf {
+        let hex = format!("{}", key);
+        self.base
+            .join(tool)
+            .join(&hex[..2])
+            .join(format!("{}.json.snap", hex))
+    }
+
+    /// Returns None if entry is absent or corrupt. Never propagates errors.
+    pub fn get<T: DeserializeOwned>(&self, tool: &str, key: &blake3::Hash) -> Option<T> {
+        if self.disabled {
+            return None;
+        }
+        let path = self.entry_path(tool, key);
+        let compressed = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => return None,
+        };
+        let bytes = match snap::raw::Decoder::new().decompress_vec(&compressed) {
+            Ok(b) => b,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache decompression failed");
+                return None;
+            }
+        };
+        match serde_json::from_slice(&bytes) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache deserialization failed");
+                None
+            }
+        }
+    }
+
+    /// Atomic write via NamedTempFile::persist (rename(2)). Silently drops all errors.
+    pub fn put<T: Serialize>(&self, tool: &str, key: &blake3::Hash, value: &T) {
+        if self.disabled {
+            return;
+        }
+        let path = self.entry_path(tool, key);
+        let dir = match path.parent() {
+            Some(d) => d.to_path_buf(),
+            None => return,
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            warn!(tool, error = %e, "disk cache: failed to create cache directory");
+            self.record_write_failure();
+            return;
+        }
+        let bytes = match serde_json::to_vec(value) {
+            Ok(b) => b,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache serialization failed");
+                return;
+            }
+        };
+        let compressed = match snap::raw::Encoder::new().compress_vec(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                debug!(tool, error = %e, "disk cache compression failed");
+                return;
+            }
+        };
+        let mut tmp = match NamedTempFile::new_in(&dir) {
+            Ok(f) => f,
+            Err(e) => {
+                warn!(tool, error = %e, "disk cache: failed to create temp file");
+                self.record_write_failure();
+                return;
+            }
+        };
+        use std::io::Write;
+        if let Err(e) = tmp.write_all(&compressed) {
+            warn!(tool, error = %e, "disk cache: write failed");
+            self.record_write_failure();
+            return;
+        }
+        if let Err(e) = tmp.persist(&path) {
+            warn!(tool, error = %e, "disk cache: atomic rename failed");
+            self.record_write_failure();
+        }
+    }
+
+    /// Increments both the per-drain and cumulative failure counters. Escalates to `error!`
+    /// once cumulative failures reach `DISK_CACHE_DEGRADED_THRESHOLD` so a sustained
+    /// disk-full or permission problem surfaces above the noise of individual `warn!` entries.
+    fn record_write_failure(&self) {
+        self.write_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let total = self
+            .total_write_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if total == DISK_CACHE_DEGRADED_THRESHOLD {
+            error!(
+                path = %self.base.display(),
+                total,
+                threshold = DISK_CACHE_DEGRADED_THRESHOLD,
+                "disk cache is degraded: consecutive write failures have reached the alert threshold; \
+                 check disk space and permissions at the cache directory"
+            );
+        }
+    }
+
+    /// Removes files not accessed within retention_days. Best-effort; silently drops errors.
+    pub fn evict_stale(&self, retention_days: u64) {
+        if self.disabled {
+            return;
+        }
+        let cutoff = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(retention_days * 86_400))
+            .unwrap_or(std::time::UNIX_EPOCH);
+        let _ = evict_dir_recursive(&self.base, cutoff);
+    }
+}
+
+fn evict_dir_recursive(
+    dir: &std::path::Path,
+    cutoff: std::time::SystemTime,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let meta = entry.metadata()?;
+        let path = entry.path();
+        if meta.is_dir() {
+            let _ = evict_dir_recursive(&path, cutoff);
+        } else if meta.is_file()
+            && let Ok(mtime) = meta.modified()
+            && mtime < cutoff
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod disk_cache_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_disk_cache_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let cache1 = DiskCache::new(dir.path().to_path_buf(), false);
+        let key = blake3::hash(b"test-key");
+        let value = serde_json::json!({"result": "hello", "count": 42});
+        cache1.put("analyze_file", &key, &value);
+        let cache2 = DiskCache::new(dir.path().to_path_buf(), false);
+        let result: Option<serde_json::Value> = cache2.get("analyze_file", &key);
+        assert_eq!(result, Some(value));
+    }
+
+    #[test]
+    fn test_disk_cache_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let cache_dir = dir.path().join("analysis-cache");
+        let _cache = DiskCache::new(cache_dir.clone(), false);
+        let meta = std::fs::metadata(&cache_dir).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "cache dir must be mode 0700");
+    }
+
+    #[test]
+    fn test_disk_cache_corrupt_entry_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let cache = DiskCache::new(dir.path().to_path_buf(), false);
+        let key = blake3::hash(b"corrupt-key");
+        let path = cache.entry_path("analyze_file", &key);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"not valid snappy data").unwrap();
+        let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert!(result.is_none(), "corrupt entry must return None");
+    }
+
+    #[test]
+    fn test_disk_cache_disabled_on_dir_creation_failure() {
+        let dir = TempDir::new().unwrap();
+        // Place a regular file where DiskCache::new() would create a directory.
+        // create_dir_all fails with ENOTDIR; new() must flip disabled=true.
+        let blocked = dir.path().join("blocked");
+        std::fs::write(&blocked, b"").unwrap();
+        let cache = DiskCache::new(blocked, false);
+        // disabled=true: put is a no-op, get always returns None
+        let key = blake3::hash(b"should-not-exist");
+        cache.put("analyze_file", &key, &serde_json::json!({"x": 1}));
+        let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert!(
+            result.is_none(),
+            "cache must be disabled after dir creation failure"
+        );
+        assert!(
+            cache.disabled,
+            "disabled flag must be true after dir creation failure"
+        );
     }
 }
