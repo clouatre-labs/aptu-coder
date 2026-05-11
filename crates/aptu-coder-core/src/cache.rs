@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tempfile::NamedTempFile;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 /// Indicates which cache tier served the result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -438,7 +438,10 @@ impl DiskCache {
             Some(d) => d.to_path_buf(),
             None => return,
         };
-        let _ = std::fs::create_dir_all(&dir);
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            warn!(tool, error = %e, "disk cache: failed to create cache directory");
+            return;
+        }
         let bytes = match serde_json::to_vec(value) {
             Ok(b) => b,
             Err(e) => {
@@ -456,17 +459,17 @@ impl DiskCache {
         let mut tmp = match NamedTempFile::new_in(&dir) {
             Ok(f) => f,
             Err(e) => {
-                debug!(tool, error = %e, "disk cache tempfile creation failed");
+                warn!(tool, error = %e, "disk cache: failed to create temp file");
                 return;
             }
         };
         use std::io::Write;
         if let Err(e) = tmp.write_all(&compressed) {
-            debug!(tool, error = %e, "disk cache write failed");
+            warn!(tool, error = %e, "disk cache: write failed");
             return;
         }
         if let Err(e) = tmp.persist(&path) {
-            debug!(tool, error = %e, "disk cache persist failed");
+            warn!(tool, error = %e, "disk cache: atomic rename failed");
         }
     }
 
