@@ -3284,6 +3284,205 @@ impl CodeAnalyzer {
         });
         Ok(result)
     }
+
+    #[tool(
+        name = "remote_tree",
+        title = "Remote Tree",
+        description = "Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Example queries: List top-level files in https://github.com/org/repo; Explore the src/ directory of a GitLab project.",
+        output_schema = schema_for_type::<aptu_remote::types::RemoteTreeOutput>(),
+        annotations(
+            title = "Remote Tree",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, url = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    pub async fn remote_tree(
+        &self,
+        params: Parameters<aptu_remote::types::RemoteTreeParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "remote_tree");
+        span.record("url", &params.url);
+
+        let depth = params.depth.unwrap_or(2);
+        let output = aptu_remote::fetch_tree(
+            &params.url,
+            params.path.as_deref(),
+            params.git_ref.as_deref(),
+            depth,
+        )
+        .await;
+
+        match output {
+            Ok(tree) => {
+                let text = tree.formatted.clone();
+                let structured = match serde_json::to_value(&tree) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        span.record("error", true);
+                        span.record("error.type", "internal_error");
+                        return Ok(err_to_tool_result(ErrorData::new(
+                            rmcp::model::ErrorCode::INTERNAL_ERROR,
+                            format!("serialization failed: {e}"),
+                            Some(error_meta("internal", false, "report this as a bug")),
+                        )));
+                    }
+                };
+                let mut result = CallToolResult::success(vec![Content::text(text)])
+                    .with_meta(Some(no_cache_meta()));
+                result.structured_content = Some(structured);
+                Ok(result)
+            }
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "remote_error");
+                let (code, category, retryable, action) = match &e {
+                    aptu_remote::RemoteError::MissingGitLabToken
+                    | aptu_remote::RemoteError::MissingGitHubToken => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "auth",
+                        false,
+                        "Set GITLAB_TOKEN or GITHUB_TOKEN env var",
+                    ),
+                    aptu_remote::RemoteError::UnsupportedHost(_) => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "params",
+                        false,
+                        "Use gitlab.com or github.com URL",
+                    ),
+                    aptu_remote::RemoteError::NotFound(_) => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "params",
+                        false,
+                        "Check path and ref",
+                    ),
+                    aptu_remote::RemoteError::InvalidLineRange(_) => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "params",
+                        false,
+                        "Use format START-END e.g. 10-50",
+                    ),
+                    _ => (
+                        rmcp::model::ErrorCode::INTERNAL_ERROR,
+                        "api",
+                        true,
+                        "Retry or check token permissions",
+                    ),
+                };
+                Ok(err_to_tool_result(ErrorData::new(
+                    code,
+                    e.to_string(),
+                    Some(error_meta(category, retryable, action)),
+                )))
+            }
+        }
+    }
+
+    #[tool(
+        name = "remote_file",
+        title = "Remote File",
+        description = "Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Supports optional line range slicing (START-END format). Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
+        output_schema = schema_for_type::<aptu_remote::types::RemoteFileOutput>(),
+        annotations(
+            title = "Remote File",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, url = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    pub async fn remote_file(
+        &self,
+        params: Parameters<aptu_remote::types::RemoteFileParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let params = params.0;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "remote_file");
+        span.record("url", &params.url);
+
+        let output = aptu_remote::fetch_file(
+            &params.url,
+            &params.path,
+            params.git_ref.as_deref(),
+            params.line_range.as_deref(),
+        )
+        .await;
+
+        match output {
+            Ok(file) => {
+                let text = file.content.clone();
+                let structured = match serde_json::to_value(&file) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        span.record("error", true);
+                        span.record("error.type", "internal_error");
+                        return Ok(err_to_tool_result(ErrorData::new(
+                            rmcp::model::ErrorCode::INTERNAL_ERROR,
+                            format!("serialization failed: {e}"),
+                            Some(error_meta("internal", false, "report this as a bug")),
+                        )));
+                    }
+                };
+                let mut result = CallToolResult::success(vec![Content::text(text)])
+                    .with_meta(Some(no_cache_meta()));
+                result.structured_content = Some(structured);
+                Ok(result)
+            }
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "remote_error");
+                let (code, category, retryable, action) = match &e {
+                    aptu_remote::RemoteError::MissingGitLabToken
+                    | aptu_remote::RemoteError::MissingGitHubToken => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "auth",
+                        false,
+                        "Set GITLAB_TOKEN or GITHUB_TOKEN env var",
+                    ),
+                    aptu_remote::RemoteError::UnsupportedHost(_) => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "params",
+                        false,
+                        "Use gitlab.com or github.com URL",
+                    ),
+                    aptu_remote::RemoteError::NotFound(_) => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "params",
+                        false,
+                        "Check path and ref",
+                    ),
+                    aptu_remote::RemoteError::InvalidLineRange(_) => (
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        "params",
+                        false,
+                        "Use format START-END e.g. 10-50",
+                    ),
+                    _ => (
+                        rmcp::model::ErrorCode::INTERNAL_ERROR,
+                        "api",
+                        true,
+                        "Retry or check token permissions",
+                    ),
+                };
+                Ok(err_to_tool_result(ErrorData::new(
+                    code,
+                    e.to_string(),
+                    Some(error_meta(category, retryable, action)),
+                )))
+            }
+        }
+    }
 }
 
 /// Executes a shell command and returns the output.
@@ -3674,7 +3873,7 @@ impl ServerHandler for CodeAnalyzer {
         // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
         // a filtered `tools` array in the API call, or for clients to use tool annotations
         // (readOnlyHint/destructiveHint) to apply their own policy.
-        // Profiles: "edit" (3 tools), "analyze" (5 tools), absent/unknown (all 7 tools).
+        // Profiles: "edit" (3 tools), "analyze" (5 tools), absent/unknown (all 9 tools).
         // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock
@@ -3696,11 +3895,15 @@ impl ServerHandler for CodeAnalyzer {
                     router.disable_route("analyze_file");
                     router.disable_route("analyze_module");
                     router.disable_route("analyze_symbol");
+                    router.disable_route("remote_tree");
+                    router.disable_route("remote_file");
                 }
                 "analyze" => {
                     // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, exec_command
                     router.disable_route("edit_replace");
                     router.disable_route("edit_overwrite");
+                    router.disable_route("remote_tree");
+                    router.disable_route("remote_file");
                 }
                 _ => {
                     // Unknown profile: leave all tools enabled (lenient fallback)

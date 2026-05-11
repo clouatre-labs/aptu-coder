@@ -7,7 +7,7 @@ use serde_json::Value;
 fn test_all_tools_have_correct_annotations() {
     let tools = CodeAnalyzer::list_tools();
 
-    assert_eq!(tools.len(), 7, "expected 7 registered tools");
+    assert_eq!(tools.len(), 9, "expected 9 registered tools");
 
     let expected_names = [
         "analyze_directory",
@@ -17,6 +17,8 @@ fn test_all_tools_have_correct_annotations() {
         "edit_overwrite",
         "edit_replace",
         "exec_command",
+        "remote_tree",
+        "remote_file",
     ];
 
     for tool in &tools {
@@ -73,8 +75,8 @@ fn test_all_tools_have_correct_annotations() {
             );
         }
 
-        // exec_command has open_world_hint=true; others have open_world_hint=false
-        if name == "exec_command" {
+        // exec_command, remote_file, and remote_tree have open_world_hint=true; others have open_world_hint=false
+        if name == "exec_command" || name == "remote_file" || name == "remote_tree" {
             assert_eq!(
                 annotations.open_world_hint,
                 Some(true),

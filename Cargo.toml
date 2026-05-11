@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/aptu-coder-core", "crates/aptu-coder"]
+members = ["crates/aptu-coder-core", "crates/aptu-coder", "crates/aptu-remote"]
 exclude = ["fuzz"]
 resolver = "2"
 
@@ -47,6 +47,9 @@ opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "metrics"] }
 opentelemetry-otlp = { version = "0.31", features = ["http-proto", "reqwest-client"] }
 opentelemetry-appender-tracing = { version = "0.31", features = ["log"] }
 tracing-opentelemetry = "0.32"
+gitlab = "0.1811.0"
+octocrab = "0.50.0"
+url = "2"
 
 [profile.release]
 opt-level = "z"

@@ -303,10 +303,10 @@ async fn test_no_profile_tool_count() {
     let tools = &resp["result"]["tools"];
     let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
 
-    // Assert: no profile should enable all 7 tools
+    // Assert: no profile should enable all 9 tools
     assert_eq!(
-        tool_count, 7,
-        "no profile should enable all 7 tools, got: {}",
+        tool_count, 9,
+        "no profile should enable all 9 tools, got: {}",
         tool_count
     );
 }
@@ -324,10 +324,10 @@ async fn test_unknown_profile_tool_count() {
     let tools = &resp["result"]["tools"];
     let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
 
-    // Assert: unknown profile should enable all 7 tools (lenient fallback)
+    // Assert: unknown profile should enable all 9 tools (lenient fallback)
     assert_eq!(
-        tool_count, 7,
-        "unknown profile should enable all 7 tools, got: {}",
+        tool_count, 9,
+        "unknown profile should enable all 9 tools, got: {}",
         tool_count
     );
 }
