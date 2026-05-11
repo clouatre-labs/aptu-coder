@@ -1430,6 +1430,7 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: Some(dir_cache_hit != CacheTier::Miss),
+            cache_write_failure: None,
             cache_tier: Some(dir_cache_hit.as_str()),
             exit_code: None,
             timed_out: false,
@@ -1696,6 +1697,7 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: Some(file_cache_hit != CacheTier::Miss),
+            cache_write_failure: None,
             cache_tier: Some(file_cache_hit.as_str()),
             exit_code: None,
             timed_out: false,
@@ -1910,8 +1912,9 @@ impl CodeAnalyzer {
                 error_type: None,
                 session_id: sid,
                 seq: Some(seq),
-                cache_hit: None,
-                cache_tier: Some("Miss"),
+                cache_hit: Some(false),
+                cache_tier: Some(CacheTier::Miss.as_str()),
+                cache_write_failure: None,
                 exit_code: None,
                 timed_out: false,
             });
@@ -2155,8 +2158,9 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: None,
-            cache_tier: Some("Miss"),
+            cache_hit: Some(false),
+            cache_tier: Some(CacheTier::Miss.as_str()),
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
         });
@@ -2235,6 +2239,7 @@ impl CodeAnalyzer {
                 session_id: sid.clone(),
                 seq: Some(seq),
                 cache_hit: None,
+                cache_write_failure: None,
                 cache_tier: None,
                 exit_code: None,
                 timed_out: false,
@@ -2400,10 +2405,12 @@ impl CodeAnalyzer {
         let text = format_module_info(&module_info);
 
         // Record cache tier in span
-        tracing::Span::current().record(
-            "cache_tier",
-            if module_cache_hit { "L1Memory" } else { "Miss" },
-        );
+        let module_tier = if module_cache_hit {
+            CacheTier::L1Memory
+        } else {
+            CacheTier::Miss
+        };
+        tracing::Span::current().record("cache_tier", module_tier.as_str());
 
         // Add content_hash to _meta
         let content_hash = format!("{}", blake3::hash(text.as_bytes()));
@@ -2438,12 +2445,9 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(module_cache_hit),
-            cache_tier: if module_cache_hit {
-                Some("L1Memory")
-            } else {
-                Some("Miss")
-            },
+            cache_hit: Some(module_tier != CacheTier::Miss),
+            cache_tier: Some(module_tier.as_str()),
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
         });
@@ -2533,6 +2537,7 @@ impl CodeAnalyzer {
                 session_id: sid.clone(),
                 seq: Some(seq),
                 cache_hit: None,
+                cache_write_failure: None,
                 cache_tier: None,
                 exit_code: None,
                 timed_out: false,
@@ -2572,6 +2577,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2602,6 +2608,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2632,6 +2639,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2677,6 +2685,7 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: None,
+            cache_write_failure: None,
             cache_tier: None,
             exit_code: None,
             timed_out: false,
@@ -2767,6 +2776,7 @@ impl CodeAnalyzer {
                 session_id: sid.clone(),
                 seq: Some(seq),
                 cache_hit: None,
+                cache_write_failure: None,
                 cache_tier: None,
                 exit_code: None,
                 timed_out: false,
@@ -2807,6 +2817,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2837,6 +2848,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2869,6 +2881,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2899,6 +2912,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2929,6 +2943,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: None,
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
@@ -2977,6 +2992,7 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: None,
+            cache_write_failure: None,
             cache_tier: None,
             exit_code: None,
             timed_out: false,
@@ -3170,6 +3186,7 @@ impl CodeAnalyzer {
                     session_id: sid.clone(),
                     seq: Some(seq),
                     cache_hit: Some(false),
+                    cache_write_failure: None,
                     cache_tier: None,
                     exit_code,
                     timed_out,
@@ -3194,6 +3211,7 @@ impl CodeAnalyzer {
             session_id: sid,
             seq: Some(seq),
             cache_hit: Some(false),
+            cache_write_failure: None,
             cache_tier: None,
             exit_code,
             timed_out,

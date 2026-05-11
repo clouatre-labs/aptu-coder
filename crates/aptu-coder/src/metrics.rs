@@ -34,6 +34,10 @@ pub struct MetricEvent {
     pub cache_hit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_tier: Option<&'static str>,
+    /// Set to Some(true) when an L2 disk cache write fails (dir, tempfile, write, or rename).
+    /// Drives the cache_write_failures_total OTEL counter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_failure: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -469,6 +473,7 @@ mod tests {
             session_id: None,
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -522,6 +527,7 @@ mod tests {
             session_id: None,
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -546,6 +552,7 @@ mod tests {
             session_id: None,
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -571,6 +578,7 @@ mod tests {
             session_id: Some("1742468880123-42".to_string()),
             seq: Some(5),
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -609,6 +617,7 @@ mod tests {
             session_id: Some("test-session-123".to_string()),
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -626,6 +635,7 @@ mod tests {
             session_id: Some("test-session-123".to_string()),
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -696,6 +706,7 @@ mod tests {
             session_id: Some("test-session-456".to_string()),
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -753,6 +764,7 @@ mod tests {
             session_id: Some(marker.to_string()),
             seq: None,
             cache_hit: None,
+            cache_write_failure: None,
             exit_code: None,
             timed_out: false,
             cache_tier: None,
@@ -803,6 +815,7 @@ fn record_otel_metrics(event: &MetricEvent) {
     static DURATION_HISTOGRAM: OnceLock<Histogram<f64>> = OnceLock::new();
     static CALL_COUNTER: OnceLock<Counter<u64>> = OnceLock::new();
     static CACHE_HITS_COUNTER: OnceLock<Counter<u64>> = OnceLock::new();
+    static CACHE_WRITE_FAILURES_COUNTER: OnceLock<Counter<u64>> = OnceLock::new();
 
     let histogram = DURATION_HISTOGRAM.get_or_init(|| {
         global::meter("aptu-coder")
@@ -823,7 +836,16 @@ fn record_otel_metrics(event: &MetricEvent) {
     let cache_hits_counter = CACHE_HITS_COUNTER.get_or_init(|| {
         global::meter("aptu-coder")
             .u64_counter("mcp.server.tool.cache_hits_total")
-            .with_description("Number of tool responses served from cache")
+            .with_description("Number of tool responses served from cache (l1_memory or l2_disk)")
+            .build()
+    });
+
+    let cache_write_failures_counter = CACHE_WRITE_FAILURES_COUNTER.get_or_init(|| {
+        global::meter("aptu-coder")
+            .u64_counter("mcp.server.tool.cache_write_failures_total")
+            .with_description(
+                "Number of L2 disk cache write failures (dir, tempfile, write, rename)",
+            )
             .build()
     });
 
@@ -840,7 +862,18 @@ fn record_otel_metrics(event: &MetricEvent) {
     counter.add(1, &attributes);
 
     if event.cache_hit == Some(true) {
+        let tier = event.cache_tier.unwrap_or("unknown");
         cache_hits_counter.add(
+            1,
+            &[
+                KeyValue::new("gen_ai.tool.name", event.tool.to_string()),
+                KeyValue::new("cache_tier", tier.to_string()),
+            ],
+        );
+    }
+
+    if event.cache_write_failure == Some(true) {
+        cache_write_failures_counter.add(
             1,
             &[KeyValue::new("gen_ai.tool.name", event.tool.to_string())],
         );

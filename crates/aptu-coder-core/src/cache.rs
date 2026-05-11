@@ -382,6 +382,17 @@ mod tests {
 pub struct DiskCache {
     base: std::path::PathBuf,
     disabled: bool,
+    /// Counts L2 write failures since last drain. Incremented inside `put` on any I/O error.
+    write_failures: std::sync::atomic::AtomicU64,
+}
+
+impl DiskCache {
+    /// Returns the number of write failures accumulated since the last call and resets the counter.
+    /// Call sites use this to emit `cache_write_failure` in MetricEvent after a write-behind task.
+    pub fn drain_write_failures(&self) -> u64 {
+        self.write_failures
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 impl DiskCache {
@@ -392,6 +403,7 @@ impl DiskCache {
             return Self {
                 base,
                 disabled: true,
+                write_failures: std::sync::atomic::AtomicU64::new(0),
             };
         }
         if let Err(e) = std::fs::create_dir_all(&base) {
@@ -399,6 +411,7 @@ impl DiskCache {
             return Self {
                 base,
                 disabled: true,
+                write_failures: std::sync::atomic::AtomicU64::new(0),
             };
         }
         if let Err(e) = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)) {
@@ -407,6 +420,7 @@ impl DiskCache {
         Self {
             base,
             disabled: false,
+            write_failures: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -456,6 +470,8 @@ impl DiskCache {
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             warn!(tool, error = %e, "disk cache: failed to create cache directory");
+            self.write_failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         let bytes = match serde_json::to_vec(value) {
@@ -476,16 +492,22 @@ impl DiskCache {
             Ok(f) => f,
             Err(e) => {
                 warn!(tool, error = %e, "disk cache: failed to create temp file");
+                self.write_failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return;
             }
         };
         use std::io::Write;
         if let Err(e) = tmp.write_all(&compressed) {
             warn!(tool, error = %e, "disk cache: write failed");
+            self.write_failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         if let Err(e) = tmp.persist(&path) {
             warn!(tool, error = %e, "disk cache: atomic rename failed");
+            self.write_failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
