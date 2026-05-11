@@ -3288,7 +3288,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "remote_tree",
         title = "Remote Tree",
-        description = "Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Example queries: List top-level files in https://github.com/org/repo; Explore the src/ directory of a GitLab project.",
+        description = "Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories with extension counts and individual entries. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, or the path or ref does not exist. Use remote_file to read a specific file from the same repository. Example queries: List top-level files in https://github.com/org/repo; Show the src/ directory at a specific tag in https://gitlab.com/org/repo.",
         output_schema = schema_for_type::<aptu_coder_remote::types::RemoteTreeOutput>(),
         annotations(
             title = "Remote Tree",
@@ -3388,7 +3388,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "remote_file",
         title = "Remote File",
-        description = "Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Supports optional line range slicing (START-END format). Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
+        description = "Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Returns file content, size_bytes, resolved_ref, and path. Supports optional line range slicing (START-END format) to keep context cost low. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, the file or ref does not exist, or line_range format is invalid. Use remote_tree to discover paths in the same repository. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
         output_schema = schema_for_type::<aptu_coder_remote::types::RemoteFileOutput>(),
         annotations(
             title = "Remote File",
