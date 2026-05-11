@@ -551,4 +551,20 @@ mod disk_cache_tests {
         let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
         assert!(result.is_none(), "corrupt entry must return None");
     }
+
+    #[test]
+    fn test_disk_cache_disabled_on_dir_creation_failure() {
+        let dir = TempDir::new().unwrap();
+        // Place a regular file where DiskCache::new() would create a directory.
+        // create_dir_all fails with ENOTDIR; new() must flip disabled=true.
+        let blocked = dir.path().join("blocked");
+        std::fs::write(&blocked, b"").unwrap();
+        let cache = DiskCache::new(blocked, false);
+        // disabled=true: put is a no-op, get always returns None
+        let key = blake3::hash(b"should-not-exist");
+        cache.put("analyze_file", &key, &serde_json::json!({"x": 1}));
+        let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert!(result.is_none(), "cache must be disabled after dir creation failure");
+        assert!(cache.disabled, "disabled flag must be true after dir creation failure");
+    }
 }
