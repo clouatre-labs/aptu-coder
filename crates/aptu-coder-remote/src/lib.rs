@@ -354,6 +354,22 @@ pub(crate) async fn gitlab_fetch_file(
 // GitHub helpers (using the `octocrab` crate)
 // ---------------------------------------------------------------------------
 
+/// Build an `Octocrab` instance. When `base_url` is `Some`, the base URI is
+/// overridden (used in tests to point at a wiremock server). The builder is
+/// fully consumed here -- no non-`Send` state leaks into the caller's async
+/// future.
+fn build_octocrab(token: &str, base_url: Option<&str>) -> Result<octocrab::Octocrab, RemoteError> {
+    let builder = octocrab::OctocrabBuilder::new().personal_token(token);
+    let builder = if let Some(url) = base_url {
+        builder
+            .base_uri(url)
+            .map_err(|e| RemoteError::Api(e.to_string()))?
+    } else {
+        builder
+    };
+    builder.build().map_err(|e| RemoteError::Api(e.to_string()))
+}
+
 /// Map an octocrab error to `RemoteError`. Checks the `status_code` on the
 /// inner `GitHubError` when the variant is `GitHub`; falls back to checking
 /// the `Display` string for "404" / "Not Found".
@@ -380,15 +396,7 @@ pub(crate) async fn github_fetch_tree(
     depth: u32,
     base_url: Option<&str>,
 ) -> Result<Vec<RemoteTreeEntry>, RemoteError> {
-    let mut builder = octocrab::OctocrabBuilder::new().personal_token(token);
-    if let Some(url) = base_url {
-        builder = builder
-            .base_uri(url)
-            .map_err(|e| RemoteError::Api(e.to_string()))?;
-    }
-    let octo = builder
-        .build()
-        .map_err(|e| RemoteError::Api(e.to_string()))?;
+    let octo = build_octocrab(token, base_url)?;
 
     let path_str = path.unwrap_or("").to_string();
     let repo_handler = octo.repos(owner, repo);
@@ -458,15 +466,7 @@ pub(crate) async fn github_fetch_file(
     git_ref: Option<&str>,
     base_url: Option<&str>,
 ) -> Result<RemoteFileOutput, RemoteError> {
-    let mut builder = octocrab::OctocrabBuilder::new().personal_token(token);
-    if let Some(url) = base_url {
-        builder = builder
-            .base_uri(url)
-            .map_err(|e| RemoteError::Api(e.to_string()))?;
-    }
-    let octo = builder
-        .build()
-        .map_err(|e| RemoteError::Api(e.to_string()))?;
+    let octo = build_octocrab(token, base_url)?;
 
     let repo_handler = octo.repos(owner, repo);
     let builder = repo_handler.get_content().path(path);
