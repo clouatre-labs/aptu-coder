@@ -20,7 +20,7 @@ pub struct RemoteTreeParams {
 }
 
 /// A single entry returned from a remote repository tree listing.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct RemoteTreeEntry {
     /// Path of the entry relative to the requested root.
     pub path: String,

@@ -580,3 +580,224 @@ fn test_build_tree_output_extension_counts() {
     assert!(out.formatted.contains("total files: 3"));
     assert_eq!(out.entries.len(), 4);
 }
+
+// ---------------------------------------------------------------------------
+// BFS depth tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_gitlab_fetch_tree_depth_zero() {
+    // depth=0 returns an empty list immediately, before any API call
+    use super::gitlab_fetch_tree;
+
+    let result = gitlab_fetch_tree("bogus.invalid", "token", "owner/repo", None, None, 0).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), vec![]);
+}
+
+#[tokio::test]
+async fn test_github_fetch_tree_depth_one_no_recursion() {
+    init_crypto();
+    use super::github_fetch_tree;
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let base_url = server.uri();
+
+    // Mock only the root path; if depth=1 recurses, it will fail
+    let src_url = format!("{base_url}/repos/owner/repo/contents/src");
+    let readme_url = format!("{base_url}/repos/owner/repo/contents/README.md");
+    Mock::given(method("GET"))
+        .and(path_regex("/repos/owner/repo/contents/?$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "name": "src",
+                "path": "src",
+                "type": "dir",
+                "size": 0,
+                "sha": "abc123",
+                "url": src_url,
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": src_url, "git": null, "html": null}
+            },
+            {
+                "name": "README.md",
+                "path": "README.md",
+                "type": "file",
+                "size": 100,
+                "sha": "def456",
+                "url": readme_url,
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": readme_url, "git": null, "html": null}
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let result = github_fetch_tree(
+        "test-token",
+        "owner",
+        "repo",
+        None,
+        None,
+        1,
+        Some(&base_url),
+    )
+    .await;
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    let entries = result.unwrap();
+    // depth=1 should return only immediate children (2 items)
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.path == "src" && e.entry_type == "tree")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.path == "README.md" && e.entry_type == "blob")
+    );
+}
+
+#[tokio::test]
+async fn test_github_fetch_tree_depth_three_stops_at_depth() {
+    init_crypto();
+    use super::github_fetch_tree;
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let base_url = server.uri();
+
+    // Mock responses for root, level 1, and level 2 paths
+    // Root: contains "src" directory
+    Mock::given(method("GET"))
+        .and(path_regex("/repos/owner/repo/contents/?$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "name": "src",
+                "path": "src",
+                "type": "dir",
+                "size": 0,
+                "sha": "abc123",
+                "url": format!("{base_url}/repos/owner/repo/contents/src"),
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": format!("{base_url}/repos/owner/repo/contents/src"), "git": null, "html": null}
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    // Level 1: src contains "main.rs" and "utils" directory
+    Mock::given(method("GET"))
+        .and(path_regex("/repos/owner/repo/contents/src$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "name": "main.rs",
+                "path": "src/main.rs",
+                "type": "file",
+                "size": 100,
+                "sha": "def456",
+                "url": format!("{base_url}/repos/owner/repo/contents/src/main.rs"),
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": format!("{base_url}/repos/owner/repo/contents/src/main.rs"), "git": null, "html": null}
+            },
+            {
+                "name": "utils",
+                "path": "src/utils",
+                "type": "dir",
+                "size": 0,
+                "sha": "ghi789",
+                "url": format!("{base_url}/repos/owner/repo/contents/src/utils"),
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": format!("{base_url}/repos/owner/repo/contents/src/utils"), "git": null, "html": null}
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    // Level 2: src/utils contains "helper.rs"
+    Mock::given(method("GET"))
+        .and(path_regex("/repos/owner/repo/contents/src/utils$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "name": "helper.rs",
+                "path": "src/utils/helper.rs",
+                "type": "file",
+                "size": 50,
+                "sha": "jkl012",
+                "url": format!("{base_url}/repos/owner/repo/contents/src/utils/helper.rs"),
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": format!("{base_url}/repos/owner/repo/contents/src/utils/helper.rs"), "git": null, "html": null}
+            },
+            {
+                "name": "nested",
+                "path": "src/utils/nested",
+                "type": "dir",
+                "size": 0,
+                "sha": "mno345",
+                "url": format!("{base_url}/repos/owner/repo/contents/src/utils/nested"),
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": format!("{base_url}/repos/owner/repo/contents/src/utils/nested"), "git": null, "html": null}
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let result = github_fetch_tree(
+        "test-token",
+        "owner",
+        "repo",
+        None,
+        None,
+        3,
+        Some(&base_url),
+    )
+    .await;
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    let entries = result.unwrap();
+
+    // depth=3 should return:
+    // Level 0: src
+    // Level 1: src/main.rs, src/utils
+    // Level 2: src/utils/helper.rs, src/utils/nested
+    // Total: 5 entries
+    assert_eq!(
+        entries.len(),
+        5,
+        "expected 5 entries, got {}",
+        entries.len()
+    );
+
+    // Verify we have entries from all three levels
+    assert!(entries.iter().any(|e| e.path == "src"));
+    assert!(entries.iter().any(|e| e.path == "src/main.rs"));
+    assert!(entries.iter().any(|e| e.path == "src/utils"));
+    assert!(entries.iter().any(|e| e.path == "src/utils/helper.rs"));
+    assert!(entries.iter().any(|e| e.path == "src/utils/nested"));
+
+    // Verify that src/utils/nested is NOT recursed into (would be level 3)
+    assert!(
+        !entries
+            .iter()
+            .any(|e| e.path.starts_with("src/utils/nested/"))
+    );
+}
