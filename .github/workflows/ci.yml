@@ -183,10 +183,10 @@ jobs:
           # aptu-coder coverage tracked but not gated (transport/logging/metrics layer)
           cargo llvm-cov report -p aptu-coder \
             --lcov --output-path lcov-mcp.info || true
-          # aptu-coder-remote coverage tracked but not gated (fetch_tree/fetch_file require
-          # live network calls; mock-free unit tests cannot reach a meaningful line threshold)
+          # aptu-coder-remote coverage with thresholds enforced
           cargo llvm-cov report -p aptu-coder-remote \
-            --lcov --output-path lcov-remote.info || true
+            --lcov --output-path lcov-remote.info \
+            --fail-under-lines 80 --fail-under-regions 70
 
   deny:
     name: Audit Dependencies

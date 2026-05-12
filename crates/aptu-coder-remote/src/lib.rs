@@ -222,7 +222,7 @@ struct GitLabTreeItem {
     path: String,
 }
 
-async fn gitlab_fetch_tree(
+pub(crate) async fn gitlab_fetch_tree(
     host: &str,
     token: &str,
     project: &str, // "owner/repo"
@@ -290,7 +290,7 @@ struct GitLabFileContent {
     size: Option<u64>,
 }
 
-async fn gitlab_fetch_file(
+pub(crate) async fn gitlab_fetch_file(
     host: &str,
     token: &str,
     project: &str,
@@ -354,7 +354,7 @@ async fn gitlab_fetch_file(
 // GitHub helpers (using the `octocrab` crate)
 // ---------------------------------------------------------------------------
 
-async fn github_fetch_tree(
+pub(crate) async fn github_fetch_tree(
     token: &str,
     owner: &str,
     repo: &str,
@@ -434,7 +434,7 @@ async fn github_fetch_tree(
     Ok(entries)
 }
 
-async fn github_fetch_file(
+pub(crate) async fn github_fetch_file(
     token: &str,
     owner: &str,
     repo: &str,
