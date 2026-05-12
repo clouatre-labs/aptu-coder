@@ -4612,3 +4612,168 @@ fn test_python_plain_function_reports_def_line() {
         "plain function should report its own line"
     );
 }
+
+// Tests for extract_module_info fast path
+
+#[test]
+fn test_extract_module_info_rust_regression() {
+    use aptu_coder_core::parser::SemanticExtractor;
+
+    let source = r#"
+pub fn hello() {
+    println!("Hello");
+}
+
+fn world() {
+    println!("World");
+}
+
+use std::collections::HashMap;
+use std::io;
+"#;
+
+    let result = SemanticExtractor::extract_module_info(source, "rust", None)
+        .expect("should extract Rust module info");
+
+    // Verify functions are extracted
+    assert_eq!(result.functions.len(), 2);
+    assert_eq!(result.functions[0].name, "hello");
+    assert_eq!(result.functions[1].name, "world");
+
+    // Verify imports are extracted (may be separate entries for each use statement)
+    assert!(result.imports.len() >= 1);
+    let all_modules: Vec<&str> = result.imports.iter().map(|i| i.module.as_str()).collect();
+    assert!(all_modules.contains(&"std"));
+
+    // Verify line count (11 lines due to leading newline in raw string)
+    assert_eq!(result.line_count, 11);
+    assert_eq!(result.language, "rust");
+}
+
+#[cfg(feature = "lang-python")]
+#[test]
+fn test_extract_module_info_python() {
+    use aptu_coder_core::parser::SemanticExtractor;
+
+    let source = r#"
+import os
+from pathlib import Path
+
+def greet(name):
+    return f"Hello, {name}"
+
+def farewell():
+    pass
+"#;
+
+    let result = SemanticExtractor::extract_module_info(source, "python", None)
+        .expect("should extract Python module info");
+
+    // Verify functions are extracted
+    assert_eq!(result.functions.len(), 2);
+    assert_eq!(result.functions[0].name, "greet");
+    assert_eq!(result.functions[1].name, "farewell");
+
+    // Verify imports are extracted (os and pathlib)
+    assert!(result.imports.len() >= 1);
+    let modules: Vec<&str> = result.imports.iter().map(|i| i.module.as_str()).collect();
+    assert!(modules.contains(&"os") || modules.contains(&"pathlib"));
+
+    // Verify language
+    assert_eq!(result.language, "python");
+}
+
+#[cfg(feature = "lang-typescript")]
+#[test]
+fn test_extract_module_info_typescript() {
+    use aptu_coder_core::parser::SemanticExtractor;
+
+    let source = r#"
+import { readFile } from 'fs';
+import * as path from 'path';
+
+export function readConfig(): void {
+    console.log('reading config');
+}
+
+function parseJson(data: string): object {
+    return JSON.parse(data);
+}
+"#;
+
+    let result = SemanticExtractor::extract_module_info(source, "typescript", None)
+        .expect("should extract TypeScript module info");
+
+    // Verify functions are extracted
+    assert_eq!(result.functions.len(), 2);
+    assert_eq!(result.functions[0].name, "readConfig");
+    assert_eq!(result.functions[1].name, "parseJson");
+
+    // Verify imports are extracted
+    assert_eq!(result.imports.len(), 2);
+
+    // Verify language
+    assert_eq!(result.language, "typescript");
+}
+
+#[test]
+fn test_extract_module_info_no_functions() {
+    use aptu_coder_core::parser::SemanticExtractor;
+
+    let source = r#"
+use std::collections::HashMap;
+use std::io::Read;
+"#;
+
+    let result = SemanticExtractor::extract_module_info(source, "rust", None)
+        .expect("should extract module info with no functions");
+
+    // Verify no functions
+    assert_eq!(result.functions.len(), 0);
+
+    // Verify imports are extracted
+    assert_eq!(result.imports.len(), 2);
+    assert_eq!(result.imports[0].module, "std::collections");
+    assert_eq!(result.imports[1].module, "std::io");
+}
+
+#[test]
+fn test_extract_module_info_no_imports() {
+    use aptu_coder_core::parser::SemanticExtractor;
+
+    let source = r#"
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+"#;
+
+    let result = SemanticExtractor::extract_module_info(source, "rust", None)
+        .expect("should extract module info with no imports");
+
+    // Verify functions are extracted
+    assert_eq!(result.functions.len(), 2);
+    assert_eq!(result.functions[0].name, "add");
+    assert_eq!(result.functions[1].name, "multiply");
+
+    // Verify no imports
+    assert_eq!(result.imports.len(), 0);
+}
+
+#[test]
+fn test_extract_module_info_empty_file() {
+    use aptu_coder_core::parser::SemanticExtractor;
+
+    let source = "";
+
+    let result = SemanticExtractor::extract_module_info(source, "rust", None)
+        .expect("should extract module info from empty file");
+
+    // Verify no functions or imports
+    assert_eq!(result.functions.len(), 0);
+    assert_eq!(result.imports.len(), 0);
+    assert_eq!(result.line_count, 0);
+}

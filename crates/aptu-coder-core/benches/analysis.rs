@@ -65,6 +65,7 @@ fn symbol_focus_benchmark(c: &mut Criterion) {
                 use_summary: false,
                 impl_only: None,
                 def_use: false,
+                parse_timeout_micros: None,
             };
 
             aptu_coder_core::analyze::analyze_focused_with_progress(path, &params, progress, ct)
@@ -244,6 +245,20 @@ fn subtree_count_overhead_1000(c: &mut Criterion) {
     drop(dir);
 }
 
+fn analyze_module_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("analyze_module");
+    group.sample_size(10);
+
+    group.bench_function("analyze_module_file_lib_rs", |b| {
+        b.iter(|| {
+            let path = std::hint::black_box("src/lib.rs");
+            aptu_coder_core::analyze::analyze_module_file(path)
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     overview_benchmark,
@@ -251,6 +266,7 @@ criterion_group!(
     symbol_focus_benchmark,
     subtree_count_overhead,
     subtree_count_overhead_500,
-    subtree_count_overhead_1000
+    subtree_count_overhead_1000,
+    analyze_module_benchmark
 );
 criterion_main!(benches);

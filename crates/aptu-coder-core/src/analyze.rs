@@ -1249,33 +1249,11 @@ pub fn analyze_module_file(path: &str) -> Result<crate::types::ModuleInfo, Analy
             ))
         })?;
 
-    let semantic = SemanticExtractor::extract(&source, language, None, None)?;
+    let mut module_info = SemanticExtractor::extract_module_info(&source, language, None)?;
+    module_info.name = name;
+    module_info.line_count = line_count;
 
-    let functions = semantic
-        .functions
-        .into_iter()
-        .map(|f| crate::types::ModuleFunctionInfo {
-            name: f.name,
-            line: f.line,
-        })
-        .collect();
-
-    let imports = semantic
-        .imports
-        .into_iter()
-        .map(|i| crate::types::ModuleImportInfo {
-            module: i.module,
-            items: i.items,
-        })
-        .collect();
-
-    Ok(crate::types::ModuleInfo {
-        name,
-        line_count,
-        language: language.to_string(),
-        functions,
-        imports,
-    })
+    Ok(module_info)
 }
 
 /// Scan a directory for files that import a given module path.

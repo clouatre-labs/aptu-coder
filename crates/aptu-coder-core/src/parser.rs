@@ -42,9 +42,9 @@ pub enum ParserError {
 #[derive(Clone, Copy)]
 struct TimeoutConfig {
     /// Absolute deadline; `None` means no timeout.
-    deadline: Option<std::time::Instant>,
+    pub deadline: Option<std::time::Instant>,
     /// The configured timeout in microseconds (used in `ParserError::Timeout`).
-    micros: u64,
+    pub micros: u64,
 }
 
 impl TimeoutConfig {
@@ -67,13 +67,13 @@ impl TimeoutConfig {
 /// Compiled tree-sitter queries for a language.
 /// Stores all query types: mandatory (element, call) and optional (import, impl, reference).
 struct CompiledQueries {
-    element: Query,
-    call: Query,
-    import: Option<Query>,
-    impl_block: Option<Query>,
-    reference: Option<Query>,
-    impl_trait: Option<Query>,
-    defuse: Option<Query>,
+    pub element: Query,
+    pub call: Query,
+    pub import: Option<Query>,
+    pub impl_block: Option<Query>,
+    pub reference: Option<Query>,
+    pub impl_trait: Option<Query>,
+    pub defuse: Option<Query>,
 }
 
 /// Build compiled queries for a given language.
@@ -603,7 +603,113 @@ impl SemanticExtractor {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Fast path for extracting module metadata: functions and imports only.
+    ///
+    /// This method is optimized for the `analyze_module` tool, which only needs function
+    /// definitions and import statements. It skips the more expensive extractors (calls,
+    /// references, impl traits) and returns a lightweight `ModuleInfo` directly.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The source code as a string
+    /// * `language` - The programming language (e.g., "rust", "python")
+    /// * `timeout` - Optional timeout configuration in microseconds
+    ///
+    /// # Returns
+    ///
+    /// A `ModuleInfo` containing the file name, line count, language, functions, and imports.
+    #[instrument(skip_all, fields(language))]
+    pub fn extract_module_info(
+        source: &str,
+        language: &str,
+        timeout_micros: Option<u64>,
+    ) -> Result<crate::types::ModuleInfo, ParserError> {
+        let tc = TimeoutConfig::new(timeout_micros);
+
+        // Check deadline at the start before any parsing work.
+        if tc.is_exceeded() {
+            return Err(ParserError::Timeout(tc.micros));
+        }
+
+        let lang_info = get_language_info(language)
+            .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
+
+        let tree = PARSER.with(|p| {
+            let mut parser = p.borrow_mut();
+            parser
+                .set_language(&lang_info.language)
+                .map_err(|e| ParserError::ParseError(format!("Failed to set language: {e}")))?;
+            parser
+                .parse(source, None)
+                .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
+        })?;
+
+        // Check deadline after parsing
+        if tc.is_exceeded() {
+            return Err(ParserError::Timeout(tc.micros));
+        }
+
+        let compiled = get_compiled_queries(language)?;
+        let root = tree.root_node();
+
+        let mut functions = Vec::new();
+        let mut classes = Vec::new();
+        let mut imports = Vec::new();
+
+        // Extract functions and classes
+        Self::extract_elements(
+            source,
+            compiled,
+            root,
+            None,
+            &lang_info,
+            &mut functions,
+            &mut classes,
+            tc,
+        )?;
+
+        // Check deadline after extract_elements
+        if tc.is_exceeded() {
+            return Err(ParserError::Timeout(tc.micros));
+        }
+
+        // Extract imports
+        Self::extract_imports(source, compiled, root, None, &mut imports, tc)?;
+
+        // Check deadline after extract_imports
+        if tc.is_exceeded() {
+            return Err(ParserError::Timeout(tc.micros));
+        }
+
+        // Map to ModuleInfo
+        let module_functions = functions
+            .into_iter()
+            .map(|f| crate::types::ModuleFunctionInfo {
+                name: f.name,
+                line: f.line,
+            })
+            .collect();
+
+        let module_imports = imports
+            .into_iter()
+            .map(|i| crate::types::ModuleImportInfo {
+                module: i.module,
+                items: i.items,
+            })
+            .collect();
+
+        let line_count = source.lines().count();
+
+        Ok(crate::types::ModuleInfo {
+            name: String::new(), // Will be set by caller
+            line_count,
+            language: language.to_string(),
+            functions: module_functions,
+            imports: module_imports,
+        })
+    }
+
+    // Extracts function and class definitions from a pre-parsed syntax tree.
     #[allow(clippy::too_many_arguments)]
     fn extract_elements(
         source: &str,
@@ -914,6 +1020,7 @@ impl SemanticExtractor {
         Ok(())
     }
 
+    // Extracts import statements from a pre-parsed syntax tree.
     fn extract_imports(
         source: &str,
         compiled: &CompiledQueries,
