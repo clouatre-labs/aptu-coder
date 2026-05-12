@@ -3,7 +3,17 @@
 
 use super::{Platform, RemoteError, detect_platform, parse_line_range, slice_lines};
 use base64::Engine;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+
+/// Install the rustls CryptoProvider exactly once per test process.
+/// Required because octocrab and wiremock both pull in rustls, which panics
+/// if no provider is installed when TLS is initialised.
+fn init_crypto() {
+    static CRYPTO: OnceLock<()> = OnceLock::new();
+    CRYPTO.get_or_init(|| {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
 
 /// Serialise env-var mutations across tests to avoid data races.
 /// std::env is global process state; concurrent mutation is UB.
@@ -291,82 +301,151 @@ async fn test_gitlab_not_found() {
 
 #[tokio::test]
 async fn test_github_fetch_tree_success() {
-    use wiremock::matchers::{method, path};
+    init_crypto();
+    use super::github_fetch_tree;
+    use wiremock::matchers::{method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let server = MockServer::start().await;
+    let base_url = server.uri();
 
-    // Mock GitHub API response for contents endpoint
+    let src_url = format!("{base_url}/repos/owner/repo/contents/src");
+    let readme_url = format!("{base_url}/repos/owner/repo/contents/README.md");
     Mock::given(method("GET"))
-        .and(path("/repos/owner/repo/contents/"))
+        .and(path_regex("/repos/owner/repo/contents/.*"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             {
                 "name": "src",
                 "path": "src",
                 "type": "dir",
                 "size": 0,
-                "url": "https://api.github.com/repos/owner/repo/contents/src"
+                "sha": "abc123",
+                "url": src_url,
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": src_url, "git": null, "html": null}
             },
             {
                 "name": "README.md",
                 "path": "README.md",
                 "type": "file",
                 "size": 100,
-                "url": "https://api.github.com/repos/owner/repo/contents/README.md"
+                "sha": "def456",
+                "url": readme_url,
+                "git_url": null,
+                "html_url": null,
+                "download_url": null,
+                "_links": {"self": readme_url, "git": null, "html": null}
             }
         ])))
         .mount(&server)
         .await;
 
-    // Note: github_fetch_tree creates its own OctocrabBuilder internally,
-    // so we cannot inject the mock server URL. This test verifies the function
-    // signature is correct and demonstrates the expected behavior pattern.
-    let _ = server; // Suppress unused warning
+    let result = github_fetch_tree(
+        "test-token",
+        "owner",
+        "repo",
+        None,
+        None,
+        1,
+        Some(&base_url),
+    )
+    .await;
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    let entries = result.unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.path == "src" && e.entry_type == "tree")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.path == "README.md" && e.entry_type == "blob")
+    );
 }
 
 #[tokio::test]
 async fn test_github_fetch_file_success() {
-    use wiremock::matchers::{method, path};
+    init_crypto();
+    use super::github_fetch_file;
+    use wiremock::matchers::{method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let server = MockServer::start().await;
+    let base_url = server.uri();
 
-    // Mock GitHub API response for file endpoint
     let file_content = "# README";
     let encoded = base64::prelude::BASE64_STANDARD.encode(file_content);
 
+    let file_url = format!("{base_url}/repos/owner/repo/contents/README.md");
     Mock::given(method("GET"))
-        .and(path("/repos/owner/repo/contents/README.md"))
+        .and(path_regex("/repos/owner/repo/contents/.*"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "name": "README.md",
             "path": "README.md",
             "type": "file",
             "size": file_content.len(),
-            "content": encoded,
+            "sha": "abc123",
+            "content": format!("{encoded}\n"),
             "encoding": "base64",
-            "url": "https://api.github.com/repos/owner/repo/contents/README.md"
+            "url": file_url,
+            "git_url": null,
+            "html_url": null,
+            "download_url": null,
+            "_links": {"self": file_url, "git": null, "html": null}
         })))
         .mount(&server)
         .await;
 
-    // Similar limitation as test_github_fetch_tree_success
-    let _ = server; // Suppress unused warning
+    let result = github_fetch_file(
+        "test-token",
+        "owner",
+        "repo",
+        "README.md",
+        None,
+        Some(&base_url),
+    )
+    .await;
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    let output = result.unwrap();
+    assert_eq!(output.content, file_content);
 }
 
 #[tokio::test]
 async fn test_github_not_found() {
-    use wiremock::matchers::{method, path};
+    init_crypto();
+    use super::github_fetch_tree;
+    use wiremock::matchers::{method, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let server = MockServer::start().await;
+    let base_url = server.uri();
 
-    // Mock GitHub API 404 response
     Mock::given(method("GET"))
-        .and(path("/repos/owner/repo/contents/"))
-        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .and(path_regex("/repos/owner/repo/contents/.*"))
+        .respond_with(
+            ResponseTemplate::new(404).set_body_json(
+                serde_json::json!({"message": "Not Found", "documentation_url": null}),
+            ),
+        )
         .mount(&server)
         .await;
 
-    // Similar limitation as above tests
-    let _ = server; // Suppress unused warning
+    let result = github_fetch_tree(
+        "test-token",
+        "owner",
+        "repo",
+        None,
+        None,
+        1,
+        Some(&base_url),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(RemoteError::NotFound(_))),
+        "expected NotFound, got {result:?}"
+    );
 }
