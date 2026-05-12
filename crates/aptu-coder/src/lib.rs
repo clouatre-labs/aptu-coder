@@ -2356,11 +2356,7 @@ impl CodeAnalyzer {
             .and_then(aptu_coder_core::lang::language_for_extension)
             .unwrap_or("unknown")
             .to_string();
-        let mut module_info = types::ModuleInfo::default();
-        module_info.name = name;
-        module_info.line_count = arc_output.line_count;
-        module_info.language = language;
-        module_info.functions = arc_output
+        let functions = arc_output
             .semantic
             .functions
             .iter()
@@ -2371,7 +2367,7 @@ impl CodeAnalyzer {
                 mfi
             })
             .collect();
-        module_info.imports = arc_output
+        let imports = arc_output
             .semantic
             .imports
             .iter()
@@ -2382,6 +2378,8 @@ impl CodeAnalyzer {
                 mii
             })
             .collect();
+        let module_info =
+            types::ModuleInfo::new(name, arc_output.line_count, language, functions, imports);
 
         let text = format_module_info(&module_info);
 

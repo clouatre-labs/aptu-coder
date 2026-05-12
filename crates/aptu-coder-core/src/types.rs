@@ -591,6 +591,26 @@ pub struct ModuleInfo {
     pub imports: Vec<ModuleImportInfo>,
 }
 
+impl ModuleInfo {
+    /// Create a new `ModuleInfo` with all fields specified.
+    #[must_use]
+    pub fn new(
+        name: String,
+        line_count: usize,
+        language: String,
+        functions: Vec<ModuleFunctionInfo>,
+        imports: Vec<ModuleImportInfo>,
+    ) -> Self {
+        Self {
+            name,
+            line_count,
+            language,
+            functions,
+            imports,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
