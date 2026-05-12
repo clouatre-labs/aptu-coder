@@ -3288,7 +3288,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "remote_tree",
         title = "Remote Tree",
-        description = "Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories with extension counts and individual entries. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, or the path or ref does not exist. Use remote_file to read a specific file from the same repository. Example queries: List top-level files in https://github.com/org/repo; Show the src/ directory at a specific tag in https://gitlab.com/org/repo.",
+        description = "For uncloned repositories only. Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories with extension counts and individual entries. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, or the path or ref does not exist. Use remote_file to read a specific file from the same repository. Example queries: List top-level files in https://github.com/org/repo; Show the src/ directory at a specific tag in https://gitlab.com/org/repo.",
         output_schema = schema_for_type::<aptu_coder_remote::types::RemoteTreeOutput>(),
         annotations(
             title = "Remote Tree",
@@ -3311,6 +3311,12 @@ impl CodeAnalyzer {
         span.record("gen_ai.tool.name", "remote_tree");
         span.record("url", &params.url);
 
+        let start = std::time::Instant::now();
+        let sid = self.session_id.lock().await.clone();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         let depth = params.depth.unwrap_or(2);
         let output = aptu_coder_remote::fetch_tree(
             &params.url,
@@ -3328,6 +3334,24 @@ impl CodeAnalyzer {
                     Err(e) => {
                         span.record("error", true);
                         span.record("error.type", "internal_error");
+                        let dur = start.elapsed().as_millis() as u64;
+                        self.metrics_tx.send(crate::metrics::MetricEvent {
+                            ts: crate::metrics::unix_ms(),
+                            tool: "remote_tree",
+                            duration_ms: dur,
+                            output_chars: 0,
+                            param_path_depth: 0,
+                            max_depth: None,
+                            result: "error",
+                            error_type: Some("serialization".to_string()),
+                            session_id: sid,
+                            seq: Some(seq),
+                            cache_hit: None,
+                            cache_write_failure: None,
+                            cache_tier: None,
+                            exit_code: None,
+                            timed_out: false,
+                        });
                         return Ok(err_to_tool_result(ErrorData::new(
                             rmcp::model::ErrorCode::INTERNAL_ERROR,
                             format!("serialization failed: {e}"),
@@ -3335,6 +3359,24 @@ impl CodeAnalyzer {
                         )));
                     }
                 };
+                let dur = start.elapsed().as_millis() as u64;
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "remote_tree",
+                    duration_ms: dur,
+                    output_chars: text.len(),
+                    param_path_depth: 0,
+                    max_depth: None,
+                    result: "ok",
+                    error_type: None,
+                    session_id: sid,
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                });
                 let mut result = CallToolResult::success(vec![Content::text(text)])
                     .with_meta(Some(no_cache_meta()));
                 result.structured_content = Some(structured);
@@ -3376,6 +3418,32 @@ impl CodeAnalyzer {
                         "Retry or check token permissions",
                     ),
                 };
+                let dur = start.elapsed().as_millis() as u64;
+                let error_type = match &e {
+                    aptu_coder_remote::RemoteError::MissingGitLabToken => "missing_gitlab_token",
+                    aptu_coder_remote::RemoteError::MissingGitHubToken => "missing_github_token",
+                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => "unsupported_host",
+                    aptu_coder_remote::RemoteError::NotFound(_) => "not_found",
+                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => "invalid_line_range",
+                    _ => "remote_error",
+                };
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "remote_tree",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: 0,
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some(error_type.to_string()),
+                    session_id: sid,
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                });
                 Ok(err_to_tool_result(ErrorData::new(
                     code,
                     e.to_string(),
@@ -3388,7 +3456,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "remote_file",
         title = "Remote File",
-        description = "Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Returns file content, size_bytes, resolved_ref, and path. Supports optional line range slicing (START-END format) to keep context cost low. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, the file or ref does not exist, or line_range format is invalid. Use remote_tree to discover paths in the same repository. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
+        description = "For uncloned repositories only. Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Returns file content, size_bytes, resolved_ref, and path. Supports optional line range slicing (START-END format) to keep context cost low. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, the file or ref does not exist, or line_range format is invalid. Use remote_tree to discover paths in the same repository. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
         output_schema = schema_for_type::<aptu_coder_remote::types::RemoteFileOutput>(),
         annotations(
             title = "Remote File",
@@ -3411,6 +3479,12 @@ impl CodeAnalyzer {
         span.record("gen_ai.tool.name", "remote_file");
         span.record("url", &params.url);
 
+        let start = std::time::Instant::now();
+        let sid = self.session_id.lock().await.clone();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         let output = aptu_coder_remote::fetch_file(
             &params.url,
             &params.path,
@@ -3427,6 +3501,24 @@ impl CodeAnalyzer {
                     Err(e) => {
                         span.record("error", true);
                         span.record("error.type", "internal_error");
+                        let dur = start.elapsed().as_millis() as u64;
+                        self.metrics_tx.send(crate::metrics::MetricEvent {
+                            ts: crate::metrics::unix_ms(),
+                            tool: "remote_file",
+                            duration_ms: dur,
+                            output_chars: 0,
+                            param_path_depth: 0,
+                            max_depth: None,
+                            result: "error",
+                            error_type: Some("serialization".to_string()),
+                            session_id: sid,
+                            seq: Some(seq),
+                            cache_hit: None,
+                            cache_write_failure: None,
+                            cache_tier: None,
+                            exit_code: None,
+                            timed_out: false,
+                        });
                         return Ok(err_to_tool_result(ErrorData::new(
                             rmcp::model::ErrorCode::INTERNAL_ERROR,
                             format!("serialization failed: {e}"),
@@ -3434,6 +3526,24 @@ impl CodeAnalyzer {
                         )));
                     }
                 };
+                let dur = start.elapsed().as_millis() as u64;
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "remote_file",
+                    duration_ms: dur,
+                    output_chars: text.len(),
+                    param_path_depth: 0,
+                    max_depth: None,
+                    result: "ok",
+                    error_type: None,
+                    session_id: sid,
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                });
                 let mut result = CallToolResult::success(vec![Content::text(text)])
                     .with_meta(Some(no_cache_meta()));
                 result.structured_content = Some(structured);
@@ -3475,6 +3585,32 @@ impl CodeAnalyzer {
                         "Retry or check token permissions",
                     ),
                 };
+                let dur = start.elapsed().as_millis() as u64;
+                let error_type = match &e {
+                    aptu_coder_remote::RemoteError::MissingGitLabToken => "missing_gitlab_token",
+                    aptu_coder_remote::RemoteError::MissingGitHubToken => "missing_github_token",
+                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => "unsupported_host",
+                    aptu_coder_remote::RemoteError::NotFound(_) => "not_found",
+                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => "invalid_line_range",
+                    _ => "remote_error",
+                };
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "remote_file",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: 0,
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some(error_type.to_string()),
+                    session_id: sid,
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                });
                 Ok(err_to_tool_result(ErrorData::new(
                     code,
                     e.to_string(),
