@@ -1902,11 +1902,11 @@ mod tests {
     #[test]
     fn test_format_module_info_happy_path() {
         use crate::types::{ModuleFunctionInfo, ModuleImportInfo, ModuleInfo};
-        let info = ModuleInfo {
-            name: "parser.rs".to_string(),
-            line_count: 312,
-            language: "rust".to_string(),
-            functions: vec![
+        let info = ModuleInfo::new(
+            "parser.rs".to_string(),
+            312,
+            "rust".to_string(),
+            vec![
                 ModuleFunctionInfo {
                     name: "parse_file".to_string(),
                     line: 24,
@@ -1916,7 +1916,7 @@ mod tests {
                     line: 58,
                 },
             ],
-            imports: vec![
+            vec![
                 ModuleImportInfo {
                     module: "crate::types".to_string(),
                     items: vec!["Token".to_string(), "Expr".to_string()],
@@ -1926,7 +1926,7 @@ mod tests {
                     items: vec!["BufReader".to_string()],
                 },
             ],
-        };
+        );
         let result = format_module_info(&info);
         assert!(result.starts_with("FILE: parser.rs (312L, 2F, 2I)"));
         assert!(result.contains("F:"));
@@ -1942,13 +1942,13 @@ mod tests {
     #[test]
     fn test_format_module_info_empty() {
         use crate::types::ModuleInfo;
-        let info = ModuleInfo {
-            name: "empty.rs".to_string(),
-            line_count: 0,
-            language: "rust".to_string(),
-            functions: vec![],
-            imports: vec![],
-        };
+        let info = ModuleInfo::new(
+            "empty.rs".to_string(),
+            0,
+            "rust".to_string(),
+            vec![],
+            vec![],
+        );
         let result = format_module_info(&info);
         assert!(result.starts_with("FILE: empty.rs (0L, 0F, 0I)"));
         assert!(!result.contains("F:"));

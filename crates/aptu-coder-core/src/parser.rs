@@ -618,6 +618,13 @@ impl SemanticExtractor {
     /// # Returns
     ///
     /// A `ModuleInfo` containing the file name, line count, language, functions, and imports.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `ParserError` if:
+    /// * `ParserError::Timeout` - The operation exceeds the specified timeout
+    /// * `ParserError::UnsupportedLanguage` - The language is not supported
+    /// * `ParserError::ParseError` - Tree-sitter parsing fails
     #[instrument(skip_all, fields(language))]
     pub fn extract_module_info(
         source: &str,
@@ -700,13 +707,13 @@ impl SemanticExtractor {
 
         let line_count = source.lines().count();
 
-        Ok(crate::types::ModuleInfo {
-            name: String::new(), // Will be set by caller
+        Ok(crate::types::ModuleInfo::new(
+            String::new(), // Will be set by caller
             line_count,
-            language: language.to_string(),
-            functions: module_functions,
-            imports: module_imports,
-        })
+            language.to_string(),
+            module_functions,
+            module_imports,
+        ))
     }
 
     // Extracts function and class definitions from a pre-parsed syntax tree.
