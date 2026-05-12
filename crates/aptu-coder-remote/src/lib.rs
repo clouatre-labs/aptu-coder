@@ -222,6 +222,44 @@ struct GitLabTreeItem {
     path: String,
 }
 
+/// Fetch one level of a GitLab tree (non-recursive).
+/// Helper function for BFS traversal in gitlab_fetch_tree.
+async fn gitlab_fetch_one_level(
+    client: &gitlab::AsyncGitlab,
+    project: &str,
+    path: &str,
+    git_ref: Option<&str>,
+) -> Result<Vec<GitLabTreeItem>, RemoteError> {
+    use gitlab::api::projects::repository::Tree;
+    use gitlab::api::{self, AsyncQuery as _};
+
+    let mut builder = Tree::builder();
+    builder.project(project);
+    if !path.is_empty() {
+        builder.path(path);
+    }
+    if let Some(r) = git_ref {
+        builder.ref_(r);
+    }
+    builder.recursive(false);
+
+    let endpoint = builder
+        .build()
+        .map_err(|e| RemoteError::Api(e.to_string()))?;
+
+    api::paged(endpoint, gitlab::api::Pagination::All)
+        .query_async(client)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("404") || msg.contains("Not Found") {
+                RemoteError::NotFound(msg)
+            } else {
+                RemoteError::Api(msg)
+            }
+        })
+}
+
 pub(crate) async fn gitlab_fetch_tree(
     host: &str,
     token: &str,
@@ -231,51 +269,48 @@ pub(crate) async fn gitlab_fetch_tree(
     depth: u32,
 ) -> Result<Vec<RemoteTreeEntry>, RemoteError> {
     use gitlab::GitlabBuilder;
-    use gitlab::api::projects::repository::Tree;
-    use gitlab::api::{self, AsyncQuery as _, Pagination};
+    use std::collections::{HashSet, VecDeque};
+
+    // depth=0 returns empty list
+    if depth == 0 {
+        return Ok(Vec::new());
+    }
 
     let client = GitlabBuilder::new(host, token)
         .build_async()
         .await
         .map_err(|e| RemoteError::Api(e.to_string()))?;
 
-    let recursive = depth > 1;
+    let mut entries: Vec<RemoteTreeEntry> = Vec::new();
+    let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
-    let mut builder = Tree::builder();
-    builder.project(project);
-    if let Some(p) = path
-        && !p.is_empty()
-    {
-        builder.path(p);
-    }
-    if let Some(r) = git_ref {
-        builder.ref_(r);
-    }
-    builder.recursive(recursive);
+    // Start with the root path
+    let root_path = path.unwrap_or("").to_string();
+    queue.push_back((root_path.clone(), 0));
+    seen.insert(root_path.clone());
 
-    let endpoint = builder
-        .build()
-        .map_err(|e| RemoteError::Api(e.to_string()))?;
+    while let Some((current_path, current_depth)) = queue.pop_front() {
+        // Fetch one level
+        let items = gitlab_fetch_one_level(&client, project, &current_path, git_ref).await?;
 
-    let items: Vec<GitLabTreeItem> = api::paged(endpoint, Pagination::All)
-        .query_async(&client)
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("404") || msg.contains("Not Found") {
-                RemoteError::NotFound(msg)
-            } else {
-                RemoteError::Api(msg)
+        for item in items {
+            entries.push(RemoteTreeEntry {
+                path: item.path.clone(),
+                entry_type: item.item_type.clone(),
+            });
+
+            // If we haven't reached max depth and this is a directory, queue it
+            if current_depth + 1 < depth
+                && item.item_type == "tree"
+                && seen.insert(item.path.clone())
+            {
+                queue.push_back((item.path, current_depth + 1));
             }
-        })?;
+        }
+    }
 
-    Ok(items
-        .into_iter()
-        .map(|i| RemoteTreeEntry {
-            path: i.path,
-            entry_type: i.item_type,
-        })
-        .collect())
+    Ok(entries)
 }
 
 /// A minimal deserialization struct for GitLab file content response.
@@ -396,52 +431,38 @@ pub(crate) async fn github_fetch_tree(
     depth: u32,
     base_url: Option<&str>,
 ) -> Result<Vec<RemoteTreeEntry>, RemoteError> {
+    use std::collections::{HashSet, VecDeque};
+
+    // depth=0 returns empty list
+    if depth == 0 {
+        return Ok(Vec::new());
+    }
+
     let octo = build_octocrab(token, base_url)?;
 
-    let path_str = path.unwrap_or("").to_string();
-    let repo_handler = octo.repos(owner, repo);
-    let builder = repo_handler.get_content().path(&path_str);
-    let builder = if let Some(r) = git_ref {
-        builder.r#ref(r)
-    } else {
-        builder
-    };
+    let mut entries: Vec<RemoteTreeEntry> = Vec::new();
+    let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
-    let mut content_items = builder.send().await.map_err(map_octocrab_err)?;
+    // Start with the root path
+    let root_path = path.unwrap_or("").to_string();
+    queue.push_back((root_path.clone(), 0));
+    seen.insert(root_path.clone());
 
-    let items = content_items.take_items();
+    while let Some((current_path, current_depth)) = queue.pop_front() {
+        let repo_handler = octo.repos(owner, repo);
+        let builder = repo_handler.get_content().path(&current_path);
+        let builder = if let Some(r) = git_ref {
+            builder.r#ref(r)
+        } else {
+            builder
+        };
 
-    let mut entries: Vec<RemoteTreeEntry> = items
-        .iter()
-        .map(|c| RemoteTreeEntry {
-            path: c.path.clone(),
-            entry_type: if c.r#type == "dir" {
-                "tree".to_string()
-            } else {
-                "blob".to_string()
-            },
-        })
-        .collect();
+        match builder.send().await {
+            Ok(mut content_items) => {
+                let items = content_items.take_items();
 
-    // Optionally recurse one more level for depth > 1
-    if depth > 1 {
-        let subdirs: Vec<String> = items
-            .iter()
-            .filter(|c| c.r#type == "dir")
-            .map(|c| c.path.clone())
-            .collect();
-
-        for subdir in subdirs {
-            debug!("github_fetch_tree: recursing into {subdir}");
-            let sub_repo_handler = octo.repos(owner, repo);
-            let sub_builder = sub_repo_handler.get_content().path(&subdir);
-            let sub_builder = if let Some(r) = git_ref {
-                sub_builder.r#ref(r)
-            } else {
-                sub_builder
-            };
-            if let Ok(mut sub_items) = sub_builder.send().await {
-                for c in sub_items.take_items() {
+                for c in items {
                     entries.push(RemoteTreeEntry {
                         path: c.path.clone(),
                         entry_type: if c.r#type == "dir" {
@@ -450,7 +471,17 @@ pub(crate) async fn github_fetch_tree(
                             "blob".to_string()
                         },
                     });
+
+                    // If we haven't reached max depth and this is a directory, queue it
+                    if current_depth + 1 < depth && c.r#type == "dir" && seen.insert(c.path.clone())
+                    {
+                        queue.push_back((c.path, current_depth + 1));
+                    }
                 }
+            }
+            Err(e) => {
+                debug!("github_fetch_tree: error fetching {current_path}: {e}");
+                return Err(map_octocrab_err(e));
             }
         }
     }
