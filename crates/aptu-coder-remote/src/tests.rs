@@ -585,16 +585,14 @@ fn test_build_tree_output_extension_counts() {
 // BFS depth tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_gitlab_fetch_tree_depth_zero() {
-    // depth=0 should return empty list immediately without any API calls
-    // This is a synchronous test that verifies the early return logic
-    // (actual async test would require mocking, but depth=0 is handled before any I/O)
-    use super::RemoteTreeEntry;
+#[tokio::test]
+async fn test_gitlab_fetch_tree_depth_zero() {
+    // depth=0 returns an empty list immediately, before any API call
+    use super::gitlab_fetch_tree;
 
-    // Simulate the depth=0 behavior: empty result
-    let entries: Vec<RemoteTreeEntry> = Vec::new();
-    assert_eq!(entries.len(), 0);
+    let result = gitlab_fetch_tree("bogus.invalid", "token", "owner/repo", None, None, 0).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), vec![]);
 }
 
 #[tokio::test]

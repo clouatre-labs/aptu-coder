@@ -283,6 +283,11 @@ pub(crate) async fn gitlab_fetch_tree(
 
     let mut entries: Vec<RemoteTreeEntry> = Vec::new();
     let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+    // `seen` tracks directory paths that have been queued for traversal.
+    // GitLab and GitHub both return canonical relative paths (no trailing
+    // slashes, no duplicates within a single level response), so a simple
+    // string HashSet is sufficient to prevent re-queuing a directory that
+    // appeared as a subdirectory of multiple already-visited parents.
     let mut seen: HashSet<String> = HashSet::new();
 
     // Start with the root path
@@ -442,6 +447,11 @@ pub(crate) async fn github_fetch_tree(
 
     let mut entries: Vec<RemoteTreeEntry> = Vec::new();
     let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+    // `seen` tracks directory paths that have been queued for traversal.
+    // GitLab and GitHub both return canonical relative paths (no trailing
+    // slashes, no duplicates within a single level response), so a simple
+    // string HashSet is sufficient to prevent re-queuing a directory that
+    // appeared as a subdirectory of multiple already-visited parents.
     let mut seen: HashSet<String> = HashSet::new();
 
     // Start with the root path
