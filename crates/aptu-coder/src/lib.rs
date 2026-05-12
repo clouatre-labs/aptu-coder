@@ -2,12 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Rust MCP server for code structure analysis using tree-sitter.
 //!
-//! This crate exposes four MCP tools for multiple programming languages:
+//! This crate exposes nine MCP tools for multiple programming languages:
 //!
+//! **Analyze family:**
 //! - **`analyze_directory`**: Directory tree with file counts and structure
 //! - **`analyze_file`**: Semantic extraction (functions, classes, imports)
 //! - **`analyze_symbol`**: Call graph analysis (callers and callees)
 //! - **`analyze_module`**: Lightweight function and import index
+//!
+//! **Edit family:**
+//! - **`edit_overwrite`**: Create or overwrite files
+//! - **`edit_replace`**: Replace text blocks in files
+//!
+//! **Exec family:**
+//! - **`exec_command`**: Run shell commands with progress notifications
+//!
+//! **Remote family (from aptu-coder-remote):**
+//! - **`remote_tree`**: Explore remote GitHub/GitLab repositories without cloning
+//! - **`remote_file`**: Fetch files from remote repositories with optional line ranges
 //!
 //! Key entry points:
 //! - [`analyze::analyze_directory`]: Analyze entire directory tree

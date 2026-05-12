@@ -1,8 +1,18 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-//! aptu-coder-remote: async helpers for fetching GitLab and GitHub repository trees and files
-//! without cloning.
+//! Async helpers for fetching GitLab and GitHub repository trees and files without cloning.
+//!
+//! This crate provides two main functions:
+//! - [`fetch_tree`]: Explore a remote repository's directory structure
+//! - [`fetch_file`]: Fetch a single file from a remote repository with optional line range slicing
+//!
+//! Both functions auto-detect the platform (GitHub or GitLab) from the repository URL and
+//! require authentication tokens to be set in environment variables:
+//! - `GITHUB_TOKEN` for GitHub repositories
+//! - `GITLAB_TOKEN` for GitLab repositories
+//!
+//! For more information, see the [README](https://github.com/clouatre-labs/aptu-coder/blob/main/crates/aptu-coder-remote/README.md).
 
 pub mod types;
 
@@ -19,12 +29,18 @@ use crate::types::{RemoteFileOutput, RemoteTreeEntry, RemoteTreeOutput};
 // ---------------------------------------------------------------------------
 
 /// Supported remote hosting platforms.
+///
+/// Platform is auto-detected from the repository URL. GitHub and GitLab use different
+/// authentication tokens and APIs.
 #[derive(Debug, Clone)]
 pub enum Platform {
-    /// GitLab instance (may be self-hosted, but currently only `gitlab.com` is
-    /// auto-detected).
+    /// GitLab instance (may be self-hosted, but currently only `gitlab.com` is auto-detected).
+    ///
+    /// Requires `GITLAB_TOKEN` environment variable to be set.
     GitLab { host: String },
     /// GitHub (`github.com`).
+    ///
+    /// Requires `GITHUB_TOKEN` environment variable to be set.
     GitHub,
 }
 
@@ -548,6 +564,45 @@ pub(crate) async fn github_fetch_file(
 ///
 /// `url` must be a `https://gitlab.com/...` or `https://github.com/...` URL.
 /// `GITLAB_TOKEN` / `GITHUB_TOKEN` must be set in the environment.
+/// Fetch the directory structure of a remote repository without cloning.
+///
+/// # Arguments
+///
+/// * `url` - Full repository URL (e.g., `https://github.com/owner/repo` or `https://gitlab.com/owner/repo`)
+/// * `path` - Optional subdirectory path within the repository (defaults to root)
+/// * `git_ref` - Optional branch, tag, or commit SHA (defaults to the repository's default branch)
+/// * `depth` - Directory traversal depth (1-5; default 2)
+///
+/// # Returns
+///
+/// A [`RemoteTreeOutput`] containing the directory structure and file counts.
+///
+/// # Errors
+///
+/// Returns [`RemoteError`] if:
+/// - The URL is invalid or not a GitHub/GitLab URL
+/// - The required authentication token (`GITHUB_TOKEN` or `GITLAB_TOKEN`) is not set
+/// - The repository or path does not exist
+/// - The API request fails
+///
+/// # Example
+///
+/// ```no_run
+/// use aptu_coder_remote::fetch_tree;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Requires GITHUB_TOKEN environment variable
+///     let output = fetch_tree(
+///         "https://github.com/clouatre-labs/aptu-coder",
+///         Some("crates"),
+///         None,
+///         2,
+///     ).await?;
+///     println!("{}", output.formatted);
+///     Ok(())
+/// }
+/// ```
 pub async fn fetch_tree(
     url: &str,
     path: Option<&str>,
@@ -576,8 +631,44 @@ pub async fn fetch_tree(
 
 /// Fetch the content of a single file from a remote repository.
 ///
-/// `url` must be a `https://gitlab.com/...` or `https://github.com/...` URL.
-/// `GITLAB_TOKEN` / `GITHUB_TOKEN` must be set in the environment.
+/// # Arguments
+///
+/// * `url` - Full repository URL (e.g., `https://github.com/owner/repo` or `https://gitlab.com/owner/repo`)
+/// * `path` - File path within the repository (e.g., `src/main.rs`)
+/// * `git_ref` - Optional branch, tag, or commit SHA (defaults to the repository's default branch)
+/// * `line_range` - Optional line range in `START-END` format (e.g., `10-50`). Both bounds are inclusive and 1-indexed.
+///
+/// # Returns
+///
+/// A [`RemoteFileOutput`] containing the file content and metadata.
+///
+/// # Errors
+///
+/// Returns [`RemoteError`] if:
+/// - The URL is invalid or not a GitHub/GitLab URL
+/// - The required authentication token (`GITHUB_TOKEN` or `GITLAB_TOKEN`) is not set
+/// - The repository, file, or ref does not exist
+/// - The line range format is invalid
+/// - The API request fails
+///
+/// # Example
+///
+/// ```no_run
+/// use aptu_coder_remote::fetch_file;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Requires GITHUB_TOKEN environment variable
+///     let output = fetch_file(
+///         "https://github.com/clouatre-labs/aptu-coder",
+///         "README.md",
+///         None,
+///         Some("1-50"),
+///     ).await?;
+///     println!("{}", output.content);
+///     Ok(())
+/// }
+/// ```
 pub async fn fetch_file(
     url: &str,
     path: &str,

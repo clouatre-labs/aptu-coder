@@ -137,6 +137,8 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
 | `exec_command` | Run a shell command; returns stdout, stderr, exit code, and timeout status; supports progress notifications | any |
+| `remote_tree` | Explore a remote GitLab or GitHub repository directory structure without cloning; returns file/directory listing with extension counts | any |
+| `remote_file` | Fetch content of a single file from a remote GitLab or GitHub repository without cloning; supports line range slicing | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
