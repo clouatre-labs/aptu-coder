@@ -4928,6 +4928,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_file_cache_capacity_default() {
         // Arrange: ensure the env var is not set
         unsafe { std::env::remove_var("APTU_CODER_FILE_CACHE_CAPACITY") };
