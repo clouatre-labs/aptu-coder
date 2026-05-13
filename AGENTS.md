@@ -35,7 +35,7 @@ By default, the server operates with noop telemetry providers (zero overhead). T
 
 - `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` -- Reserved per OpenTelemetry GenAI semantic conventions for opt-in capture of tool arguments and results. aptu-coder does not implement this: individual bounded parameters (path, symbol, depth) are recorded as span attributes instead of serializing the full tool call arguments or results, ensuring credentials and file content are never emitted.
 
-- `XDG_DATA_HOME` -- Base directory for the always-on JSONL metrics channel. The server writes daily-rotated metrics to `$XDG_DATA_HOME/aptu-coder/metrics/` and retains them for 30 days. Defaults to `~/.local/share` if unset.
+- `XDG_DATA_HOME` -- Base directory for the always-on JSONL metrics channel. The server writes daily-rotated metrics to `$XDG_DATA_HOME/aptu-coder/` and retains them for 30 days. Defaults to `~/.local/share` if unset.
 
 **Instrumentation:** Each tool invocation is wrapped in a span carrying OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`). W3C Trace Context is extracted from the MCP `_meta` field, allowing MCP clients to propagate their trace context so tool spans become children in a distributed trace.
 
@@ -44,6 +44,20 @@ By default, the server operates with noop telemetry providers (zero overhead). T
 - OpenTelemetry: optional, parallel to JSONL. Configured at server init; no runtime reconfiguration.
 
 For span attribute policy and the never-record list, see [OBSERVABILITY.md](OBSERVABILITY.md) at the repository root.
+
+### JSONL Metrics Analysis
+
+Daily-rotated JSONL files live at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/share/aptu-coder/`). See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full field reference.
+
+Key schema fields: `ts` (u64), `tool` (string), `duration_ms` (u64), `output_chars` (usize), `result` (string), `error_type` (nullable), `session_id` (nullable), `seq` (nullable), `cache_hit` (nullable), `cache_tier` (nullable), `exit_code` (nullable), `timed_out` (bool).
+
+Five validated jq one-liners:
+
+1. Tool call volume: `jq -r '.tool' metrics-*.jsonl | sort | uniq -c | sort -rn`
+2. Avg duration by tool: `jq -r '[.tool, .duration_ms] | @tsv' metrics-*.jsonl | awk -F'\t' '{c[$1]++;s[$1]+=$2} END{for(t in c) printf "%s\t%dms avg\n",t,s[t]/c[t]}' | sort -t$'\t' -k2 -rn`
+3. Error rate by tool: `jq -r 'select(.result=="error") | .tool' metrics-*.jsonl | sort | uniq -c | sort -rn`
+4. Cache hit rate by day: `for f in metrics-*.jsonl; do d=${f#metrics-}; d=${d%.jsonl}; total=$(jq 'select(.cache_hit!=null)' $f | wc -l); hits=$(jq 'select(.cache_hit==true)' $f | wc -l); echo "$d: $hits/$total"; done`
+5. Slowest 10 calls: `jq -r '[.tool, (.duration_ms|tostring), (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn | head -10`
 
 ## API verification (critical)
 

@@ -37,6 +37,10 @@ Each line in the JSONL file is one JSON object:
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
+| `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable |
+| `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
+| `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable |
+| `timed_out` | `bool` | `true` if the call timed out; `false` otherwise |
 
 ### Example record
 
