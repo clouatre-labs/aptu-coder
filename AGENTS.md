@@ -75,7 +75,7 @@ Canonical parameter lists live in the `types` module (`crates/aptu-coder-core/sr
 - `def_use=true` on `analyze_symbol` triggers def-use extraction; `def_use_sites` is populated in `structuredContent` only when paginating in DefUse cursor mode, not on the initial call (the handler clears it on the first response and bootstraps a cursor to page through def-use results).
 - `git_ref` is supported on both `analyze_directory` and `analyze_symbol` to restrict analysis to files changed relative to a git ref.
 - `working_dir` on `edit_overwrite` and `edit_replace` sets the base directory for path resolution; must be within the server CWD.
-- `APTU_CODER_PROFILE` (env var) or `io.clouatre-labs/profile` (MCP `_meta`) activates a tool subset: `edit` disables all analyze_* tools; `analyze` disables edit_replace and edit_overwrite.
+- `APTU_CODER_PROFILE` (env var) or `io.clouatre-labs/profile` (MCP `_meta`) activates a tool subset: `edit` disables all analyze_* and remote_* tools (3 tools); `analyze` disables edit_* and remote_* tools (5 tools); `remote` enables all 9 tools; absent/unknown disables remote_* tools (7 tools). By default, `remote_tree` and `remote_file` are disabled unless profile is explicitly set to `remote`.
 
 ## Do not
 

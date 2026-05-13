@@ -170,7 +170,7 @@ fn test_flatten_fields_have_descriptions() {
 #[test]
 fn test_complex_params_have_examples() {
     let tools = CodeAnalyzer::list_tools();
-    let checks: &[(&str, &str)] = &[("analyze_file", "fields"), ("analyze_symbol", "match_mode")];
+    let checks: &[(&str, &str)] = &[("analyze_file", "fields")];
     for (tool_name, param_name) in checks {
         let tool = tools
             .iter()

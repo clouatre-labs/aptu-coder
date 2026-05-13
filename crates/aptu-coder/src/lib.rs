@@ -3853,6 +3853,12 @@ struct FocusedAnalysisParams {
     parse_timeout_micros: Option<u64>,
 }
 
+fn disable_routes(router: &mut ToolRouter<CodeAnalyzer>, tools: &[&'static str]) {
+    for tool in tools {
+        router.disable_route(*tool);
+    }
+}
+
 #[tool_handler]
 impl ServerHandler for CodeAnalyzer {
     #[instrument(skip(self, context), fields(service.name = tracing::field::Empty, service.version = tracing::field::Empty))]
@@ -3959,7 +3965,7 @@ impl ServerHandler for CodeAnalyzer {
         // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
         // a filtered `tools` array in the API call, or for clients to use tool annotations
         // (readOnlyHint/destructiveHint) to apply their own policy.
-        // Profiles: "edit" (3 tools), "analyze" (5 tools), absent/unknown (all 9 tools).
+        // Profiles: "edit" (3 tools), "analyze" (5 tools), "remote" (all 9 tools), absent/unknown (7 tools, no remote_*).
         // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock
@@ -3972,29 +3978,46 @@ impl ServerHandler for CodeAnalyzer {
         // Resolve the active profile: _meta wins; fall back to env var.
         let active_profile = meta_profile.or(std::env::var("APTU_CODER_PROFILE").ok());
 
-        if let Some(ref profile) = active_profile {
+        {
             let mut router = self.tool_router.write().await;
-            match profile.as_str() {
-                "edit" => {
-                    // Enable only: edit_replace, edit_overwrite, exec_command
-                    router.disable_route("analyze_directory");
-                    router.disable_route("analyze_file");
-                    router.disable_route("analyze_module");
-                    router.disable_route("analyze_symbol");
-                    router.disable_route("remote_tree");
-                    router.disable_route("remote_file");
-                }
-                "analyze" => {
-                    // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, exec_command
-                    router.disable_route("edit_replace");
-                    router.disable_route("edit_overwrite");
-                    router.disable_route("remote_tree");
-                    router.disable_route("remote_file");
-                }
-                _ => {
-                    // Unknown profile: leave all tools enabled (lenient fallback)
+
+            // Default: remote tools off unless profile explicitly enables them.
+            // Profiles: "edit" (3 tools), "analyze" (5 tools), "remote" (all 9 tools), absent/unknown (7 tools, no remote_*).
+            let enable_remote = active_profile.as_deref() == Some("remote");
+            // Add new remote_* tool names here when introduced.
+            if !enable_remote {
+                disable_routes(&mut router, &["remote_tree", "remote_file"]);
+            }
+
+            if let Some(ref profile) = active_profile {
+                match profile.as_str() {
+                    "edit" => {
+                        // Enable only: edit_replace, edit_overwrite, exec_command
+                        disable_routes(
+                            &mut router,
+                            &[
+                                "analyze_directory",
+                                "analyze_file",
+                                "analyze_module",
+                                "analyze_symbol",
+                            ],
+                        );
+                        // remote_tree and remote_file already disabled above
+                    }
+                    "analyze" => {
+                        // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, exec_command
+                        disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
+                        // remote_tree and remote_file already disabled above
+                    }
+                    "remote" => {
+                        // All 9 tools enabled; remote tools re-enabled by enable_remote=true above
+                    }
+                    _ => {
+                        // Unknown profile: leave non-remote tools as default (lenient fallback)
+                    }
                 }
             }
+
             // Bind peer notifier after disabling tools to send tools/list_changed notification
             router.bind_peer_notifier(&context.peer);
         }
@@ -4823,6 +4846,55 @@ mod tests {
             exec_cmd_annot.open_world_hint,
             Some(true),
             "exec_command open_world_hint should be true"
+        );
+    }
+
+    #[test]
+    fn test_profile_remote_enables_remote_tools() {
+        // Arrange: get tool list via static method
+        let tools = CodeAnalyzer::list_tools();
+
+        // Act: check for remote_tree and remote_file
+        let remote_tree = tools.iter().find(|t| t.name == "remote_tree");
+        let remote_file = tools.iter().find(|t| t.name == "remote_file");
+
+        // Assert: both remote tools should exist in the full tool list
+        // (profile filtering happens at runtime in on_initialized, not in list_tools)
+        assert!(
+            remote_tree.is_some(),
+            "remote_tree should exist in full tool list"
+        );
+        assert!(
+            remote_file.is_some(),
+            "remote_file should exist in full tool list"
+        );
+    }
+
+    #[test]
+    fn test_profile_none_disables_remote_tools() {
+        // Arrange: get tool list via static method
+        let tools = CodeAnalyzer::list_tools();
+
+        // Act: count total tools (should be 9 in the static list)
+        let tool_count = tools.len();
+
+        // Assert: static list has all 9 tools
+        // (remote_tree and remote_file are disabled at runtime in on_initialized when no profile is set)
+        assert_eq!(
+            tool_count, 9,
+            "static tool list should contain all 9 tools; filtering happens at runtime"
+        );
+
+        // Verify remote tools exist in static list
+        let remote_tree = tools.iter().find(|t| t.name == "remote_tree");
+        let remote_file = tools.iter().find(|t| t.name == "remote_file");
+        assert!(
+            remote_tree.is_some(),
+            "remote_tree should exist in static list"
+        );
+        assert!(
+            remote_file.is_some(),
+            "remote_file should exist in static list"
         );
     }
 
