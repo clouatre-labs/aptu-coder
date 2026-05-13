@@ -108,10 +108,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Idempotent: skip creation if release already exists; if creation fails with 422
+          # (concurrent race), the final view confirms existence and exits 0.
           gh release view "v${VERSION}" &>/dev/null \
             || gh release create "v${VERSION}" \
               --title "v${VERSION}" \
-              --generate-notes
+              --generate-notes \
+            || gh release view "v${VERSION}" &>/dev/null
 
       - name: Dry run - skip release creation
         if: ${{ env.DRY_RUN == 'true' }}
