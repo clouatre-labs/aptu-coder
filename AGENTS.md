@@ -91,6 +91,8 @@ Canonical parameter lists live in the `types` module (`crates/aptu-coder-core/sr
 - `working_dir` on `edit_overwrite` and `edit_replace` sets the base directory for path resolution; must be within the server CWD.
 - `APTU_CODER_PROFILE` (env var) or `io.clouatre-labs/profile` (MCP `_meta`) activates a tool subset: `edit` disables all analyze_* and remote_* tools (3 tools); `analyze` disables edit_* and remote_* tools (5 tools); `remote` enables all 9 tools; absent/unknown disables remote_* tools (7 tools). By default, `remote_tree` and `remote_file` are disabled unless profile is explicitly set to `remote`.
 
+Escalate to `analyze_symbol` when: (1) you need all callers of a function, (2) you need the full call chain for a symbol, (3) you need all files importing a module path (use `import_lookup=true`).
+
 ## Do not
 
 - Add dependencies without justification in the PR description

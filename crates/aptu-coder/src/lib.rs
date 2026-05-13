@@ -1787,7 +1787,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Returns callers and callees. Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if import_lookup=true with empty symbol; fails if summary=true and cursor. match_mode controls name matching (exact/insensitive/prefix/contains). git_ref restricts to changed files. Example queries: Find all callers of parse_config; Find all files that import std::collections.",
+        description = "Use when you need to: find all callers of a function across the codebase, trace transitive call chains, or locate all files importing a module path. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\".\n\nCall graph for a named symbol across all files in a directory. Returns callers and callees. Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if import_lookup=true with empty symbol; fails if summary=true and cursor. match_mode controls name matching (exact/insensitive/prefix/contains). git_ref restricts to changed files. Example queries: Find all callers of parse_config; Find all files that import std::collections.",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
             title = "Analyze Symbol",
@@ -2683,7 +2683,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD). Example queries: Update the function signature in lib.rs.",
+        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). If invalid_params is returned, re-read the target file with analyze_file or analyze_module before retrying. Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD). Example queries: Update the function signature in lib.rs.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
@@ -2787,38 +2787,9 @@ impl CodeAnalyzer {
 
         let output = match handle.await {
             Ok(Ok(v)) => v,
-            Ok(Err(aptu_coder_core::EditError::NotFound { path: _ })) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                });
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    "old_text not found in file — verify the text matches exactly, including whitespace and newlines".to_string(),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "check that old_text appears in the file",
-                    )),
-                )));
-            }
-            Ok(Err(aptu_coder_core::EditError::Ambiguous { count, path: _ })) => {
+            Ok(Err(aptu_coder_core::EditError::NotFound {
+                path: notfound_path,
+            })) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -2842,12 +2813,48 @@ impl CodeAnalyzer {
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
                     format!(
-                        "old_text appears {count} times in file — make old_text longer and more specific to uniquely identify the block"
+                        "old_text not found (0 matches) in {notfound_path}. Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
                     ),
                     Some(error_meta(
                         "validation",
                         false,
-                        "include more context in old_text to make it unique",
+                        "re-read the file with analyze_file or analyze_module, then derive old_text from the live content",
+                    )),
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::Ambiguous {
+                count,
+                path: ambiguous_path,
+            })) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "edit_replace",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("invalid_params".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                });
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "old_text matched {count} locations in {ambiguous_path}. Extend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
+                    ),
+                    Some(error_meta(
+                        "validation",
+                        false,
+                        "extend old_text with more surrounding context, or re-read with analyze_file to confirm the exact text",
                     )),
                 )));
             }
