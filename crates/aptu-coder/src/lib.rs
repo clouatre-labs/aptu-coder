@@ -3984,6 +3984,7 @@ impl ServerHandler for CodeAnalyzer {
             // Default: remote tools off unless profile explicitly enables them.
             // Profiles: "edit" (3 tools), "analyze" (5 tools), "remote" (all 9 tools), absent/unknown (7 tools, no remote_*).
             let enable_remote = active_profile.as_deref() == Some("remote");
+            // Add new remote_* tool names here when introduced.
             if !enable_remote {
                 disable_routes(&mut router, &["remote_tree", "remote_file"]);
             }
