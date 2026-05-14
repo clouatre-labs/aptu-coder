@@ -32,7 +32,7 @@ env:
 jobs:
   validate-release:
     name: Validate Release Exists
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
     steps:
@@ -99,7 +99,7 @@ jobs:
     name: Update Homebrew Formula
     needs: [build-aarch64-apple-darwin, build-aarch64-unknown-linux-musl, build-x86_64-unknown-linux-musl]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout homebrew-tap repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -215,7 +215,7 @@ jobs:
     name: Generate MCPB Bundles
     needs: [build-aarch64-apple-darwin, build-aarch64-unknown-linux-musl, build-x86_64-unknown-linux-musl]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
     steps:
@@ -278,7 +278,7 @@ jobs:
     name: Update server.json
     needs: [generate-mcpb]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
       pull-requests: write

@@ -30,7 +30,7 @@ env:
 jobs:
   verify-tag-signature:
     name: Verify Tag Signature
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     if: github.event_name != 'workflow_dispatch'
     steps:
       - name: Checkout repository
@@ -72,7 +72,7 @@ jobs:
     name: Create Release
     needs: [verify-tag-signature]
     if: always() && (needs.verify-tag-signature.result == 'success' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
     outputs:
@@ -154,7 +154,7 @@ jobs:
     name: Update Homebrew Formula
     needs: [create-release, build-and-attest]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout homebrew-tap repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -262,7 +262,7 @@ jobs:
     name: Generate MCPB Bundles
     needs: [create-release, build-and-attest]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
     steps:
@@ -325,7 +325,7 @@ jobs:
     name: Publish to MCP Registry
     needs: [create-release, generate-mcpb]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       id-token: write
@@ -422,7 +422,7 @@ jobs:
     name: Publish to crates.io
     needs: create-release
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       id-token: write
