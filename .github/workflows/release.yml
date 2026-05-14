@@ -76,7 +76,7 @@ jobs:
     permissions:
       contents: write
     outputs:
-      version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || steps.extract_version.outputs.version }}
+      version: ${{ steps.extract_version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
