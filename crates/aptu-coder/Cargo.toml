@@ -27,6 +27,7 @@ aptu-coder-remote = { path = "../aptu-coder-remote", version = "0.12" }
 rmcp = { workspace = true }
 rustls = { workspace = true }
 tokio = { workspace = true }
+axum = { workspace = true }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
