@@ -7,5 +7,18 @@
     "url": "https://github.com/clouatre-labs/aptu-coder",
     "source": "github"
   },
-  "packages": []
+  "packages": [
+    {
+      "identifier": "https://github.com/clouatre-labs/aptu-coder/releases/download/v0.13.0/aptu-coder-0.13.0-aarch64-apple-darwin.mcpb",
+      "fileSha256": "2f3a2bd8977fc5a0b341867b43b237c2e3454905351a00080ad2f24bb17cbf90"
+    },
+    {
+      "identifier": "https://github.com/clouatre-labs/aptu-coder/releases/download/v0.13.0/aptu-coder-0.13.0-aarch64-unknown-linux-musl.mcpb",
+      "fileSha256": "513998501cbdfcf042c26bd014ff18d370ff6b68b6aad21178698a82720ac124"
+    },
+    {
+      "identifier": "https://github.com/clouatre-labs/aptu-coder/releases/download/v0.13.0/aptu-coder-0.13.0-x86_64-unknown-linux-musl.mcpb",
+      "fileSha256": "003f1adaebf3f6512ccaba33a1a7fc3302c0bc11d2e1ba0895440d343be20d47"
+    }
+  ]
 }
