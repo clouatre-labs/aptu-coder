@@ -456,4 +456,4 @@ jobs:
           # Replaces hand-rolled curl-poll loops. 30s is conservative; crates.io typically
           # propagates within 10-15s but spikes under load.
           PUBLISH_GRACE_SLEEP: 30
-        run: cargo release publish --execute --no-confirm --unpublished
+        run: cargo release publish --execute --no-confirm
