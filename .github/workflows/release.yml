@@ -76,12 +76,13 @@ jobs:
     permissions:
       contents: write
     outputs:
-      version: ${{ env.VERSION }}
+      version: ${{ steps.extract_version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Extract version from tag or input
+        id: extract_version
         env:
           INPUT_VERSION: ${{ inputs.version }}
           EVENT_NAME: ${{ github.event_name }}
@@ -91,11 +92,13 @@ jobs:
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
           fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Validate version matches Cargo.toml
         if: ${{ github.event_name != 'workflow_dispatch' }}
         shell: bash
+        env:
+          VERSION: ${{ steps.extract_version.outputs.version }}
         run: |
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           if [ "$VERSION" != "$CARGO_VERSION" ]; then
@@ -107,6 +110,7 @@ jobs:
         if: ${{ env.DRY_RUN != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.extract_version.outputs.version }}
         run: |
           # Idempotent: skip creation if release already exists; if creation fails with 422
           # (concurrent race), the final view confirms existence and exits 0.
@@ -118,6 +122,8 @@ jobs:
 
       - name: Dry run - skip release creation
         if: ${{ env.DRY_RUN == 'true' }}
+        env:
+          VERSION: ${{ steps.extract_version.outputs.version }}
         run: echo "DRY RUN - Would create release for v$VERSION"
 
   build-and-attest:
