@@ -25,7 +25,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
 
 jobs:
   verify-tag-signature:
@@ -153,7 +153,7 @@ jobs:
   update-homebrew:
     name: Update Homebrew Formula
     needs: [create-release, build-and-attest]
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout homebrew-tap repository
@@ -261,7 +261,7 @@ jobs:
   generate-mcpb:
     name: Generate MCPB Bundles
     needs: [create-release, build-and-attest]
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
@@ -324,7 +324,7 @@ jobs:
   publish-registry:
     name: Publish to MCP Registry
     needs: [create-release, generate-mcpb]
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -421,7 +421,7 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: create-release
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
