@@ -89,18 +89,53 @@ The binary is at `target/release/aptu-coder`.
 
 ### Configure MCP Client
 
-Two transports are available:
+Two transports are available. **Streamable HTTP is recommended** when using orchestrators that spawn delegates (e.g. goose coder): a single server process is shared across the orchestrator and all agents, eliminating extension-drift that occurs when each stdio subprocess gets its own isolated instance.
 
-**stdio (local, default):** Register with the Claude Code CLI:
+**Streamable HTTP (recommended for multi-agent setups)**
+
+With Homebrew, one command starts the server on login and keeps it running:
+
+```bash
+brew services start aptu-coder
+```
+
+The Homebrew formula starts the server on port `49200` by default. Then add the extension once to `~/.config/goose/config.yaml`:
+
+```yaml
+extensions:
+  aptu-coder:
+    type: streamable_http
+    uri: http://127.0.0.1:49200/mcp
+    name: aptu-coder
+    timeout: 300
+```
+
+Or for Claude Code:
+
+```bash
+claude mcp add --transport http aptu-coder http://127.0.0.1:49200/mcp
+```
+
+To use a different port, set `APTU_CODER_PORT` before restarting:
+
+```bash
+APTU_CODER_PORT=4000 brew services restart aptu-coder
+```
+
+To start directly without brew services:
+
+```bash
+aptu-coder --port 49200
+# or equivalently
+APTU_CODER_PORT=49200 aptu-coder
+```
+
+**stdio (single-client use)**
+
+Suitable when only one process needs the server. The client owns the process lifecycle and spawns it automatically:
 
 ```bash
 claude mcp add --transport stdio aptu-coder -- aptu-coder
-```
-
-If you built from source, use the binary path directly:
-
-```bash
-claude mcp add --transport stdio aptu-coder -- /path/to/repo/target/release/aptu-coder
 ```
 
 Or add manually to `.mcp.json` at your project root (shared with your team via version control):
@@ -114,20 +149,6 @@ Or add manually to `.mcp.json` at your project root (shared with your team via v
     }
   }
 }
-```
-
-**Streamable HTTP (`--port N`):** Binds to `127.0.0.1:N` and serves all tools over the MCP streamable HTTP transport (localhost only; no TLS or auth required). Useful for MCP clients that prefer HTTP over stdio.
-
-```bash
-aptu-coder --port 3042
-```
-
-goose configuration:
-
-```yaml
-- type: streamable_http
-  name: aptu-coder
-  uri: http://127.0.0.1:3042/mcp
 ```
 
 ## Tools
@@ -185,6 +206,7 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | Variable | Default | Description |
 |---|---|---|
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
+| `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
 | `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | LRU cache size for `exec_command` results. |
 | `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result cache. |
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |

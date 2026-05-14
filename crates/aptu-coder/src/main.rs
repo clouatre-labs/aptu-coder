@@ -64,6 +64,17 @@ async fn run_http(analyzer: CodeAnalyzer, port: u16) -> Result<(), Box<dyn std::
     Ok(())
 }
 
+/// Parse a port string into a non-zero u16.  Returns `Err` with a human-readable message on
+/// failure so callers share identical validation logic regardless of whether the value came
+/// from a CLI flag or an environment variable.
+fn parse_port(s: &str) -> Result<u16, String> {
+    match s.parse::<u16>() {
+        Ok(0) => Err("must be a non-zero u16 value".to_string()),
+        Ok(p) => Ok(p),
+        Err(_) => Err(format!("{s:?} is not a valid u16 value")),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     aws_lc_rs::default_provider()
@@ -79,10 +90,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "--port" => match args.next() {
-                Some(port_str) => match port_str.parse::<u16>() {
+                Some(val) => match parse_port(&val) {
                     Ok(p) => port = Some(p),
-                    Err(_) => {
-                        eprintln!("error: --port requires a valid u16 value");
+                    Err(msg) => {
+                        eprintln!("error: --port {msg}");
                         std::process::exit(1);
                     }
                 },
@@ -92,6 +103,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
             _ => {}
+        }
+    }
+
+    // Fall back to APTU_CODER_PORT env var when --port was not passed.
+    if port.is_none()
+        && let Ok(val) = std::env::var("APTU_CODER_PORT")
+    {
+        match parse_port(&val) {
+            Ok(p) => port = Some(p),
+            Err(msg) => {
+                eprintln!("error: APTU_CODER_PORT {msg}");
+                std::process::exit(1);
+            }
         }
     }
 
