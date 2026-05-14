@@ -167,19 +167,17 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Download SHA256 checksums
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
-          RELEASE_URL="https://api.github.com/repos/clouatre-labs/aptu-coder/releases/tags/${RELEASE_TAG}"
-          
-          # Get release assets
-          ASSETS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$RELEASE_URL" | jq '.assets[] | select(.name | endswith(".tar.gz")) | {name: .name, url: .browser_download_url}')
-          
-          # Download each asset and compute SHA256
-          echo "$ASSETS" | jq -r '.url' | while read -r url; do
-            filename=$(basename "$url")
-            curl -sL "$url" -o "/tmp/$filename"
-            sha256=$(sha256sum "/tmp/$filename" | cut -d' ' -f1)
+          gh release download "v${{ needs.create-release.outputs.version }}" \
+            --repo clouatre-labs/aptu-coder \
+            --pattern "*.tar.gz" \
+            --dir /tmp/assets
+          for f in /tmp/assets/*.tar.gz; do
+            filename=$(basename "$f")
+            sha256=$(sha256sum "$f" | cut -d' ' -f1)
             echo "$filename:$sha256" >> /tmp/checksums.txt
           done
 
@@ -275,7 +273,7 @@ jobs:
 
       - name: Generate and upload MCPB bundles
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           
@@ -287,14 +285,12 @@ jobs:
           for target in "${targets[@]}"; do
             echo "Processing target: $target"
             
-            # Download the release artifact
             ARTIFACT_NAME="aptu-coder-${VERSION}-${target}.tar.gz"
-            DOWNLOAD_URL="https://github.com/clouatre-labs/aptu-coder/releases/download/${RELEASE_TAG}/${ARTIFACT_NAME}"
-            
-            if ! curl -fsSL "$DOWNLOAD_URL" -o "/tmp/${ARTIFACT_NAME}"; then
-              echo "Error: Failed to download artifact from ${DOWNLOAD_URL}" >&2
-              exit 1
-            fi
+
+            gh release download "${RELEASE_TAG}" \
+              --repo clouatre-labs/aptu-coder \
+              --pattern "${ARTIFACT_NAME}" \
+              --dir /tmp
 
             # Validate the downloaded tarball before extracting
             if ! tar -tzf "/tmp/${ARTIFACT_NAME}" >/dev/null 2>&1; then

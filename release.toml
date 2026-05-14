@@ -1,0 +1,2 @@
+# allow-branch: permit cargo release publish from detached HEAD (tag checkout in CI)
+allow-branch = ["*"]
