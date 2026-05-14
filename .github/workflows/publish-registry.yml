@@ -1,0 +1,111 @@
+# Standalone workflow to publish a release to the MCP Registry.
+# Triggered manually when the publish-registry job in release.yml fails
+# (e.g. due to the matrix+reusable-workflow skip on workflow_dispatch).
+# Prerequisites: GitHub release must already exist with .mcpb assets uploaded.
+name: Publish to MCP Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to publish (e.g. 0.13.2)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-registry:
+    name: Publish to MCP Registry
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Download MCPB files and compute SHA256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ inputs.version }}"
+          RELEASE_TAG="v${VERSION}"
+
+          declare -a targets=("aarch64-apple-darwin" "aarch64-unknown-linux-musl" "x86_64-unknown-linux-musl")
+          declare -A shas
+
+          for target in "${targets[@]}"; do
+            MCPB_NAME="aptu-coder-${VERSION}-${target}.mcpb"
+            gh release download "${RELEASE_TAG}" \
+              --repo clouatre-labs/aptu-coder \
+              --pattern "${MCPB_NAME}" \
+              --dir /tmp
+            sha=$(sha256sum "/tmp/${MCPB_NAME}" | cut -d' ' -f1)
+            shas["${target}"]="$sha"
+          done
+
+          echo "SHA_AARCH64_APPLE_DARWIN=${shas[aarch64-apple-darwin]}" >> "$GITHUB_ENV"
+          echo "SHA_AARCH64_LINUX_MUSL=${shas[aarch64-unknown-linux-musl]}" >> "$GITHUB_ENV"
+          echo "SHA_X86_64_LINUX_MUSL=${shas[x86_64-unknown-linux-musl]}" >> "$GITHUB_ENV"
+
+      - name: Build server.json from template
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ inputs.version }}"
+
+          jq \
+            --arg version "$VERSION" \
+            --arg sha_darwin "$SHA_AARCH64_APPLE_DARWIN" \
+            --arg sha_linux_arm "$SHA_AARCH64_LINUX_MUSL" \
+            --arg sha_linux_x86 "$SHA_X86_64_LINUX_MUSL" \
+            '.version = $version |
+             .packages = [
+               {
+                 "registryType": "mcpb",
+                 "identifier": "https://github.com/clouatre-labs/aptu-coder/releases/download/v\($version)/aptu-coder-\($version)-aarch64-apple-darwin.mcpb",
+                 "fileSha256": $sha_darwin,
+                 "transport": {"type": "stdio"}
+               },
+               {
+                 "registryType": "mcpb",
+                 "identifier": "https://github.com/clouatre-labs/aptu-coder/releases/download/v\($version)/aptu-coder-\($version)-aarch64-unknown-linux-musl.mcpb",
+                 "fileSha256": $sha_linux_arm,
+                 "transport": {"type": "stdio"}
+               },
+               {
+                 "registryType": "mcpb",
+                 "identifier": "https://github.com/clouatre-labs/aptu-coder/releases/download/v\($version)/aptu-coder-\($version)-x86_64-unknown-linux-musl.mcpb",
+                 "fileSha256": $sha_linux_x86,
+                 "transport": {"type": "stdio"}
+               }
+             ]' \
+            server.json > server.json.tmp && mv server.json.tmp server.json
+
+      - name: Install mcp-publisher
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download v1.7.8 \
+            --repo modelcontextprotocol/registry \
+            --pattern "mcp-publisher_linux_arm64.tar.gz" \
+            --output /tmp/mcp-publisher.tar.gz
+          echo "3eaa88ea0590433b538d3971a6ca0863d0345d3ff5937b0d1874b7a8de71a591  /tmp/mcp-publisher.tar.gz" | sha256sum --check
+          tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
+          test -f /tmp/mcp-publisher || { echo "mcp-publisher binary not found in tarball"; exit 1; }
+          sudo mv /tmp/mcp-publisher /usr/local/bin/mcp-publisher
+          rm -f /tmp/mcp-publisher.tar.gz
+
+      - name: Validate server.json
+        run: mcp-publisher validate
+
+      - name: Login via GitHub OIDC
+        run: mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: mcp-publisher publish
