@@ -435,79 +435,21 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install cargo-release
+        uses: taiki-e/install-action@3235f8901fd37ffed0052b276cec25a362fb82e9 # v2.77.7
+        with:
+          tool: cargo-release
+
       - name: Authenticate with crates.io
         id: auth
         uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
 
-      - name: Publish aptu-coder-core to crates.io
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder-core/${VERSION}" > /dev/null; then
-            echo "aptu-coder-core ${VERSION} already published to crates.io, skipping"
-          else
-            cargo publish -p aptu-coder-core
-          fi
+      - name: Publish workspace crates to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-
-      - name: Wait for index propagation
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          MAX_ATTEMPTS=12
-          SLEEP_INTERVAL=10
-          ATTEMPT=0
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder-core/${VERSION}" > /dev/null; then
-              echo "aptu-coder-core ${VERSION} found in crates.io index"
-              exit 0
-            fi
-            ATTEMPT=$((ATTEMPT + 1))
-            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
-              echo "Waiting for index propagation... (attempt $ATTEMPT/$MAX_ATTEMPTS)"
-              sleep $SLEEP_INTERVAL
-            fi
-          done
-          echo "Timeout waiting for aptu-coder-core to appear in crates.io index"
-          exit 1
-
-      - name: Publish aptu-coder-remote to crates.io
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder-remote/${VERSION}" > /dev/null; then
-            echo "aptu-coder-remote ${VERSION} already published to crates.io, skipping"
-          else
-            cargo publish -p aptu-coder-remote
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-
-      - name: Wait for aptu-coder-remote index propagation
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          MAX_ATTEMPTS=12
-          SLEEP_INTERVAL=10
-          ATTEMPT=0
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder-remote/${VERSION}" > /dev/null; then
-              echo "aptu-coder-remote ${VERSION} found in crates.io index"
-              exit 0
-            fi
-            ATTEMPT=$((ATTEMPT + 1))
-            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
-              echo "Waiting for index propagation... (attempt $ATTEMPT/$MAX_ATTEMPTS)"
-              sleep $SLEEP_INTERVAL
-            fi
-          done
-          echo "Timeout waiting for aptu-coder-remote to appear in crates.io index"
-          exit 1
-
-      - name: Publish aptu-coder to crates.io
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder/${VERSION}" > /dev/null; then
-            echo "aptu-coder ${VERSION} already published to crates.io, skipping"
-          else
-            cargo publish -p aptu-coder
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          # PUBLISH_GRACE_SLEEP: documented cargo-release mechanism for inter-crate index
+          # propagation delay (https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md).
+          # Replaces hand-rolled curl-poll loops. 30s is conservative; crates.io typically
+          # propagates within 10-15s but spikes under load.
+          PUBLISH_GRACE_SLEEP: 30
+        run: cargo release publish --execute --no-confirm --unpublished
