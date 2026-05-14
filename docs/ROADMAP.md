@@ -148,12 +148,17 @@ No annotation changes until new MCP SEPs land (tracked in #1913, #1984, #1561, #
 
 ---
 
-## Wave 7+ Direction (Tentative)
+### [Complete] Streamable HTTP transport (#885)
+
+Added `--port N` flag. When set, aptu-coder binds to `127.0.0.1:N` and serves all tools over the MCP streamable HTTP transport (2025-11-25 spec) using `StreamableHttpService` with `NeverSessionManager` (tools are pure functions; session state buys nothing). When `--port` is absent, stdio mode is unchanged.
+
+---
+
+## Direction (Tentative)
 
 Unimplemented and pertinent:
 
 - MCP SEP adoption: #1487 (`trustedHint`), #1561 (`unsafeOutputHint`), #1913 (trust/sensitivity annotations), #1984 (governance annotations) -- open upstream; no action until specs stabilize. #1560 (`secretHint`) closed 2026-03-23; evaluate adoption once merged into spec.
-- Streamable HTTP transport: add `--http` flag exposing `StreamableHttpService` (axum + rmcp `transport-streamable-http-server` + `transport-streamable-http-server-session` features) alongside existing stdio. Tower middleware: `RequestBodyLimitLayer` (4 MB) + `tower-governor` (per-token rate limit) + static Bearer token from env var. Target deployment: GCP e2-micro Always Free (us-central1) behind Cloudflare proxy (free tier, TLS termination, WAF, 5 rate-limit rules). No changes to tool handlers or session logic required.
 
 ## Wave 9: Editing Tools [Complete, Partially Removed]
 

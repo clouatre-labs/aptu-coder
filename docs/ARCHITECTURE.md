@@ -10,7 +10,7 @@
 
 - **Minimize token usage**: Return only structured, relevant context - no prose, no noise
 - **Language-agnostic parsing via tree-sitter**: Support 12 languages (Rust, Go, Java, Kotlin, Python, TypeScript, TSX, Fortran, JavaScript, C, C++, C#) with a unified query-based extraction system; TypeScript and TSX use distinct grammars (`LANGUAGE_TYPESCRIPT` and `LANGUAGE_TSX`) but share the same queries in `crates/aptu-coder-core/src/languages/typescript.rs`
-- **Seven focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
+- **Nine focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family); `remote_tree`, `remote_file` (remote_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
 - **Compatible with any MCP orchestrator**: Designed to work with any standards-compliant MCP host
 - **Performance via parallelism**: Use rayon for parallel file processing and ignore crate for efficient .gitignore-aware directory walking
 
@@ -20,7 +20,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 
 | Module | File | Responsibility |
 |--------|------|-----------------|
-| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel, and stdio transport |
+| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed |
 | `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command` |
 | `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients via `notifications/message` |
 | `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
@@ -29,7 +29,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
 | `parser` | `crates/aptu-coder-core/src/parser.rs` | Tree-sitter parsing; ElementExtractor and SemanticExtractor |
-| `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all seven tools |
+| `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all nine tools |
 | `traversal` | `crates/aptu-coder-core/src/traversal.rs` | Directory walking with .gitignore support via ignore crate |
 | `types` | `crates/aptu-coder-core/src/types.rs` | Shared data structures (`AnalyzeDirectoryParams`, `AnalyzeFileParams`, `AnalyzeModuleParams`, `AnalyzeSymbolParams`, `AnalysisResult`, etc.) |
 | `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |

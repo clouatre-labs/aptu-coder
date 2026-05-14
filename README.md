@@ -89,7 +89,9 @@ The binary is at `target/release/aptu-coder`.
 
 ### Configure MCP Client
 
-After installation via brew or cargo, register with the Claude Code CLI:
+Two transports are available:
+
+**stdio (local, default):** Register with the Claude Code CLI:
 
 ```bash
 claude mcp add --transport stdio aptu-coder -- aptu-coder
@@ -100,8 +102,6 @@ If you built from source, use the binary path directly:
 ```bash
 claude mcp add --transport stdio aptu-coder -- /path/to/repo/target/release/aptu-coder
 ```
-
-stdio is intentional: this server runs locally and processes files directly on disk. The low-latency, zero-network-overhead transport matches the use case. Streamable HTTP adds a network hop with no benefit for a local tool.
 
 Or add manually to `.mcp.json` at your project root (shared with your team via version control):
 
@@ -114,6 +114,20 @@ Or add manually to `.mcp.json` at your project root (shared with your team via v
     }
   }
 }
+```
+
+**Streamable HTTP (`--port N`):** Binds to `127.0.0.1:N` and serves all tools over the MCP streamable HTTP transport (localhost only; no TLS or auth required). Useful for MCP clients that prefer HTTP over stdio.
+
+```bash
+aptu-coder --port 3042
+```
+
+goose configuration:
+
+```yaml
+- type: streamable_http
+  name: aptu-coder
+  uri: http://127.0.0.1:3042/mcp
 ```
 
 ## Tools
@@ -186,13 +200,13 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | `DISABLE_PROMPT_CACHING_HAIKU` | unset | Set to `1` to disable prompt caching for Haiku-specific pipelines only. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP HTTP endpoint URL (e.g., `http://localhost:4318`). When set, enables trace, log, and metric export via OTLP/HTTP; noop providers when unset. |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | unset | Reserved per OTel GenAI conventions; aptu-coder does not implement this -- bounded parameters are recorded as span attributes instead. |
-| `XDG_DATA_HOME` | `~/.local/share` | Base directory for daily-rotated JSONL metrics files (`$XDG_DATA_HOME/aptu-coder/metrics/`, 30-day retention). |
+| `XDG_DATA_HOME` | `~/.local/share` | Base directory for daily-rotated JSONL metrics files (`$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl`, 30-day retention). |
 
 ## Observability
 
 The server emits two parallel, independent telemetry streams.
 
-**JSONL metrics (always-on)** are written daily-rotated to `$XDG_DATA_HOME/aptu-coder/metrics/` (fallback: `~/.local/share/aptu-coder/metrics/`) regardless of configuration. Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full schema.
+**JSONL metrics (always-on)** are written daily-rotated to `$XDG_DATA_HOME/aptu-coder/` (fallback: `~/.local/share/aptu-coder/`) regardless of configuration. Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full schema.
 
 **OpenTelemetry export (opt-in)** is enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set to an OTLP HTTP endpoint URL. When set, the server initializes OpenTelemetry trace, log, and meter providers and exports asynchronously via OTLP/HTTP. When unset, noop providers are used with zero runtime overhead.
 
@@ -202,12 +216,13 @@ For the span attribute policy, the never-record list, and details on what is ins
 
 ## Documentation
 
+- **[AGENTS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/AGENTS.md)** - Contributor reference: project structure, commands, rmcp footguns, tool parameter constraints
 - **[ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)** - Design goals, module map, data flow, language handler system, caching strategy
+- **[CONTRIBUTING.md](https://github.com/clouatre-labs/aptu-coder/blob/main/CONTRIBUTING.md)** - Development workflow, commit conventions, PR checklist
+- **[DESIGN-GUIDE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/DESIGN-GUIDE.md)** - Design decisions, rationale, and replication guide for building high-performance MCP servers
 - **[MCP Best Practices](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/MCP-BEST-PRACTICES.md)** - Best practices for agentic loops, orchestration patterns, MCP tool design, memory management, and safety controls
 - **[OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md)** - Metrics schema, JSONL format, and retention policy
 - **[ROADMAP.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ROADMAP.md)** - Development history and future direction
-- **[DESIGN-GUIDE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/DESIGN-GUIDE.md)** - Design decisions, rationale, and replication guide for building high-performance MCP servers
-- **[CONTRIBUTING.md](https://github.com/clouatre-labs/aptu-coder/blob/main/CONTRIBUTING.md)** - Development workflow, commit conventions, PR checklist
 - **[SECURITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/SECURITY.md)** - Security policy and vulnerability reporting
 
 ## License

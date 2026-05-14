@@ -178,8 +178,6 @@ Note: `act` can also run Linux jobs locally, but `aarch64-apple-darwin` builds a
 
 We follow [SemVer](https://semver.org/): MAJOR (breaking), MINOR (features), PATCH (fixes).
 
-## Planned enhancements
-
 ## AI Agent Contributions
 
 This section covers workflows for using **GitHub Copilot coding agent** to implement issues.
