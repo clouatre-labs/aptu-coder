@@ -481,6 +481,26 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
+      - name: Wait for aptu-coder-remote index propagation
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          MAX_ATTEMPTS=12
+          SLEEP_INTERVAL=10
+          ATTEMPT=0
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            if curl -sf -A "aptu-coder-release/1.0" "https://crates.io/api/v1/crates/aptu-coder-remote/${VERSION}" > /dev/null; then
+              echo "aptu-coder-remote ${VERSION} found in crates.io index"
+              exit 0
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "Waiting for index propagation... (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+              sleep $SLEEP_INTERVAL
+            fi
+          done
+          echo "Timeout waiting for aptu-coder-remote to appear in crates.io index"
+          exit 1
+
       - name: Publish aptu-coder to crates.io
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
