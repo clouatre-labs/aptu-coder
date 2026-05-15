@@ -180,7 +180,7 @@ jobs:
             echo "$filename:$sha256" >> /tmp/checksums.txt
           done
 
-      - name: Generate formula
+      - name: Update formula URLs and SHA256s
         run: |
           VERSION_NUMBER="${{ needs.create-release.outputs.version }}"
           RELEASE_TAG="v${VERSION_NUMBER}"
@@ -196,32 +196,45 @@ jobs:
 
           FORMULA="homebrew-tap/Formula/aptu-coder.rb"
 
-          printf '%s\n' \
-            'class AptuCoder < Formula' \
-            '  desc "MCP server for code structure analysis using tree-sitter"' \
-            '  homepage "https://github.com/clouatre-labs/aptu-coder"' \
-            '  license "Apache-2.0"' \
-            '' \
-            '  if OS.mac? && Hardware::CPU.arm?' \
-            "    url \"https://github.com/clouatre-labs/aptu-coder/releases/download/${RELEASE_TAG}/aptu-coder-${VERSION_NUMBER}-aarch64-apple-darwin.tar.gz\"" \
-            "    sha256 \"${SHA_MACOS_ARM}\"" \
-            '  elsif OS.linux? && Hardware::CPU.arm?' \
-            "    url \"https://github.com/clouatre-labs/aptu-coder/releases/download/${RELEASE_TAG}/aptu-coder-${VERSION_NUMBER}-aarch64-unknown-linux-musl.tar.gz\"" \
-            "    sha256 \"${SHA_LINUX_ARM}\"" \
-            '  elsif OS.linux? && Hardware::CPU.intel?' \
-            "    url \"https://github.com/clouatre-labs/aptu-coder/releases/download/${RELEASE_TAG}/aptu-coder-${VERSION_NUMBER}-x86_64-unknown-linux-musl.tar.gz\"" \
-            "    sha256 \"${SHA_LINUX_X86}\"" \
-            '  end' \
-            '' \
-            '  def install' \
-            '    bin.install "aptu-coder"' \
-            '  end' \
-            '' \
-            '  test do' \
-            '    assert_match version.to_s, shell_output("#{bin}/aptu-coder --version")' \
-            '  end' \
-            'end' \
-            > "$FORMULA"
+          # Update URLs in-place; preserves all other formula content (service block, etc.)
+          sed -i \
+            -e "s|releases/download/v[0-9.]\+/aptu-coder-[0-9.]\+-aarch64-apple-darwin\.tar\.gz|releases/download/${RELEASE_TAG}/aptu-coder-${VERSION_NUMBER}-aarch64-apple-darwin.tar.gz|g" \
+            -e "s|releases/download/v[0-9.]\+/aptu-coder-[0-9.]\+-aarch64-unknown-linux-musl\.tar\.gz|releases/download/${RELEASE_TAG}/aptu-coder-${VERSION_NUMBER}-aarch64-unknown-linux-musl.tar.gz|g" \
+            -e "s|releases/download/v[0-9.]\+/aptu-coder-[0-9.]\+-x86_64-unknown-linux-musl\.tar\.gz|releases/download/${RELEASE_TAG}/aptu-coder-${VERSION_NUMBER}-x86_64-unknown-linux-musl.tar.gz|g" \
+            "$FORMULA"
+
+          # Update SHA256s: replace each sha256 line following its url line
+          python3 - "$FORMULA" "$SHA_MACOS_ARM" "$SHA_LINUX_ARM" "$SHA_LINUX_X86" << 'PYEOF'
+          import sys, re
+
+          formula_path, sha_macos, sha_linux_arm, sha_linux_x86 = sys.argv[1:]
+
+          sha_map = {
+              "aarch64-apple-darwin": sha_macos,
+              "aarch64-unknown-linux-musl": sha_linux_arm,
+              "x86_64-unknown-linux-musl": sha_linux_x86,
+          }
+
+          with open(formula_path) as f:
+              lines = f.readlines()
+
+          out = []
+          pending_sha = None
+          for line in lines:
+              if pending_sha is not None and re.match(r'\s+sha256 "', line):
+                  out.append(re.sub(r'sha256 "[^"]*"', f'sha256 "{pending_sha}"', line))
+                  pending_sha = None
+                  continue
+              pending_sha = None
+              for arch, sha in sha_map.items():
+                  if arch in line and "url " in line:
+                      pending_sha = sha
+                      break
+              out.append(line)
+
+          with open(formula_path, "w") as f:
+              f.writelines(out)
+          PYEOF
 
       - name: Create feature branch and commit formula update
         run: |
