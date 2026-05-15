@@ -3972,7 +3972,7 @@ impl ServerHandler for CodeAnalyzer {
         // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
         // a filtered `tools` array in the API call, or for clients to use tool annotations
         // (readOnlyHint/destructiveHint) to apply their own policy.
-        // Profiles: "edit" (3 tools), "analyze" (5 tools), "remote" (all 9 tools), absent/unknown (7 tools, no remote_*).
+        // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), "remote" (9 tools), absent/unknown (9 tools).
         // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock
@@ -3988,9 +3988,12 @@ impl ServerHandler for CodeAnalyzer {
         {
             let mut router = self.tool_router.write().await;
 
-            // Default: remote tools off unless profile explicitly enables them.
-            // Profiles: "edit" (3 tools), "analyze" (5 tools), "remote" (all 9 tools), absent/unknown (7 tools, no remote_*).
-            let enable_remote = active_profile.as_deref() == Some("remote");
+            // Default: all 9 tools enabled unless profile explicitly disables them.
+            // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), "remote" (9 tools), absent/unknown (9 tools).
+            let enable_remote = !matches!(
+                active_profile.as_deref(),
+                Some("compact") | Some("edit") | Some("analyze")
+            );
             // Add new remote_* tool names here when introduced.
             if !enable_remote {
                 disable_routes(&mut router, &["remote_tree", "remote_file"]);
@@ -4016,11 +4019,15 @@ impl ServerHandler for CodeAnalyzer {
                         disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
                         // remote_tree and remote_file already disabled above
                     }
+                    "compact" => {
+                        // Enable 7 tools: all except remote_tree and remote_file
+                        // remote_tree and remote_file already disabled above
+                    }
                     "remote" => {
                         // All 9 tools enabled; remote tools re-enabled by enable_remote=true above
                     }
                     _ => {
-                        // Unknown profile: leave non-remote tools as default (lenient fallback)
+                        // Unknown profile: all 9 tools enabled (lenient fallback)
                     }
                 }
             }
