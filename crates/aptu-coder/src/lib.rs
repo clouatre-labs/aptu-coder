@@ -570,10 +570,12 @@ impl CodeAnalyzer {
         let disk_cache =
             std::sync::Arc::new(cache::DiskCache::new(disk_cache_dir, disk_cache_disabled));
 
-        // Snapshot login shell PATH: invoke login shell with -l -c 'echo $PATH'
+        // Snapshot login shell PATH once at startup: invoke login shell with -l -c 'echo $PATH'.
+        // Falls back to the current process PATH (inherited in stdio mode) if the shell invocation
+        // fails or returns an empty string, so exec_command always has a usable PATH.
         let resolved_path = {
             let shell = resolve_shell();
-            match std::process::Command::new(&shell)
+            let login_path = match std::process::Command::new(&shell)
                 .args(["-l", "-c", "echo $PATH"])
                 .output()
             {
@@ -581,16 +583,19 @@ impl CodeAnalyzer {
                     let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if path_str.is_empty() {
                         tracing::warn!("login shell PATH snapshot returned empty string");
-                        Arc::new(None)
+                        None
                     } else {
-                        Arc::new(Some(path_str))
+                        Some(path_str)
                     }
                 }
                 Err(e) => {
                     tracing::warn!("failed to snapshot login shell PATH: {e}");
-                    Arc::new(None)
+                    None
                 }
-            }
+            };
+            // Fall back to the current process PATH when the login shell snapshot fails.
+            let path = login_path.or_else(|| std::env::var("PATH").ok());
+            Arc::new(path)
         };
 
         CodeAnalyzer {
