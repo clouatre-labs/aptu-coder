@@ -570,26 +570,48 @@ impl CodeAnalyzer {
         let disk_cache =
             std::sync::Arc::new(cache::DiskCache::new(disk_cache_dir, disk_cache_disabled));
 
-        // Snapshot login shell PATH once at startup: invoke login shell with -l -c 'echo $PATH'.
-        // Falls back to the current process PATH (inherited in stdio mode) if the shell invocation
-        // fails or returns an empty string, so exec_command always has a usable PATH.
+        // Snapshot login shell PATH once at startup: invoke the user's login shell with
+        // -l -c 'echo $PATH' so their full profile (nvm, Homebrew, etc.) is captured.
+        // Shell resolution priority for the snapshot:
+        //   1. $SHELL env var (user's actual login shell; sources the right profile)
+        //   2. resolve_shell() (APTU_SHELL override or bash from PATH)
+        //   3. /bin/sh (guaranteed to exist on all POSIX systems)
+        // Falls back to the current process PATH when the snapshot fails or returns empty,
+        // so exec_command always has a usable PATH in both stdio and HTTP transport modes.
         let resolved_path = {
-            let shell = resolve_shell();
-            let login_path = match std::process::Command::new(&shell)
+            let snapshot_shell = std::env::var("SHELL")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    let s = resolve_shell();
+                    if s.is_empty() {
+                        "/bin/sh".to_string()
+                    } else {
+                        s
+                    }
+                });
+            let login_path = match std::process::Command::new(&snapshot_shell)
                 .args(["-l", "-c", "echo $PATH"])
                 .output()
             {
                 Ok(output) => {
                     let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if path_str.is_empty() {
-                        tracing::warn!("login shell PATH snapshot returned empty string");
+                        tracing::warn!(
+                            shell = %snapshot_shell,
+                            "login shell PATH snapshot returned empty string"
+                        );
                         None
                     } else {
                         Some(path_str)
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("failed to snapshot login shell PATH: {e}");
+                    tracing::warn!(
+                        shell = %snapshot_shell,
+                        error = %e,
+                        "failed to snapshot login shell PATH"
+                    );
                     None
                 }
             };
