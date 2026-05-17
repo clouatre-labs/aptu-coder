@@ -30,8 +30,13 @@ pub const IMPORT_QUERY: &str = r"
 /// Tree-sitter query for extracting definition and use sites.
 pub const DEFUSE_QUERY: &str = r"
 (property_declaration
-  name: (simple_identifier) @write.property)
-(simple_identifier) @read.usage
+  (variable_declaration
+    (identifier) @write.property))
+(property_declaration
+  (multi_variable_declaration
+    (variable_declaration
+      (identifier) @write.property)))
+(identifier) @read.usage
 ";
 
 use tree_sitter::Node;
@@ -540,5 +545,66 @@ mod tests {
             find_node(class_node, "function_declaration").expect("function_declaration not found");
         let result = find_method_for_receiver(&node, src, None);
         assert_eq!(result, Some("bar".to_string()));
+    }
+
+    #[test]
+    fn test_defuse_kotlin_val_declaration() {
+        // Arrange: val declaration with write and read
+        let source = r#"
+fun main() {
+    val x = 42
+    val y = x + 1
+}
+"#;
+        // Act
+        let sites = crate::parser::SemanticExtractor::extract_def_use_for_file(
+            source,
+            "kotlin",
+            "x",
+            "src/main.kt",
+            None,
+        );
+
+        // Assert
+        assert!(
+            !sites.is_empty(),
+            "expected at least one def-use site for 'x'"
+        );
+        let has_write = sites
+            .iter()
+            .any(|s| s.kind == crate::types::DefUseKind::Write);
+        let has_read = sites
+            .iter()
+            .any(|s| s.kind == crate::types::DefUseKind::Read);
+        assert!(has_write, "expected a write site for 'x'");
+        assert!(has_read, "expected a read site for 'x'");
+    }
+
+    #[test]
+    fn test_defuse_kotlin_multi_variable_declaration() {
+        // Arrange: destructuring assignment with multiple write sites
+        let source = r#"
+fun main() {
+    val (a, b) = Pair(1, 2)
+}
+"#;
+        // Act
+        let sites_a = crate::parser::SemanticExtractor::extract_def_use_for_file(
+            source,
+            "kotlin",
+            "a",
+            "src/main.kt",
+            None,
+        );
+
+        // Assert
+        assert!(
+            !sites_a.is_empty(),
+            "expected at least one def-use site for 'a'"
+        );
+        let has_write_a = sites_a
+            .iter()
+            .any(|s| s.kind == crate::types::DefUseKind::Write);
+        assert!(has_write_a, "expected a write site for 'a'");
     }
 }
