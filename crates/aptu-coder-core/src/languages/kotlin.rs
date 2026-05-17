@@ -28,14 +28,20 @@ pub const IMPORT_QUERY: &str = r"
 ";
 
 /// Tree-sitter query for extracting definition and use sites.
+/// Write-site patterns capture the identifier node within property declarations:
+/// - (single): captures `val x = ...` or `var x = ...` via variable_declaration
+/// - (multi): captures `val (a, b) = ...` via multi_variable_declaration
 pub const DEFUSE_QUERY: &str = r"
+; write site: val/var x = ... (single variable declaration)
 (property_declaration
   (variable_declaration
     (identifier) @write.property))
+; write site: val (a, b) = ... (destructuring declaration)
 (property_declaration
   (multi_variable_declaration
     (variable_declaration
       (identifier) @write.property)))
+; read site: any identifier reference -- intentionally broad, consistent with Python/Go/Rust patterns
 (identifier) @read.usage
 ";
 
