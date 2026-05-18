@@ -32,4 +32,4 @@ url = { workspace = true }
 [dev-dependencies]
 rustls = { workspace = true }
 tokio = { workspace = true }
-wiremock = "0.6"
+wiremock = "=0.6.5"

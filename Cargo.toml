@@ -42,10 +42,10 @@ tree-sitter-python = "0.25.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-fortran = "0.6.0"
-opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "metrics"] }
-opentelemetry-otlp = { version = "0.31", features = ["http-proto", "reqwest-client"] }
-opentelemetry-appender-tracing = { version = "0.31", features = ["log"] }
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
+opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-client"] }
+opentelemetry-appender-tracing = { version = "0.32", features = ["log"] }
 tracing-opentelemetry = "0.32"
 gitlab = "0.1811.0"
 octocrab = "0.50.0"
