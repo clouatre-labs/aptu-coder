@@ -1,0 +1,87 @@
+# v15 Run Order
+# Pilots run first (one per condition per target group) to verify methodology.
+# Scored runs follow interleaved (5 E + 5 F per target).
+#
+# Usage: bash scripts/bench-v15-run.sh <CONDITION_ID> <TARGET_ID> <RUN_ID>
+# CONDITION_ID: E (MCP) or F (curl)
+# TARGET_ID: T1, T1b, T2, T3, T4
+# RUN_ID: e.g. E-T1-pilot, F-T1-scored-1
+
+# --- Pilot runs (one per condition, validate methodology before scored runs) ---
+# Run these first, review outputs, then proceed to scored runs
+ 1. bash scripts/bench-v15-run.sh E T1 E-T1-pilot
+ 2. bash scripts/bench-v15-run.sh F T1 F-T1-pilot
+
+# --- Scored runs: T1 (5E + 5F interleaved) ---
+ 3. bash scripts/bench-v15-run.sh E T1 E-T1-scored-1
+ 4. bash scripts/bench-v15-run.sh F T1 F-T1-scored-1
+ 5. bash scripts/bench-v15-run.sh F T1 F-T1-scored-2
+ 6. bash scripts/bench-v15-run.sh E T1 E-T1-scored-2
+ 7. bash scripts/bench-v15-run.sh E T1 E-T1-scored-3
+ 8. bash scripts/bench-v15-run.sh F T1 F-T1-scored-3
+ 9. bash scripts/bench-v15-run.sh F T1 F-T1-scored-4
+10. bash scripts/bench-v15-run.sh E T1 E-T1-scored-4
+11. bash scripts/bench-v15-run.sh E T1 E-T1-scored-5
+12. bash scripts/bench-v15-run.sh F T1 F-T1-scored-5
+
+# --- T1b (same interleave pattern) ---
+13. bash scripts/bench-v15-run.sh E T1b E-T1b-pilot
+14. bash scripts/bench-v15-run.sh F T1b F-T1b-pilot
+15. bash scripts/bench-v15-run.sh E T1b E-T1b-scored-1
+16. bash scripts/bench-v15-run.sh F T1b F-T1b-scored-1
+17. bash scripts/bench-v15-run.sh F T1b F-T1b-scored-2
+18. bash scripts/bench-v15-run.sh E T1b E-T1b-scored-2
+19. bash scripts/bench-v15-run.sh E T1b E-T1b-scored-3
+20. bash scripts/bench-v15-run.sh F T1b F-T1b-scored-3
+21. bash scripts/bench-v15-run.sh F T1b F-T1b-scored-4
+22. bash scripts/bench-v15-run.sh E T1b E-T1b-scored-4
+23. bash scripts/bench-v15-run.sh E T1b E-T1b-scored-5
+24. bash scripts/bench-v15-run.sh F T1b F-T1b-scored-5
+
+# --- T2 ---
+25. bash scripts/bench-v15-run.sh E T2 E-T2-pilot
+26. bash scripts/bench-v15-run.sh F T2 F-T2-pilot
+27. bash scripts/bench-v15-run.sh E T2 E-T2-scored-1
+28. bash scripts/bench-v15-run.sh F T2 F-T2-scored-1
+29. bash scripts/bench-v15-run.sh F T2 F-T2-scored-2
+30. bash scripts/bench-v15-run.sh E T2 E-T2-scored-2
+31. bash scripts/bench-v15-run.sh E T2 E-T2-scored-3
+32. bash scripts/bench-v15-run.sh F T2 F-T2-scored-3
+33. bash scripts/bench-v15-run.sh F T2 F-T2-scored-4
+34. bash scripts/bench-v15-run.sh E T2 E-T2-scored-4
+35. bash scripts/bench-v15-run.sh E T2 E-T2-scored-5
+36. bash scripts/bench-v15-run.sh F T2 F-T2-scored-5
+
+# --- T3 ---
+37. bash scripts/bench-v15-run.sh E T3 E-T3-pilot
+38. bash scripts/bench-v15-run.sh F T3 F-T3-pilot
+39. bash scripts/bench-v15-run.sh E T3 E-T3-scored-1
+40. bash scripts/bench-v15-run.sh F T3 F-T3-scored-1
+41. bash scripts/bench-v15-run.sh F T3 F-T3-scored-2
+42. bash scripts/bench-v15-run.sh E T3 E-T3-scored-2
+43. bash scripts/bench-v15-run.sh E T3 E-T3-scored-3
+44. bash scripts/bench-v15-run.sh F T3 F-T3-scored-3
+45. bash scripts/bench-v15-run.sh F T3 F-T3-scored-4
+46. bash scripts/bench-v15-run.sh E T3 E-T3-scored-4
+47. bash scripts/bench-v15-run.sh E T3 E-T3-scored-5
+48. bash scripts/bench-v15-run.sh F T3 F-T3-scored-5
+
+# --- T4 (depth=2 stress; may trigger discard-and-rerun for >30s) ---
+49. bash scripts/bench-v15-run.sh E T4 E-T4-pilot
+50. bash scripts/bench-v15-run.sh F T4 F-T4-pilot
+51. bash scripts/bench-v15-run.sh E T4 E-T4-scored-1
+52. bash scripts/bench-v15-run.sh F T4 F-T4-scored-1
+53. bash scripts/bench-v15-run.sh F T4 F-T4-scored-2
+54. bash scripts/bench-v15-run.sh E T4 E-T4-scored-2
+55. bash scripts/bench-v15-run.sh E T4 E-T4-scored-3
+56. bash scripts/bench-v15-run.sh F T4 F-T4-scored-3
+57. bash scripts/bench-v15-run.sh F T4 F-T4-scored-4
+58. bash scripts/bench-v15-run.sh E T4 E-T4-scored-4
+59. bash scripts/bench-v15-run.sh E T4 E-T4-scored-5
+60. bash scripts/bench-v15-run.sh F T4 F-T4-scored-5
+
+# --- Error sub-tasks (one per condition; not counted in n=5) ---
+61. bash scripts/bench-v15-run.sh E error E-error-missing-token --error-type missing_token
+62. bash scripts/bench-v15-run.sh E error E-error-not-found --error-type not_found
+63. bash scripts/bench-v15-run.sh F error F-error-missing-token --error-type missing_token
+64. bash scripts/bench-v15-run.sh F error F-error-not-found --error-type not_found
