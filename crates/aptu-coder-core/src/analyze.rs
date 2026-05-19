@@ -970,7 +970,10 @@ fn analyze_focused_with_progress_with_entries_internal(
                 // Symbol not found anywhere (neither in call graph nor as def/use site).
                 // Propagate the original SymbolNotFound error instead of returning an
                 // empty success response.
-                return Err(resolve_result.unwrap_err());
+                if let Err(e) = resolve_result {
+                    return Err(e);
+                }
+                unreachable!("resolve_result is Ok only when symbol was found");
             }
             use std::fmt::Write as _;
             let mut formatted = String::new();

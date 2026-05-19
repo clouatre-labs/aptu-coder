@@ -14,6 +14,8 @@
 //!
 //! For more information, see the [README](https://github.com/clouatre-labs/aptu-coder/blob/main/crates/aptu-coder-remote/README.md).
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod types;
 
 use std::collections::HashMap;

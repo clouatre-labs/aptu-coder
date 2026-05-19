@@ -26,6 +26,8 @@
 //! # }
 //! ```
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod analyze;
 pub mod cache;
 pub mod completion;

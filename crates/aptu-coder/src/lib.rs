@@ -27,6 +27,8 @@
 //!
 //! Languages supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#.
 
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod logging;
 pub mod metrics;
 pub mod otel;
