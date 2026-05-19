@@ -207,10 +207,6 @@ jobs:
           tool: cargo-deny
       - name: Check advisories and licenses
         run: cargo deny check advisories licenses
-      - name: Install jq
-        # jq is pre-installed on ubuntu-24.04-arm but the explicit install step
-        # makes the dependency visible and survives runner image updates.
-        run: sudo apt-get install -y jq
       - name: Check package age
         run: bash .github/scripts/check-package-age.sh
 
