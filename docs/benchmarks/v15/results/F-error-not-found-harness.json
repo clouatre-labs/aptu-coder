@@ -1,0 +1,12 @@
+{
+  "run_id": "F-error-not-found",
+  "condition": "F",
+  "target_id": "error",
+  "latency_ms": 0,
+  "raw_bytes": 0,
+  "content_chars": 0,
+  "est_tokens": 0,
+  "timestamp": "2026-05-19T21:32:59Z",
+  "timing_method": "epochrealtime",
+  "note": "harness_extraction_fixed_manually"
+}

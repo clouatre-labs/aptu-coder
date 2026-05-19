@@ -1,0 +1,1 @@
+{"run_id": "E-T1b-scored-5", "condition": "E", "target_id": "T1b", "content_correct": true, "decode_required": false, "first_line_seen": "/* GTK - The GIMP Toolkit", "content_chars": 1825, "tool_calls_total": 1}

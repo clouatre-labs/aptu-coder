@@ -1,0 +1,1 @@
+{"run_id": "F-T3-scored-1", "condition": "F", "target_id": "T3", "content_correct": true, "decode_required": false, "entry_count": 101, "first_entry_seen": "gtkaboutdialog.c", "tool_calls_total": 1}
