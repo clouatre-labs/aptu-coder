@@ -82,7 +82,7 @@ jobs:
         if: ${{ inputs.dry_run }}
         env:
           TARGET: ${{ inputs.target }}
-        run: cargo build --release --target "${TARGET}"
+        run: cargo build --locked --release --target "${TARGET}"
 
       - name: Sign tarball with cosign
         if: ${{ !inputs.dry_run }}
