@@ -95,7 +95,9 @@ where
     match mutex.lock() {
         Ok(mut guard) => recovery(&mut guard),
         Err(poisoned) => {
-            let cache_size = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap());
+            // SAFETY: 100 is a non-zero literal
+            let cache_size = NonZeroUsize::new(capacity)
+                .unwrap_or_else(|| unsafe { NonZeroUsize::new_unchecked(100) });
             let new_cache = LruCache::new(cache_size);
             let mut guard = poisoned.into_inner();
             *guard = new_cache;
@@ -124,8 +126,10 @@ impl AnalysisCache {
             .and_then(|v| v.parse().ok())
             .unwrap_or(20);
         let dir_capacity = dir_capacity.max(1);
-        let cache_size = NonZeroUsize::new(file_capacity).unwrap();
-        let dir_cache_size = NonZeroUsize::new(dir_capacity).unwrap();
+        // SAFETY: file_capacity is >= 1 due to .max(1) applied above
+        let cache_size = unsafe { NonZeroUsize::new_unchecked(file_capacity) };
+        // SAFETY: dir_capacity is >= 1 due to .max(1) applied above
+        let dir_cache_size = unsafe { NonZeroUsize::new_unchecked(dir_capacity) };
         Self {
             file_capacity,
             dir_capacity,
