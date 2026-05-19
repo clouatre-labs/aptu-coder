@@ -207,6 +207,8 @@ jobs:
           tool: cargo-deny
       - name: Check advisories and licenses
         run: cargo deny check advisories licenses
+      - name: Check package age
+        run: bash .github/scripts/check-package-age.sh
 
   msrv:
     name: MSRV Check
