@@ -130,7 +130,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Run Clippy lints
-        run: cargo clippy --profile ci -- -D warnings -W clippy::cognitive_complexity
+        run: cargo clippy --locked --profile ci -- -D warnings -W clippy::cognitive_complexity
       - name: Check SPDX headers
         run: |
           rg --files crates/ | rg '\.rs$' | while read -r f; do
@@ -173,22 +173,22 @@ jobs:
           tool: cargo-nextest
       - name: Coverage
         run: |
-          cargo llvm-cov nextest --no-report --all-features \
+          cargo llvm-cov nextest --locked --no-report --all-features \
             --workspace \
             -E 'not binary(mcp_smoke)'
-          cargo llvm-cov report -p aptu-coder-core \
+          cargo llvm-cov report --locked -p aptu-coder-core \
             --fail-under-lines 90 \
             --fail-under-regions 80 \
             --lcov --output-path lcov-core.info
           # aptu-coder coverage tracked but not gated (transport/logging/metrics layer)
-          cargo llvm-cov report -p aptu-coder \
+          cargo llvm-cov report --locked -p aptu-coder \
             --lcov --output-path lcov-mcp.info || true
           # aptu-coder-remote coverage with thresholds enforced.
           # The gitlab crate does not support HTTP base URL injection so
           # gitlab_fetch_tree / gitlab_fetch_file internals cannot be reached
           # via wiremock. Thresholds reflect coverage achievable without
           # refactoring the GitLab client.
-          cargo llvm-cov report -p aptu-coder-remote \
+          cargo llvm-cov report --locked -p aptu-coder-remote \
             --lcov --output-path lcov-remote.info \
             --fail-under-lines 60 --fail-under-regions 50
 
@@ -227,7 +227,7 @@ jobs:
           cache-targets: false
           save-if: true
       - name: Check MSRV
-        run: cargo check
+        run: cargo check --locked
 
   zizmor:
     name: zizmor
