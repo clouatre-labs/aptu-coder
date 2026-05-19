@@ -36,10 +36,12 @@ fn test_init_otel_invalid_url_returns_none() {
     // Act: call init_otel with invalid endpoint
     let result = aptu_coder::otel::init_otel();
 
-    // Assert: should return None (graceful failure on invalid URL)
+    // Assert: opentelemetry-otlp 0.32+ uses lazy connection, so init_otel returns Some(provider)
+    // even with an invalid URL. The actual connection failure occurs at export time, not init time.
+    // This test verifies that init_otel doesn't panic and returns a provider.
     assert!(
-        result.is_none(),
-        "init_otel should return None when endpoint is invalid"
+        result.is_some(),
+        "init_otel should return Some(provider) with lazy connection (otel 0.32+)"
     );
 
     // Cleanup
