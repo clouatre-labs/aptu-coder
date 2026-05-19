@@ -1,0 +1,38 @@
+{
+  "version": "v15",
+  "rubric": {
+    "dimensions": ["content_correct", "latency_ok", "decode_not_required", "error_graceful"],
+    "criteria": {
+      "C1": {
+        "source": "agent",
+        "field": "content_correct",
+        "description": "content begins with expected first line"
+      },
+      "C2": {
+        "source": "harness",
+        "field": "latency_ms",
+        "description": "median across 5 runs <= 2000ms"
+      },
+      "C3": {
+        "source": "agent",
+        "field": "decode_required",
+        "description": "false = no base64 decode required"
+      },
+      "C4": {
+        "note": "architectural asymmetry: MCP requires GITLAB_TOKEN unconditionally; not scored per-run"
+      },
+      "C5": {
+        "source": "agent",
+        "field": "error_graceful",
+        "description": "clear actionable error on missing token AND on 404"
+      }
+    },
+    "win_threshold": ">=4/5 runs (C2 uses median; C1/C3/C5 use run scores)"
+  },
+  "targets": ["T1", "T1b", "T2", "T3", "T4"],
+  "conditions": {
+    "E": "MCP remote tools",
+    "F": "curl"
+  },
+  "runs": []
+}
