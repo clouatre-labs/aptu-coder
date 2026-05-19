@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 aptu-coder contributors
+# SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
 # check-package-age.sh: Validate that new dependencies introduced in a PR
@@ -24,14 +26,16 @@ if [ ! -f "Cargo.lock" ]; then
   exit 1
 fi
 
-# Fetch origin/main to ensure we have the latest base branch
-git fetch origin main:refs/remotes/origin/main 2>/dev/null || true
+# Fetch origin/main with minimal depth to ensure the ref is available even in
+# shallow clones (GitHub Actions default fetch-depth: 1 only fetches HEAD).
+git fetch --depth=1 origin main:refs/remotes/origin/main 2>/dev/null || true
 
-# Get the diff of Cargo.lock against origin/main
-# We look for lines that start with '+[[package]]' to find new package entries
-DIFF_OUTPUT=$(git diff origin/main -- Cargo.lock || echo "")
-
-if [ -z "$DIFF_OUTPUT" ]; then
+# Get the diff of Cargo.lock against origin/main.
+# Use --exit-code to distinguish "no diff" (exit 0) from errors; capture output
+# separately so set -e does not abort on a clean diff.
+if ! git diff --exit-code --quiet origin/main -- Cargo.lock 2>/dev/null; then
+  DIFF_OUTPUT=$(git diff origin/main -- Cargo.lock)
+else
   echo "No changes to Cargo.lock detected"
   exit 0
 fi
@@ -83,8 +87,10 @@ while IFS=':' read -r NAME VERSION; do
 
   echo -n "Checking $NAME@$VERSION... "
 
-  # Query crates.io API for this specific version (10s timeout to avoid hanging the job)
-  RESPONSE=$(curl -s --max-time 10 "https://crates.io/api/v1/crates/$NAME/$VERSION" 2>/dev/null || echo "{}")
+  # Query crates.io API for this specific version.
+  # --connect-timeout 5: fail fast if crates.io is unreachable.
+  # --max-time 10: cap total transfer time so the job cannot hang indefinitely.
+  RESPONSE=$(curl -s --connect-timeout 5 --max-time 10 "https://crates.io/api/v1/crates/$NAME/$VERSION" 2>/dev/null || echo "{}")
 
   # Extract the created_at timestamp
   CREATED_AT=$(echo "$RESPONSE" | jq -r '.version.created_at // empty' 2>/dev/null || echo "")
