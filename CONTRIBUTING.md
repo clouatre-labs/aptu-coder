@@ -76,7 +76,7 @@ The `-S` flag GPG-signs the commit (required by branch protection).
 - [ ] Tests pass (`cargo test`)
 - [ ] No clippy warnings (`cargo clippy -- -D warnings`)
 - [ ] Code formatted (`cargo fmt --check`)
-- [ ] Dependency audit clean (`cargo deny check advisories licenses`)
+- [ ] Dependency audit clean (`cargo deny check advisories licenses`); dependencies must also pass the 7-day freshness gate (run automatically in CI; bypass with `SKIP_PACKAGE_AGE_CHECK=true` if necessary)
 - [ ] Commits GPG-signed and signed off (`git commit -S --signoff`)
 - [ ] Clear PR description
 
@@ -109,12 +109,10 @@ This project follows a Rust adaptation of the [NASA/JPL Power of 10](https://en.
 
 - **Zero warnings:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test`, and `cargo deny check` must all pass
 - **Every unsafe block requires a SAFETY comment:** Enforced by `clippy::undocumented_unsafe_blocks = deny` in workspace lints
-- **No .unwrap() or .expect() in library or server code:** Restricted to tests, examples, and startup paths (future mechanical enforcement via `clippy::unwrap_used`)
+- **No `.unwrap()` in production code:** Enforced by `clippy::unwrap_used = "deny"`. Test code is exempted via `#[cfg_attr(test, allow(clippy::unwrap_used))]` at each crate root.
 - **No unchecked indexing on untrusted data:** Use `.get()` with explicit error propagation instead of `[]`
 - **Loops over untrusted or externally-driven data must have an explicit bound or checked max-iteration guard**
 - **Minimize #[cfg] feature combinations:** Each supported combination must be covered by CI
-
-Note: Mechanical enforcement of `unwrap_used` is deferred to a follow-on issue.
 
 ## Automated Review Tooling
 

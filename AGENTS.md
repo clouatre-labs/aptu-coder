@@ -27,6 +27,9 @@ cargo bench
 cargo install --path crates/aptu-coder --profile release   # local install; binary lands in ~/.cargo/bin/
 ```
 
+Workspace lints enforced in CI (deny): undocumented_unsafe_blocks, unwrap_used (test code exempted via cfg_attr).
+Dependency freshness: new Cargo.lock entries must be >=7 days old; bypass with SKIP_PACKAGE_AGE_CHECK=true.
+
 ## Observability
 
 By default, the server operates with noop telemetry providers (zero overhead). Telemetry export is opt-in via environment variables:
@@ -96,7 +99,7 @@ Escalate to `analyze_symbol` when: (1) you need all callers of a function, (2) y
 ## Do not
 
 - Add dependencies without justification in the PR description
-- Use `unsafe` code
+- Use `unsafe` code without a `// SAFETY:` comment (every unsafe block requires documentation, enforced by `clippy::undocumented_unsafe_blocks = "deny"`)
 - Implement features not specified in the assigned issue
 - Modify files outside the scope of the assigned issue
 - Assume any API exists based on training data; verify against installed crate versions

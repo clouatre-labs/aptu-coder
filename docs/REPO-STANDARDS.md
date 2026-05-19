@@ -14,6 +14,7 @@ This document maps every repo-level artifact to its purpose and the rationale be
 | `.github/workflows/ci.yml` | Lint, test, audit; path-filtered; aggregate `CI Result` job; pass `--profile ci` explicitly on `cargo clippy` (not `cargo test`: profile.ci inherits `panic=abort` which aborts the test harness) |
 | `.github/workflows/build-and-attest.yml` | Reusable multi-platform build with cosign signing and provenance attestation |
 | `.github/workflows/release.yml` | GPG tag verification, Homebrew + cargo-binstall + crates.io distribution |
+| `.github/scripts/check-package-age.sh` | Validates new Cargo.lock dependencies are >=7 days old; bypass with `SKIP_PACKAGE_AGE_CHECK=true` |
 | `.commitlintrc.yml` | Enforces Conventional Commits for automated changelog and searchable history |
 | `clippy.toml` | Clippy configuration; lints enforced with `-D warnings` in CI; cognitive complexity threshold set to 30 |
 | `deny.toml` | `cargo deny` configuration for advisory and license checks |
@@ -55,6 +56,8 @@ ci-result:
 **Provenance attestation.** `build-and-attest.yml` generates a signed attestation via `actions/attest-build-provenance`. Consumers can verify with `gh attestation verify` before installing. `Cargo.lock` is committed and `cargo deny` enforces license and advisory checks in CI. Build provenance is covered by cosign signing and `actions/attest-build-provenance` (SLSA Build L3).
 
 **Runner pinning to ubuntu-24.04-arm.** `ubuntu-latest` is a moving alias; GitHub advances it to the next LTS image with short notice. Pinning to a specific image (`ubuntu-24.04-arm`) makes toolchain changes explicit and reviewable rather than silent. Renovate keeps the pin current via automated PRs.
+
+**New dependency freshness gate.** The `deny` CI job runs `.github/scripts/check-package-age.sh` to verify new Cargo.lock entries were published >=7 days ago.
 
 **Cognitive complexity threshold.** `clippy::cognitive_complexity` is enforced at a threshold of 30 (set in `clippy.toml`); `-D warnings` promotes violations to hard errors in CI. When a function legitimately exceeds the threshold and splitting it would reduce clarity rather than improve it, suppress with an attribute and a mandatory `reason` field:
 
