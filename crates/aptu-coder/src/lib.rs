@@ -3703,7 +3703,7 @@ impl ServerHandler for CodeAnalyzer {
         // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
         // a filtered `tools` array in the API call, or for clients to use tool annotations
         // (readOnlyHint/destructiveHint) to apply their own policy.
-        // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), absent/unknown (7 tools).
+        // Two profiles: "edit" (3 tools), "analyze" (5 tools); absent/unknown = all 7 tools.
         // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock
@@ -3720,7 +3720,7 @@ impl ServerHandler for CodeAnalyzer {
             let mut router = self.tool_router.write().await;
 
             // Default: all 7 tools enabled unless profile explicitly disables them.
-            // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), absent/unknown (7 tools).
+            // Two profiles: "edit" (3 tools), "analyze" (5 tools); absent/unknown = all 7 tools.
 
             if let Some(ref profile) = active_profile {
                 match profile.as_str() {
@@ -3739,9 +3739,6 @@ impl ServerHandler for CodeAnalyzer {
                     "analyze" => {
                         // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, exec_command
                         disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
-                    }
-                    "compact" => {
-                        // Enable all 7 tools
                     }
                     _ => {
                         // Unknown profile: all 7 tools enabled (lenient fallback)

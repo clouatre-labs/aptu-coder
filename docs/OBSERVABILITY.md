@@ -27,7 +27,7 @@ Each line in the JSONL file is one JSON object:
 | Field | Type | Description |
 |---|---|---|
 | `ts` | `u64` | Unix timestamp in milliseconds at handler return |
-| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command`, `remote_tree`, `remote_file` |
+| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command` |
 | `duration_ms` | `u64` | Wall-clock time from handler entry to return |
 | `output_chars` | `usize` | Byte length (`str::len()`) of the final text returned; `0` on error paths |
 | `param_path_depth` | `usize` | `Path::components().count()` on `params.path` |
