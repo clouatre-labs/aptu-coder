@@ -1,0 +1,11 @@
+{
+  "run_id": "E-T1b-pilot",
+  "condition": "E",
+  "target_id": "T1b",
+  "latency_ms": 3838,
+  "raw_bytes": 0,
+  "content_chars": 2051,
+  "est_tokens": 512,
+  "timestamp": "2026-05-19T21:24:21Z",
+  "timing_method": "epochrealtime"
+}

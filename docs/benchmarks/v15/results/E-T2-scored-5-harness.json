@@ -1,0 +1,11 @@
+{
+  "run_id": "E-T2-scored-5",
+  "condition": "E",
+  "target_id": "T2",
+  "latency_ms": 3767,
+  "raw_bytes": 0,
+  "content_chars": 0,
+  "est_tokens": 0,
+  "timestamp": "2026-05-19T21:26:53Z",
+  "timing_method": "epochrealtime"
+}

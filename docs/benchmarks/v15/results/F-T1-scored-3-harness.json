@@ -1,0 +1,11 @@
+{
+  "run_id": "F-T1-scored-3",
+  "condition": "F",
+  "target_id": "T1",
+  "latency_ms": 6332,
+  "raw_bytes": 0,
+  "content_chars": 1247894,
+  "est_tokens": 311973,
+  "timestamp": "2026-05-19T21:23:48Z",
+  "timing_method": "epochrealtime"
+}

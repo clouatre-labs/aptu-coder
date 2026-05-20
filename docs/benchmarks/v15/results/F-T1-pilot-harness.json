@@ -1,0 +1,11 @@
+{
+  "run_id": "F-T1-pilot",
+  "condition": "F",
+  "target_id": "T1",
+  "latency_ms": 7636,
+  "raw_bytes": 0,
+  "content_chars": 892347,
+  "est_tokens": 223086,
+  "timestamp": "2026-05-19T21:23:04Z",
+  "timing_method": "epochrealtime"
+}

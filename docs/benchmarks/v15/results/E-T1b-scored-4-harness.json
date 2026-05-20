@@ -1,0 +1,11 @@
+{
+  "run_id": "E-T1b-scored-4",
+  "condition": "E",
+  "target_id": "T1b",
+  "latency_ms": 3937,
+  "raw_bytes": 0,
+  "content_chars": 1846,
+  "est_tokens": 461,
+  "timestamp": "2026-05-19T21:25:13Z",
+  "timing_method": "epochrealtime"
+}
