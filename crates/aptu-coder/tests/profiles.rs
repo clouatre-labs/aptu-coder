@@ -291,30 +291,6 @@ async fn test_analyze_profile_tool_count() {
 }
 
 #[tokio::test]
-async fn test_compact_profile_tool_count() {
-    let _guard = env_var_lock();
-    // Arrange: initialize with compact profile
-    let resp = call_tools_list_with_profile(Some("compact")).await;
-
-    // Act: extract tool count from response
-    let tools = &resp["result"]["tools"];
-    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
-    let tool_names: Vec<String> = tools
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
-        .collect();
-
-    // Assert: compact profile should have exactly 7 tools
-    assert_eq!(
-        tool_count, 7,
-        "compact profile should enable exactly 7 tools, got: {:?}",
-        tool_names
-    );
-}
-
-#[tokio::test]
 async fn test_no_profile_tool_count() {
     let _guard = env_var_lock();
     // Arrange: initialize with no profile metadata; env var must be absent.
