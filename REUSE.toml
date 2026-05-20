@@ -1,7 +1,7 @@
 version = 1
 
 [[annotations]]
-path = ["crates/aptu-coder-core/src/**/*.rs", "crates/aptu-coder/src/**/*.rs", "crates/aptu-coder-remote/src/**/*.rs", "crates/aptu-coder-core/Cargo.toml", "crates/aptu-coder/Cargo.toml", "crates/aptu-coder-remote/Cargo.toml"]
+path = ["crates/aptu-coder-core/src/**/*.rs", "crates/aptu-coder/src/**/*.rs", "crates/aptu-coder-core/Cargo.toml", "crates/aptu-coder/Cargo.toml"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 aptu-coder Contributors"
 SPDX-License-Identifier = "Apache-2.0"
@@ -19,7 +19,7 @@ SPDX-FileCopyrightText = "2026 aptu-coder Contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
-path = ["crates/aptu-coder-core/tests/**/*", "crates/aptu-coder/tests/**/*", "crates/aptu-coder-remote/tests/**/*"]
+path = ["crates/aptu-coder-core/tests/**/*", "crates/aptu-coder/tests/**/*"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 aptu-coder Contributors"
 SPDX-License-Identifier = "Apache-2.0"

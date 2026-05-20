@@ -6,7 +6,6 @@ on:
     paths:
       - 'crates/aptu-coder-core/**'
       - 'crates/aptu-coder/**'
-      - 'crates/aptu-coder-remote/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'clippy.toml'
@@ -44,7 +43,6 @@ jobs:
             code:
               - 'crates/aptu-coder-core/**'
               - 'crates/aptu-coder/**'
-              - 'crates/aptu-coder-remote/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'clippy.toml'
@@ -183,14 +181,7 @@ jobs:
           # aptu-coder coverage tracked but not gated (transport/logging/metrics layer)
           cargo llvm-cov report --locked -p aptu-coder \
             --lcov --output-path lcov-mcp.info || true
-          # aptu-coder-remote coverage with thresholds enforced.
-          # The gitlab crate does not support HTTP base URL injection so
-          # gitlab_fetch_tree / gitlab_fetch_file internals cannot be reached
-          # via wiremock. Thresholds reflect coverage achievable without
-          # refactoring the GitLab client.
-          cargo llvm-cov report --locked -p aptu-coder-remote \
-            --lcov --output-path lcov-remote.info \
-            --fail-under-lines 60 --fail-under-regions 50
+
 
   deny:
     name: Audit Dependencies

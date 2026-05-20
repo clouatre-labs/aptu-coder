@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Rust MCP server for code structure analysis using tree-sitter.
 //!
-//! This crate exposes nine MCP tools for multiple programming languages:
+//! This crate exposes seven MCP tools for multiple programming languages:
 //!
 //! **Analyze family:**
 //! - **`analyze_directory`**: Directory tree with file counts and structure
@@ -16,10 +16,6 @@
 //!
 //! **Exec family:**
 //! - **`exec_command`**: Run shell commands with progress notifications
-//!
-//! **Remote family (from aptu-coder-remote):**
-//! - **`remote_tree`**: Explore remote GitHub/GitLab repositories without cloning
-//! - **`remote_file`**: Fetch files from remote repositories with optional line ranges
 //!
 //! Key entry points:
 //! - [`analyze::analyze_directory`]: Analyze entire directory tree
@@ -3269,341 +3265,6 @@ impl CodeAnalyzer {
         });
         Ok(result)
     }
-
-    #[tool(
-        name = "remote_tree",
-        title = "Remote Tree",
-        description = "For uncloned repositories only. Explore a remote GitLab or GitHub repository directory structure without cloning. Returns a compact summary of files and directories with extension counts and individual entries. Supports gitlab.com and github.com URLs. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, or the path or ref does not exist. Use remote_file to read a specific file from the same repository. Example queries: List top-level files in https://github.com/org/repo; Show the src/ directory at a specific tag in https://gitlab.com/org/repo.",
-        output_schema = schema_for_type::<aptu_coder_remote::types::RemoteTreeOutput>(),
-        annotations(
-            title = "Remote Tree",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = true
-        )
-    )]
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, url = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
-    pub async fn remote_tree(
-        &self,
-        params: Parameters<aptu_coder_remote::types::RemoteTreeParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let params = params.0;
-        let span = tracing::Span::current();
-        span.record("gen_ai.system", "mcp");
-        span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "remote_tree");
-        span.record("url", &params.url);
-
-        let start = std::time::Instant::now();
-        let sid = self.session_id.lock().await.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let depth = params.depth.unwrap_or(2);
-        let output = aptu_coder_remote::fetch_tree(
-            &params.url,
-            params.path.as_deref(),
-            params.git_ref.as_deref(),
-            depth,
-        )
-        .await;
-
-        match output {
-            Ok(tree) => {
-                let text = tree.formatted.clone();
-                let structured = match serde_json::to_value(&tree) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        span.record("error", true);
-                        span.record("error.type", "internal_error");
-                        let dur = start.elapsed().as_millis() as u64;
-                        self.metrics_tx.send(crate::metrics::MetricEvent {
-                            ts: crate::metrics::unix_ms(),
-                            tool: "remote_tree",
-                            duration_ms: dur,
-                            output_chars: 0,
-                            param_path_depth: 0,
-                            max_depth: None,
-                            result: "error",
-                            error_type: Some("serialization".to_string()),
-                            session_id: sid,
-                            seq: Some(seq),
-                            cache_hit: None,
-                            cache_write_failure: None,
-                            cache_tier: None,
-                            exit_code: None,
-                            timed_out: false,
-                        });
-                        return Ok(err_to_tool_result(ErrorData::new(
-                            rmcp::model::ErrorCode::INTERNAL_ERROR,
-                            format!("serialization failed: {e}"),
-                            Some(error_meta("internal", false, "report this as a bug")),
-                        )));
-                    }
-                };
-                let dur = start.elapsed().as_millis() as u64;
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "remote_tree",
-                    duration_ms: dur,
-                    output_chars: text.len(),
-                    param_path_depth: 0,
-                    max_depth: None,
-                    result: "ok",
-                    error_type: None,
-                    session_id: sid,
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                });
-                let mut result = CallToolResult::success(vec![Content::text(text)])
-                    .with_meta(Some(no_cache_meta()));
-                result.structured_content = Some(structured);
-                Ok(result)
-            }
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "remote_error");
-                let (code, category, retryable, action) = match &e {
-                    aptu_coder_remote::RemoteError::MissingGitLabToken
-                    | aptu_coder_remote::RemoteError::MissingGitHubToken => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "auth",
-                        false,
-                        "Set GITLAB_TOKEN or GITHUB_TOKEN env var",
-                    ),
-                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "params",
-                        false,
-                        "Use gitlab.com or github.com URL",
-                    ),
-                    aptu_coder_remote::RemoteError::NotFound(_) => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "params",
-                        false,
-                        "Check path and ref",
-                    ),
-                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "params",
-                        false,
-                        "Use format START-END e.g. 10-50",
-                    ),
-                    _ => (
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        "api",
-                        true,
-                        "Retry or check token permissions",
-                    ),
-                };
-                let dur = start.elapsed().as_millis() as u64;
-                let error_type = match &e {
-                    aptu_coder_remote::RemoteError::MissingGitLabToken => "missing_gitlab_token",
-                    aptu_coder_remote::RemoteError::MissingGitHubToken => "missing_github_token",
-                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => "unsupported_host",
-                    aptu_coder_remote::RemoteError::NotFound(_) => "not_found",
-                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => "invalid_line_range",
-                    _ => "remote_error",
-                };
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "remote_tree",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: 0,
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some(error_type.to_string()),
-                    session_id: sid,
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                });
-                Ok(err_to_tool_result(ErrorData::new(
-                    code,
-                    e.to_string(),
-                    Some(error_meta(category, retryable, action)),
-                )))
-            }
-        }
-    }
-
-    #[tool(
-        name = "remote_file",
-        title = "Remote File",
-        description = "For uncloned repositories only. Fetch the content of a single file from a remote GitLab or GitHub repository without cloning. Returns file content, size_bytes, resolved_ref, and path. Supports optional line range slicing (START-END format) to keep context cost low. Requires GITLAB_TOKEN or GITHUB_TOKEN environment variable. Fails if the URL scheme is not https://, the host is unsupported, the token is missing, the file or ref does not exist, or line_range format is invalid. Use remote_tree to discover paths in the same repository. Example queries: Read README.md from https://github.com/org/repo; Show lines 10-50 of src/main.rs in a GitLab project.",
-        output_schema = schema_for_type::<aptu_coder_remote::types::RemoteFileOutput>(),
-        annotations(
-            title = "Remote File",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = true
-        )
-    )]
-    #[instrument(skip(self, _context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, url = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
-    pub async fn remote_file(
-        &self,
-        params: Parameters<aptu_coder_remote::types::RemoteFileParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let params = params.0;
-        let span = tracing::Span::current();
-        span.record("gen_ai.system", "mcp");
-        span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "remote_file");
-        span.record("url", &params.url);
-
-        let start = std::time::Instant::now();
-        let sid = self.session_id.lock().await.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let output = aptu_coder_remote::fetch_file(
-            &params.url,
-            &params.path,
-            params.git_ref.as_deref(),
-            params.line_range.as_deref(),
-        )
-        .await;
-
-        match output {
-            Ok(file) => {
-                let text = file.content.clone();
-                let structured = match serde_json::to_value(&file) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        span.record("error", true);
-                        span.record("error.type", "internal_error");
-                        let dur = start.elapsed().as_millis() as u64;
-                        self.metrics_tx.send(crate::metrics::MetricEvent {
-                            ts: crate::metrics::unix_ms(),
-                            tool: "remote_file",
-                            duration_ms: dur,
-                            output_chars: 0,
-                            param_path_depth: 0,
-                            max_depth: None,
-                            result: "error",
-                            error_type: Some("serialization".to_string()),
-                            session_id: sid,
-                            seq: Some(seq),
-                            cache_hit: None,
-                            cache_write_failure: None,
-                            cache_tier: None,
-                            exit_code: None,
-                            timed_out: false,
-                        });
-                        return Ok(err_to_tool_result(ErrorData::new(
-                            rmcp::model::ErrorCode::INTERNAL_ERROR,
-                            format!("serialization failed: {e}"),
-                            Some(error_meta("internal", false, "report this as a bug")),
-                        )));
-                    }
-                };
-                let dur = start.elapsed().as_millis() as u64;
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "remote_file",
-                    duration_ms: dur,
-                    output_chars: text.len(),
-                    param_path_depth: 0,
-                    max_depth: None,
-                    result: "ok",
-                    error_type: None,
-                    session_id: sid,
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                });
-                let mut result = CallToolResult::success(vec![Content::text(text)])
-                    .with_meta(Some(no_cache_meta()));
-                result.structured_content = Some(structured);
-                Ok(result)
-            }
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "remote_error");
-                let (code, category, retryable, action) = match &e {
-                    aptu_coder_remote::RemoteError::MissingGitLabToken
-                    | aptu_coder_remote::RemoteError::MissingGitHubToken => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "auth",
-                        false,
-                        "Set GITLAB_TOKEN or GITHUB_TOKEN env var",
-                    ),
-                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "params",
-                        false,
-                        "Use gitlab.com or github.com URL",
-                    ),
-                    aptu_coder_remote::RemoteError::NotFound(_) => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "params",
-                        false,
-                        "Check path and ref",
-                    ),
-                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => (
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        "params",
-                        false,
-                        "Use format START-END e.g. 10-50",
-                    ),
-                    _ => (
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        "api",
-                        true,
-                        "Retry or check token permissions",
-                    ),
-                };
-                let dur = start.elapsed().as_millis() as u64;
-                let error_type = match &e {
-                    aptu_coder_remote::RemoteError::MissingGitLabToken => "missing_gitlab_token",
-                    aptu_coder_remote::RemoteError::MissingGitHubToken => "missing_github_token",
-                    aptu_coder_remote::RemoteError::UnsupportedHost(_) => "unsupported_host",
-                    aptu_coder_remote::RemoteError::NotFound(_) => "not_found",
-                    aptu_coder_remote::RemoteError::InvalidLineRange(_) => "invalid_line_range",
-                    _ => "remote_error",
-                };
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "remote_file",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: 0,
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some(error_type.to_string()),
-                    session_id: sid,
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                });
-                Ok(err_to_tool_result(ErrorData::new(
-                    code,
-                    e.to_string(),
-                    Some(error_meta(category, retryable, action)),
-                )))
-            }
-        }
-    }
 }
 
 /// Build and configure a tokio::process::Command with stdio, working directory, and resource limits.
@@ -4042,7 +3703,7 @@ impl ServerHandler for CodeAnalyzer {
         // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
         // a filtered `tools` array in the API call, or for clients to use tool annotations
         // (readOnlyHint/destructiveHint) to apply their own policy.
-        // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), "remote" (9 tools), absent/unknown (9 tools).
+        // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), absent/unknown (7 tools).
         // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
         let meta_lock = self.profile_meta.lock().await;
         let meta_profile = meta_lock
@@ -4058,16 +3719,8 @@ impl ServerHandler for CodeAnalyzer {
         {
             let mut router = self.tool_router.write().await;
 
-            // Default: all 9 tools enabled unless profile explicitly disables them.
-            // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), "remote" (9 tools), absent/unknown (9 tools).
-            let enable_remote = !matches!(
-                active_profile.as_deref(),
-                Some("compact") | Some("edit") | Some("analyze")
-            );
-            // Add new remote_* tool names here when introduced.
-            if !enable_remote {
-                disable_routes(&mut router, &["remote_tree", "remote_file"]);
-            }
+            // Default: all 7 tools enabled unless profile explicitly disables them.
+            // Profiles: "edit" (3 tools), "analyze" (5 tools), "compact" (7 tools), absent/unknown (7 tools).
 
             if let Some(ref profile) = active_profile {
                 match profile.as_str() {
@@ -4082,22 +3735,16 @@ impl ServerHandler for CodeAnalyzer {
                                 "analyze_symbol",
                             ],
                         );
-                        // remote_tree and remote_file already disabled above
                     }
                     "analyze" => {
                         // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, exec_command
                         disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
-                        // remote_tree and remote_file already disabled above
                     }
                     "compact" => {
-                        // Enable 7 tools: all except remote_tree and remote_file
-                        // remote_tree and remote_file already disabled above
-                    }
-                    "remote" => {
-                        // All 9 tools enabled; remote tools re-enabled by enable_remote=true above
+                        // Enable all 7 tools
                     }
                     _ => {
-                        // Unknown profile: all 9 tools enabled (lenient fallback)
+                        // Unknown profile: all 7 tools enabled (lenient fallback)
                     }
                 }
             }
@@ -4930,55 +4577,6 @@ mod tests {
             exec_cmd_annot.open_world_hint,
             Some(true),
             "exec_command open_world_hint should be true"
-        );
-    }
-
-    #[test]
-    fn test_profile_remote_enables_remote_tools() {
-        // Arrange: get tool list via static method
-        let tools = CodeAnalyzer::list_tools();
-
-        // Act: check for remote_tree and remote_file
-        let remote_tree = tools.iter().find(|t| t.name == "remote_tree");
-        let remote_file = tools.iter().find(|t| t.name == "remote_file");
-
-        // Assert: both remote tools should exist in the full tool list
-        // (profile filtering happens at runtime in on_initialized, not in list_tools)
-        assert!(
-            remote_tree.is_some(),
-            "remote_tree should exist in full tool list"
-        );
-        assert!(
-            remote_file.is_some(),
-            "remote_file should exist in full tool list"
-        );
-    }
-
-    #[test]
-    fn test_profile_none_disables_remote_tools() {
-        // Arrange: get tool list via static method
-        let tools = CodeAnalyzer::list_tools();
-
-        // Act: count total tools (should be 9 in the static list)
-        let tool_count = tools.len();
-
-        // Assert: static list has all 9 tools
-        // (remote_tree and remote_file are disabled at runtime in on_initialized when no profile is set)
-        assert_eq!(
-            tool_count, 9,
-            "static tool list should contain all 9 tools; filtering happens at runtime"
-        );
-
-        // Verify remote tools exist in static list
-        let remote_tree = tools.iter().find(|t| t.name == "remote_tree");
-        let remote_file = tools.iter().find(|t| t.name == "remote_file");
-        assert!(
-            remote_tree.is_some(),
-            "remote_tree should exist in static list"
-        );
-        assert!(
-            remote_file.is_some(),
-            "remote_file should exist in static list"
         );
     }
 

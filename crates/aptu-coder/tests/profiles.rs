@@ -291,40 +291,6 @@ async fn test_analyze_profile_tool_count() {
 }
 
 #[tokio::test]
-async fn test_remote_profile_tool_count() {
-    let _guard = env_var_lock();
-    // Arrange: initialize with remote profile
-    let resp = call_tools_list_with_profile(Some("remote")).await;
-
-    // Act: extract tool count from response
-    let tools = &resp["result"]["tools"];
-    let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
-    let tool_names: Vec<String> = tools
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
-        .collect();
-
-    // Assert: remote profile should have all 9 tools
-    assert_eq!(
-        tool_count, 9,
-        "remote profile should enable all 9 tools, got: {:?}",
-        tool_names
-    );
-
-    // Verify remote tools are present
-    assert!(
-        tool_names.contains(&"remote_tree".to_string()),
-        "remote profile should include remote_tree"
-    );
-    assert!(
-        tool_names.contains(&"remote_file".to_string()),
-        "remote profile should include remote_file"
-    );
-}
-
-#[tokio::test]
 async fn test_compact_profile_tool_count() {
     let _guard = env_var_lock();
     // Arrange: initialize with compact profile
@@ -340,21 +306,11 @@ async fn test_compact_profile_tool_count() {
         .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
         .collect();
 
-    // Assert: compact profile should have exactly 7 tools (remote_tree and remote_file disabled)
+    // Assert: compact profile should have exactly 7 tools
     assert_eq!(
         tool_count, 7,
         "compact profile should enable exactly 7 tools, got: {:?}",
         tool_names
-    );
-
-    // Verify remote tools are NOT present
-    assert!(
-        !tool_names.contains(&"remote_tree".to_string()),
-        "compact profile should NOT include remote_tree"
-    );
-    assert!(
-        !tool_names.contains(&"remote_file".to_string()),
-        "compact profile should NOT include remote_file"
     );
 }
 
@@ -371,10 +327,10 @@ async fn test_no_profile_tool_count() {
     let tools = &resp["result"]["tools"];
     let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
 
-    // Assert: no profile should enable all 9 tools (default behavior)
+    // Assert: no profile should enable all 7 tools (default behavior)
     assert_eq!(
-        tool_count, 9,
-        "no profile should enable all 9 tools (default behavior), got: {}",
+        tool_count, 7,
+        "no profile should enable all 7 tools (default behavior), got: {}",
         tool_count
     );
 }
@@ -392,10 +348,10 @@ async fn test_unknown_profile_tool_count() {
     let tools = &resp["result"]["tools"];
     let tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0);
 
-    // Assert: unknown profile should enable all 9 tools (lenient fallback)
+    // Assert: unknown profile should enable all 7 tools (lenient fallback)
     assert_eq!(
-        tool_count, 9,
-        "unknown profile should enable all 9 tools (lenient fallback), got: {}",
+        tool_count, 7,
+        "unknown profile should enable all 7 tools (lenient fallback), got: {}",
         tool_count
     );
 }
