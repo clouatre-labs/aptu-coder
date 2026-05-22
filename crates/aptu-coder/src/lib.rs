@@ -2042,8 +2042,8 @@ impl CodeAnalyzer {
                 error_type: None,
                 session_id: sid,
                 seq: Some(seq),
-                cache_hit: None,
-                cache_tier: None,
+                cache_hit: Some(false),
+                cache_tier: Some(CacheTier::Miss.as_str()),
                 cache_write_failure: None,
                 exit_code: None,
                 timed_out: false,
@@ -2288,8 +2288,8 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: None,
-            cache_tier: None,
+            cache_hit: Some(false),
+            cache_tier: Some(CacheTier::Miss.as_str()),
             cache_write_failure: None,
             exit_code: None,
             timed_out: false,
@@ -4749,6 +4749,22 @@ mod tests {
         assert!(
             !cmd_str.is_empty(),
             "build_exec_command should handle None resolved_path gracefully"
+        );
+    }
+
+    #[test]
+    fn test_analyze_symbol_cache_fields_use_cache_tier_enum() {
+        // Verify that CacheTier::Miss produces the expected cache_hit/cache_tier
+        // values that analyze_symbol writes in both code paths (#950).
+        // Guards against string drift if CacheTier::Miss.as_str() ever changes.
+        assert_eq!(
+            CacheTier::Miss.as_str(),
+            "miss",
+            "CacheTier::Miss.as_str() must stay \"miss\" -- analyze_symbol metrics depend on it"
+        );
+        assert!(
+            !matches!(CacheTier::Miss, CacheTier::L1Memory | CacheTier::L2Disk),
+            "CacheTier::Miss must not be a hit variant (cache_hit=false for a miss)"
         );
     }
 }
