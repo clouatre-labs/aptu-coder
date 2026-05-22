@@ -53,6 +53,7 @@ use aptu_coder_core::formatter_defuse::format_focused_paginated_defuse;
 use aptu_coder_core::pagination::{
     CursorData, DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor, encode_cursor, paginate_slice,
 };
+use aptu_coder_core::parser::ParserError;
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
@@ -998,15 +999,30 @@ impl CodeAnalyzer {
                 }
                 Ok((arc_output, CacheTier::Miss))
             }
-            Err(e) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Error analyzing file: {e}"),
-                Some(error_meta(
-                    "resource",
-                    false,
-                    "check file path and permissions",
+            Err(e) => match &e {
+                analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(lang)) => {
+                    Err(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "Unsupported language: {lang}. Supported extensions: rs, py, go, ts, tsx, js, mjs, cjs, java, kt, kts, cs, cpp, cc, cxx, c, h, hpp, hxx, f, f77, f90, f95, f03, f08, for, ftn"
+                        ),
+                        Some(error_meta(
+                            "invalid_request",
+                            false,
+                            "provide a file with a supported extension",
+                        )),
+                    ))
+                }
+                _ => Err(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    format!("Error analyzing file: {e}"),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check file path and permissions",
+                    )),
                 )),
-            )),
+            },
         }
     }
 
@@ -4765,6 +4781,70 @@ mod tests {
         assert!(
             !matches!(CacheTier::Miss, CacheTier::L1Memory | CacheTier::L2Disk),
             "CacheTier::Miss must not be a hit variant (cache_hit=false for a miss)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyze_file_unsupported_extension_returns_invalid_params() {
+        // Arrange: create a temporary file with unsupported extension
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let unsupported_file = temp_dir.path().join("test.md");
+        std::fs::write(&unsupported_file, "# Markdown file").expect("should write file");
+
+        let analyzer = make_analyzer();
+        let mut params = AnalyzeFileParams::default();
+        params.path = unsupported_file.to_string_lossy().to_string();
+
+        // Act
+        let result = analyzer.handle_file_details_mode(&params).await;
+
+        // Assert: must return INVALID_PARAMS, not INTERNAL_ERROR
+        assert!(
+            result.is_err(),
+            "should return error for unsupported extension"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code,
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "unsupported extension should return INVALID_PARAMS"
+        );
+        assert!(
+            err.message.to_lowercase().contains("unsupported"),
+            "error message should mention unsupported, got: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyze_module_unsupported_extension_returns_invalid_params() {
+        // Arrange: create a temporary file with unsupported extension
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let unsupported_file = temp_dir.path().join("config.json");
+        std::fs::write(&unsupported_file, "{}").expect("should write file");
+
+        let analyzer = make_analyzer();
+        let mut params = AnalyzeFileParams::default();
+        params.path = unsupported_file.to_string_lossy().to_string();
+
+        // Act: analyze_module routes through handle_file_details_mode
+        let result = analyzer.handle_file_details_mode(&params).await;
+
+        // Assert: must return INVALID_PARAMS, not INTERNAL_ERROR
+        assert!(
+            result.is_err(),
+            "should return error for unsupported extension"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code,
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "unsupported extension should return INVALID_PARAMS"
+        );
+        assert!(
+            err.message.to_lowercase().contains("unsupported"),
+            "error message should mention unsupported, got: {}",
+            err.message
         );
     }
 }

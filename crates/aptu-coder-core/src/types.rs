@@ -144,6 +144,10 @@ pub enum AnalyzeFileField {
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct AnalyzeFileParams {
     /// File path to analyze
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(pattern(r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn)$"))
+    )]
     pub path: String,
 
     /// AST traversal depth limit for tree-sitter queries. Leave unset in normal use; increase only for deeply nested generated code. None=library default, 0=unlimited, n=limit to n levels.
@@ -173,6 +177,10 @@ pub struct AnalyzeFileParams {
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct AnalyzeModuleParams {
     /// File path to analyze
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(pattern(r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn)$"))
+    )]
     pub path: String,
 }
 
