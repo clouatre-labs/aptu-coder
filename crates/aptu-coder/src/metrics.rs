@@ -42,6 +42,8 @@ pub struct MetricEvent {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub timed_out: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_truncated: Option<bool>,
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -515,6 +517,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         };
         tx.send(make_event()).unwrap();
         tx.send(make_event()).unwrap();
@@ -569,6 +572,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("analyze_directory"));
@@ -594,6 +598,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""result":"error""#));
@@ -620,6 +625,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
@@ -659,6 +665,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         })
         .unwrap();
         tx.send(MetricEvent {
@@ -677,6 +684,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         })
         .unwrap();
         drop(tx);
@@ -748,6 +756,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         })
         .unwrap();
         drop(tx);
@@ -806,6 +815,7 @@ mod tests {
             exit_code: None,
             timed_out: false,
             cache_tier: None,
+            output_truncated: None,
         })
         .unwrap();
         drop(tx);
