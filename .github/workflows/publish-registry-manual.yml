@@ -19,7 +19,7 @@ concurrency:
 jobs:
   publish-registry:
     name: Publish to MCP Registry
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       id-token: write
