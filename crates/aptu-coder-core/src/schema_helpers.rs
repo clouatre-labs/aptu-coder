@@ -43,6 +43,27 @@ pub fn option_ast_limit_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     Schema::from(map)
 }
 
+/// Regex matching all supported source file extensions (case-insensitive).
+///
+/// Used as the `inputSchema` `pattern` constraint on `path` fields in
+/// `AnalyzeFileParams` and `AnalyzeModuleParams`. Covers every extension in
+/// `lang.rs` `EXTENSION_MAP`. Centralised here so adding a language requires
+/// one change, not two.
+pub const SUPPORTED_FILE_EXT_PATTERN: &str = r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn)$";
+
+/// Returns a string schema with a `pattern` constraint covering all supported
+/// source file extensions. Used as `schema_with` on `path` fields.
+pub fn supported_file_path_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
+    let map = serde_json::json!({
+        "type": "string",
+        "pattern": SUPPORTED_FILE_EXT_PATTERN
+    })
+    .as_object()
+    .expect("json! object literal is always a Value::Object")
+    .clone();
+    Schema::from(map)
+}
+
 /// Returns a nullable integer schema for `Option<usize>` `page_size` fields.
 /// Enforces minimum: 1 to prevent callers from sending `page_size=0`, which
 /// would cause `paginate_slice` to make no progress and loop on the same cursor.

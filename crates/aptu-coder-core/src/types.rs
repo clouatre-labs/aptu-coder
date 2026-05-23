@@ -146,7 +146,7 @@ pub struct AnalyzeFileParams {
     /// File path to analyze
     #[cfg_attr(
         feature = "schemars",
-        schemars(pattern(r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn)$"))
+        schemars(schema_with = "crate::schema_helpers::supported_file_path_schema")
     )]
     pub path: String,
 
@@ -179,7 +179,7 @@ pub struct AnalyzeModuleParams {
     /// File path to analyze
     #[cfg_attr(
         feature = "schemars",
-        schemars(pattern(r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn)$"))
+        schemars(schema_with = "crate::schema_helpers::supported_file_path_schema")
     )]
     pub path: String,
 }
