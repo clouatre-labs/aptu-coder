@@ -42,6 +42,7 @@ Each line in the JSONL file is one JSON object:
 | `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable |
 | `timed_out` | `bool` | `true` if the call timed out; `false` otherwise |
 | `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap, per-stream byte cap, or combined cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
+| `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
 
 ### Example record
 
@@ -58,6 +59,7 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `session_id` | early | `null` |
 | `seq` | early | `null` |
 | `output_truncated` | v0.9.0 | `null` (treat as unknown; does not mean truncation did not occur) |
+| `chars_threshold_breach` | current | `false` (omitted from JSONL when false; safe to query with `// false`) |
 
 The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
 

@@ -891,6 +891,7 @@ impl CodeAnalyzer {
                                 exit_code: None,
                                 timed_out: false,
                                 output_truncated: None,
+                                chars_threshold_breach: false,
                             });
                         }
                     });
@@ -1003,6 +1004,7 @@ impl CodeAnalyzer {
                                 exit_code: None,
                                 timed_out: false,
                                 output_truncated: None,
+                                chars_threshold_breach: false,
                             });
                         }
                     });
@@ -1592,6 +1594,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            chars_threshold_breach: false,
         });
         Ok(result)
     }
@@ -1860,6 +1863,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            chars_threshold_breach: false,
         });
         Ok(result)
     }
@@ -2077,6 +2081,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
+                chars_threshold_breach: false,
             });
             return Ok(result);
         }
@@ -2324,6 +2329,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            chars_threshold_breach: false,
         });
         Ok(result)
     }
@@ -2405,6 +2411,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
+                chars_threshold_breach: false,
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2521,6 +2528,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            chars_threshold_breach: false,
         });
         Ok(result)
     }
@@ -2613,6 +2621,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
+                chars_threshold_breach: false,
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2654,6 +2663,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2686,6 +2696,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2718,6 +2729,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2765,6 +2777,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            chars_threshold_breach: false,
         });
         Ok(result)
     }
@@ -2857,6 +2870,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
+                chars_threshold_breach: false,
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2901,6 +2915,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2938,6 +2953,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2972,6 +2988,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -3004,6 +3021,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -3036,6 +3054,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -3086,6 +3105,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            chars_threshold_breach: false,
         });
         Ok(result)
     }
@@ -3302,6 +3322,7 @@ impl CodeAnalyzer {
                     exit_code,
                     timed_out,
                     output_truncated: Some(output_truncated),
+                    chars_threshold_breach: false,
                 });
                 return Ok(err_to_tool_result(e));
             }
@@ -3328,6 +3349,7 @@ impl CodeAnalyzer {
             exit_code,
             timed_out,
             output_truncated: Some(output_truncated),
+            chars_threshold_breach: text.len() > 30_000,
         });
         Ok(result)
     }
@@ -5385,6 +5407,192 @@ mod tests {
         assert!(
             !filtered.contains("line4"),
             "should not include lines beyond max"
+        );
+    }
+
+    #[test]
+    fn test_line_cap_fires_before_byte_cap() {
+        // Edge case: 2500 lines x 5 chars each = 12500 bytes (under 30k byte cap)
+        // Line cap (2000) should fire; returned content has ~50 lines (OVERFLOW_PREVIEW_LINES)
+        let line = "abcde";
+        let stdout: String = std::iter::repeat(format!("{}\n", line))
+            .take(2500)
+            .collect();
+        assert_eq!(stdout.lines().count(), 2500, "should have 2500 lines");
+        assert!(stdout.len() < 30_000, "should be under byte cap");
+
+        let stderr = String::new();
+        let slot = 42u32;
+
+        let (out_stdout, _out_stderr, stdout_path, _stderr_path, byte_truncated) =
+            handle_output_persist(stdout, stderr, slot);
+
+        // Line cap fires: output_truncated should be indicated via stdout_path being set
+        assert!(
+            !byte_truncated,
+            "byte cap should NOT fire (under 30k bytes)"
+        );
+        assert!(
+            stdout_path.is_some(),
+            "stdout_path should be set when line cap fires"
+        );
+        // Returned preview is last OVERFLOW_PREVIEW_LINES (50) lines
+        let line_count = out_stdout.lines().count();
+        assert!(
+            line_count <= 50,
+            "returned content should have at most 50 lines, got {}",
+            line_count
+        );
+        assert!(line_count > 0, "returned content should not be empty");
+    }
+
+    #[test]
+    fn test_project_local_overrides_builtin() {
+        // Edge case: project-local rule inserted at index 0 takes precedence (first-match semantics).
+        // Use a unique command name that does NOT match any built-in rule to verify
+        // that project-local rules are loaded and placed before built-ins.
+        use std::io::Write;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "aptu-test-project-local-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let aptu_dir = tmp.join(".aptu");
+        std::fs::create_dir_all(&aptu_dir).expect("should create .aptu dir");
+
+        // Use a unique command not matching any built-in rule; include required schema_version field
+        let toml_content = "schema_version = 1\n[[filters]]\nmatch_command = \"^my-custom-tool\"\nkeep_lines_matching = []\non_empty = \"project-local-only-marker\"\n";
+        let mut f = std::fs::File::create(aptu_dir.join("filters.toml"))
+            .expect("should create filters.toml");
+        f.write_all(toml_content.as_bytes())
+            .expect("should write toml");
+        drop(f);
+
+        let rules = filters::load_filter_table(&tmp);
+
+        // The project-local rule should appear at index 0
+        let first_rule = rules.first().expect("should have at least one rule");
+        assert!(
+            first_rule.pattern.is_match("my-custom-tool --flag"),
+            "project-local rule should be first (index 0)"
+        );
+        assert_eq!(
+            first_rule.rule.on_empty.as_deref(),
+            Some("project-local-only-marker"),
+            "project-local rule on_empty should match what was written"
+        );
+
+        // Also verify that built-in rules are still present (after the project-local rule)
+        let has_git_pull = rules
+            .iter()
+            .any(|r| r.pattern.is_match("git pull origin main"));
+        assert!(
+            has_git_pull,
+            "built-in git pull rule should still be present"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_invalid_toml_falls_back_gracefully() {
+        // Edge case: invalid TOML in .aptu/filters.toml should fall back to built-ins without panic
+        use std::io::Write;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "aptu-test-invalid-toml-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let aptu_dir = tmp.join(".aptu");
+        std::fs::create_dir_all(&aptu_dir).expect("should create .aptu dir");
+
+        let mut f = std::fs::File::create(aptu_dir.join("filters.toml"))
+            .expect("should create filters.toml");
+        // invalid TOML: use "garbage" that is syntactically invalid TOML
+        // Note: the TOML also requires schema_version field in FilterTableConfig;
+        // invalid content ensures the serde parse fails
+        f.write_all(b"schema_version = INVALID_VALUE {{{{")
+            .expect("should write garbage");
+        drop(f);
+
+        // Should not panic; should return built-in rules only
+        let rules = filters::load_filter_table(&tmp);
+
+        // Built-in rules include git pull, git fetch, etc.
+        let has_git_pull = rules
+            .iter()
+            .any(|r| r.pattern.is_match("git pull origin main"));
+        assert!(
+            has_git_pull,
+            "should have git pull built-in rule after invalid TOML"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_metric_chars_threshold_breach_fires() {
+        // Happy path: chars_threshold_breach is true when output_chars > 30_000
+        let output_chars: usize = 35_000;
+        let event = crate::metrics::MetricEvent {
+            ts: 0,
+            tool: "exec_command",
+            duration_ms: 1,
+            output_chars,
+            param_path_depth: 0,
+            max_depth: None,
+            result: "ok",
+            error_type: None,
+            session_id: None,
+            seq: None,
+            cache_hit: None,
+            cache_write_failure: None,
+            cache_tier: None,
+            exit_code: None,
+            timed_out: false,
+            output_truncated: None,
+            chars_threshold_breach: output_chars > 30_000,
+        };
+        assert!(
+            event.chars_threshold_breach,
+            "chars_threshold_breach should be true for output_chars=35000"
+        );
+    }
+
+    #[test]
+    fn test_metric_chars_threshold_breach_no_fire() {
+        // Edge case: chars_threshold_breach is false when output_chars <= 30_000
+        let output_chars: usize = 5_000;
+        let event = crate::metrics::MetricEvent {
+            ts: 0,
+            tool: "exec_command",
+            duration_ms: 1,
+            output_chars,
+            param_path_depth: 0,
+            max_depth: None,
+            result: "ok",
+            error_type: None,
+            session_id: None,
+            seq: None,
+            cache_hit: None,
+            cache_write_failure: None,
+            cache_tier: None,
+            exit_code: None,
+            timed_out: false,
+            output_truncated: None,
+            chars_threshold_breach: output_chars > 30_000,
+        };
+        assert!(
+            !event.chars_threshold_breach,
+            "chars_threshold_breach should be false for output_chars=5000"
         );
     }
 }
