@@ -891,7 +891,7 @@ impl CodeAnalyzer {
                                 exit_code: None,
                                 timed_out: false,
                                 output_truncated: None,
-                                chars_threshold_breach: false,
+                                ..Default::default()
                             });
                         }
                     });
@@ -1004,7 +1004,7 @@ impl CodeAnalyzer {
                                 exit_code: None,
                                 timed_out: false,
                                 output_truncated: None,
-                                chars_threshold_breach: false,
+                                ..Default::default()
                             });
                         }
                     });
@@ -1594,7 +1594,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
-            chars_threshold_breach: false,
+            ..Default::default()
         });
         Ok(result)
     }
@@ -1863,7 +1863,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
-            chars_threshold_breach: false,
+            ..Default::default()
         });
         Ok(result)
     }
@@ -2081,7 +2081,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
-                chars_threshold_breach: false,
+                ..Default::default()
             });
             return Ok(result);
         }
@@ -2329,7 +2329,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
-            chars_threshold_breach: false,
+            ..Default::default()
         });
         Ok(result)
     }
@@ -2411,7 +2411,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
-                chars_threshold_breach: false,
+                ..Default::default()
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2528,7 +2528,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
-            chars_threshold_breach: false,
+            ..Default::default()
         });
         Ok(result)
     }
@@ -2621,7 +2621,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
-                chars_threshold_breach: false,
+                ..Default::default()
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2663,7 +2663,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2696,7 +2696,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2729,7 +2729,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2777,7 +2777,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
-            chars_threshold_breach: false,
+            ..Default::default()
         });
         Ok(result)
     }
@@ -2870,7 +2870,7 @@ impl CodeAnalyzer {
                 exit_code: None,
                 timed_out: false,
                 output_truncated: None,
-                chars_threshold_breach: false,
+                ..Default::default()
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2915,7 +2915,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2953,7 +2953,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2988,7 +2988,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -3021,7 +3021,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -3054,7 +3054,7 @@ impl CodeAnalyzer {
                     exit_code: None,
                     timed_out: false,
                     output_truncated: None,
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -3105,7 +3105,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
-            chars_threshold_breach: false,
+            ..Default::default()
         });
         Ok(result)
     }
@@ -3322,7 +3322,7 @@ impl CodeAnalyzer {
                     exit_code,
                     timed_out,
                     output_truncated: Some(output_truncated),
-                    chars_threshold_breach: false,
+                    ..Default::default()
                 });
                 return Ok(err_to_tool_result(e));
             }
