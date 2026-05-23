@@ -166,18 +166,18 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | Tool | Purpose | Languages |
 |------|---------|-----------|
 | `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
-| `analyze_file` | Functions, classes, and imports with signatures and line ranges | all |
-| `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`) | all |
+| `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns `INVALID_PARAMS` for unsupported extensions | all |
+| `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns `INVALID_PARAMS` for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code, and timeout status; supports progress notifications | any |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code, and timeout status; supports progress notifications; output capped and filtered automatically | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
 ## Output Management
 
-For large codebases, two mechanisms prevent context overflow:
+For large codebases, several mechanisms prevent context overflow.
 
 **Pagination**
 
@@ -190,6 +190,34 @@ NEXT_CURSOR: eyJvZmZzZXQiOjUwfQ==
 # Fetch next page:
 analyze_symbol path: /my/project symbol: my_function cursor: eyJvZmZzZXQiOjUwfQ==
 ```
+
+**exec_command output caps**
+
+`exec_command` applies three independent byte-level caps to prevent large command outputs from flooding the context:
+
+| Stream | Cap | Behavior |
+|--------|-----|----------|
+| stdout | 30,000 chars | Tail-preserving; keeps the last 30k chars |
+| stderr | 10,000 chars | Tail-preserving; errors appear at the end |
+| combined `output_text` | 50,000 chars | Safety net after interleaving |
+
+The 30k stdout cap is data-driven: analysis of 27,981 observed `exec_command` calls shows only 0.33% exceed this limit. When any cap fires, `output_truncated: true` is set in the response and recorded in the JSONL metrics.
+
+**exec_command output filters**
+
+A built-in filter table suppresses per-file noise from chatty CLI tools before output reaches the model. Filters apply on success only; raw output is always preserved on failure.
+
+| Command | Behavior |
+|---------|----------|
+| `git pull` | Injects `--no-stat` before execution; strips diff-stat noise |
+| `git fetch` | Strips `From` / ref lines; caps at 10 lines |
+| `git push` | Strips `remote:` lines; caps at 10 lines |
+| `git log` | Caps at 20 lines |
+| `git status` | Caps at 20 lines |
+| `cargo build` | Strips `Compiling` / `Checking` / `Downloading` / `Fresh` lines |
+| `cargo test` | Strips `Compiling` / `Checking` / `Fresh` lines |
+
+Project-local rules can be added in `.aptu/filters.toml`. Parse errors fall back to the built-in table (no crash). When a filter fires, `filter_applied` in `structuredContent` identifies which rule matched.
 
 ## Non-Interactive Pipelines
 

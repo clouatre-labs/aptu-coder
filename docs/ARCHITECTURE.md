@@ -70,13 +70,14 @@ graph TD
     B6 --> F2["edit_overwrite_content"]
     B7 --> F3["edit_replace_block"]
     B10 --> F6["exec_sh_command"]
+    F6 --> F7["output_filter + byte_caps"]
     P --> Q["MCP Response"]
     L --> Q
     T --> Q
     I --> Q
     F2 --> Q
     F3 --> Q
-    F6 --> Q
+    F7 --> Q
     Q --> Z1["MetricEvent channel"]
     Z1 --> Z2["MetricsWriter JSONL"]
     Q --> Z3["OTel span end"]
@@ -96,13 +97,13 @@ When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the
 
 ### analyze_file (File Details)
 
-1. Detect language from extension
+1. Detect language from extension; return `INVALID_PARAMS` immediately if the extension is not in the supported set
 2. SemanticExtractor parses the file: functions with signatures, classes/structs with fields, imports, type references
 3. Format as structured sections
 
 ### analyze_module (Module Index)
 
-1. Detect language from extension
+1. Detect language from extension; return `INVALID_PARAMS` immediately if the extension is not in the supported set
 2. `analyze_module_file` in `src/analyze.rs` reads the file and dispatches to `SemanticExtractor`
 3. Returns a minimal fixed schema: `name`, `line_count`, `language`, `functions[{name, line}]`, `imports[{module, items}]`
 4. No call graph, no type references, no field accesses -- output is ~75% smaller than `analyze_file`
