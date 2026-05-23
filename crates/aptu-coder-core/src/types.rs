@@ -144,6 +144,10 @@ pub enum AnalyzeFileField {
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct AnalyzeFileParams {
     /// File path to analyze
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::supported_file_path_schema")
+    )]
     pub path: String,
 
     /// AST traversal depth limit for tree-sitter queries. Leave unset in normal use; increase only for deeply nested generated code. None=library default, 0=unlimited, n=limit to n levels.
@@ -173,6 +177,10 @@ pub struct AnalyzeFileParams {
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct AnalyzeModuleParams {
     /// File path to analyze
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::supported_file_path_schema")
+    )]
     pub path: String,
 }
 
