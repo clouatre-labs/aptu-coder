@@ -148,6 +148,25 @@ mod tests {
         assert_eq!(language_for_extension("kts"), Some("kotlin"));
     }
 
+    /// Asserts every extension in `EXTENSION_MAP` appears as an alternation in
+    /// `SUPPORTED_FILE_EXT_PATTERN`, preventing drift when a new language is added.
+    /// The check is a substring match: the pattern has the form `...(ext1|ext2|...)...`
+    /// so each extension must appear as `ext|` or `ext)`.
+    #[test]
+    fn test_supported_file_ext_pattern_covers_all_extension_map_entries() {
+        #[cfg(feature = "schemars")]
+        for (ext, _lang) in EXTENSION_MAP {
+            let in_alternation = crate::schema_helpers::SUPPORTED_FILE_EXT_PATTERN
+                .contains(&format!("{ext}|"))
+                || crate::schema_helpers::SUPPORTED_FILE_EXT_PATTERN.contains(&format!("{ext})"));
+            assert!(
+                in_alternation,
+                "SUPPORTED_FILE_EXT_PATTERN is missing extension '{ext}' from EXTENSION_MAP; \
+                 add it to schema_helpers.rs"
+            );
+        }
+    }
+
     #[test]
     fn test_language_for_extension_edge_case() {
         assert_eq!(language_for_extension("unknown"), None);
