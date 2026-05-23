@@ -915,7 +915,30 @@ impl Default for ExecCommandParams {
     }
 }
 
-#[non_exhaustive]
+/// Filter rule for command output post-processing.
+/// Matches command prefixes and applies transformations (strip/keep/cap lines).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct FilterRule {
+    /// Regex pattern to match against the command string (e.g., "^git\\s+pull").
+    pub match_command: String,
+    /// Optional description of what this filter does.
+    pub description: Option<String>,
+    /// If true, strip ANSI escape sequences before processing lines.
+    #[serde(default)]
+    pub strip_ansi: bool,
+    /// Regex patterns: lines matching any of these are removed from output.
+    #[serde(default)]
+    pub strip_lines_matching: Vec<String>,
+    /// Regex patterns: if non-empty, retain only lines matching any of these.
+    #[serde(default)]
+    pub keep_lines_matching: Vec<String>,
+    /// Maximum number of lines to keep in output.
+    pub max_lines: Option<usize>,
+    /// Replacement text if filtered output is empty (success-only).
+    pub on_empty: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct ShellOutput {
@@ -943,6 +966,9 @@ pub struct ShellOutput {
     /// Path to the slot file containing full stderr (if output was persisted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_path: Option<String>,
+    /// Description of the filter applied to stdout (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_applied: Option<String>,
 }
 
 impl ShellOutput {
@@ -965,6 +991,7 @@ impl ShellOutput {
             output_collection_error: None,
             stdout_path: None,
             stderr_path: None,
+            filter_applied: None,
         }
     }
 }

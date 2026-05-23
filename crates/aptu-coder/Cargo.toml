@@ -37,6 +37,8 @@ serde_json = { workspace = true }
 blake3 = { workspace = true }
 nix = { version = "0.31", features = ["resource"] }
 which = "8"
+regex = { workspace = true }
+toml = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
