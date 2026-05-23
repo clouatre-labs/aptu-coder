@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Review PR
-        uses: clouatre-labs/aptu@4e67919a1ad42b4ae81cb92df951711c2ec1b64f # v0.8.4
+        uses: clouatre-labs/aptu@b505a0c3144c113c77f1607025c0cc7f60c654d6 # v0.8.4
         continue-on-error: true  # Non-blocking - AI review is advisory
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
