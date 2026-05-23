@@ -44,6 +44,11 @@ pub struct MetricEvent {
     pub timed_out: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_truncated: Option<bool>,
+    /// True when `output_chars > 30_000`; fires for the top ~0.33% of exec_command calls
+    /// (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching
+    /// the per-stream byte-cap threshold.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chars_threshold_breach: bool,
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -518,6 +523,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         };
         tx.send(make_event()).unwrap();
         tx.send(make_event()).unwrap();
@@ -573,6 +579,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("analyze_directory"));
@@ -599,6 +606,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""result":"error""#));
@@ -626,6 +634,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
@@ -666,6 +675,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         })
         .unwrap();
         tx.send(MetricEvent {
@@ -685,6 +695,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         })
         .unwrap();
         drop(tx);
@@ -757,6 +768,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         })
         .unwrap();
         drop(tx);
@@ -816,6 +828,7 @@ mod tests {
             timed_out: false,
             cache_tier: None,
             output_truncated: None,
+            chars_threshold_breach: false,
         })
         .unwrap();
         drop(tx);
