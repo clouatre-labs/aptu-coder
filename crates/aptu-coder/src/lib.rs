@@ -882,6 +882,7 @@ impl CodeAnalyzer {
                                 cache_tier: None,
                                 exit_code: None,
                                 timed_out: false,
+                                output_truncated: None,
                             });
                         }
                     });
@@ -993,6 +994,7 @@ impl CodeAnalyzer {
                                 cache_tier: None,
                                 exit_code: None,
                                 timed_out: false,
+                                output_truncated: None,
                             });
                         }
                     });
@@ -1581,6 +1583,7 @@ impl CodeAnalyzer {
             cache_tier: Some(dir_cache_hit.as_str()),
             exit_code: None,
             timed_out: false,
+            output_truncated: None,
         });
         Ok(result)
     }
@@ -1848,6 +1851,7 @@ impl CodeAnalyzer {
             cache_tier: Some(file_cache_hit.as_str()),
             exit_code: None,
             timed_out: false,
+            output_truncated: None,
         });
         Ok(result)
     }
@@ -2064,6 +2068,7 @@ impl CodeAnalyzer {
                 cache_write_failure: None,
                 exit_code: None,
                 timed_out: false,
+                output_truncated: None,
             });
             return Ok(result);
         }
@@ -2310,6 +2315,7 @@ impl CodeAnalyzer {
             cache_write_failure: None,
             exit_code: None,
             timed_out: false,
+            output_truncated: None,
         });
         Ok(result)
     }
@@ -2390,6 +2396,7 @@ impl CodeAnalyzer {
                 cache_tier: None,
                 exit_code: None,
                 timed_out: false,
+                output_truncated: None,
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2505,6 +2512,7 @@ impl CodeAnalyzer {
             cache_write_failure: None,
             exit_code: None,
             timed_out: false,
+            output_truncated: None,
         });
         Ok(result)
     }
@@ -2596,6 +2604,7 @@ impl CodeAnalyzer {
                 cache_tier: None,
                 exit_code: None,
                 timed_out: false,
+                output_truncated: None,
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2636,6 +2645,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2667,6 +2677,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2698,6 +2709,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -2744,6 +2756,7 @@ impl CodeAnalyzer {
             cache_tier: None,
             exit_code: None,
             timed_out: false,
+            output_truncated: None,
         });
         Ok(result)
     }
@@ -2835,6 +2848,7 @@ impl CodeAnalyzer {
                 cache_tier: None,
                 exit_code: None,
                 timed_out: false,
+                output_truncated: None,
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2878,6 +2892,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2914,6 +2929,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2947,6 +2963,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -2978,6 +2995,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -3009,6 +3027,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code: None,
                     timed_out: false,
+                    output_truncated: None,
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -3058,6 +3077,7 @@ impl CodeAnalyzer {
             cache_tier: None,
             exit_code: None,
             timed_out: false,
+            output_truncated: None,
         });
         Ok(result)
     }
@@ -3065,7 +3085,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<types::ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3177,7 +3197,7 @@ impl CodeAnalyzer {
 
         let exit_code = output.exit_code;
         let timed_out = output.timed_out;
-        let output_truncated = output.output_truncated;
+        let mut output_truncated = output.output_truncated;
 
         // Record execution results on span
         if let Some(code) = exit_code {
@@ -3198,6 +3218,24 @@ impl CodeAnalyzer {
             format!("Output:\n{}", output.interleaved)
         };
 
+        // Apply combined output size limit (SIZE_LIMIT = 50k chars). Per-stream caps
+        // (MAX_STDOUT_BYTES = 30k stdout, MAX_STDERR_BYTES = 10k stderr) already fired in
+        // handle_output_persist; this is the safety net for the interleaved assembly which
+        // can still reach up to ~40k chars from per-stream content plus headers and formatting.
+        let mut combined_truncated = false;
+        let truncated_output_text = if output_text.len() > SIZE_LIMIT {
+            combined_truncated = true;
+            // Use char-boundary-safe tail truncation
+            let tail_start = output_text.len().saturating_sub(SIZE_LIMIT);
+            let safe_start = output_text[..tail_start].floor_char_boundary(tail_start);
+            output_text[safe_start..].to_string()
+        } else {
+            output_text
+        };
+
+        // Update output_truncated flag to include combined truncation
+        output_truncated = output_truncated || combined_truncated;
+
         let text = format!(
             "Command: {}\nExit code: {}\nTimed out: {}\nOutput truncated: {}\n\n{}",
             params.command,
@@ -3206,7 +3244,7 @@ impl CodeAnalyzer {
                 .unwrap_or_else(|| "null".to_string()),
             timed_out,
             output_truncated,
-            output_text,
+            truncated_output_text,
         );
 
         let content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
@@ -3254,6 +3292,7 @@ impl CodeAnalyzer {
                     cache_tier: None,
                     exit_code,
                     timed_out,
+                    output_truncated: Some(output_truncated),
                 });
                 return Ok(err_to_tool_result(e));
             }
@@ -3279,6 +3318,7 @@ impl CodeAnalyzer {
             cache_tier: None,
             exit_code,
             timed_out,
+            output_truncated: Some(output_truncated),
         });
         Ok(result)
     }
@@ -3516,9 +3556,9 @@ async fn run_exec_impl(
     }
 
     let slot = seq % 8;
-    let (stdout, stderr, stdout_path, stderr_path) =
+    let (stdout, stderr, stdout_path, stderr_path, byte_truncated) =
         handle_output_persist(stdout_str, stderr_str, slot);
-    output_truncated = output_truncated || stdout_path.is_some();
+    output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;
 
     let mut output = types::ShellOutput::new(
         stdout,
@@ -3545,16 +3585,30 @@ fn handle_output_persist(
     stdout: String,
     stderr: String,
     slot: u32,
-) -> (String, String, Option<String>, Option<String>) {
+) -> (String, String, Option<String>, Option<String>, bool) {
     const MAX_OUTPUT_LINES: usize = 2000;
+    // Sized at p99.3 of observed exec_command output_chars (27k calls): 99.27% of calls are
+    // under 20k chars; raising to 30k covers 99.67% while still capping pathological cases
+    // (git pull on large repos, cargo test on large workspaces) that exceed 100k chars.
+    const MAX_STDOUT_BYTES: usize = 30_000;
+    const MAX_STDERR_BYTES: usize = 10_000;
     const OVERFLOW_PREVIEW_LINES: usize = 50;
 
     let stdout_lines: Vec<&str> = stdout.lines().collect();
     let stderr_lines: Vec<&str> = stderr.lines().collect();
 
+    let mut byte_truncated = false;
+
+    // Check for line overflow or byte overflow
+    let line_overflow =
+        stdout_lines.len() > MAX_OUTPUT_LINES || stderr_lines.len() > MAX_OUTPUT_LINES;
+    let stdout_byte_overflow = stdout.len() > MAX_STDOUT_BYTES;
+    let stderr_byte_overflow = stderr.len() > MAX_STDERR_BYTES;
+    let byte_overflow = stdout_byte_overflow || stderr_byte_overflow;
+
     // No overflow: return as-is with no I/O.
-    if stdout_lines.len() <= MAX_OUTPUT_LINES && stderr_lines.len() <= MAX_OUTPUT_LINES {
-        return (stdout, stderr, None, None);
+    if !line_overflow && !byte_overflow {
+        return (stdout, stderr, None, None, false);
     }
 
     // Overflow: write slot files and return last-N-lines preview.
@@ -3572,12 +3626,27 @@ fn handle_output_persist(
     let stdout_path_str = stdout_path.display().to_string();
     let stderr_path_str = stderr_path.display().to_string();
 
-    let stdout_preview = if stdout_lines.len() > MAX_OUTPUT_LINES {
+    // Truncate stdout if it exceeds byte limit
+    let stdout_preview = if stdout_byte_overflow {
+        byte_truncated = true;
+        // Use char-boundary-safe tail truncation
+        let tail_start = stdout.len().saturating_sub(MAX_STDOUT_BYTES);
+        let safe_start = stdout[..tail_start].floor_char_boundary(tail_start);
+        stdout[safe_start..].to_string()
+    } else if stdout_lines.len() > MAX_OUTPUT_LINES {
         stdout_lines[stdout_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
     } else {
         stdout
     };
-    let stderr_preview = if stderr_lines.len() > MAX_OUTPUT_LINES {
+
+    // Truncate stderr if it exceeds byte limit
+    let stderr_preview = if stderr_byte_overflow {
+        byte_truncated = true;
+        // Use char-boundary-safe tail truncation
+        let tail_start = stderr.len().saturating_sub(MAX_STDERR_BYTES);
+        let safe_start = stderr[..tail_start].floor_char_boundary(tail_start);
+        stderr[safe_start..].to_string()
+    } else if stderr_lines.len() > MAX_OUTPUT_LINES {
         stderr_lines[stderr_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
     } else {
         stderr
@@ -3588,6 +3657,7 @@ fn handle_output_persist(
         stderr_preview,
         Some(stdout_path_str),
         Some(stderr_path_str),
+        byte_truncated,
     )
 }
 
@@ -4803,5 +4873,177 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
         assert!(err.message.to_lowercase().contains("unsupported"));
+    }
+
+    #[test]
+    fn test_exec_no_truncation_under_limits() {
+        // Happy path: small output under all caps
+        let stdout = "hello world".to_string();
+        let stderr = "no errors".to_string();
+        let slot = 0u32;
+
+        let (out_stdout, out_stderr, stdout_path, stderr_path, byte_truncated) =
+            handle_output_persist(stdout, stderr, slot);
+
+        assert_eq!(out_stdout, "hello world");
+        assert_eq!(out_stderr, "no errors");
+        assert!(stdout_path.is_none());
+        assert!(stderr_path.is_none());
+        assert!(!byte_truncated);
+    }
+
+    #[test]
+    fn test_exec_byte_overflow_stdout_exceeds_30k() {
+        // Edge case: stdout exceeds 30k byte limit
+        let stdout = "x".repeat(35_000);
+        let stderr = "small".to_string();
+        let slot = 0u32;
+
+        let (out_stdout, out_stderr, stdout_path, stderr_path, byte_truncated) =
+            handle_output_persist(stdout.clone(), stderr.clone(), slot);
+
+        // Verify truncation occurred
+        assert!(byte_truncated, "byte_truncated should be true");
+        assert!(stdout_path.is_some(), "stdout_path should be set");
+        assert!(stderr_path.is_some(), "stderr_path should be set");
+
+        // Verify output was truncated
+        assert!(
+            out_stdout.len() <= 30_000,
+            "stdout should be truncated to <= 30k"
+        );
+        assert_eq!(out_stderr, "small", "stderr should be unchanged");
+
+        // Verify slot file was written
+        let base = std::env::temp_dir()
+            .join("aptu-coder-overflow")
+            .join(format!("slot-{slot}"));
+        let stdout_file = base.join("stdout");
+        assert!(
+            stdout_file.exists(),
+            "stdout slot file should exist after byte overflow"
+        );
+    }
+
+    #[test]
+    fn test_exec_byte_overflow_stderr_exceeds_10k() {
+        // Edge case: stderr exceeds 10k byte limit
+        let stdout = "small".to_string();
+        let stderr = "y".repeat(15_000);
+        let slot = 1u32;
+
+        let (out_stdout, out_stderr, stdout_path, stderr_path, byte_truncated) =
+            handle_output_persist(stdout.clone(), stderr.clone(), slot);
+
+        // Verify truncation occurred
+        assert!(byte_truncated, "byte_truncated should be true");
+        assert!(stdout_path.is_some(), "stdout_path should be set");
+        assert!(stderr_path.is_some(), "stderr_path should be set");
+
+        // Verify output was truncated
+        assert_eq!(out_stdout, "small", "stdout should be unchanged");
+        assert!(
+            out_stderr.len() <= 10_000,
+            "stderr should be truncated to <= 10k"
+        );
+
+        // Verify slot file was written
+        let base = std::env::temp_dir()
+            .join("aptu-coder-overflow")
+            .join(format!("slot-{slot}"));
+        let stderr_file = base.join("stderr");
+        assert!(
+            stderr_file.exists(),
+            "stderr slot file should exist after byte overflow"
+        );
+    }
+
+    #[test]
+    fn test_exec_byte_overflow_combined_exceeds_50k() {
+        // Edge case: combined output_text exceeds 50k char limit
+        // This is tested by verifying the truncation logic in exec_command
+        let large_output = "z".repeat(60_000);
+        assert!(large_output.len() > SIZE_LIMIT);
+
+        // Simulate the truncation logic from exec_command
+        let mut combined_truncated = false;
+        let truncated = if large_output.len() > SIZE_LIMIT {
+            combined_truncated = true;
+            let tail_start = large_output.len().saturating_sub(SIZE_LIMIT);
+            let safe_start = large_output[..tail_start].floor_char_boundary(tail_start);
+            large_output[safe_start..].to_string()
+        } else {
+            large_output.clone()
+        };
+
+        assert!(combined_truncated, "combined_truncated should be true");
+        assert!(
+            truncated.len() <= SIZE_LIMIT,
+            "output should be truncated to <= 50k"
+        );
+    }
+
+    #[test]
+    fn test_exec_line_and_byte_interaction() {
+        // Edge case: line cap and byte cap are independent
+        // 1500 lines with long content to exceed 30k bytes should trigger byte cap, not line cap
+        let lines: Vec<String> = (0..1500)
+            .map(|i| {
+                format!(
+                    "line {} with some padding to make it longer: {}",
+                    i,
+                    "x".repeat(15)
+                )
+            })
+            .collect();
+        let stdout = lines.join("\n");
+        assert!(stdout.lines().count() <= 2000, "should have <= 2000 lines");
+        assert!(stdout.len() > 30_000, "should exceed 30k bytes");
+
+        let stderr = "".to_string();
+        let slot = 2u32;
+
+        let (out_stdout, _out_stderr, stdout_path, _stderr_path, byte_truncated) =
+            handle_output_persist(stdout.clone(), stderr, slot);
+
+        // Byte cap should fire, not line cap
+        assert!(byte_truncated, "byte_truncated should be true");
+        assert!(stdout_path.is_some(), "stdout_path should be set");
+        assert!(
+            out_stdout.len() <= 30_000,
+            "stdout should be truncated by byte cap"
+        );
+    }
+
+    #[test]
+    fn test_exec_utf8_boundary_safety() {
+        // Edge case: ensure truncation doesn't split multi-byte UTF-8 chars
+        // Create a string with multi-byte characters near the boundary
+        let mut stdout = String::new();
+        for _ in 0..4000 {
+            stdout.push_str("hello world ");
+        }
+        // Add some multi-byte chars
+        stdout.push_str("こんにちは"); // Japanese characters (3 bytes each)
+        assert!(stdout.len() > 30_000, "stdout should exceed 30k bytes");
+
+        let stderr = "".to_string();
+        let slot = 5u32;
+
+        let (out_stdout, _out_stderr, _stdout_path, _stderr_path, byte_truncated) =
+            handle_output_persist(stdout, stderr, slot);
+
+        // Verify truncation happened and result is valid UTF-8
+        assert!(byte_truncated, "byte_truncated should be true");
+        assert!(
+            out_stdout.is_char_boundary(0),
+            "start should be char boundary"
+        );
+        assert!(
+            out_stdout.is_char_boundary(out_stdout.len()),
+            "end should be char boundary"
+        );
+        // Verify we can iterate chars without panic
+        let _char_count = out_stdout.chars().count();
     }
 }

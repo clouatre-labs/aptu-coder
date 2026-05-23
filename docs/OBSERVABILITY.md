@@ -41,6 +41,7 @@ Each line in the JSONL file is one JSON object:
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
 | `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable |
 | `timed_out` | `bool` | `true` if the call timed out; `false` otherwise |
+| `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap, per-stream byte cap, or combined cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
 
 ### Example record
 
@@ -50,7 +51,19 @@ Each line in the JSONL file is one JSON object:
 
 ### Backward compatibility
 
-The `session_id` and `seq` fields are optional (both marked with `#[serde(default)]` in the Rust struct). JSONL files written by older versions without these fields will parse successfully; missing fields default to `None`.
+The following fields are optional (marked with `#[serde(default)]` in the Rust struct). JSONL files written by older server versions without these fields parse successfully; missing fields default to `null` or `false` as indicated:
+
+| Field | Added in | Default when absent |
+|---|---|---|
+| `session_id` | early | `null` |
+| `seq` | early | `null` |
+| `output_truncated` | v0.9.0 | `null` (treat as unknown; does not mean truncation did not occur) |
+
+The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
+
+```bash
+jq -r 'select(.output_truncated==true) | [.tool, .output_chars, (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn
+```
 
 ## Daily Rotation and 30-Day Retention
 
