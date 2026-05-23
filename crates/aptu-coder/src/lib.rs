@@ -4786,66 +4786,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_analyze_file_unsupported_extension_returns_invalid_params() {
-        // Arrange: create a temporary file with unsupported extension
+    async fn test_unsupported_extension_returns_invalid_params() {
+        // Arrange: unsupported extension; both analyze_file and analyze_module
+        // route through handle_file_details_mode so one test covers both.
         let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
-        let unsupported_file = temp_dir.path().join("test.md");
-        std::fs::write(&unsupported_file, "# Markdown file").expect("should write file");
+        let unsupported_file = temp_dir.path().join("notes.md");
+        std::fs::write(&unsupported_file, "# notes").expect("should write file");
 
         let analyzer = make_analyzer();
         let mut params = AnalyzeFileParams::default();
         params.path = unsupported_file.to_string_lossy().to_string();
 
-        // Act
         let result = analyzer.handle_file_details_mode(&params).await;
 
-        // Assert: must return INVALID_PARAMS, not INTERNAL_ERROR
-        assert!(
-            result.is_err(),
-            "should return error for unsupported extension"
-        );
+        assert!(result.is_err(), "should error for unsupported extension");
         let err = result.unwrap_err();
-        assert_eq!(
-            err.code,
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "unsupported extension should return INVALID_PARAMS"
-        );
-        assert!(
-            err.message.to_lowercase().contains("unsupported"),
-            "error message should mention unsupported, got: {}",
-            err.message
-        );
-    }
-
-    #[tokio::test]
-    async fn test_analyze_module_unsupported_extension_returns_invalid_params() {
-        // Arrange: create a temporary file with unsupported extension
-        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
-        let unsupported_file = temp_dir.path().join("config.json");
-        std::fs::write(&unsupported_file, "{}").expect("should write file");
-
-        let analyzer = make_analyzer();
-        let mut params = AnalyzeFileParams::default();
-        params.path = unsupported_file.to_string_lossy().to_string();
-
-        // Act: analyze_module routes through handle_file_details_mode
-        let result = analyzer.handle_file_details_mode(&params).await;
-
-        // Assert: must return INVALID_PARAMS, not INTERNAL_ERROR
-        assert!(
-            result.is_err(),
-            "should return error for unsupported extension"
-        );
-        let err = result.unwrap_err();
-        assert_eq!(
-            err.code,
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "unsupported extension should return INVALID_PARAMS"
-        );
-        assert!(
-            err.message.to_lowercase().contains("unsupported"),
-            "error message should mention unsupported, got: {}",
-            err.message
-        );
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.to_lowercase().contains("unsupported"));
     }
 }
