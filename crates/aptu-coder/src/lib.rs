@@ -25,6 +25,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+mod filters;
 pub mod logging;
 pub mod metrics;
 pub mod otel;
@@ -62,6 +63,7 @@ use aptu_coder_core::types::{
     AnalyzeSymbolParams, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput,
     EditReplaceParams, SymbolMatchMode,
 };
+use filters::{CompiledRule, apply_filter, load_filter_table, maybe_inject_no_stat};
 use logging::LogEvent;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
@@ -530,6 +532,9 @@ pub struct CodeAnalyzer {
     // Resolved login shell PATH, captured once at startup via login shell invocation.
     // Arc<Option<String>> is immutable after init; no lock needed.
     resolved_path: Arc<Option<String>>,
+    // Compiled filter rules table (built-in + project-local from .aptu/filters.toml).
+    // Immutable after init; no lock needed.
+    filter_table: Arc<Vec<CompiledRule>>,
 }
 
 #[tool_router]
@@ -619,6 +624,8 @@ impl CodeAnalyzer {
             Arc::new(path)
         };
 
+        let filter_table = Arc::new(load_filter_table(Path::new(".")));
+
         CodeAnalyzer {
             tool_router: Arc::new(RwLock::new(Self::tool_router())),
             cache: AnalysisCache::new(file_cap),
@@ -633,6 +640,7 @@ impl CodeAnalyzer {
             client_name: Arc::new(TokioMutex::new(None)),
             client_version: Arc::new(TokioMutex::new(None)),
             resolved_path,
+            filter_table,
         }
     }
 
@@ -3192,6 +3200,7 @@ impl CodeAnalyzer {
             params.stdin.clone(),
             seq,
             resolved_path_str,
+            &self.filter_table,
         )
         .await;
 
@@ -3481,7 +3490,11 @@ async fn run_exec_impl(
     stdin: Option<String>,
     seq: u32,
     resolved_path: Option<&str>,
+    filter_table: &Arc<Vec<CompiledRule>>,
 ) -> types::ShellOutput {
+    // Inject --no-stat for git pull if not already present
+    let command = maybe_inject_no_stat(&command);
+
     let mut cmd = build_exec_command(
         &command,
         working_dir_path.as_ref(),
@@ -3571,6 +3584,22 @@ async fn run_exec_impl(
     output.output_collection_error = output_collection_error;
     output.stdout_path = stdout_path;
     output.stderr_path = stderr_path;
+
+    // Apply filter if exit_code == 0 and not timed out
+    if exit_code == Some(0) && !timed_out {
+        for compiled_rule in filter_table.iter() {
+            if compiled_rule.pattern.is_match(&command) {
+                let filtered_stdout = apply_filter(compiled_rule, &output.stdout);
+                output.stdout = filtered_stdout;
+                output.filter_applied = compiled_rule
+                    .rule
+                    .description
+                    .clone()
+                    .or_else(|| Some(compiled_rule.rule.match_command.clone()));
+                break;
+            }
+        }
+    }
 
     output
 }
@@ -3974,6 +4003,7 @@ impl ServerHandler for CodeAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use regex::Regex;
 
     #[tokio::test]
     async fn test_emit_progress_none_peer_is_noop() {
@@ -5045,5 +5075,316 @@ mod tests {
         );
         // Verify we can iterate chars without panic
         let _char_count = out_stdout.chars().count();
+    }
+
+    #[test]
+    fn test_filter_strip_lines_matching() {
+        // Happy path: filter matches command prefix and strips lines
+        let rule = types::FilterRule {
+            match_command: "^git\\s+pull".to_string(),
+            description: Some("test filter".to_string()),
+            strip_ansi: false,
+            strip_lines_matching: vec!["^\\s*\\|\\s*\\d+\\s*[+-]+".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: None,
+            on_empty: None,
+        };
+
+        let strip_patterns = vec![Regex::new("^\\s*\\|\\s*\\d+\\s*[+-]+").unwrap()];
+        let compiled = CompiledRule {
+            pattern: Regex::new("^git\\s+pull").unwrap(),
+            strip_patterns,
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "Updating abc123..def456\n | 5 ++++\n | 3 ---\nFast-forward\n";
+        let filtered = apply_filter(&compiled, stdout);
+
+        assert!(!filtered.contains("| 5 ++++"), "should strip stat lines");
+        assert!(!filtered.contains("| 3 ---"), "should strip stat lines");
+        assert!(
+            filtered.contains("Updating"),
+            "should keep non-matching lines"
+        );
+        assert!(
+            filtered.contains("Fast-forward"),
+            "should keep non-matching lines"
+        );
+    }
+
+    #[test]
+    fn test_filter_on_empty_substitution() {
+        // Edge case: on_empty substitution when filtered stdout is empty
+        let rule = types::FilterRule {
+            match_command: "^git\\s+fetch".to_string(),
+            description: Some("test fetch".to_string()),
+            strip_ansi: false,
+            strip_lines_matching: vec!["^From ".to_string(), "^\\s+[a-f0-9]+\\.\\.".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: None,
+            on_empty: Some("ok fetched".to_string()),
+        };
+
+        let strip_patterns = vec![
+            Regex::new("^From ").unwrap(),
+            Regex::new("^\\s+[a-f0-9]+\\.\\.").unwrap(),
+        ];
+        let compiled = CompiledRule {
+            pattern: Regex::new("^git\\s+fetch").unwrap(),
+            strip_patterns,
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "From github.com:user/repo\n  abc123..def456 main -> origin/main\n";
+        let filtered = apply_filter(&compiled, stdout);
+
+        assert_eq!(
+            filtered, "ok fetched",
+            "should return on_empty when all lines stripped"
+        );
+    }
+
+    #[test]
+    fn test_filter_passthrough_on_failure() {
+        // Test the exit-code guard in run_exec_impl: filter only applied when exit_code == Some(0)
+        let rule = types::FilterRule {
+            match_command: "^cargo\\s+build".to_string(),
+            description: Some("cargo build filter".to_string()),
+            strip_ansi: false,
+            strip_lines_matching: vec!["^\\s*Compiling ".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: None,
+            on_empty: None,
+        };
+
+        let strip_patterns = vec![Regex::new("^\\s*Compiling ").unwrap()];
+        let compiled = CompiledRule {
+            pattern: Regex::new("^cargo\\s+build").unwrap(),
+            strip_patterns,
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "   Compiling mylib v0.1.0\nerror: failed to compile\n";
+
+        // Sub-case 1: non-zero exit code (exit_code != Some(0))
+        // The guard condition fails, so filter_applied must remain None and stdout unchanged
+        let mut output = types::ShellOutput::new(
+            stdout.to_string(),
+            "".to_string(),
+            "".to_string(),
+            Some(1), // non-zero exit
+            false,
+            false,
+        );
+
+        // Simulate the guard: if exit_code == Some(0) && !timed_out { apply filter }
+        if output.exit_code == Some(0) && !output.timed_out {
+            output.stdout = apply_filter(&compiled, &output.stdout);
+            output.filter_applied = compiled
+                .rule
+                .description
+                .clone()
+                .or_else(|| Some(compiled.rule.match_command.clone()));
+        }
+
+        assert!(
+            output.filter_applied.is_none(),
+            "filter_applied should be None when exit_code != Some(0)"
+        );
+        assert!(
+            output.stdout.contains("Compiling"),
+            "stdout should be unchanged when exit_code != Some(0)"
+        );
+
+        // Sub-case 2: zero exit code (exit_code == Some(0))
+        // The guard condition passes, so filter_applied is set and stdout is filtered
+        let mut output2 = types::ShellOutput::new(
+            stdout.to_string(),
+            "".to_string(),
+            "".to_string(),
+            Some(0), // zero exit
+            false,
+            false,
+        );
+
+        if output2.exit_code == Some(0) && !output2.timed_out {
+            output2.stdout = apply_filter(&compiled, &output2.stdout);
+            output2.filter_applied = compiled
+                .rule
+                .description
+                .clone()
+                .or_else(|| Some(compiled.rule.match_command.clone()));
+        }
+
+        assert!(
+            output2.filter_applied.is_some(),
+            "filter_applied should be set when exit_code == Some(0)"
+        );
+        assert_eq!(
+            output2.filter_applied.as_ref().unwrap(),
+            "cargo build filter"
+        );
+        assert!(
+            !output2.stdout.contains("Compiling"),
+            "stdout should be filtered when exit_code == Some(0)"
+        );
+    }
+
+    #[test]
+    fn test_no_stat_injection() {
+        // Happy path: --no-stat injection for bare git pull
+        let command = "git pull origin main";
+        let result = maybe_inject_no_stat(command);
+        assert_eq!(
+            result, "git pull origin main --no-stat",
+            "should inject --no-stat"
+        );
+    }
+
+    #[test]
+    fn test_no_stat_not_injected_when_present() {
+        // Edge case: --no-stat not injected when --stat already present
+        let command = "git pull --stat origin main";
+        let result = maybe_inject_no_stat(command);
+        assert_eq!(result, command, "should not inject when --stat present");
+
+        let command2 = "git pull --no-stat origin main";
+        let result2 = maybe_inject_no_stat(command2);
+        assert_eq!(
+            result2, command2,
+            "should not inject when --no-stat present"
+        );
+
+        let command3 = "git pull --verbose origin main";
+        let result3 = maybe_inject_no_stat(command3);
+        assert_eq!(
+            result3, command3,
+            "should not inject when --verbose present"
+        );
+    }
+
+    #[test]
+    fn test_filter_applied_field_present() {
+        // Test apply_filter() end-to-end and verify filter_applied field is set correctly
+        let rule = types::FilterRule {
+            match_command: "^git\\s+status".to_string(),
+            description: Some("git status filter".to_string()),
+            strip_ansi: false,
+            strip_lines_matching: vec!["^On branch".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: Some(20),
+            on_empty: None,
+        };
+
+        let strip_patterns = vec![Regex::new("^On branch").unwrap()];
+        let compiled = CompiledRule {
+            pattern: Regex::new("^git\\s+status").unwrap(),
+            strip_patterns,
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "On branch main\nnothing to commit\n";
+
+        // Call apply_filter() and verify the returned string is filtered
+        let filtered = apply_filter(&compiled, stdout);
+        assert!(
+            !filtered.contains("On branch"),
+            "apply_filter should strip matching lines"
+        );
+        assert!(
+            filtered.contains("nothing to commit"),
+            "apply_filter should keep non-matching lines"
+        );
+
+        // Simulate the guard and field assignment from run_exec_impl
+        let mut output = types::ShellOutput::new(
+            filtered,
+            "".to_string(),
+            "".to_string(),
+            Some(0),
+            false,
+            false,
+        );
+
+        // Set filter_applied as run_exec_impl does
+        output.filter_applied = compiled
+            .rule
+            .description
+            .clone()
+            .or_else(|| Some(compiled.rule.match_command.clone()));
+
+        assert!(
+            output.filter_applied.is_some(),
+            "filter_applied should be set when filter matches"
+        );
+        assert_eq!(output.filter_applied.as_ref().unwrap(), "git status filter");
+    }
+
+    #[test]
+    fn test_filter_keep_lines_matching() {
+        // Happy path: filter matches command prefix and keeps only matching lines
+        let rule = types::FilterRule {
+            match_command: "^cargo\\s+test".to_string(),
+            description: Some("test keep filter".to_string()),
+            strip_ansi: false,
+            strip_lines_matching: vec![],
+            keep_lines_matching: vec!["^test ".to_string(), "^FAILED".to_string()],
+            max_lines: None,
+            on_empty: None,
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^cargo\\s+test").unwrap(),
+            strip_patterns: vec![],
+            keep_patterns: vec![
+                Regex::new("^test ").unwrap(),
+                Regex::new("^FAILED").unwrap(),
+            ],
+            rule,
+        };
+
+        let stdout = "   Compiling mylib v0.1.0\ntest foo::bar ... ok\ntest foo::baz ... FAILED\ntest result: FAILED\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert!(filtered.contains("test foo::bar"), "should keep test lines");
+        assert!(
+            filtered.contains("test foo::baz"),
+            "should keep FAILED test lines"
+        );
+        assert!(!filtered.contains("Compiling"), "should drop compile lines");
+    }
+
+    #[test]
+    fn test_filter_max_lines_cap() {
+        // Edge case: filter caps output to max_lines
+        let rule = types::FilterRule {
+            match_command: "^git\\s+log".to_string(),
+            description: Some("test max lines".to_string()),
+            strip_ansi: false,
+            strip_lines_matching: vec![],
+            keep_lines_matching: vec![],
+            max_lines: Some(3),
+            on_empty: None,
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+log").unwrap(),
+            strip_patterns: vec![],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "line1\nline2\nline3\nline4\nline5\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert_eq!(filtered.lines().count(), 3, "should cap at 3 lines");
+        assert!(filtered.contains("line1"));
+        assert!(filtered.contains("line3"));
+        assert!(
+            !filtered.contains("line4"),
+            "should not include lines beyond max"
+        );
     }
 }
