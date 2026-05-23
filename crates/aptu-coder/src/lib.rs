@@ -1004,7 +1004,8 @@ impl CodeAnalyzer {
                     Err(ErrorData::new(
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         format!(
-                            "Unsupported language: {lang}. Supported extensions: rs, py, go, ts, tsx, js, mjs, cjs, java, kt, kts, cs, cpp, cc, cxx, c, h, hpp, hxx, f, f77, f90, f95, f03, f08, for, ftn"
+                            "Unsupported language: {lang}. Supported extensions: {}",
+                            aptu_coder_core::lang::supported_extensions().join(", ")
                         ),
                         Some(error_meta(
                             "invalid_request",

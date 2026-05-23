@@ -74,6 +74,15 @@ pub fn language_for_extension(ext: &str) -> Option<&'static str> {
         .map(|(_, lang)| *lang)
 }
 
+/// Returns all file extensions supported by the compiled feature set.
+///
+/// Each entry corresponds to one row in `EXTENSION_MAP`. The list is used to
+/// build human-readable error messages without duplicating the extension list.
+#[must_use]
+pub fn supported_extensions() -> Vec<&'static str> {
+    EXTENSION_MAP.iter().map(|(ext, _)| *ext).collect()
+}
+
 /// Returns a static slice of all supported language names based on compiled features.
 ///
 /// The returned slice contains language identifiers like `"rust"`, `"python"`, `"go"`, etc.,
