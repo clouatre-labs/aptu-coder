@@ -61,15 +61,7 @@ Five validated jq one-liners:
 4. Cache hit rate by day: `for f in metrics-*.jsonl; do d=${f#metrics-}; d=${d%.jsonl}; total=$(jq 'select(.cache_hit!=null)' $f | wc -l); hits=$(jq 'select(.cache_hit==true)' $f | wc -l); echo "$d: $hits/$total"; done`
 5. Slowest 10 calls: `jq -r '[.tool, (.duration_ms|tostring), (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn | head -10`
 
-For richer analysis, use `scripts/mcp-metrics.py` (zero dependencies, stdlib only):
-
-```
-python scripts/mcp-metrics.py                          # full summary on default path
-python scripts/mcp-metrics.py --trend                  # daily breakdown table
-python scripts/mcp-metrics.py --tool exec_command      # focus on one tool
-python scripts/mcp-metrics.py --format json | jq .     # machine-readable output
-python scripts/mcp-metrics.py --from 2026-05-01 --to 2026-05-24  # date range
-```
+For richer analysis, use `python scripts/mcp-metrics.py --help`.
 
 ## API verification (critical)
 

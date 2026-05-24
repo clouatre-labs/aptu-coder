@@ -20,10 +20,9 @@ import argparse
 import csv
 import json
 import os
-import statistics
 import sys
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import datetime, timezone
 from glob import glob
 from io import StringIO
 
@@ -245,7 +244,7 @@ def compute_trend(records):
         if ts is None:
             continue
         try:
-            day = datetime.utcfromtimestamp(ts / 1000.0).strftime("%Y-%m-%d")
+            day = datetime.fromtimestamp(ts / 1000.0, timezone.utc).strftime("%Y-%m-%d")
         except (ValueError, OSError, OverflowError):
             continue
         by_day[day].append(rec)
