@@ -1,0 +1,171 @@
+{
+  "version": "v16",
+  "rubric": {
+    "dimensions": [
+      "structural_accuracy",
+      "call_chain_tracing",
+      "integration_map_quality"
+    ],
+    "max_per_dimension": 3,
+    "max_total": 9
+  },
+  "native_baseline_source": "v13",
+  "native_baseline": {
+    "sonnet": {
+      "input_tokens_median": 876513,
+      "cost_usd_median": 2.85,
+      "runs": ["B-scored-1", "B-scored-2"]
+    },
+    "haiku": {
+      "input_tokens_median": 2161934,
+      "cost_usd_median": 2.21,
+      "runs": ["D-scored-1", "D-scored-2"]
+    }
+  },
+  "runs": [
+    {
+      "run_id": "A-pilot",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "cost_usd": null,
+        "num_turns": null
+      }
+    },
+    {
+      "run_id": "A-scored-1",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "cost_usd": null,
+        "num_turns": null
+      }
+    },
+    {
+      "run_id": "A-scored-2",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "cost_usd": null,
+        "num_turns": null
+      }
+    },
+    {
+      "run_id": "C-pilot",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "cost_usd": null,
+        "num_turns": null
+      }
+    },
+    {
+      "run_id": "C-scored-1",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "cost_usd": null,
+        "num_turns": null
+      }
+    },
+    {
+      "run_id": "C-scored-2",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "cost_usd": null,
+        "num_turns": null
+      }
+    }
+  ]
+}
