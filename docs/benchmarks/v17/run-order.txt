@@ -1,0 +1,20 @@
+# v17 Run Order (seed=42)
+# Pilots run first (2 runs) to verify tool isolation before scoring.
+# Scored runs follow in randomized order (4 runs, seed=42).
+# Native conditions (B/D) are reused from v13; do not re-run them.
+#
+# IMPORTANT: Before starting scored runs, verify isolation holds in pilot
+# session JSONLs -- confirm no Bash/Grep/Read/Glob appear in tools_used.
+#
+# Usage: bash scripts/bench-v17-run.sh <CONDITION_ID> <RUN_ID>
+# CONDITION_ID: A or C only
+
+# --- Pilot runs (execute in order; verify isolation before proceeding) ---
+1. bash scripts/bench-v17-run.sh A A-pilot
+2. bash scripts/bench-v17-run.sh C C-pilot
+
+# --- Scored runs (randomized, seed=42) ---
+3. bash scripts/bench-v17-run.sh C C-scored-1
+4. bash scripts/bench-v17-run.sh A A-scored-1
+5. bash scripts/bench-v17-run.sh A A-scored-2
+6. bash scripts/bench-v17-run.sh C C-scored-2
