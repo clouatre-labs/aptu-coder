@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # v16 Benchmark Runner
 # Runs MCP-full conditions (A and C) only. Native conditions (B/D) are reused from v13.
-# Condition A uses claude-sonnet-4-6, C uses claude-haiku-4-5.
-# Both conditions use: analyze_directory, analyze_file, analyze_symbol, analyze_module, exec_command.
+# Model and tool allowlist are declared in agent frontmatter (prompts/condition-*.md);
+# the runner expands repo-path/run-id placeholders into a temp agent file and passes
+# it via --agent. No --model or --allowedTools flags needed.
 #
 # Usage:
 #   bash scripts/bench-v16-run.sh <CONDITION_ID> <RUN_ID>
@@ -13,13 +14,8 @@
 #   bash scripts/bench-v16-run.sh A A-scored-2
 #
 # Environment variables:
-#   BENCH_MAX_BUDGET_USD           -- cap spend per run (optional, e.g. "2.00")
-#   OPENFAST_REPO                  -- local path to openfast clone
-#                                     (default: /tmp/openfast-benchmark)
-#   ANTHROPIC_DEFAULT_SONNET_MODEL -- model ID for condition A
-#                                     (default: claude-sonnet-4-6)
-#   ANTHROPIC_DEFAULT_HAIKU_MODEL  -- model ID for condition C
-#                                     (default: claude-haiku-4-5)
+#   BENCH_MAX_BUDGET_USD  -- cap spend per run (optional, e.g. "2.00")
+#   OPENFAST_REPO         -- local path to openfast clone (default: /tmp/openfast-benchmark)
 
 set -euo pipefail
 
@@ -114,18 +110,9 @@ fi
 # ---------------------------------------------------------------------------
 # Condition dispatch
 # ---------------------------------------------------------------------------
-SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-sonnet-4-6}"
-HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}"
-
 case "$CONDITION_ID" in
-  A)
-    MODEL="$SONNET_MODEL"
-    SYSTEM_PROMPT_FILE="$PROMPTS_DIR/condition-a-mcp-sonnet.md"
-    ;;
-  C)
-    MODEL="$HAIKU_MODEL"
-    SYSTEM_PROMPT_FILE="$PROMPTS_DIR/condition-c-mcp-haiku.md"
-    ;;
+  A) AGENT_SOURCE="$PROMPTS_DIR/condition-a-mcp-sonnet.md" ;;
+  C) AGENT_SOURCE="$PROMPTS_DIR/condition-c-mcp-haiku.md" ;;
 esac
 
 # ---------------------------------------------------------------------------
@@ -135,12 +122,19 @@ OUTPUT_FILE="$RUNS_DIR/${RUN_ID}-report.json"
 TELEMETRY_FILE="$RUNS_DIR/${RUN_ID}-telemetry.json"
 LOG_FILE="$RUNS_DIR/${RUN_ID}.log"
 SCRATCH_FILE=$(mktemp /tmp/bench-v16-XXXXXX.json)
-trap 'rm -f "$SCRATCH_FILE"' EXIT
+# Expand repo path and run-id placeholders into a temp agent file
+AGENT_FILE=$(mktemp /tmp/bench-v16-agent-XXXXXX.md)
+sed \
+  -e "s|<repo>|$OPENFAST_REPO|g" \
+  -e "s|REPO_PATH_PLACEHOLDER|$OPENFAST_REPO|g" \
+  -e "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" \
+  -e "s|CONDITION_PLACEHOLDER|$CONDITION_ID|g" \
+  "$AGENT_SOURCE" > "$AGENT_FILE"
+trap 'rm -f "$SCRATCH_FILE" "$AGENT_FILE"' EXIT
 
 # ---------------------------------------------------------------------------
-# Tool isolation flags
+# MCP config flag (server registration only; tool allowlist lives in agent frontmatter)
 # ---------------------------------------------------------------------------
-MCP_TOOLS="mcp__aptu-coder__analyze_directory,mcp__aptu-coder__analyze_file,mcp__aptu-coder__analyze_symbol,mcp__aptu-coder__analyze_module,mcp__aptu-coder__exec_command"
 MCP_FLAGS="--mcp-config $MCP_CONFIG --strict-mcp-config"
 
 # ---------------------------------------------------------------------------
@@ -171,15 +165,7 @@ OUTPUT_SCHEMA=$(cat <<'SCHEMA'
 SCHEMA
 )
 
-# ---------------------------------------------------------------------------
-# Build prompts (substitute placeholders)
-# ---------------------------------------------------------------------------
-SYSTEM_PROMPT=$(sed \
-  -e "s|<repo>|$OPENFAST_REPO|g" \
-  -e "s|REPO_PATH_PLACEHOLDER|$OPENFAST_REPO|g" \
-  -e "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" \
-  "$SYSTEM_PROMPT_FILE")
-
+# Task user message: repo path is the only runtime context needed (agent file has the rest)
 TASK_CONTENT=$(sed \
   -e "s|RUN_ID_PLACEHOLDER|$RUN_ID|g" \
   -e "s|CONDITION_PLACEHOLDER|$CONDITION_ID|g" \
@@ -197,9 +183,7 @@ cat <<EOF
 === v16 Benchmark Run ===
 CONDITION:   $CONDITION_ID
 RUN_ID:      $RUN_ID
-MODEL:       $MODEL
-TOOL_SET:    mcp-full (analyze_* + exec_command)
-ALLOWED:     $MCP_TOOLS
+AGENT:       $AGENT_FILE
 OPENFAST:    $OPENFAST_REPO ($ACTUAL_COMMIT)
 BUDGET:      ${BENCH_MAX_BUDGET_USD:-unlimited} USD
 OUTPUT:      $OUTPUT_FILE
@@ -217,12 +201,12 @@ if [[ -n "${BENCH_MAX_BUDGET_USD:-}" ]]; then
   BUDGET_FLAG=(--max-budget-usd "$BENCH_MAX_BUDGET_USD")
 fi
 
+# --agent supplies model + tool allowlist via frontmatter; no --model/--allowedTools needed.
+# --strict-mcp-config ensures only the aptu-coder server is loaded regardless of user config.
 DISABLE_PROMPT_CACHING=1 claude \
   -p \
-  --model "$MODEL" \
-  --system-prompt "$SYSTEM_PROMPT" \
+  --agent "$AGENT_FILE" \
   $MCP_FLAGS \
-  --allowedTools "$MCP_TOOLS" \
   --dangerously-skip-permissions \
   --output-format json \
   --json-schema "$OUTPUT_SCHEMA" \
