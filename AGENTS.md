@@ -61,6 +61,8 @@ Five validated jq one-liners:
 4. Cache hit rate by day: `for f in metrics-*.jsonl; do d=${f#metrics-}; d=${d%.jsonl}; total=$(jq 'select(.cache_hit!=null)' $f | wc -l); hits=$(jq 'select(.cache_hit==true)' $f | wc -l); echo "$d: $hits/$total"; done`
 5. Slowest 10 calls: `jq -r '[.tool, (.duration_ms|tostring), (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn | head -10`
 
+For richer analysis, use `python scripts/mcp-metrics.py --help`.
+
 ## API verification (critical)
 
 Do not rely on training data for `rmcp`, `schemars`, or `thiserror` APIs. **Read `crates/aptu-coder/src/lib.rs` before adding or modifying any tool** -- it is the authoritative reference for tool handler patterns.
