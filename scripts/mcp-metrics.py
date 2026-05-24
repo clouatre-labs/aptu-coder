@@ -57,7 +57,18 @@ def file_date(path):
     return None
 
 
-def load_records(metrics_dir, from_date=None, to_date=None, tool_filter=None):
+CURRENT_TOOLS = {
+    "analyze_directory",
+    "analyze_file",
+    "analyze_module",
+    "analyze_symbol",
+    "edit_overwrite",
+    "edit_replace",
+    "exec_command",
+}
+
+
+def load_records(metrics_dir, from_date=None, to_date=None, tool_filter=None, all_tools=False):
     pattern = os.path.join(metrics_dir, "metrics-*.jsonl")
     files = sorted(glob(pattern))
     records = []
@@ -85,7 +96,10 @@ def load_records(metrics_dir, from_date=None, to_date=None, tool_filter=None):
                         )
                         skipped += 1
                         continue
-                    if tool_filter and rec.get("tool") != tool_filter:
+                    tool = rec.get("tool")
+                    if tool_filter and tool != tool_filter:
+                        continue
+                    if not all_tools and tool not in CURRENT_TOOLS:
                         continue
                     records.append(rec)
         except OSError as exc:
@@ -484,6 +498,10 @@ def main():
         "--trend", action="store_true",
         help="Show daily trend breakdown.",
     )
+    parser.add_argument(
+        "--all-tools", action="store_true",
+        help="Include obsolete/renamed tools from older server versions (excluded by default).",
+    )
     args = parser.parse_args()
 
     metrics_dir = args.metrics_dir or default_metrics_dir()
@@ -497,6 +515,7 @@ def main():
         from_date=args.from_date,
         to_date=args.to_date,
         tool_filter=args.tool_filter,
+        all_tools=args.all_tools,
     )
 
     if not records:
