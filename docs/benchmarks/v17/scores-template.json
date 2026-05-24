@@ -1,0 +1,104 @@
+{
+  "version": "v17",
+  "rubric": {
+    "dimensions": [
+      "structural_accuracy",
+      "call_chain_tracing",
+      "integration_map_quality"
+    ],
+    "max_per_dimension": 3,
+    "max_total": 9
+  },
+  "runs": [
+    {
+      "run_id": "A-pilot",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {}
+    },
+    {
+      "run_id": "A-scored-1",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {}
+    },
+    {
+      "run_id": "A-scored-2",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {}
+    },
+    {
+      "run_id": "C-pilot",
+      "condition": "C",
+      "model": "claude-haiku-4-5-20251001",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {}
+    },
+    {
+      "run_id": "C-scored-1",
+      "condition": "C",
+      "model": "claude-haiku-4-5-20251001",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {}
+    },
+    {
+      "run_id": "C-scored-2",
+      "condition": "C",
+      "model": "claude-haiku-4-5-20251001",
+      "tool_set": "mcp-full",
+      "scores": {
+        "structural_accuracy": null,
+        "call_chain_tracing": null,
+        "integration_map_quality": null,
+        "total": null
+      },
+      "notes": "",
+      "tool_calls_total": null,
+      "telemetry": {}
+    }
+  ]
+}
