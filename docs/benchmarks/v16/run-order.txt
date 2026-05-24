@@ -1,0 +1,17 @@
+# v16 Run Order (seed=42)
+# Pilots run first (2 runs) to verify exec_command integration before scoring.
+# Scored runs follow in randomized order (4 runs, seed=42).
+# Native conditions (B/D) are reused from v13; do not re-run them.
+#
+# Usage: bash scripts/bench-v16-run.sh <CONDITION_ID> <RUN_ID>
+# CONDITION_ID: A or C only
+
+# --- Pilot runs (execute in order before any scored run) ---
+1. bash scripts/bench-v16-run.sh A A-pilot
+2. bash scripts/bench-v16-run.sh C C-pilot
+
+# --- Scored runs (randomized, seed=42) ---
+3. bash scripts/bench-v16-run.sh C C-scored-1
+4. bash scripts/bench-v16-run.sh A A-scored-1
+5. bash scripts/bench-v16-run.sh A A-scored-2
+6. bash scripts/bench-v16-run.sh C C-scored-2
