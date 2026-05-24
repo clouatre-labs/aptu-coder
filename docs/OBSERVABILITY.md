@@ -99,3 +99,35 @@ This avoids `XDG_DATA_HOME` environment variable manipulation in tests.
 - **Unbounded channel backpressure**: If the writer task falls behind (slow disk I/O), the unbounded channel will grow. This is acceptable because metrics writes are the lowest-priority operation. A future enhancement could add a bounded channel with a drop-on-full policy.
 - **Date arithmetic**: The Gregorian calendar implementation in `current_date_str()` does not handle leap seconds. Off-by-one errors at year boundaries are possible but inconsequential for 30-day retention logic.
 - **Hint semantics**: Per MCP Blog 2, `readOnlyHint` and `idempotentHint` are not enforced by the protocol. Clients make their own trust decisions.
+
+## Metrics CLI
+
+`scripts/mcp-metrics.py` is a zero-dependency Python CLI (stdlib only, Python 3.8+) for interactive analysis of the aptu-coder JSONL metrics corpus. It reads daily-rotated files from the same XDG path used by the server (`$XDG_DATA_HOME/aptu-coder/`, defaulting to `~/.local/share/aptu-coder/`) and produces four analysis sections: tool efficiency (output size p50/p95/max, latency p50/p95), cache health (hit rate by tool and tier, estimated token savings), session patterns (top sessions by call volume and output chars, error rate by tool and error type), and an optional daily trend view. All optional JSONL fields introduced after the initial release are accessed with `dict.get` so records from any server version parse cleanly.
+
+```
+# Full summary on the default XDG path
+python scripts/mcp-metrics.py
+
+# Restrict to a date range
+python scripts/mcp-metrics.py --from 2026-05-01 --to 2026-05-24
+
+# Override the metrics directory
+python scripts/mcp-metrics.py --dir /path/to/metrics/
+
+# Machine-readable JSON output
+python scripts/mcp-metrics.py --format json
+
+# CSV output (sections separated by blank rows)
+python scripts/mcp-metrics.py --format csv
+
+# Focus on a single tool
+python scripts/mcp-metrics.py --tool exec_command
+
+# Daily trend breakdown
+python scripts/mcp-metrics.py --trend
+
+# Combine: trend as JSON, piped to jq
+python scripts/mcp-metrics.py --trend --format json | jq .trend
+```
+
+The script is OTel-aligned: field names match the JSONL schema defined in the Metric Record Schema section above. No external packages are required; it runs with any Python 3.8+ interpreter.
