@@ -98,7 +98,9 @@ differences:
 4. `analyze_directory(path="<repo>/modules/nwtc-library/src", max_depth=1, summary=true)` -- NWTC types
 5. `analyze_file` on 1-2 NWTC type/utility files
 6. `analyze_file` on `modules/openfast-library/src/FAST_Subs.f90` -- glue code entry point
-7. `exec_command` for targeted line-number lookups or cross-checks as needed
+7. `exec_command` for targeted line-number lookups or cross-checks as needed; non-zero exit
+   codes are passed through to the agent as-is (exit_code field in the tool result) -- the
+   agent is expected to fall back to an `analyze_*` call if a shell command fails
 
 ## Rubric
 

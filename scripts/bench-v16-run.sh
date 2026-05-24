@@ -20,6 +20,14 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Preflight checks
+# ---------------------------------------------------------------------------
+if ! command -v claude >/dev/null 2>&1; then
+  echo "ERROR: 'claude' CLI not found. Install Claude Code and authenticate before running." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -276,6 +284,9 @@ PYEOF
 # ---------------------------------------------------------------------------
 # Tool isolation validation
 # ---------------------------------------------------------------------------
+# Claude Code writes session JSONL to ~/.claude/projects/<slug>/ where <slug> is the
+# working directory path with slashes replaced by hyphens. Override with CLAUDE_SESSION_DIR
+# if your installation uses a different layout.
 _REPO_SLUG="${REPO_ROOT//\//-}"
 SESSION_DIR="${CLAUDE_SESSION_DIR:-$HOME/.claude/projects/${_REPO_SLUG}}"
 
