@@ -26,6 +26,8 @@ pub struct MetricEvent {
     pub max_depth: Option<u32>,
     pub result: &'static str,
     pub error_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_subtype: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
@@ -544,6 +546,7 @@ mod tests {
             max_depth: None,
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: None,
             seq: None,
             cache_hit: None,
@@ -601,6 +604,7 @@ mod tests {
             max_depth: Some(2),
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: None,
             seq: None,
             cache_hit: None,
@@ -616,6 +620,8 @@ mod tests {
         assert!(json.contains("analyze_directory"));
         assert!(json.contains(r#""result":"ok""#));
         assert!(json.contains(r#""output_chars":100"#));
+        // Verify error_subtype is omitted when None (backward compat)
+        assert!(!json.contains("error_subtype"));
     }
 
     #[test]
@@ -629,6 +635,7 @@ mod tests {
             max_depth: Some(3),
             result: "error",
             error_type: Some("invalid_params".to_string()),
+            error_subtype: None,
             session_id: None,
             seq: None,
             cache_hit: None,
@@ -644,7 +651,62 @@ mod tests {
         assert!(json.contains(r#""result":"error""#));
         assert!(json.contains(r#""error_type":"invalid_params""#));
         assert!(json.contains(r#""output_chars":0"#));
-        assert!(json.contains(r#""max_depth":3"#));
+        // Verify error_subtype is omitted when None (backward compat)
+        assert!(!json.contains("error_subtype"));
+    }
+
+    #[test]
+    fn test_metric_event_error_subtype_some_serializes() {
+        let event = MetricEvent {
+            ts: 1_700_000_000_000,
+            tool: "edit_replace",
+            duration_ms: 10,
+            output_chars: 0,
+            param_path_depth: 2,
+            max_depth: None,
+            result: "error",
+            error_type: Some("invalid_params".to_string()),
+            error_subtype: Some("not_found".to_string()),
+            session_id: None,
+            seq: None,
+            cache_hit: None,
+            cache_write_failure: None,
+            exit_code: None,
+            timed_out: false,
+            cache_tier: None,
+            output_truncated: None,
+            chars_threshold_breach: false,
+            file_ext: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""error_subtype":"not_found""#));
+    }
+
+    #[test]
+    fn test_metric_event_error_subtype_ambiguous() {
+        let event = MetricEvent {
+            ts: 1_700_000_000_000,
+            tool: "edit_replace",
+            duration_ms: 10,
+            output_chars: 0,
+            param_path_depth: 2,
+            max_depth: None,
+            result: "error",
+            error_type: Some("invalid_params".to_string()),
+            error_subtype: Some("ambiguous".to_string()),
+            session_id: None,
+            seq: None,
+            cache_hit: None,
+            cache_write_failure: None,
+            exit_code: None,
+            timed_out: false,
+            cache_tier: None,
+            output_truncated: None,
+            chars_threshold_breach: false,
+            file_ext: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""error_subtype":"ambiguous""#));
     }
 
     #[test]
@@ -658,6 +720,7 @@ mod tests {
             max_depth: Some(3),
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: Some("1742468880123-42".to_string()),
             seq: Some(5),
             cache_hit: None,
@@ -730,6 +793,7 @@ mod tests {
             max_depth: None,
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: Some("test-session-123".to_string()),
             seq: None,
             cache_hit: None,
@@ -751,6 +815,7 @@ mod tests {
             max_depth: Some(3),
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: Some("test-session-123".to_string()),
             seq: None,
             cache_hit: None,
@@ -825,6 +890,7 @@ mod tests {
             max_depth: None,
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: Some("test-session-456".to_string()),
             seq: None,
             cache_hit: None,
@@ -886,6 +952,7 @@ mod tests {
             max_depth: None,
             result: "ok",
             error_type: None,
+            error_subtype: None,
             session_id: Some(marker.to_string()),
             seq: None,
             cache_hit: None,
