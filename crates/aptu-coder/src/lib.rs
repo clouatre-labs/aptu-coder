@@ -1694,6 +1694,32 @@ impl CodeAnalyzer {
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                let error_type = match e.code {
+                    rmcp::model::ErrorCode::INVALID_PARAMS => Some("invalid_params".to_string()),
+                    rmcp::model::ErrorCode::INTERNAL_ERROR => Some("internal_error".to_string()),
+                    _ => None,
+                };
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "analyze_file",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type,
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    file_ext: crate::metrics::path_file_ext(&param_path),
+                    ..Default::default()
+                });
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -1863,6 +1889,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            file_ext: crate::metrics::path_file_ext(&param_path),
             ..Default::default()
         });
         Ok(result)
@@ -2430,21 +2457,49 @@ impl CodeAnalyzer {
         // Route through handle_file_details_mode to inherit L1+L2 caching
         let mut analyze_file_params: AnalyzeFileParams = Default::default();
         analyze_file_params.path = params.path.clone();
-        let (arc_output, module_tier) =
-            match self.handle_file_details_mode(&analyze_file_params).await {
-                Ok((output, tier)) => (output, tier),
-                Err(e) => {
-                    let error_data = match e.code {
-                        rmcp::model::ErrorCode::INVALID_PARAMS => e,
-                        _ => ErrorData::new(
-                            rmcp::model::ErrorCode::INTERNAL_ERROR,
-                            format!("Failed to analyze module: {}", e.message),
-                            Some(error_meta("internal", false, "report this as a bug")),
-                        ),
-                    };
-                    return Ok(err_to_tool_result(error_data));
-                }
-            };
+        let (arc_output, module_tier) = match self
+            .handle_file_details_mode(&analyze_file_params)
+            .await
+        {
+            Ok((output, tier)) => (output, tier),
+            Err(e) => {
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                let error_type = match e.code {
+                    rmcp::model::ErrorCode::INVALID_PARAMS => Some("invalid_params".to_string()),
+                    rmcp::model::ErrorCode::INTERNAL_ERROR => Some("internal_error".to_string()),
+                    _ => None,
+                };
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "analyze_module",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type,
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    file_ext: crate::metrics::path_file_ext(&param_path),
+                    ..Default::default()
+                });
+                let error_data = match e.code {
+                    rmcp::model::ErrorCode::INVALID_PARAMS => e,
+                    _ => ErrorData::new(
+                        rmcp::model::ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to analyze module: {}", e.message),
+                        Some(error_meta("internal", false, "report this as a bug")),
+                    ),
+                };
+                return Ok(err_to_tool_result(error_data));
+            }
+        };
 
         // Reconstruct ModuleInfo from FileAnalysisOutput
         let file_path = std::path::Path::new(&params.path);
@@ -2528,6 +2583,7 @@ impl CodeAnalyzer {
             exit_code: None,
             timed_out: false,
             output_truncated: None,
+            file_ext: crate::metrics::path_file_ext(&param_path),
             ..Default::default()
         });
         Ok(result)
@@ -3350,6 +3406,7 @@ impl CodeAnalyzer {
             timed_out,
             output_truncated: Some(output_truncated),
             chars_threshold_breach: text.len() > 30_000,
+            file_ext: None,
         });
         Ok(result)
     }
@@ -5560,6 +5617,7 @@ mod tests {
             timed_out: false,
             output_truncated: None,
             chars_threshold_breach: output_chars > 30_000,
+            file_ext: None,
         };
         assert!(
             event.chars_threshold_breach,
@@ -5589,6 +5647,7 @@ mod tests {
             timed_out: false,
             output_truncated: None,
             chars_threshold_breach: output_chars > 30_000,
+            file_ext: None,
         };
         assert!(
             !event.chars_threshold_breach,
