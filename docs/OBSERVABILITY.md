@@ -31,6 +31,7 @@ Each line in the JSONL file is one JSON object:
 | `duration_ms` | `u64` | Wall-clock time from handler entry to return |
 | `output_chars` | `usize` | Byte length (`str::len()`) of the final text returned; `0` on error paths |
 | `param_path_depth` | `usize` | `Path::components().count()` on `params.path` |
+| `file_ext` | `string \| null` | Lowercased file extension of `params.path`: known extension key (e.g. `"rs"`), `"other"` for unrecognized extensions, `null` when the path has no extension. Only populated for `analyze_file` and `analyze_module`. |
 | `max_depth` | `u32 \| null` | The `max_depth` param if present; `null` for `analyze_file` and `analyze_module` |
 | `result` | `string` | `"ok"` on success, `"error"` on early-exit error paths |
 | `error_type` | `string \| null` | On error: `invalid_params`, `parse`, or `unknown`; `null` on success |

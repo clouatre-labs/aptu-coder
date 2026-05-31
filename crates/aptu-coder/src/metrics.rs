@@ -7,6 +7,7 @@
 //! under the XDG data directory (`~/.local/share/aptu-coder/metrics-YYYY-MM-DD.jsonl`).
 //! Files older than 30 days are deleted on startup.
 
+use aptu_coder_core::lang::language_for_extension;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -49,6 +50,11 @@ pub struct MetricEvent {
     /// the per-stream byte-cap threshold.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub chars_threshold_breach: bool,
+    /// File extension of the analyzed path, lowercased. `Some("rs")` for known extensions,
+    /// `Some("other")` for unrecognized extensions, `None` when the path has no extension.
+    /// Only populated for `analyze_file` and `analyze_module`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_ext: Option<&'static str>,
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -273,6 +279,29 @@ pub fn unix_ms() -> u64 {
 #[must_use]
 pub fn path_component_count(path: &str) -> usize {
     Path::new(path).components().count()
+}
+
+/// Returns the lowercased file extension of `path` as a `&'static str`.
+///
+/// - Returns `Some(ext)` for extensions recognized by [`language_for_extension`] (e.g. `"rs"`).
+/// - Returns `Some("other")` for paths that have an extension but it is not in the known set.
+/// - Returns `None` for paths with no extension or an empty extension.
+#[must_use]
+pub fn path_file_ext(path: &str) -> Option<&'static str> {
+    let ext_os = Path::new(path).extension()?;
+    let ext_str = ext_os.to_str()?;
+    if ext_str.is_empty() {
+        return None;
+    }
+    // language_for_extension does case-insensitive lookup; if found, return the
+    // canonical (lowercased) extension key from EXTENSION_MAP via supported_extensions().
+    if language_for_extension(ext_str).is_some() {
+        aptu_coder_core::lang::supported_extensions()
+            .into_iter()
+            .find(|e| e.eq_ignore_ascii_case(ext_str))
+    } else {
+        Some("other")
+    }
 }
 
 fn xdg_metrics_dir() -> PathBuf {
@@ -524,6 +553,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         };
         tx.send(make_event()).unwrap();
         tx.send(make_event()).unwrap();
@@ -580,6 +610,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("analyze_directory"));
@@ -607,6 +638,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""result":"error""#));
@@ -635,10 +667,41 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
         assert_eq!(serialized, json_str);
+    }
+
+    #[test]
+    fn test_path_file_ext_known() {
+        // Arrange / Act / Assert: known extension returns the lowercased extension key
+        assert_eq!(path_file_ext("src/main.rs"), Some("rs"));
+    }
+
+    #[test]
+    fn test_path_file_ext_unknown() {
+        // Arrange / Act / Assert: unrecognized extension returns Some("other")
+        assert_eq!(path_file_ext("file.xyz"), Some("other"));
+    }
+
+    #[test]
+    fn test_path_file_ext_no_ext() {
+        // Arrange / Act / Assert: path with no extension returns None
+        assert_eq!(path_file_ext("Makefile"), None);
+    }
+
+    #[test]
+    fn test_path_file_ext_case_insensitive() {
+        // Arrange / Act / Assert: uppercase extension is normalized to lowercase key
+        assert_eq!(path_file_ext("src/main.RS"), Some("rs"));
+    }
+
+    #[test]
+    fn test_path_file_ext_multi_dot() {
+        // Arrange / Act / Assert: multi-dot filename uses the last extension
+        assert_eq!(path_file_ext("file.test.rs"), Some("rs"));
     }
 
     #[tokio::test]
@@ -676,6 +739,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         })
         .unwrap();
         tx.send(MetricEvent {
@@ -696,6 +760,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         })
         .unwrap();
         drop(tx);
@@ -769,6 +834,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         })
         .unwrap();
         drop(tx);
@@ -829,6 +895,7 @@ mod tests {
             cache_tier: None,
             output_truncated: None,
             chars_threshold_breach: false,
+            file_ext: None,
         })
         .unwrap();
         drop(tx);
