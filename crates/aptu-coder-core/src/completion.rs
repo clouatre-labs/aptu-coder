@@ -70,12 +70,11 @@ pub fn path_completions(root: &Path, prefix: &str) -> Vec<String> {
         // Get the filename
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
             && file_name.starts_with(&name_prefix)
+            && let Ok(rel_path) = path.strip_prefix(root)
         {
             // Construct relative path from root
-            if let Ok(rel_path) = path.strip_prefix(root) {
-                let rel_str = rel_path.to_string_lossy().to_string();
-                results.push(rel_str);
-            }
+            let rel_str = rel_path.to_string_lossy().to_string();
+            results.push(rel_str);
         }
     }
 

@@ -170,15 +170,13 @@ fn process_file_entry(entry: &WalkEntry, source: &str) -> FileInfo {
     let ext = entry.path.extension().and_then(|e| e.to_str());
 
     // Detect language and extract counts
-    let (language, function_count, class_count) = if let Some(ext_str) = ext {
-        if let Some(lang) = language_for_extension(ext_str) {
-            let lang_str = lang.to_string();
-            match ElementExtractor::extract_with_depth(source, &lang_str) {
-                Ok((func_count, class_count)) => (lang_str, func_count, class_count),
-                Err(_) => (lang_str, 0, 0),
-            }
-        } else {
-            ("unknown".to_string(), 0, 0)
+    let (language, function_count, class_count) = if let Some(ext_str) = ext
+        && let Some(lang) = language_for_extension(ext_str)
+    {
+        let lang_str = lang.to_string();
+        match ElementExtractor::extract_with_depth(source, &lang_str) {
+            Ok((func_count, class_count)) => (lang_str, func_count, class_count),
+            Err(_) => (lang_str, 0, 0),
         }
     } else {
         ("unknown".to_string(), 0, 0)

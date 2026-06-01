@@ -291,25 +291,18 @@ pub fn format_structure(
         if entry.is_dir {
             let line = format!("{indent}{name}/\n");
             output.push_str(&line);
-        } else if let Some(analysis) = analysis_map.get(&entry.path.display().to_string()) {
-            if let Some(info_str) = format_file_info_parts(
+        } else if let Some(analysis) = analysis_map.get(&entry.path.display().to_string())
+            && let Some(info_str) = format_file_info_parts(
                 analysis.line_count,
                 analysis.function_count,
                 analysis.class_count,
-            ) {
-                let line = format!("{indent}{name} {info_str}\n");
-                if analysis.is_test {
-                    test_buf.push_str(&line);
-                } else {
-                    output.push_str(&line);
-                }
+            )
+        {
+            let line = format!("{indent}{name} {info_str}\n");
+            if analysis.is_test {
+                test_buf.push_str(&line);
             } else {
-                let line = format!("{indent}{name}\n");
-                if analysis.is_test {
-                    test_buf.push_str(&line);
-                } else {
-                    output.push_str(&line);
-                }
+                output.push_str(&line);
             }
             // Skip files not in analysis_map (binary/unreadable files)
         }
@@ -1118,16 +1111,16 @@ pub fn format_summary(
             }
         } else {
             // For files, show individual stats
-            if let Some(analysis) = analysis_map.get(&entry.path.display().to_string()) {
-                if let Some(info_str) = format_file_info_parts(
+            if let Some(analysis) = analysis_map.get(&entry.path.display().to_string())
+                && let Some(info_str) = format_file_info_parts(
                     analysis.line_count,
                     analysis.function_count,
                     analysis.class_count,
-                ) {
-                    let _ = writeln!(output, "  {name} {info_str}");
-                } else {
-                    let _ = writeln!(output, "  {name}");
-                }
+                )
+            {
+                let _ = writeln!(output, "  {name} {info_str}");
+            } else if analysis_map.contains_key(&entry.path.display().to_string()) {
+                let _ = writeln!(output, "  {name}");
             }
         }
     }

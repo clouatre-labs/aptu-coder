@@ -449,22 +449,20 @@ impl CallGraph {
                     let mut chain_depth = depth;
 
                     while chain_depth < follow_depth {
-                        if let Some(next_neighbors) = graph_map.get(&chain_node) {
-                            if let Some(next_edge) = next_neighbors.first() {
-                                // Advance to the next (deeper) caller before pushing, so that
-                                // for incoming chains the element pushed is the deeper ancestor
-                                // (not chain_node itself, which was already recorded or is the
-                                // immediate neighbor pushed after this loop).
-                                chain_node = next_edge.neighbor_name.clone();
-                                chain.push((
-                                    chain_node.clone(),
-                                    next_edge.path.clone(),
-                                    next_edge.line,
-                                ));
-                                chain_depth += 1;
-                            } else {
-                                break;
-                            }
+                        if let Some(next_neighbors) = graph_map.get(&chain_node)
+                            && let Some(next_edge) = next_neighbors.first()
+                        {
+                            // Advance to the next (deeper) caller before pushing, so that
+                            // for incoming chains the element pushed is the deeper ancestor
+                            // (not chain_node itself, which was already recorded or is the
+                            // immediate neighbor pushed after this loop).
+                            chain_node = next_edge.neighbor_name.clone();
+                            chain.push((
+                                chain_node.clone(),
+                                next_edge.path.clone(),
+                                next_edge.line,
+                            ));
+                            chain_depth += 1;
                         } else {
                             break;
                         }
