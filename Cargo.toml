@@ -34,7 +34,7 @@ tempfile = "=3.27.0"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
 tree-sitter-rust = "0.24.2"
 regex = "1"
-toml = "0.9"
+toml = "1.0"
 tree-sitter-go = "0.25.0"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-c-sharp = "0.23.5"
