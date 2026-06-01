@@ -260,10 +260,10 @@ fn validate_path(path: &str, require_exists: bool) -> Result<std::path::PathBuf,
             if ancestor.exists() {
                 break;
             }
-            if let Some(parent) = ancestor.parent() {
-                if let Some(file_name) = ancestor.file_name() {
-                    suffix = std::path::PathBuf::from(file_name).join(&suffix);
-                }
+            if let Some(parent) = ancestor.parent()
+                && let Some(file_name) = ancestor.file_name()
+            {
+                suffix = std::path::PathBuf::from(file_name).join(&suffix);
                 ancestor = parent.to_path_buf();
             } else {
                 // No existing ancestor found — use allowed_root as anchor
@@ -394,10 +394,10 @@ fn validate_path_in_dir(
             if full_path.exists() {
                 break;
             }
-            if let Some(parent) = ancestor.parent() {
-                if let Some(file_name) = ancestor.file_name() {
-                    suffix = std::path::PathBuf::from(file_name).join(&suffix);
-                }
+            if let Some(parent) = ancestor.parent()
+                && let Some(file_name) = ancestor.file_name()
+            {
+                suffix = std::path::PathBuf::from(file_name).join(&suffix);
                 ancestor = parent.to_path_buf();
             } else {
                 // No existing ancestor found — use working_dir as anchor
