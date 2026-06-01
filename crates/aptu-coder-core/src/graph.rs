@@ -985,7 +985,7 @@ mod tests {
     fn test_resolve_symbol_exact_no_match() {
         let syms = known(&["ParseConfig"]);
         let err = resolve_symbol(syms.iter(), "parse_config", &SymbolMatchMode::Exact).unwrap_err();
-        assert!(matches!(err, GraphError::SymbolNotFound { .. }));
+        std::assert_matches!(err, GraphError::SymbolNotFound { .. });
     }
 
     #[test]
@@ -1000,7 +1000,7 @@ mod tests {
         let syms = known(&["unrelated"]);
         let err =
             resolve_symbol(syms.iter(), "parseconfig", &SymbolMatchMode::Insensitive).unwrap_err();
-        assert!(matches!(err, GraphError::SymbolNotFound { .. }));
+        std::assert_matches!(err, GraphError::SymbolNotFound { .. });
     }
 
     #[test]
@@ -1014,7 +1014,7 @@ mod tests {
     fn test_resolve_symbol_prefix_multiple_candidates() {
         let syms = known(&["parse_config", "parse_args", "build"]);
         let err = resolve_symbol(syms.iter(), "parse", &SymbolMatchMode::Prefix).unwrap_err();
-        assert!(matches!(&err, GraphError::MultipleCandidates { .. }));
+        std::assert_matches!(&err, GraphError::MultipleCandidates { .. });
         if let GraphError::MultipleCandidates { candidates, .. } = err {
             assert_eq!(candidates.len(), 2);
         }
@@ -1031,7 +1031,7 @@ mod tests {
     fn test_resolve_symbol_contains_no_match() {
         let syms = known(&["parse_config", "build_artifact"]);
         let err = resolve_symbol(syms.iter(), "deploy", &SymbolMatchMode::Contains).unwrap_err();
-        assert!(matches!(err, GraphError::SymbolNotFound { .. }));
+        std::assert_matches!(err, GraphError::SymbolNotFound { .. });
     }
 
     #[test]
@@ -1123,7 +1123,7 @@ mod tests {
             .unwrap_err();
 
         // Assert: multiple candidates found
-        assert!(matches!(&err, GraphError::MultipleCandidates { .. }));
+        std::assert_matches!(&err, GraphError::MultipleCandidates { .. });
         if let GraphError::MultipleCandidates { candidates, .. } = err {
             assert_eq!(candidates.len(), 2);
         }
@@ -1143,7 +1143,7 @@ mod tests {
             .unwrap_err();
 
         // Assert: MultipleCandidates returned for case collision
-        assert!(matches!(&err, GraphError::MultipleCandidates { .. }));
+        std::assert_matches!(&err, GraphError::MultipleCandidates { .. });
         if let GraphError::MultipleCandidates { candidates, .. } = err {
             assert_eq!(candidates.len(), 2);
         }
@@ -1166,7 +1166,7 @@ mod tests {
             .unwrap_err();
 
         // Assert: both matching symbols returned as MultipleCandidates
-        assert!(matches!(&err, GraphError::MultipleCandidates { .. }));
+        std::assert_matches!(&err, GraphError::MultipleCandidates { .. });
         if let GraphError::MultipleCandidates { candidates, .. } = err {
             let mut sorted = candidates.clone();
             sorted.sort();

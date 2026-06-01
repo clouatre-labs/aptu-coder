@@ -134,7 +134,7 @@ mod tests {
     fn edit_overwrite_content_directory_guard() {
         let dir = tempfile::tempdir().unwrap();
         let err = edit_overwrite_content(dir.path(), "content").unwrap_err();
-        assert!(matches!(err, EditError::NotAFile(_)));
+        std::assert_matches!(err, EditError::NotAFile(_));
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
         let err = edit_replace_block(&path, "missing", "x").unwrap_err();
-        assert!(matches!(err, EditError::NotFound { .. }));
+        std::assert_matches!(err, EditError::NotFound { .. });
     }
 
     #[test]
@@ -163,13 +163,13 @@ mod tests {
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo foo baz").unwrap();
         let err = edit_replace_block(&path, "foo", "x").unwrap_err();
-        assert!(matches!(err, EditError::Ambiguous { count: 2, .. }));
+        std::assert_matches!(err, EditError::Ambiguous { count: 2, .. });
     }
 
     #[test]
     fn edit_replace_block_directory_guard() {
         let dir = tempfile::tempdir().unwrap();
         let err = edit_replace_block(dir.path(), "old", "new").unwrap_err();
-        assert!(matches!(err, EditError::NotAFile(_)));
+        std::assert_matches!(err, EditError::NotAFile(_));
     }
 }
