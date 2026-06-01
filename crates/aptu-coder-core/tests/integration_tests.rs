@@ -1296,7 +1296,7 @@ fn test_cancellation_during_directory_walk() {
     let result = analyze_directory_with_progress(root, entries, counter, ct);
 
     // Assert: Should return Cancelled error
-    assert!(matches!(result, Err(AnalyzeError::Cancelled)));
+    std::assert_matches!(result, Err(AnalyzeError::Cancelled));
 }
 
 #[test]
