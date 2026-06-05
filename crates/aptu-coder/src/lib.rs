@@ -347,31 +347,15 @@ fn validate_path_in_dir(
         ));
     }
 
-    // Verify working_dir is within the server CWD (same bounds check as validate_path)
-    let allowed_root = std::fs::canonicalize(std::env::current_dir().map_err(|_| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the allowed root".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "ensure the working directory is accessible",
-            )),
-        )
-    })?)
-    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
-
-    if !canonical_working_dir.starts_with(&allowed_root) {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "working_dir is outside the allowed root".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "provide a working directory within the current working directory",
-            )),
-        ));
-    }
+    // working_dir is intentionally not restricted to the server CWD here.
+    // The security boundary is the inner PathBuf::starts_with check below,
+    // which ensures the resolved path cannot escape working_dir regardless
+    // of where working_dir itself lives on disk.  Restricting working_dir to
+    // server CWD was the original design but it prevented legitimate
+    // cross-repository edits (e.g. orchestrators writing to a sibling repo)
+    // while exec_command already allows arbitrary paths via `cd`.  The
+    // operator sets the scope at server launch; per-call working_dir is a
+    // convenience override within that operator-controlled process.
 
     // Now resolve the target path relative to working_dir
     let canonical_path = if require_exists {
@@ -384,7 +368,11 @@ fn validate_path_in_dir(
             )
         })?
     } else {
-        // For non-existent files, walk up the path until we find an existing ancestor
+        // For non-existent files, walk up the path until we find an existing ancestor.
+        // `..` components are safe here: file_name() returns None for `..`, so the
+        // loop hits the else branch and resets ancestor to PathBuf::new(), anchoring
+        // the resolved path inside canonical_working_dir.  The starts_with check
+        // below catches any residual traversal regardless.
         let p = std::path::Path::new(path);
         let mut ancestor = p.to_path_buf();
         let mut suffix = std::path::PathBuf::new();
@@ -400,7 +388,8 @@ fn validate_path_in_dir(
                 suffix = std::path::PathBuf::from(file_name).join(&suffix);
                 ancestor = parent.to_path_buf();
             } else {
-                // No existing ancestor found — use working_dir as anchor
+                // No existing ancestor found (or path contains `..`) --
+                // use working_dir as anchor; starts_with below enforces the boundary.
                 ancestor = std::path::PathBuf::new();
                 break;
             }
@@ -4645,6 +4634,31 @@ mod tests {
             "Resolved path should be within working_dir: {:?} should start with {:?}",
             resolved,
             temp_path
+        );
+    }
+
+    #[test]
+    fn test_validate_path_in_dir_accepts_outside_cwd() {
+        // Arrange: use temp_dir() which is guaranteed to be outside CWD
+        let temp_dir = std::env::temp_dir();
+        let canonical_temp_dir =
+            std::fs::canonicalize(&temp_dir).expect("should canonicalize temp_dir");
+
+        // Act: call validate_path_in_dir with a relative filename
+        let result = validate_path_in_dir("probe.txt", false, &temp_dir);
+
+        // Assert: should accept working_dir outside CWD
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept working_dir outside CWD: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        assert!(
+            resolved.starts_with(&canonical_temp_dir),
+            "Resolved path should be within working_dir: {:?} should start with {:?}",
+            resolved,
+            canonical_temp_dir
         );
     }
 

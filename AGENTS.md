@@ -92,7 +92,7 @@ Canonical parameter lists live in the `types` module (`crates/aptu-coder-core/sr
 - `import_lookup=true` on `analyze_symbol` requires a non-empty `symbol` (the module path to search for); returns INVALID_PARAMS if symbol is empty. Mutually exclusive with normal call-graph lookup.
 - `def_use=true` on `analyze_symbol` triggers def-use extraction; `def_use_sites` is populated in `structuredContent` only when paginating in DefUse cursor mode, not on the initial call (the handler clears it on the first response and bootstraps a cursor to page through def-use results).
 - `git_ref` is supported on both `analyze_directory` and `analyze_symbol` to restrict analysis to files changed relative to a git ref.
-- `working_dir` on `edit_overwrite` and `edit_replace` sets the base directory for path resolution; must be within the server CWD.
+- `working_dir` on `edit_overwrite` and `edit_replace` sets the base directory for path resolution (default: server CWD). The resolved target path must be within working_dir.
 - `APTU_CODER_PROFILE` (env var) or `io.clouatre-labs/profile` (MCP `_meta`) activates a tool subset: `edit` disables all analyze_* tools (3 tools); `analyze` disables edit_* tools (5 tools); absent/unknown enables all 7 tools. By default, all 7 tools are available.
 
 Escalate to `analyze_symbol` when: (1) you need all callers of a function, (2) you need the full call chain for a symbol, (3) you need all files importing a module path (use `import_lookup=true`).
