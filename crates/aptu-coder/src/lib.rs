@@ -514,8 +514,9 @@ pub struct CodeAnalyzer {
     metrics_tx: crate::metrics::MetricsSender,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
     session_id: Arc<TokioMutex<Option<String>>>,
-    // Store profile metadata from initialize request for use in on_initialized
-    profile_meta: Arc<TokioMutex<Option<serde_json::Map<String, serde_json::Value>>>>,
+    // Resolved profile string set once in initialize; read in on_initialized and call_tool.
+    // OnceLock is lock-free after the first set; no mutex needed.
+    session_profile: Arc<std::sync::OnceLock<String>>,
     client_name: Arc<TokioMutex<Option<String>>>,
     client_version: Arc<TokioMutex<Option<String>>>,
     // Resolved login shell PATH, captured once at startup via login shell invocation.
@@ -625,7 +626,7 @@ impl CodeAnalyzer {
             metrics_tx,
             session_call_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             session_id: Arc::new(TokioMutex::new(None)),
-            profile_meta: Arc::new(TokioMutex::new(None)),
+            session_profile: Arc::new(std::sync::OnceLock::new()),
             client_name: Arc::new(TokioMutex::new(None)),
             client_version: Arc::new(TokioMutex::new(None)),
             resolved_path,
@@ -3806,11 +3807,14 @@ impl ServerHandler for CodeAnalyzer {
             *client_version_lock = Some(request.client_info.version.clone());
         }
 
-        // The _meta field is extracted from params and stored in request extensions.
-        // Extract it and store for use in on_initialized.
-        if let Some(meta) = context.extensions.get::<Meta>() {
-            let mut meta_lock = self.profile_meta.lock().await;
-            *meta_lock = Some(meta.0.clone());
+        // Extract profile string from _meta and store for use in on_initialized and call_tool.
+        if let Some(meta) = context.extensions.get::<Meta>()
+            && let Some(profile) = meta
+                .0
+                .get("io.clouatre-labs/profile")
+                .and_then(|v| v.as_str())
+        {
+            let _ = self.session_profile.set(profile.to_owned());
         }
         Ok(self.get_info())
     }
@@ -3892,16 +3896,14 @@ impl ServerHandler for CodeAnalyzer {
         // (readOnlyHint/destructiveHint) to apply their own policy.
         // Two profiles: "edit" (3 tools), "analyze" (5 tools); absent/unknown = all 7 tools.
         // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
-        let meta_lock = self.profile_meta.lock().await;
-        let meta_profile = meta_lock
-            .as_ref()
-            .and_then(|m| m.get("io.clouatre-labs/profile"))
-            .and_then(|v| v.as_str())
-            .map(str::to_owned);
-        drop(meta_lock);
 
-        // Resolve the active profile: _meta wins; fall back to env var.
-        let active_profile = meta_profile.or(std::env::var("APTU_CODER_PROFILE").ok());
+        // Resolve the active profile: session_profile (set in initialize from _meta) wins;
+        // fall back to env var.
+        let active_profile = self
+            .session_profile
+            .get()
+            .cloned()
+            .or_else(|| std::env::var("APTU_CODER_PROFILE").ok());
 
         {
             let mut router = self.tool_router.write().await;
