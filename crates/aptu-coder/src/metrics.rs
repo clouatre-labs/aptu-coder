@@ -76,6 +76,14 @@ pub struct MetricsWriter {
     dir_created: bool,
 }
 
+/// Accumulated metrics for a single tool.
+#[derive(Default, Debug)]
+struct ToolMetrics {
+    count: u64,
+    duration_ms: u64,
+    output_chars: u64,
+}
+
 impl MetricsWriter {
     pub fn new(
         rx: tokio::sync::mpsc::UnboundedReceiver<MetricEvent>,
@@ -91,13 +99,15 @@ impl MetricsWriter {
 
     /// Accumulate a metric event into tool_counts and export_session_id.
     fn accumulate_event(
-        tool_counts: &mut std::collections::HashMap<&'static str, (u64, u64)>,
+        tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
         event: &MetricEvent,
     ) {
-        let entry = tool_counts.entry(event.tool).or_insert((0, 0));
-        entry.0 += 1;
-        entry.1 += event.duration_ms;
+        let entry = tool_counts.entry(event.tool).or_default();
+        entry.count += 1;
+        entry.duration_ms += event.duration_ms;
+        // output_chars is capped at 50 KB per stream (stdout + stderr each), so usize -> u64 is lossless.
+        entry.output_chars += event.output_chars as u64;
         if export_session_id.is_none() {
             *export_session_id = event.session_id.clone();
         }
@@ -146,7 +156,7 @@ impl MetricsWriter {
     /// Receive and accumulate a batch of events from the channel.
     async fn receive_batch(
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<MetricEvent>,
-        tool_counts: &mut std::collections::HashMap<&'static str, (u64, u64)>,
+        tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
     ) -> Option<Vec<MetricEvent>> {
         let mut batch = Vec::new();
@@ -197,7 +207,7 @@ impl MetricsWriter {
         let mut current_file: Option<PathBuf> = None;
 
         // Accumulate per-tool metrics for export on shutdown (issue #773)
-        let mut tool_counts: std::collections::HashMap<&'static str, (u64, u64)> =
+        let mut tool_counts: std::collections::HashMap<&'static str, ToolMetrics> =
             std::collections::HashMap::new();
         let mut export_session_id: Option<String> = None;
 
@@ -239,18 +249,25 @@ impl MetricsWriter {
             } else {
                 let mut tool_calls = Vec::new();
                 let mut total_duration_ms = 0u64;
-                for (tool_name, (count, duration)) in tool_counts {
+                let mut total_output_chars_sum = 0u64;
+                // Sort by tool name for deterministic JSON output
+                let mut sorted_tools: Vec<_> = tool_counts.iter().collect();
+                sorted_tools.sort_by_key(|&(name, _)| name);
+                for (tool_name, metrics) in sorted_tools {
                     tool_calls.push(serde_json::json!({
                         "tool": tool_name,
-                        "call_count": count,
-                        "total_duration_ms": duration
+                        "call_count": metrics.count,
+                        "total_duration_ms": metrics.duration_ms,
+                        "total_output_chars": metrics.output_chars
                     }));
-                    total_duration_ms += duration;
+                    total_duration_ms += metrics.duration_ms;
+                    total_output_chars_sum += metrics.output_chars;
                 }
                 let summary = serde_json::json!({
                     "session_id": export_session_id.unwrap_or_default(),
                     "tool_calls": tool_calls,
-                    "total_duration_ms": total_duration_ms
+                    "total_duration_ms": total_duration_ms,
+                    "total_output_chars": total_output_chars_sum
                 });
                 if let Ok(json_str) = serde_json::to_string(&summary)
                     && let Err(e) = tokio::fs::write(&export_path, json_str).await
@@ -857,6 +874,18 @@ mod tests {
         assert_eq!(
             json["total_duration_ms"], 150,
             "total_duration_ms should be sum of all durations"
+        );
+        assert_eq!(
+            json["tool_calls"][0]["total_output_chars"], 50,
+            "first tool call should have total_output_chars=50"
+        );
+        assert_eq!(
+            json["tool_calls"][1]["total_output_chars"], 100,
+            "second tool call should have total_output_chars=100"
+        );
+        assert_eq!(
+            json["total_output_chars"], 150,
+            "total_output_chars should be sum of all output_chars"
         );
 
         // Cleanup
