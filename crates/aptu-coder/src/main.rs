@@ -24,21 +24,25 @@ use tracing_subscriber::util::SubscriberInitExt;
 mod otel;
 
 /// Authentication middleware that validates Bearer tokens using constant-time comparison.
-/// The token comparison uses blake3::Hash PartialEq which calls constant_time_eq_32 internally,
-/// preventing timing side-channels.
+///
+/// `expected` is the blake3 hash of the token computed once at startup. Per-request, only the
+/// incoming token is hashed and compared via `blake3::Hash`'s `PartialEq`, which uses
+/// `constant_time_eq_32` internally, preventing timing side-channels.
 async fn auth_middleware(
-    State(expected): State<String>,
+    State(expected): State<blake3::Hash>,
     request: axum::extract::Request,
     next: Next,
 ) -> axum::response::Response {
-    let incoming = request
+    let Some(incoming) = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
+    else {
+        return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+    };
 
-    if blake3::hash(expected.as_bytes()) == blake3::hash(incoming.as_bytes()) {
+    if expected == blake3::hash(incoming.as_bytes()) {
         next.run(request).await
     } else {
         (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
@@ -91,13 +95,17 @@ async fn run_http(analyzer: CodeAnalyzer, port: u16) -> Result<(), Box<dyn std::
                  use a random token of at least 32 characters for production deployments"
             );
         }
-        base_router.layer(axum::middleware::from_fn_with_state(token, auth_middleware))
+        let expected_hash = blake3::hash(token.as_bytes());
+        base_router.layer(axum::middleware::from_fn_with_state(
+            expected_hash,
+            auth_middleware,
+        ))
     } else {
         base_router
     };
 
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
-    eprintln!("Listening on http://127.0.0.1:{port}/mcp");
+    tracing::info!(port, "Listening on http://127.0.0.1:{port}/mcp");
 
     axum::serve(listener, router)
         .with_graceful_shutdown(async move { ct.cancelled().await })
@@ -249,7 +257,7 @@ mod tests {
         axum::Router::new()
             .route("/ping", axum::routing::get(|| async { "ok" }))
             .layer(axum::middleware::from_fn_with_state(
-                token.to_owned(),
+                blake3::hash(token.as_bytes()),
                 auth_middleware,
             ))
     }
