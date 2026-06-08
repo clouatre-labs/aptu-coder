@@ -5,6 +5,10 @@ use aptu_coder::{
     logging::McpLoggingLayer,
     metrics::{MetricEvent, MetricsSender, MetricsWriter},
 };
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::response::IntoResponse;
 use rmcp::serve_server;
 use rmcp::transport::stdio;
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
@@ -19,7 +23,31 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 mod otel;
 
+/// Authentication middleware that validates Bearer tokens using constant-time comparison.
+/// The token comparison uses blake3::Hash PartialEq which calls constant_time_eq_32 internally,
+/// preventing timing side-channels.
+async fn auth_middleware(
+    State(expected): State<String>,
+    request: axum::extract::Request,
+    next: Next,
+) -> axum::response::Response {
+    let incoming = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    if blake3::hash(expected.as_bytes()) == blake3::hash(incoming.as_bytes()) {
+        next.run(request).await
+    } else {
+        (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+    }
+}
+
 async fn run_http(analyzer: CodeAnalyzer, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let bearer_token = std::env::var("APTU_CODER_BEARER_TOKEN").ok();
+
     let ct = CancellationToken::new();
     let ct_signal = ct.clone();
     tokio::spawn(async move {
@@ -54,7 +82,20 @@ async fn run_http(analyzer: CodeAnalyzer, port: u16) -> Result<(), Box<dyn std::
             config,
         );
 
-    let router = axum::Router::new().nest_service("/mcp", service);
+    let base_router = axum::Router::new().nest_service("/mcp", service);
+    let router = if let Some(token) = bearer_token {
+        if token.len() < 32 {
+            tracing::warn!(
+                token_len = token.len(),
+                "APTU_CODER_BEARER_TOKEN is shorter than 32 characters; \
+                 use a random token of at least 32 characters for production deployments"
+            );
+        }
+        base_router.layer(axum::middleware::from_fn_with_state(token, auth_middleware))
+    } else {
+        base_router
+    };
+
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     eprintln!("Listening on http://127.0.0.1:{port}/mcp");
 
@@ -194,4 +235,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn make_test_router(token: &str) -> axum::Router {
+        axum::Router::new()
+            .route("/ping", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn_with_state(
+                token.to_owned(),
+                auth_middleware,
+            ))
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_valid_token() {
+        // Arrange
+        let router = make_test_router("secret");
+        let request = Request::builder()
+            .uri("/ping")
+            .header("Authorization", "Bearer secret")
+            .body(Body::empty())
+            .unwrap();
+
+        // Act
+        let response = router.oneshot(request).await.unwrap();
+
+        // Assert
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_invalid_token() {
+        // Arrange
+        let router = make_test_router("secret");
+        let request = Request::builder()
+            .uri("/ping")
+            .header("Authorization", "Bearer wrong")
+            .body(Body::empty())
+            .unwrap();
+
+        // Act
+        let response = router.oneshot(request).await.unwrap();
+
+        // Assert
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_no_header() {
+        // Arrange
+        let router = make_test_router("secret");
+        let request = Request::builder().uri("/ping").body(Body::empty()).unwrap();
+
+        // Act
+        let response = router.oneshot(request).await.unwrap();
+
+        // Assert
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 }
