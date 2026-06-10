@@ -319,8 +319,8 @@ fn io_error_to_path_error(
 }
 
 /// Validates a path relative to a working directory.
-/// The working_dir itself must be within the server CWD.
-/// The resolved path must also be within the working_dir.
+/// The working_dir may be anywhere on disk; it is not restricted to the server CWD.
+/// The resolved path must be within the working_dir.
 fn validate_path_in_dir(
     path: &str,
     require_exists: bool,
