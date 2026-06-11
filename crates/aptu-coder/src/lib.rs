@@ -4688,6 +4688,84 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_path_in_dir_nonexistent_root_level_file() {
+        // Root-level non-existent path: the file name has no parent segments,
+        // so the loop terminates on the first iteration without walking up.
+        // Resolved path must be working_dir/new.txt (within boundary).
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let result = validate_path_in_dir("new.txt", false, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept a root-level non-existent file: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        let canonical_wd =
+            std::fs::canonicalize(temp_dir.path()).expect("should canonicalize temp dir");
+        assert!(
+            resolved.starts_with(&canonical_wd),
+            "Resolved path must be within working_dir: {resolved:?} does not start with {canonical_wd:?}"
+        );
+        assert_eq!(
+            resolved.file_name().and_then(|n| n.to_str()),
+            Some("new.txt"),
+            "File name component must be preserved"
+        );
+    }
+
+    #[test]
+    fn test_validate_path_in_dir_nonexistent_deep_path() {
+        // Deeply nested non-existent path: a/b/c/d/new.txt -- none of the
+        // intermediate directories exist.  The loop must walk up all four
+        // segments and anchor at working_dir, then rejoin the full suffix.
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let result = validate_path_in_dir("a/b/c/d/new.txt", false, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept deeply nested non-existent path: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        let canonical_wd =
+            std::fs::canonicalize(temp_dir.path()).expect("should canonicalize temp dir");
+        assert!(
+            resolved.starts_with(&canonical_wd),
+            "Resolved path must be within working_dir: {resolved:?}"
+        );
+        assert!(
+            resolved.ends_with("a/b/c/d/new.txt"),
+            "Full suffix must be preserved: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_path_in_dir_nonexistent_with_existing_parent() {
+        // Partial existence: working_dir/sub/ exists but working_dir/sub/new.txt does not.
+        // The loop should stop at sub/ (the first existing ancestor) and rejoin new.txt.
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let sub = temp_dir.path().join("sub");
+        std::fs::create_dir_all(&sub).expect("should create sub dir");
+
+        let result = validate_path_in_dir("sub/new.txt", false, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept file in existing subdir: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        let canonical_sub = std::fs::canonicalize(&sub).expect("should canonicalize sub");
+        assert!(
+            resolved.starts_with(&canonical_sub),
+            "Resolved path should anchor at the existing sub/ dir: {resolved:?}"
+        );
+        assert_eq!(
+            resolved.file_name().and_then(|n| n.to_str()),
+            Some("new.txt"),
+            "File name component must be preserved"
+        );
+    }
+
+    #[test]
     #[serial_test::serial]
     fn test_file_cache_capacity_default() {
         // Arrange: ensure the env var is not set
