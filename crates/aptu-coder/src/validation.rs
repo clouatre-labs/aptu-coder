@@ -9,7 +9,10 @@ use crate::error_meta;
 /// Validates that a path is within the current working directory.
 /// For `require_exists=true`, the path must exist and be canonicalizable.
 /// For `require_exists=false`, the parent directory must exist and be canonicalizable.
-pub(crate) fn validate_path(path: &str, require_exists: bool) -> Result<std::path::PathBuf, ErrorData> {
+pub(crate) fn validate_path(
+    path: &str,
+    require_exists: bool,
+) -> Result<std::path::PathBuf, ErrorData> {
     // Canonicalize the allowed root (CWD) to resolve symlinks
     let allowed_root = std::fs::canonicalize(std::env::current_dir().map_err(|_| {
         ErrorData::new(
