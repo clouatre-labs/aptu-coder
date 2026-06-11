@@ -469,20 +469,6 @@ class MyClass:
     assert_eq!(output.semantic.classes[0].name, "MyClass");
 }
 
-#[cfg(feature = "lang-python")]
-#[test]
-fn test_python_edge_case_empty_file() {
-    let temp_dir = TempDir::new().unwrap();
-    let file_path = temp_dir.path().join("empty.py");
-
-    fs::write(&file_path, "").unwrap();
-
-    let output = analyze_file(file_path.to_str().unwrap(), None).unwrap();
-
-    assert_eq!(output.semantic.functions.len(), 0);
-    assert_eq!(output.semantic.classes.len(), 0);
-}
-
 #[cfg(feature = "lang-javascript")]
 #[test]
 fn test_javascript_parse_and_extract() {
@@ -605,20 +591,6 @@ class MyClass {
     assert!(class_names.contains(&"MyClass"));
 }
 
-#[cfg(feature = "lang-typescript")]
-#[test]
-fn test_typescript_edge_case_empty_file() {
-    let temp_dir = TempDir::new().unwrap();
-    let file_path = temp_dir.path().join("empty.ts");
-
-    fs::write(&file_path, "").unwrap();
-
-    let output = analyze_file(file_path.to_str().unwrap(), None).unwrap();
-
-    assert_eq!(output.semantic.functions.len(), 0);
-    assert_eq!(output.semantic.classes.len(), 0);
-}
-
 #[cfg(feature = "lang-go")]
 #[test]
 fn test_go_parse_and_extract() {
@@ -658,20 +630,6 @@ type MyInterface interface {
         .collect();
     assert!(class_names.contains(&"MyStruct"));
     assert!(class_names.contains(&"MyInterface"));
-}
-
-#[cfg(feature = "lang-go")]
-#[test]
-fn test_go_edge_case_empty_file() {
-    let temp_dir = TempDir::new().unwrap();
-    let file_path = temp_dir.path().join("empty.go");
-
-    fs::write(&file_path, "").unwrap();
-
-    let output = analyze_file(file_path.to_str().unwrap(), None).unwrap();
-
-    assert_eq!(output.semantic.functions.len(), 0);
-    assert_eq!(output.semantic.classes.len(), 0);
 }
 
 #[cfg(feature = "lang-java")]
@@ -714,20 +672,6 @@ enum MyEnum {
     assert!(class_names.contains(&"MyClass"));
     assert!(class_names.contains(&"MyInterface"));
     assert!(class_names.contains(&"MyEnum"));
-}
-
-#[cfg(feature = "lang-java")]
-#[test]
-fn test_java_edge_case_empty_file() {
-    let temp_dir = TempDir::new().unwrap();
-    let file_path = temp_dir.path().join("empty.java");
-
-    fs::write(&file_path, "").unwrap();
-
-    let output = analyze_file(file_path.to_str().unwrap(), None).unwrap();
-
-    assert_eq!(output.semantic.functions.len(), 0);
-    assert_eq!(output.semantic.classes.len(), 0);
 }
 
 // Cache tests

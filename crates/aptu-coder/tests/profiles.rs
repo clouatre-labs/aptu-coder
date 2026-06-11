@@ -208,7 +208,10 @@ async fn call_tool_with_profile(profile: Option<&str>, tool_name: &str) -> serde
 
 #[tokio::test]
 async fn test_edit_profile_tool_count() {
-    let _guard = env_var_lock();
+    // Arrange: hold guard only during setup; drop before first .await
+    {
+        let _guard = env_var_lock();
+    }
     // Arrange: initialize with edit profile
     let resp = call_tools_list_with_profile(Some("edit")).await;
 
@@ -246,7 +249,10 @@ async fn test_edit_profile_tool_count() {
 
 #[tokio::test]
 async fn test_analyze_profile_tool_count() {
-    let _guard = env_var_lock();
+    // Arrange: hold guard only during setup; drop before first .await
+    {
+        let _guard = env_var_lock();
+    }
     // Arrange: initialize with analyze profile
     let resp = call_tools_list_with_profile(Some("analyze")).await;
 
@@ -292,10 +298,13 @@ async fn test_analyze_profile_tool_count() {
 
 #[tokio::test]
 async fn test_no_profile_tool_count() {
-    let _guard = env_var_lock();
-    // Arrange: initialize with no profile metadata; env var must be absent.
-    unsafe {
-        std::env::remove_var("APTU_CODER_PROFILE");
+    // Arrange: hold guard only during setup; drop before first .await
+    {
+        let _guard = env_var_lock();
+        // Arrange: initialize with no profile metadata; env var must be absent.
+        unsafe {
+            std::env::remove_var("APTU_CODER_PROFILE");
+        }
     }
     let resp = call_tools_list_with_profile(None).await;
 
@@ -313,10 +322,13 @@ async fn test_no_profile_tool_count() {
 
 #[tokio::test]
 async fn test_unknown_profile_tool_count() {
-    let _guard = env_var_lock();
-    // Arrange: initialize with unknown profile string; env var must be absent.
-    unsafe {
-        std::env::remove_var("APTU_CODER_PROFILE");
+    // Arrange: hold guard only during setup; drop before first .await
+    {
+        let _guard = env_var_lock();
+        // Arrange: initialize with unknown profile string; env var must be absent.
+        unsafe {
+            std::env::remove_var("APTU_CODER_PROFILE");
+        }
     }
     let resp = call_tools_list_with_profile(Some("unknown_profile")).await;
 
@@ -334,7 +346,10 @@ async fn test_unknown_profile_tool_count() {
 
 #[tokio::test]
 async fn test_disabled_tool_returns_invalid_params() {
-    let _guard = env_var_lock();
+    // Arrange: hold guard only during setup; drop before first .await
+    {
+        let _guard = env_var_lock();
+    }
     // Arrange: initialize with edit profile and try to call a disabled tool (analyze_directory)
     let resp = call_tool_with_profile(Some("edit"), "analyze_directory").await;
 
@@ -352,17 +367,18 @@ async fn test_disabled_tool_returns_invalid_params() {
 
 #[tokio::test]
 async fn test_profile_env_var_fallback() {
-    // Serialize against other env-var-mutating tests.
-    let _guard = env_var_lock();
-
-    // Arrange: set APTU_CODER_PROFILE env var to "edit", initialize with no _meta.
-    unsafe {
-        std::env::set_var("APTU_CODER_PROFILE", "edit");
+    // Serialize against other env-var-mutating tests; drop guard before first .await.
+    {
+        let _guard = env_var_lock();
+        // Arrange: set APTU_CODER_PROFILE env var to "edit", initialize with no _meta.
+        unsafe {
+            std::env::set_var("APTU_CODER_PROFILE", "edit");
+        }
     }
 
     let resp = call_tools_list_with_profile(None).await;
 
-    // Cleanup before any assertion so panics cannot leave the env var set.
+    // Cleanup after async call so the env var is present during initialize.
     unsafe {
         std::env::remove_var("APTU_CODER_PROFILE");
     }
@@ -391,18 +407,19 @@ async fn test_profile_env_var_fallback() {
 
 #[tokio::test]
 async fn test_profile_env_var_ignored_when_meta_present() {
-    // Serialize against other env-var-mutating tests.
-    let _guard = env_var_lock();
-
-    // Arrange: set APTU_CODER_PROFILE=edit but initialize with _meta "analyze".
-    // _meta must win.
-    unsafe {
-        std::env::set_var("APTU_CODER_PROFILE", "edit");
+    // Serialize against other env-var-mutating tests; drop guard before first .await.
+    {
+        let _guard = env_var_lock();
+        // Arrange: set APTU_CODER_PROFILE=edit but initialize with _meta "analyze".
+        // _meta must win.
+        unsafe {
+            std::env::set_var("APTU_CODER_PROFILE", "edit");
+        }
     }
 
     let resp = call_tools_list_with_profile(Some("analyze")).await;
 
-    // Cleanup before any assertion.
+    // Cleanup after async call so the env var is present during initialize.
     unsafe {
         std::env::remove_var("APTU_CODER_PROFILE");
     }
