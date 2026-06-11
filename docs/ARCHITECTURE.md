@@ -21,7 +21,9 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | Module | File | Responsibility |
 |--------|------|-----------------|
 | `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed |
-| `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command` |
+| `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command`; exec plumbing (`build_exec_command`, `run_exec_impl`, `handle_output_persist`) |
+| `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative), `validate_path_in_dir` (working_dir-relative with traversal prevention), `io_error_to_path_error` |
+| `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
 | `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients via `notifications/message` |
 | `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
 | `schema_helpers` | `crates/aptu-coder-core/src/schema_helpers.rs` | Core JSON Schema helpers for integer and page_size field validation |

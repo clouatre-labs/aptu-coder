@@ -29,10 +29,14 @@ mod filters;
 pub mod logging;
 pub mod metrics;
 pub mod otel;
+mod shell;
+mod validation;
 
 pub use aptu_coder_core::analyze;
 use aptu_coder_core::types::STDIN_MAX_BYTES;
 use aptu_coder_core::{cache, completion, graph, traversal, types};
+use shell::resolve_shell;
+use validation::{validate_path, validate_path_in_dir};
 
 pub(crate) const EXCLUDED_DIRS: &[&str] = &[
     "node_modules",
@@ -215,214 +219,6 @@ fn no_cache_meta() -> Meta {
     Meta(m)
 }
 
-/// Validates that a path is within the current working directory.
-/// For `require_exists=true`, the path must exist and be canonicalizable.
-/// For `require_exists=false`, the parent directory must exist and be canonicalizable.
-fn validate_path(path: &str, require_exists: bool) -> Result<std::path::PathBuf, ErrorData> {
-    // Canonicalize the allowed root (CWD) to resolve symlinks
-    let allowed_root = std::fs::canonicalize(std::env::current_dir().map_err(|_| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the allowed root".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "ensure the working directory is accessible",
-            )),
-        )
-    })?)
-    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
-
-    let canonical_path = if require_exists {
-        std::fs::canonicalize(path).map_err(|e| {
-            let msg = match e.kind() {
-                std::io::ErrorKind::NotFound => format!("path not found: {path}"),
-                std::io::ErrorKind::PermissionDenied => format!("permission denied: {path}"),
-                _ => "path is outside the allowed root".to_string(),
-            };
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                msg,
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "provide a valid path within the working directory",
-                )),
-            )
-        })?
-    } else {
-        // For non-existent files (edit_overwrite), walk up the path until we find an existing ancestor
-        let p = std::path::Path::new(path);
-        let mut ancestor = p.to_path_buf();
-        let mut suffix = std::path::PathBuf::new();
-
-        loop {
-            if ancestor.exists() {
-                break;
-            }
-            if let Some(parent) = ancestor.parent()
-                && let Some(file_name) = ancestor.file_name()
-            {
-                suffix = std::path::PathBuf::from(file_name).join(&suffix);
-                ancestor = parent.to_path_buf();
-            } else {
-                // No existing ancestor found — use allowed_root as anchor
-                ancestor = allowed_root.clone();
-                break;
-            }
-        }
-
-        let canonical_base =
-            std::fs::canonicalize(&ancestor).unwrap_or_else(|_| allowed_root.clone());
-        canonical_base.join(&suffix)
-    };
-
-    if !canonical_path.starts_with(&allowed_root) {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the allowed root".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "provide a path within the current working directory",
-            )),
-        ));
-    }
-
-    Ok(canonical_path)
-}
-
-/// Maps an io::Error to an ErrorData with kind-specific message and preserved context.
-fn io_error_to_path_error(
-    err: &std::io::Error,
-    path_context: &str,
-    suggested_action: &'static str,
-) -> ErrorData {
-    let msg = match err.kind() {
-        std::io::ErrorKind::NotFound => format!("{path_context} not found"),
-        std::io::ErrorKind::PermissionDenied => format!("permission denied: {path_context}"),
-        _ => format!("{path_context} is invalid"),
-    };
-    let mut meta = error_meta("validation", false, suggested_action);
-    // Preserve io::Error context in data field
-    if let Some(obj) = meta.as_object_mut() {
-        obj.insert(
-            "ioErrorKind".to_string(),
-            serde_json::json!(format!("{:?}", err.kind())),
-        );
-        obj.insert(
-            "ioErrorSource".to_string(),
-            serde_json::json!(err.to_string()),
-        );
-    }
-    ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, msg, Some(meta))
-}
-
-/// Validates a path relative to a working directory.
-/// The working_dir may be anywhere on disk; it is not restricted to the server CWD.
-/// The resolved path must be within the working_dir.
-fn validate_path_in_dir(
-    path: &str,
-    require_exists: bool,
-    working_dir: &std::path::Path,
-) -> Result<std::path::PathBuf, ErrorData> {
-    // Canonicalize the working_dir to resolve symlinks
-    let canonical_working_dir = std::fs::canonicalize(working_dir).map_err(|e| {
-        io_error_to_path_error(&e, "working_dir", "provide a valid working directory")
-    })?;
-
-    // Verify working_dir is actually a directory
-    if !std::fs::metadata(&canonical_working_dir)
-        .map(|m| m.is_dir())
-        .unwrap_or(false)
-    {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "working_dir must be a directory".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "provide a valid directory path",
-            )),
-        ));
-    }
-
-    // working_dir is intentionally not restricted to the server CWD here.
-    // The security boundary is the inner PathBuf::starts_with check below,
-    // which ensures the resolved path cannot escape working_dir regardless
-    // of where working_dir itself lives on disk.  Restricting working_dir to
-    // server CWD was the original design but it prevented legitimate
-    // cross-repository edits (e.g. orchestrators writing to a sibling repo)
-    // while exec_command already allows arbitrary paths via `cd`.  The
-    // operator sets the scope at server launch; per-call working_dir is a
-    // convenience override within that operator-controlled process.
-
-    // Now resolve the target path relative to working_dir
-    let canonical_path = if require_exists {
-        let target_path = canonical_working_dir.join(path);
-        std::fs::canonicalize(&target_path).map_err(|e| {
-            io_error_to_path_error(
-                &e,
-                path,
-                "provide a valid path within the working directory",
-            )
-        })?
-    } else {
-        // For non-existent files, walk up the path until we find an existing ancestor.
-        // `..` components are safe here: file_name() returns None for `..`, so the
-        // loop hits the else branch and resets ancestor to PathBuf::new(), anchoring
-        // the resolved path inside canonical_working_dir.  The starts_with check
-        // below catches any residual traversal regardless.
-        let p = std::path::Path::new(path);
-        let mut ancestor = p.to_path_buf();
-        let mut suffix = std::path::PathBuf::new();
-
-        loop {
-            let full_path = canonical_working_dir.join(&ancestor);
-            if full_path.exists() {
-                break;
-            }
-            if let Some(parent) = ancestor.parent()
-                && let Some(file_name) = ancestor.file_name()
-            {
-                suffix = std::path::PathBuf::from(file_name).join(&suffix);
-                ancestor = parent.to_path_buf();
-            } else {
-                // No existing ancestor found (or path contains `..`) --
-                // use working_dir as anchor; starts_with below enforces the boundary.
-                ancestor = std::path::PathBuf::new();
-                break;
-            }
-        }
-
-        let canonical_base = canonical_working_dir.join(&ancestor);
-        let canonical_base =
-            std::fs::canonicalize(&canonical_base).unwrap_or(canonical_working_dir.clone());
-        canonical_base.join(&suffix)
-    };
-
-    // Verify the resolved path is within working_dir.
-    // PathBuf::starts_with compares path *components*, not raw bytes, so
-    // a sibling directory whose name shares our prefix (e.g. "/work_evil"
-    // when the allowed root is "/work") is correctly rejected -- this is
-    // the exact prefix-confusion vector exploited in CVE-2025-53110 against
-    // @modelcontextprotocol/server-filesystem.  Do not replace this check
-    // with a string-level prefix comparison.
-    if !canonical_path.starts_with(&canonical_working_dir) {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the working directory".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "provide a path within the working directory",
-            )),
-        ));
-    }
-
-    Ok(canonical_path)
-}
-
 /// Helper function for paginating focus chains (callers or callees).
 /// Returns (items, re-encoded_cursor_option).
 fn paginate_focus_chains(
@@ -469,36 +265,6 @@ fn paginate_focus_chains(
     };
 
     Ok((paginated.items, next))
-}
-
-/// Resolve the preferred shell for command execution.
-/// Priority: APTU_SHELL env var > bash (PATH search) > /bin/sh (unix) / cmd (windows).
-/// APTU_SHELL is honored on all platforms so callers can override the shell uniformly.
-fn resolve_shell() -> String {
-    if let Ok(shell) = std::env::var("APTU_SHELL") {
-        return shell;
-    }
-    #[cfg(unix)]
-    {
-        if std::env::var("PATH").is_ok_and(|p| {
-            std::env::split_paths(&p).any(|dir| {
-                use std::os::unix::fs::PermissionsExt as _;
-                let candidate = dir.join("bash");
-                candidate.is_file()
-                    && candidate
-                        .metadata()
-                        .map(|m| m.permissions().mode() & 0o111 != 0)
-                        .unwrap_or(false)
-            })
-        }) {
-            return "bash".to_string();
-        }
-        "/bin/sh".to_string()
-    }
-    #[cfg(not(unix))]
-    {
-        "cmd".to_string()
-    }
 }
 
 /// MCP server handler that wires the four analysis tools to the rmcp transport.
@@ -4918,6 +4684,58 @@ mod tests {
             msg.contains("outside") || msg.contains("working"),
             "Error should mention 'outside' or 'working', got: {}",
             err.message
+        );
+    }
+
+    #[test]
+    fn test_validate_path_in_dir_nonexistent_deep_path() {
+        // Deeply nested non-existent path: a/b/c/d/new.txt -- none of the
+        // intermediate directories exist.  The loop must walk up all four
+        // segments and anchor at working_dir, then rejoin the full suffix.
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let result = validate_path_in_dir("a/b/c/d/new.txt", false, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept deeply nested non-existent path: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        let canonical_wd =
+            std::fs::canonicalize(temp_dir.path()).expect("should canonicalize temp dir");
+        assert!(
+            resolved.starts_with(&canonical_wd),
+            "Resolved path must be within working_dir: {resolved:?}"
+        );
+        assert!(
+            resolved.ends_with("a/b/c/d/new.txt"),
+            "Full suffix must be preserved: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn test_validate_path_in_dir_nonexistent_with_existing_parent() {
+        // Partial existence: working_dir/sub/ exists but working_dir/sub/new.txt does not.
+        // The loop should stop at sub/ (the first existing ancestor) and rejoin new.txt.
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let sub = temp_dir.path().join("sub");
+        std::fs::create_dir_all(&sub).expect("should create sub dir");
+
+        let result = validate_path_in_dir("sub/new.txt", false, temp_dir.path());
+        assert!(
+            result.is_ok(),
+            "validate_path_in_dir should accept file in existing subdir: {:?}",
+            result.err()
+        );
+        let resolved = result.unwrap();
+        let canonical_sub = std::fs::canonicalize(&sub).expect("should canonicalize sub");
+        assert!(
+            resolved.starts_with(&canonical_sub),
+            "Resolved path should anchor at the existing sub/ dir: {resolved:?}"
+        );
+        assert_eq!(
+            resolved.file_name().and_then(|n| n.to_str()),
+            Some("new.txt"),
+            "File name component must be preserved"
         );
     }
 
