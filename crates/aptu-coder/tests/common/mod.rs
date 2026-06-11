@@ -48,11 +48,21 @@ pub async fn call_tool_raw(tool_name: &str, params: serde_json::Value) -> serde_
     })
     .to_string()
         + "\n";
-    client_tx.write_all(init.as_bytes()).await.unwrap();
-    client_tx.flush().await.unwrap();
+    client_tx
+        .write_all(init.as_bytes())
+        .await
+        .expect("failed to write initialize request");
+    client_tx
+        .flush()
+        .await
+        .expect("failed to flush initialize request");
 
     // Step 2: Read initialize response (discard)
-    let _resp = reader.next_line().await.unwrap().unwrap();
+    let _resp = reader
+        .next_line()
+        .await
+        .expect("IO error reading initialize response")
+        .expect("server closed before sending initialize response");
 
     // Step 3: Send initialized notification (no id)
     let notif = serde_json::json!({
@@ -62,8 +72,14 @@ pub async fn call_tool_raw(tool_name: &str, params: serde_json::Value) -> serde_
     })
     .to_string()
         + "\n";
-    client_tx.write_all(notif.as_bytes()).await.unwrap();
-    client_tx.flush().await.unwrap();
+    client_tx
+        .write_all(notif.as_bytes())
+        .await
+        .expect("failed to write initialized notification");
+    client_tx
+        .flush()
+        .await
+        .expect("failed to flush initialized notification");
 
     // Step 4: Send tools/call
     let call = serde_json::json!({
@@ -77,15 +93,26 @@ pub async fn call_tool_raw(tool_name: &str, params: serde_json::Value) -> serde_
     })
     .to_string()
         + "\n";
-    client_tx.write_all(call.as_bytes()).await.unwrap();
-    client_tx.flush().await.unwrap();
+    client_tx
+        .write_all(call.as_bytes())
+        .await
+        .expect("failed to write tools/call request");
+    client_tx
+        .flush()
+        .await
+        .expect("failed to flush tools/call request");
 
     // Step 5: Race response loop against server handle to surface server panics
     tokio::select! {
         result = async {
             loop {
-                let line = reader.next_line().await.unwrap().unwrap();
-                let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+                let line = reader
+                    .next_line()
+                    .await
+                    .expect("IO error reading tool response")
+                    .expect("server closed before sending tool response");
+                let v: serde_json::Value =
+                    serde_json::from_str(&line).expect("tool response is not valid JSON");
                 if v.get("id") == Some(&serde_json::json!(2)) {
                     return v;
                 }
