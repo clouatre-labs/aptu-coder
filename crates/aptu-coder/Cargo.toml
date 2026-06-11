@@ -42,6 +42,7 @@ opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

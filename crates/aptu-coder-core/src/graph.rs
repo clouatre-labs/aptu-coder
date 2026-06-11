@@ -498,7 +498,7 @@ impl CallGraph {
     }
 
     #[instrument(skip(self))]
-    pub(crate) fn find_incoming_chains(
+    pub fn find_incoming_chains(
         &self,
         symbol: &str,
         follow_depth: u32,
@@ -507,7 +507,7 @@ impl CallGraph {
     }
 
     #[instrument(skip(self))]
-    pub(crate) fn find_outgoing_chains(
+    pub fn find_outgoing_chains(
         &self,
         symbol: &str,
         follow_depth: u32,

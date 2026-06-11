@@ -47,7 +47,7 @@ pub mod types;
 #[cfg(feature = "schemars")]
 pub mod schema_helpers;
 
-pub(crate) const EXCLUDED_DIRS: &[&str] = &[
+pub const EXCLUDED_DIRS: &[&str] = &[
     "node_modules",
     "vendor",
     ".git",
@@ -67,16 +67,18 @@ pub use analyze::{
 };
 pub use config::AnalysisConfig;
 pub use edit::{EditError, edit_overwrite_content, edit_replace_block};
+pub use graph::{GraphError, InternalCallChain};
 pub use lang::{language_for_extension, supported_languages};
+pub use pagination::{CursorData, PaginationError};
 pub use parser::ParserError;
+pub use traversal::{TraversalError, WalkEntry};
 pub use types::{
     AnalysisMode, AnalysisResult, AnalyzeDirectoryParams, AnalyzeFileField, AnalyzeFileParams,
     AnalyzeModuleParams, AnalyzeSymbolParams, CallChain, CallEdge, CallInfo, ClassInfo, DefUseKind,
     DefUseSite, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
-    ErrorMeta, ExecCommandParams, FileInfo, FocusedAnalysisData, FunctionInfo, ImplTraitInfo,
-    ImportInfo, ModuleFunctionInfo, ModuleImportInfo, ModuleInfo, OutputControlParams,
-    PaginationParams, ReferenceInfo, ReferenceType, STDIN_MAX_BYTES, SemanticAnalysis, ShellOutput,
-    SymbolMatchMode,
+    FileInfo, FilterRule, FocusedAnalysisData, FunctionInfo, ImplTraitInfo, ImportInfo,
+    ModuleFunctionInfo, ModuleImportInfo, ModuleInfo, OutputControlParams, PaginationParams,
+    ReferenceInfo, ReferenceType, SemanticAnalysis, SymbolMatchMode,
 };
 
 /// Captures from a custom tree-sitter query.

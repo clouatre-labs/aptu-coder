@@ -599,7 +599,7 @@ fn test_handler_output_collection_error() {
     // The field is populated when a post-exit drain timeout fires; that path
     // is difficult to trigger deterministically in an integration test, so we
     // verify the struct-level contract here.
-    use aptu_coder_core::types::ShellOutput;
+    use aptu_coder::ShellOutput;
     let mut output = ShellOutput::new(
         "out".into(),
         "err".into(),
