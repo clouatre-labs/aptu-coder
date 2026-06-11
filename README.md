@@ -209,16 +209,16 @@ A built-in filter table suppresses per-file noise from chatty CLI tools before o
 
 | Command | Behavior |
 |---------|----------|
-| `git pull` | Injects `--no-stat` before execution; strips diff-stat noise |
-| `git fetch` | Strips `From` / ref lines; caps at 10 lines |
-| `git push` | Strips `remote:` lines; caps at 10 lines |
+| `git pull` | Strips diff-stat noise (pipe bars, `create mode`, `delete mode`, `rename`, `mode change` lines); empty output replaced with `ok (up-to-date)` |
+| `git fetch` | Strips `From` and ref-range lines; caps at 10 lines; empty output replaced with `ok fetched` |
+| `git push` | Strips `remote:` progress lines and `To ` destination lines; caps at 10 lines; empty output replaced with `ok pushed` |
 | `git log` | Caps at 20 lines |
 | `git status` | Caps at 20 lines |
 | `git show` | Strips patch hunks (`@@` headers and `+`/`-` diff lines); caps at 200 lines |
 | `git commit` | Strips GPG signing and gitleaks hook output; caps at 10 lines; empty output replaced with `ok committed` |
 | `git diff` | Strips ANSI escape sequences; caps at 100 lines; empty output replaced with `ok (working tree clean)` |
 | `git add` | Strips gitleaks hook output; caps at 5 lines; empty output replaced with `ok staged` |
-| `cargo build` | Strips `Compiling` / `Checking` / `Downloading` / `Fresh` lines |
+| `cargo build` | Strips `Compiling` / `Checking` / `Downloading` / `Fresh` lines; empty output replaced with `ok (build clean)` |
 | `cargo test` | Strips `Compiling` / `Checking` / `Fresh` lines |
 
 Project-local rules can be added in `.aptu/filters.toml`. Parse errors fall back to the built-in table (no crash). When a filter fires, `filter_applied` in `structuredContent` identifies which rule matched.
