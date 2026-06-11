@@ -155,6 +155,8 @@ pub(crate) fn build_builtin_filter_rules() -> Vec<types::FilterRule> {
             strip_ansi: true,
             strip_lines_matching: vec![
                 "^gpg:".to_string(),
+                // gitleaks progress spinner: Unicode chars emitted by the gitleaks binary
+                // regardless of terminal type; not git-native output
                 "^\\s*[○│╲░]".to_string(),
                 "^.*gitleaks".to_string(),
                 "^.*INF\\b".to_string(),
@@ -186,6 +188,8 @@ pub(crate) fn build_builtin_filter_rules() -> Vec<types::FilterRule> {
             ),
             strip_ansi: true,
             strip_lines_matching: vec![
+                // gitleaks progress spinner: Unicode chars emitted by the gitleaks binary
+                // regardless of terminal type; not git-native output
                 "^\\s*[○│╲░]".to_string(),
                 "^.*gitleaks".to_string(),
                 "^.*INF\\b".to_string(),
