@@ -480,7 +480,17 @@ fn resolve_shell() -> String {
     }
     #[cfg(unix)]
     {
-        if which::which("bash").is_ok() {
+        if std::env::var("PATH").is_ok_and(|p| {
+            std::env::split_paths(&p).any(|dir| {
+                use std::os::unix::fs::PermissionsExt as _;
+                let candidate = dir.join("bash");
+                candidate.is_file()
+                    && candidate
+                        .metadata()
+                        .map(|m| m.permissions().mode() & 0o111 != 0)
+                        .unwrap_or(false)
+            })
+        }) {
             return "bash".to_string();
         }
         "/bin/sh".to_string()
