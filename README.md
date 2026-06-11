@@ -205,7 +205,7 @@ The 30k stdout cap is data-driven: analysis of 27,981 observed `exec_command` ca
 
 **exec_command output filters**
 
-A built-in filter table suppresses per-file noise from chatty CLI tools before output reaches the model. Filters apply on success only; raw output is always preserved on failure.
+A built-in filter table suppresses per-file noise from chatty CLI tools before output reaches the model. Filters apply to stdout, stderr, and interleaved output on success only; raw output is always preserved on failure.
 
 | Command | Behavior |
 |---------|----------|
@@ -221,7 +221,7 @@ A built-in filter table suppresses per-file noise from chatty CLI tools before o
 | `cargo build` | Strips `Compiling` / `Checking` / `Downloading` / `Fresh` lines; empty output replaced with `ok (build clean)` |
 | `cargo test` | Strips `Compiling` / `Checking` / `Fresh` lines |
 
-Project-local rules can be added in `.aptu/filters.toml`. Parse errors fall back to the built-in table (no crash). When a filter fires, `filter_applied` in `structuredContent` identifies which rule matched.
+Project-local rules can be added in `.aptu/filters.toml`. Parse errors and unrecognized schema_version values (version != 1) fall back to the built-in table with a logged warning; no crash occurs. When a filter fires, `filter_applied` in `structuredContent` identifies which rule matched.
 
 ## Non-Interactive Pipelines
 
