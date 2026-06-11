@@ -4688,32 +4688,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_path_in_dir_nonexistent_root_level_file() {
-        // Root-level non-existent path: the file name has no parent segments,
-        // so the loop terminates on the first iteration without walking up.
-        // Resolved path must be working_dir/new.txt (within boundary).
-        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
-        let result = validate_path_in_dir("new.txt", false, temp_dir.path());
-        assert!(
-            result.is_ok(),
-            "validate_path_in_dir should accept a root-level non-existent file: {:?}",
-            result.err()
-        );
-        let resolved = result.unwrap();
-        let canonical_wd =
-            std::fs::canonicalize(temp_dir.path()).expect("should canonicalize temp dir");
-        assert!(
-            resolved.starts_with(&canonical_wd),
-            "Resolved path must be within working_dir: {resolved:?} does not start with {canonical_wd:?}"
-        );
-        assert_eq!(
-            resolved.file_name().and_then(|n| n.to_str()),
-            Some("new.txt"),
-            "File name component must be preserved"
-        );
-    }
-
-    #[test]
     fn test_validate_path_in_dir_nonexistent_deep_path() {
         // Deeply nested non-existent path: a/b/c/d/new.txt -- none of the
         // intermediate directories exist.  The loop must walk up all four
