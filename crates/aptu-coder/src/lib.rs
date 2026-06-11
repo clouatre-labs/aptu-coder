@@ -5487,6 +5487,391 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_git_show_strips_patch_hunks() {
+        // Happy path: exit 0, hunk headers and diff content lines stripped, blob content kept
+        let rule = types::FilterRule {
+            match_command: "^git\\s+show".to_string(),
+            description: Some("git show filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec!["^@@".to_string(), "^[+-][^+-]".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: Some(200),
+            on_empty: None,
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+show").unwrap(),
+            strip_patterns: vec![
+                Regex::new("^@@").unwrap(),
+                Regex::new("^[+-][^+-]").unwrap(),
+            ],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "commit abc123\nAuthor: Dev <dev@example.com>\n\n    Fix bug\n\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,4 @@\n-old line\n+new line\n context line\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert!(
+            filtered.contains("commit abc123"),
+            "should keep commit header"
+        );
+        assert!(filtered.contains("Author:"), "should keep author line");
+        assert!(filtered.contains("Fix bug"), "should keep commit message");
+        assert!(
+            filtered.contains("--- a/src/lib.rs"),
+            "should keep --- file header"
+        );
+        assert!(
+            filtered.contains("+++ b/src/lib.rs"),
+            "should keep +++ file header"
+        );
+        assert!(!filtered.contains("@@ -1,3"), "should strip hunk headers");
+        assert!(
+            !filtered.contains("-old line"),
+            "should strip removed lines"
+        );
+        assert!(!filtered.contains("+new line"), "should strip added lines");
+    }
+
+    #[test]
+    fn test_filter_git_show_passthrough_on_failure() {
+        // Edge case: non-zero exit, raw output preserved (filter not applied)
+        let rule = types::FilterRule {
+            match_command: "^git\\s+show".to_string(),
+            description: Some("git show filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec!["^@@".to_string(), "^[+-][^+-]".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: Some(200),
+            on_empty: None,
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+show").unwrap(),
+            strip_patterns: vec![
+                Regex::new("^@@").unwrap(),
+                Regex::new("^[+-][^+-]").unwrap(),
+            ],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "@@ -1,3 +1,4 @@\n-old line\n+new line\nfatal: bad object\n";
+        let mut output = types::ShellOutput::new(
+            stdout.to_string(),
+            "".to_string(),
+            "".to_string(),
+            Some(128),
+            false,
+            false,
+        );
+
+        if output.exit_code == Some(0) && !output.timed_out {
+            output.stdout = filters::apply_filter(&compiled, &output.stdout);
+            output.filter_applied = compiled
+                .rule
+                .description
+                .clone()
+                .or_else(|| Some(compiled.rule.match_command.clone()));
+        }
+
+        assert!(
+            output.filter_applied.is_none(),
+            "filter_applied should be None on non-zero exit"
+        );
+        assert!(
+            output.stdout.contains("@@ -1,3"),
+            "hunk header should be preserved on failure"
+        );
+        assert!(
+            output.stdout.contains("-old line"),
+            "diff lines should be preserved on failure"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_commit_strips_gpg_and_hook() {
+        // Happy path: exit 0, GPG and gitleaks lines stripped, summary line kept
+        let rule = types::FilterRule {
+            match_command: "^git\\s+commit".to_string(),
+            description: Some("git commit filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec![
+                "^gpg:".to_string(),
+                "^\\s*[○│╲░]".to_string(),
+                "^.*gitleaks".to_string(),
+                "^.*INF\\b".to_string(),
+                "^.*no leaks found".to_string(),
+            ],
+            keep_lines_matching: vec![],
+            max_lines: Some(10),
+            on_empty: Some("ok committed".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+commit").unwrap(),
+            strip_patterns: vec![
+                Regex::new("^gpg:").unwrap(),
+                Regex::new("^\\s*[○│╲░]").unwrap(),
+                Regex::new("^.*gitleaks").unwrap(),
+                Regex::new("^.*INF\\b").unwrap(),
+                Regex::new("^.*no leaks found").unwrap(),
+            ],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "gpg: using key ABC123\n○ running gitleaks scan\n│ INF scanning...\n░ no leaks found\n[main abc1234] Fix bug\n 1 file changed, 2 insertions(+)\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert!(!filtered.contains("gpg:"), "should strip GPG lines");
+        assert!(
+            !filtered.contains("gitleaks"),
+            "should strip gitleaks lines"
+        );
+        assert!(!filtered.contains("INF"), "should strip INF hook lines");
+        assert!(
+            !filtered.contains("no leaks found"),
+            "should strip no leaks found"
+        );
+        assert!(
+            filtered.contains("[main abc1234]"),
+            "should keep commit summary"
+        );
+        assert!(
+            filtered.contains("1 file changed"),
+            "should keep file stats"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_commit_on_empty() {
+        // Happy path: exit 0, all output stripped -> on_empty fires
+        let rule = types::FilterRule {
+            match_command: "^git\\s+commit".to_string(),
+            description: Some("git commit filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec!["^gpg:".to_string(), "^.*gitleaks".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: Some(10),
+            on_empty: Some("ok committed".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+commit").unwrap(),
+            strip_patterns: vec![
+                Regex::new("^gpg:").unwrap(),
+                Regex::new("^.*gitleaks").unwrap(),
+            ],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "gpg: signing commit\ngitleaks: no leaks\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert_eq!(
+            filtered, "ok committed",
+            "on_empty should fire when all lines stripped"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_commit_passthrough_on_failure() {
+        // Edge case: non-zero exit, raw output preserved (filter not applied)
+        let rule = types::FilterRule {
+            match_command: "^git\\s+commit".to_string(),
+            description: Some("git commit filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec!["^gpg:".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: Some(10),
+            on_empty: Some("ok committed".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+commit").unwrap(),
+            strip_patterns: vec![Regex::new("^gpg:").unwrap()],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "gpg: signing failed\nerror: commit failed\n";
+        let mut output = types::ShellOutput::new(
+            stdout.to_string(),
+            "".to_string(),
+            "".to_string(),
+            Some(1),
+            false,
+            false,
+        );
+
+        if output.exit_code == Some(0) && !output.timed_out {
+            output.stdout = filters::apply_filter(&compiled, &output.stdout);
+            output.filter_applied = compiled
+                .rule
+                .description
+                .clone()
+                .or_else(|| Some(compiled.rule.match_command.clone()));
+        }
+
+        assert!(
+            output.filter_applied.is_none(),
+            "filter_applied should be None on non-zero exit"
+        );
+        assert!(
+            output.stdout.contains("gpg:"),
+            "gpg lines should be preserved on failure"
+        );
+        assert!(
+            output.stdout.contains("error: commit failed"),
+            "error should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_diff_caps_lines() {
+        // Happy path: exit 0, output capped at 100 lines
+        let rule = types::FilterRule {
+            match_command: "^git\\s+diff".to_string(),
+            description: Some("git diff filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec![],
+            keep_lines_matching: vec![],
+            max_lines: Some(100),
+            on_empty: Some("ok (working tree clean)".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+diff").unwrap(),
+            strip_patterns: vec![],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout: String = (1..=150).map(|i| format!("line {}\n", i)).collect();
+        let filtered = filters::apply_filter(&compiled, stdout.as_str());
+
+        assert_eq!(filtered.lines().count(), 100, "should cap at 100 lines");
+        assert!(filtered.contains("line 1"), "should keep first line");
+        assert!(filtered.contains("line 100"), "should keep line 100");
+        assert!(
+            !filtered.contains("line 101"),
+            "should not include lines beyond cap"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_diff_on_empty() {
+        // Happy path: exit 0, empty output -> on_empty fires
+        let rule = types::FilterRule {
+            match_command: "^git\\s+diff".to_string(),
+            description: Some("git diff filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec![],
+            keep_lines_matching: vec![],
+            max_lines: Some(100),
+            on_empty: Some("ok (working tree clean)".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+diff").unwrap(),
+            strip_patterns: vec![],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let filtered = filters::apply_filter(&compiled, "");
+
+        assert_eq!(
+            filtered, "ok (working tree clean)",
+            "on_empty should fire on empty output"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_add_on_empty() {
+        // Happy path: exit 0, hook noise stripped -> empty -> on_empty fires
+        let rule = types::FilterRule {
+            match_command: "^git\\s+add".to_string(),
+            description: Some("git add filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec![
+                "^\\s*[○│╲░]".to_string(),
+                "^.*gitleaks".to_string(),
+                "^.*INF\\b".to_string(),
+            ],
+            keep_lines_matching: vec![],
+            max_lines: Some(5),
+            on_empty: Some("ok staged".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+add").unwrap(),
+            strip_patterns: vec![
+                Regex::new("^\\s*[○│╲░]").unwrap(),
+                Regex::new("^.*gitleaks").unwrap(),
+                Regex::new("^.*INF\\b").unwrap(),
+            ],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "○ running gitleaks\n│ INF scanning files\n░ no leaks found\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert_eq!(
+            filtered, "ok staged",
+            "on_empty should fire when all hook lines stripped"
+        );
+    }
+
+    #[test]
+    fn test_filter_git_add_passthrough_on_failure() {
+        // Edge case: non-zero exit, raw output preserved (filter not applied)
+        let rule = types::FilterRule {
+            match_command: "^git\\s+add".to_string(),
+            description: Some("git add filter".to_string()),
+            strip_ansi: true,
+            strip_lines_matching: vec!["^.*gitleaks".to_string()],
+            keep_lines_matching: vec![],
+            max_lines: Some(5),
+            on_empty: Some("ok staged".to_string()),
+        };
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+add").unwrap(),
+            strip_patterns: vec![Regex::new("^.*gitleaks").unwrap()],
+            keep_patterns: vec![],
+            rule,
+        };
+
+        let stdout = "gitleaks: scan failed\nerror: pathspec 'missing.rs' did not match\n";
+        let mut output = types::ShellOutput::new(
+            stdout.to_string(),
+            "".to_string(),
+            "".to_string(),
+            Some(1),
+            false,
+            false,
+        );
+
+        if output.exit_code == Some(0) && !output.timed_out {
+            output.stdout = filters::apply_filter(&compiled, &output.stdout);
+            output.filter_applied = compiled
+                .rule
+                .description
+                .clone()
+                .or_else(|| Some(compiled.rule.match_command.clone()));
+        }
+
+        assert!(
+            output.filter_applied.is_none(),
+            "filter_applied should be None on non-zero exit"
+        );
+        assert!(
+            output.stdout.contains("gitleaks"),
+            "gitleaks line should be preserved on failure"
+        );
+        assert!(
+            output.stdout.contains("pathspec"),
+            "error should be preserved on failure"
+        );
+    }
+
+    #[test]
     fn test_line_cap_fires_before_byte_cap() {
         // Edge case: 2500 lines x 5 chars each = 12500 bytes (under 30k byte cap)
         // Line cap (2000) should fire; returned content has ~50 lines (OVERFLOW_PREVIEW_LINES)

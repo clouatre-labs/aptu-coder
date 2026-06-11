@@ -129,6 +129,71 @@ pub(crate) fn build_builtin_filter_rules() -> Vec<types::FilterRule> {
             max_lines: None,
             on_empty: None,
         },
+        // git show: cap blob reads; strip patch hunks from commit objects
+        types::FilterRule {
+            match_command: "^git\\s+show".to_string(),
+            description: Some(
+                "git show: cap at 200 lines; strip diff content lines from commit objects (exit-code-gated)"
+                    .to_string(),
+            ),
+            strip_ansi: true,
+            strip_lines_matching: vec![
+                "^@@".to_string(),
+                "^[+-][^+-]".to_string(),
+            ],
+            keep_lines_matching: vec![],
+            max_lines: Some(200),
+            on_empty: None,
+        },
+        // git commit: keep summary line, strip GPG and hook output
+        types::FilterRule {
+            match_command: "^git\\s+commit".to_string(),
+            description: Some(
+                "git commit: strip GPG signing and hook output, keep branch/hash summary line (exit-code-gated)"
+                    .to_string(),
+            ),
+            strip_ansi: true,
+            strip_lines_matching: vec![
+                "^gpg:".to_string(),
+                "^\\s*[○│╲░]".to_string(),
+                "^.*gitleaks".to_string(),
+                "^.*INF\\b".to_string(),
+                "^.*no leaks found".to_string(),
+            ],
+            keep_lines_matching: vec![],
+            max_lines: Some(10),
+            on_empty: Some("ok committed".to_string()),
+        },
+        // git diff: strip ANSI, cap at 100 lines
+        types::FilterRule {
+            match_command: "^git\\s+diff".to_string(),
+            description: Some(
+                "git diff: strip ANSI escape sequences, cap at 100 lines (exit-code-gated)"
+                    .to_string(),
+            ),
+            strip_ansi: true,
+            strip_lines_matching: vec![],
+            keep_lines_matching: vec![],
+            max_lines: Some(100),
+            on_empty: Some("ok (working tree clean)".to_string()),
+        },
+        // git add: strip hook output, confirm staged
+        types::FilterRule {
+            match_command: "^git\\s+add".to_string(),
+            description: Some(
+                "git add: strip hook output, confirm staged on empty output (exit-code-gated)"
+                    .to_string(),
+            ),
+            strip_ansi: true,
+            strip_lines_matching: vec![
+                "^\\s*[○│╲░]".to_string(),
+                "^.*gitleaks".to_string(),
+                "^.*INF\\b".to_string(),
+            ],
+            keep_lines_matching: vec![],
+            max_lines: Some(5),
+            on_empty: Some("ok staged".to_string()),
+        },
     ]
 }
 
