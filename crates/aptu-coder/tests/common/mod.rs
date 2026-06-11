@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
+#![allow(dead_code)]
 
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as TokioMutex;
 use tracing_subscriber::filter::LevelFilter;
 
-#[allow(dead_code)]
 pub fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
     let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
@@ -20,7 +20,6 @@ pub fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
     )
 }
 
-#[allow(dead_code)]
 pub async fn call_tool_raw(tool_name: &str, params: serde_json::Value) -> serde_json::Value {
     let analyzer = make_test_analyzer();
     let (client, server) = tokio::io::duplex(65536);
