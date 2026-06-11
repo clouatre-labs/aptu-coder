@@ -11,6 +11,9 @@ use tracing::warn;
 /// TOML configuration for filter rules.
 #[derive(serde::Deserialize)]
 pub(crate) struct FilterTableConfig {
+    /// Config file format version. Only version 1 is supported; other values
+    /// log a warning and fall back to built-in rules. Bump this when the
+    /// schema changes in a breaking way so old readers fail loudly.
     schema_version: u32,
     filters: Vec<types::FilterRule>,
 }
