@@ -504,7 +504,6 @@ pub struct CodeAnalyzer {
     // IMPORTANT: Do not perform long-running I/O while holding the write lock in
     // on_initialized. The write lock blocks all concurrent list_tools/call_tool calls
     // for the duration. Keep the critical section to disable_route() calls only.
-    #[allow(dead_code)]
     pub(crate) tool_router: Arc<RwLock<ToolRouter<Self>>>,
     cache: AnalysisCache,
     disk_cache: std::sync::Arc<cache::DiskCache>,

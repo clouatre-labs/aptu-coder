@@ -29,7 +29,6 @@ tokio = { workspace = true }
 axum = { workspace = true }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { workspace = true }
-async-trait = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }

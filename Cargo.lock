@@ -58,7 +58,6 @@ name = "aptu-coder"
 version = "0.16.1"
 dependencies = [
  "aptu-coder-core",
- "async-trait",
  "axum",
  "blake3",
  "nix",
@@ -94,7 +93,6 @@ dependencies = [
  "ignore",
  "lru",
  "rayon",
- "regex",
  "schemars",
  "serde",
  "serde_json",
@@ -103,7 +101,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
- "toml",
  "tracing",
  "tracing-subscriber",
  "tree-sitter",

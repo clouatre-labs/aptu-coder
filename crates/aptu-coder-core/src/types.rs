@@ -865,7 +865,7 @@ pub struct EditReplaceOutput {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct ExecCommandParams {
     /// Shell command to execute via sh -c (or $SHELL if set).
@@ -896,21 +896,6 @@ impl ExecCommandParams {
             timeout_secs,
             working_dir,
             ..Default::default()
-        }
-    }
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for ExecCommandParams {
-    fn default() -> Self {
-        Self {
-            command: String::new(),
-            timeout_secs: None,
-            working_dir: None,
-            memory_limit_mb: None,
-            cpu_limit_secs: None,
-            stdin: None,
-            cache: None,
         }
     }
 }
