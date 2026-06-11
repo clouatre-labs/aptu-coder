@@ -247,24 +247,22 @@ async fn exec_command_timeout() {
 
 #[tokio::test]
 async fn exec_command_working_dir_rejection() {
-    // Arrange: pass a working_dir that points outside the server's CWD
-    // This test verifies that the handler rejects paths outside the allowed directory
-    // We'll use a path like "/tmp" or "../../etc" which should be rejected
+    // Arrange: working_dir=/tmp is outside the server's CWD
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo hi",
+        "working_dir": "/tmp"
+    }))
+    .await;
 
-    // Note: This test is a placeholder that documents the expected behavior.
-    // The actual handler validation happens in the exec_command tool handler in lib.rs,
-    // which calls validate_path() and checks if the directory exists and is within bounds.
-    // A full integration test would require setting up the MCP server context.
-
-    // For now, we verify that attempting to use an absolute path like /tmp
-    // would be rejected by the validate_path function.
-    let invalid_path = "/tmp";
-
-    // The validate_path function should reject this because it's outside the server's CWD
-    // This is tested implicitly by the handler's validation logic.
+    // Assert: handler must reject with isError=true and mention 'outside'
     assert!(
-        invalid_path.starts_with("/"),
-        "absolute paths should be rejected by validate_path"
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for working_dir outside CWD: {resp}"
+    );
+    let content_text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        content_text.contains("outside"),
+        "error message should contain 'outside': {content_text}"
     );
 }
 
