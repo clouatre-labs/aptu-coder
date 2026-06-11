@@ -12,6 +12,7 @@ use lru::LruCache;
 use rayon::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
 use std::num::NonZeroUsize;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -436,9 +437,12 @@ impl DiskCache {
                 total_write_failures: std::sync::atomic::AtomicU64::new(0),
             };
         }
+        #[cfg(unix)]
         if let Err(e) = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)) {
             warn!(path = %base.display(), error = %e, "disk cache: failed to set directory permissions to 0700");
         }
+        #[cfg(not(unix))]
+        let _ = &base; // permissions not supported on this platform
         Self {
             base,
             disabled: false,
@@ -597,6 +601,7 @@ mod disk_cache_tests {
         assert_eq!(result, Some(value));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_disk_cache_permissions() {
         use std::os::unix::fs::PermissionsExt;

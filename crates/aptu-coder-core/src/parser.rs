@@ -1525,7 +1525,7 @@ pub fn extract_impl_traits(source: &str, path: &Path) -> Vec<ImplTraitInfo> {
 /// Execute a custom tree-sitter query against source code.
 ///
 /// This is the internal implementation of the public `execute_query` function.
-pub fn execute_query_impl(
+pub(crate) fn execute_query_impl(
     language: &str,
     source: &str,
     query_str: &str,

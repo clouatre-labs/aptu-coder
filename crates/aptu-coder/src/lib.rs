@@ -32,22 +32,103 @@ pub mod otel;
 mod shell;
 mod validation;
 
-pub use aptu_coder_core::analyze;
-use aptu_coder_core::types::STDIN_MAX_BYTES;
+use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion, graph, traversal, types};
 use shell::resolve_shell;
 use validation::{validate_path, validate_path_in_dir};
 
-pub(crate) const EXCLUDED_DIRS: &[&str] = &[
-    "node_modules",
-    "vendor",
-    ".git",
-    "__pycache__",
-    "target",
-    "dist",
-    "build",
-    ".venv",
-];
+pub const STDIN_MAX_BYTES: usize = 1_048_576;
+
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct ExecCommandParams {
+    /// Shell command to execute via sh -c (or $SHELL if set).
+    pub command: String,
+    /// Timeout in seconds before SIGKILL. None = no timeout (default).
+    pub timeout_secs: Option<u64>,
+    /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
+    pub working_dir: Option<String>,
+    /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
+    /// None = no limit (default).
+    pub memory_limit_mb: Option<u64>,
+    /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
+    /// None = no limit (default).
+    pub cpu_limit_secs: Option<u64>,
+    /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
+    pub stdin: Option<String>,
+    /// Enable caching of command results. None or true = enabled (default); false = disabled.
+    /// Caching is skipped if stdin is provided, regardless of this setting.
+    #[serde(default)]
+    pub cache: Option<bool>,
+}
+
+impl ExecCommandParams {
+    /// Creates a new ExecCommandParams with the given command.
+    pub fn new(command: String, timeout_secs: Option<u64>, working_dir: Option<String>) -> Self {
+        Self {
+            command,
+            timeout_secs,
+            working_dir,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct ShellOutput {
+    /// Standard output from the command.
+    pub stdout: String,
+    /// Standard error from the command.
+    pub stderr: String,
+    /// Stdout and stderr interleaved in arrival order.
+    pub interleaved: String,
+    /// Exit code; null if killed by timeout.
+    pub exit_code: Option<i32>,
+    /// True if the command was killed due to timeout.
+    pub timed_out: bool,
+    /// True if the post-exit drain timed out (backgrounded process kept pipes open).
+    /// When true, any available output is still included; use the overflow file path
+    /// from the truncation notice Content block to recover the full output.
+    pub output_truncated: bool,
+    /// Set when the post-exit drain timed out because a background process held the
+    /// pipes open. Distinct from `output_truncated` (size cap) -- this indicates a
+    /// drain timeout rather than a size overflow.
+    pub output_collection_error: Option<String>,
+    /// Path to the slot file containing full stdout (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_path: Option<String>,
+    /// Path to the slot file containing full stderr (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_path: Option<String>,
+    /// Description of the filter applied to stdout (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_applied: Option<String>,
+}
+
+impl ShellOutput {
+    /// Creates a new ShellOutput with the given parameters.
+    pub fn new(
+        stdout: String,
+        stderr: String,
+        interleaved: String,
+        exit_code: Option<i32>,
+        timed_out: bool,
+        output_truncated: bool,
+    ) -> Self {
+        Self {
+            stdout,
+            stderr,
+            interleaved,
+            exit_code,
+            timed_out,
+            output_truncated,
+            output_collection_error: None,
+            stdout_path: None,
+            stderr_path: None,
+            filter_applied: None,
+        }
+    }
+}
 
 use aptu_coder_core::cache::{AnalysisCache, CacheTier};
 use aptu_coder_core::formatter::{
@@ -185,17 +266,26 @@ impl<'a> opentelemetry::propagation::Extractor for ExtractMap<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorMeta {
+    error_category: &'static str,
+    is_retryable: bool,
+    suggested_action: &'static str,
+}
+
 #[must_use]
 fn error_meta(
     category: &'static str,
     is_retryable: bool,
     suggested_action: &'static str,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "errorCategory": category,
-        "isRetryable": is_retryable,
-        "suggestedAction": suggested_action,
+    serde_json::to_value(ErrorMeta {
+        error_category: category,
+        is_retryable,
+        suggested_action,
     })
+    .unwrap_or_default()
 }
 
 #[must_use]
@@ -2937,7 +3027,7 @@ impl CodeAnalyzer {
         name = "exec_command",
         title = "Exec Command",
         description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. working_dir sets initial working directory; cd and absolute paths in command string bypass this restriction. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
-        output_schema = schema_for_type::<types::ShellOutput>(),
+        output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
             read_only_hint = false,
@@ -2949,7 +3039,7 @@ impl CodeAnalyzer {
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, command = tracing::field::Empty, exit_code = tracing::field::Empty, timed_out = tracing::field::Empty, output_truncated = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
     pub async fn exec_command(
         &self,
-        params: Parameters<types::ExecCommandParams>,
+        params: Parameters<ExecCommandParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
@@ -3338,7 +3428,7 @@ async fn run_exec_impl(
     seq: u32,
     resolved_path: Option<&str>,
     filter_table: &Arc<Vec<CompiledRule>>,
-) -> types::ShellOutput {
+) -> ShellOutput {
     // Inject --no-stat for git pull if not already present
     let command = maybe_inject_no_stat(&command);
 
@@ -3354,7 +3444,7 @@ async fn run_exec_impl(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            return types::ShellOutput::new(
+            return ShellOutput::new(
                 String::new(),
                 format!("failed to spawn command: {e}"),
                 format!("failed to spawn command: {e}"),
@@ -3420,7 +3510,7 @@ async fn run_exec_impl(
         handle_output_persist(stdout_str, stderr_str, slot);
     output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;
 
-    let mut output = types::ShellOutput::new(
+    let mut output = ShellOutput::new(
         stdout,
         stderr,
         interleaved_str,
@@ -3602,7 +3692,7 @@ impl ServerHandler for CodeAnalyzer {
     }
 
     fn get_info(&self) -> InitializeResult {
-        let excluded = crate::EXCLUDED_DIRS.join(", ");
+        let excluded = aptu_coder_core::EXCLUDED_DIRS.join(", ");
         let instructions = format!(
             "Recommended workflow:\n\
             1. Start with analyze_directory(path=<repo_root>, max_depth=2, summary=true) to identify source package (largest by file count; exclude {excluded}).\n\
@@ -5103,7 +5193,7 @@ mod tests {
 
         // Sub-case 1: non-zero exit code (exit_code != Some(0))
         // The guard condition fails, so filter_applied must remain None and stdout unchanged
-        let mut output = types::ShellOutput::new(
+        let mut output = ShellOutput::new(
             stdout.to_string(),
             "".to_string(),
             "".to_string(),
@@ -5133,7 +5223,7 @@ mod tests {
 
         // Sub-case 2: zero exit code (exit_code == Some(0))
         // The guard condition passes, so filter_applied is set and stdout is filtered
-        let mut output2 = types::ShellOutput::new(
+        let mut output2 = ShellOutput::new(
             stdout.to_string(),
             "".to_string(),
             "".to_string(),
@@ -5233,7 +5323,7 @@ mod tests {
         );
 
         // Simulate the guard and field assignment from run_exec_impl
-        let mut output = types::ShellOutput::new(
+        let mut output = ShellOutput::new(
             filtered,
             "".to_string(),
             "".to_string(),

@@ -7,9 +7,6 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::PathBuf;
 
-/// Maximum byte length for stdin content passed to exec_command.
-pub const STDIN_MAX_BYTES: usize = 1_048_576;
-
 /// A single edge in the call graph with impl-trait metadata.
 /// `neighbor_name` holds the caller name in `callers` maps and the callee name in `callees` maps.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -767,55 +764,6 @@ mod tests {
     }
 }
 
-/// Structured error metadata for MCP error responses.
-/// Serializes to camelCase JSON for inclusion in `ErrorData.data`.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ErrorMeta {
-    pub error_category: &'static str,
-    pub is_retryable: bool,
-    pub suggested_action: &'static str,
-}
-
-#[cfg(test)]
-mod error_meta_tests {
-    use super::*;
-
-    #[test]
-    fn test_error_meta_serialization_camel_case() {
-        let meta = ErrorMeta {
-            error_category: "validation",
-            is_retryable: false,
-            suggested_action: "fix input",
-        };
-        let v = serde_json::to_value(&meta).unwrap();
-        assert_eq!(v["errorCategory"], "validation");
-        assert_eq!(v["isRetryable"], false);
-        assert_eq!(v["suggestedAction"], "fix input");
-    }
-
-    #[test]
-    fn test_error_meta_validation_not_retryable() {
-        let meta = ErrorMeta {
-            error_category: "validation",
-            is_retryable: false,
-            suggested_action: "use summary=true",
-        };
-        assert!(!meta.is_retryable);
-    }
-
-    #[test]
-    fn test_error_meta_transient_retryable() {
-        let meta = ErrorMeta {
-            error_category: "transient",
-            is_retryable: true,
-            suggested_action: "retry the request",
-        };
-        assert!(meta.is_retryable);
-    }
-}
-
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
@@ -864,42 +812,6 @@ pub struct EditReplaceOutput {
     pub bytes_after: usize,
 }
 
-#[non_exhaustive]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct ExecCommandParams {
-    /// Shell command to execute via sh -c (or $SHELL if set).
-    pub command: String,
-    /// Timeout in seconds before SIGKILL. None = no timeout (default).
-    pub timeout_secs: Option<u64>,
-    /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
-    pub working_dir: Option<String>,
-    /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
-    /// None = no limit (default).
-    pub memory_limit_mb: Option<u64>,
-    /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
-    /// None = no limit (default).
-    pub cpu_limit_secs: Option<u64>,
-    /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
-    pub stdin: Option<String>,
-    /// Enable caching of command results. None or true = enabled (default); false = disabled.
-    /// Caching is skipped if stdin is provided, regardless of this setting.
-    #[serde(default)]
-    pub cache: Option<bool>,
-}
-
-impl ExecCommandParams {
-    /// Creates a new ExecCommandParams with the given command.
-    pub fn new(command: String, timeout_secs: Option<u64>, working_dir: Option<String>) -> Self {
-        Self {
-            command,
-            timeout_secs,
-            working_dir,
-            ..Default::default()
-        }
-    }
-}
-
 /// Filter rule for command output post-processing.
 /// Matches command prefixes and applies transformations (strip/keep/cap lines).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -922,61 +834,4 @@ pub struct FilterRule {
     pub max_lines: Option<usize>,
     /// Replacement text if filtered output is empty (success-only).
     pub on_empty: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct ShellOutput {
-    /// Standard output from the command.
-    pub stdout: String,
-    /// Standard error from the command.
-    pub stderr: String,
-    /// Stdout and stderr interleaved in arrival order.
-    pub interleaved: String,
-    /// Exit code; null if killed by timeout.
-    pub exit_code: Option<i32>,
-    /// True if the command was killed due to timeout.
-    pub timed_out: bool,
-    /// True if the post-exit drain timed out (backgrounded process kept pipes open).
-    /// When true, any available output is still included; use the overflow file path
-    /// from the truncation notice Content block to recover the full output.
-    pub output_truncated: bool,
-    /// Set when the post-exit drain timed out because a background process held the
-    /// pipes open. Distinct from `output_truncated` (size cap) -- this indicates a
-    /// drain timeout rather than a size overflow.
-    pub output_collection_error: Option<String>,
-    /// Path to the slot file containing full stdout (if output was persisted).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stdout_path: Option<String>,
-    /// Path to the slot file containing full stderr (if output was persisted).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stderr_path: Option<String>,
-    /// Description of the filter applied to stdout (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub filter_applied: Option<String>,
-}
-
-impl ShellOutput {
-    /// Creates a new ShellOutput with the given parameters.
-    pub fn new(
-        stdout: String,
-        stderr: String,
-        interleaved: String,
-        exit_code: Option<i32>,
-        timed_out: bool,
-        output_truncated: bool,
-    ) -> Self {
-        Self {
-            stdout,
-            stderr,
-            interleaved,
-            exit_code,
-            timed_out,
-            output_truncated,
-            output_collection_error: None,
-            stdout_path: None,
-            stderr_path: None,
-            filter_applied: None,
-        }
-    }
 }
