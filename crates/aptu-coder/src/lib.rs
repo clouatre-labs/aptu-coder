@@ -5764,6 +5764,54 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_schema_version_falls_back_gracefully() {
+        // Edge case: schema_version != 1 in .aptu/filters.toml should fall back to built-ins.
+        use std::io::Write;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "aptu-test-schema-version-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let aptu_dir = tmp.join(".aptu");
+        std::fs::create_dir_all(&aptu_dir).expect("should create .aptu dir");
+
+        // schema_version = 2 with a valid filter rule; should be rejected
+        let toml_content = "schema_version = 2\n[[filters]]\nmatch_command = \"^my-v2-tool\"\nkeep_lines_matching = []\n";
+        let mut f = std::fs::File::create(aptu_dir.join("filters.toml"))
+            .expect("should create filters.toml");
+        f.write_all(toml_content.as_bytes())
+            .expect("should write toml");
+        drop(f);
+
+        // Should not panic; should return built-in rules only (no project-local rule)
+        let rules = filters::load_filter_table(&tmp);
+
+        // Built-in rules must be present
+        let has_git_pull = rules
+            .iter()
+            .any(|r| r.pattern.is_match("git pull origin main"));
+        assert!(
+            has_git_pull,
+            "should have git pull built-in rule after schema_version=2 rejection"
+        );
+
+        // The project-local rule must NOT be present
+        let has_v2_rule = rules
+            .iter()
+            .any(|r| r.pattern.is_match("my-v2-tool --flag"));
+        assert!(
+            !has_v2_rule,
+            "schema_version=2 rule should not be loaded; only built-ins expected"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn test_metric_chars_threshold_breach_fires() {
         // Happy path: chars_threshold_breach is true when output_chars > 30_000
         let output_chars: usize = 35_000;

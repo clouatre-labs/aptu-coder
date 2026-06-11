@@ -11,7 +11,6 @@ use tracing::warn;
 /// TOML configuration for filter rules.
 #[derive(serde::Deserialize)]
 pub(crate) struct FilterTableConfig {
-    #[allow(dead_code)]
     schema_version: u32,
     filters: Vec<types::FilterRule>,
 }
@@ -234,6 +233,14 @@ pub(crate) fn load_filter_table(cwd: &Path) -> Vec<CompiledRule> {
     if let Ok(content) = fs::read_to_string(&filters_path) {
         match toml::from_str::<FilterTableConfig>(&content) {
             Ok(config) => {
+                if config.schema_version != 1 {
+                    warn!(
+                        schema_version = config.schema_version,
+                        path = %filters_path.display(),
+                        "unsupported filters.toml schema_version; only version 1 is supported; falling back to built-in rules"
+                    );
+                    return compiled_rules;
+                }
                 for rule in config.filters {
                     if let Ok(pattern) = Regex::new(&rule.match_command) {
                         let strip_patterns = rule
