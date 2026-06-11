@@ -3663,6 +3663,13 @@ async fn run_exec_impl(
             if compiled_rule.pattern.is_match(&command) {
                 let filtered_stdout = apply_filter(compiled_rule, &output.stdout);
                 output.stdout = filtered_stdout;
+                // Also filter interleaved: the response handler prefers interleaved when
+                // non-empty (which it always is for commands that write to both streams),
+                // so filtering only stdout would leave the LLM-visible output unfiltered.
+                // apply_filter is called separately on each field; there is no double-filtering
+                // because stdout and interleaved are independent strings assembled from the
+                // same source lines -- updating one does not affect the other.
+                output.interleaved = apply_filter(compiled_rule, &output.interleaved);
                 output.filter_applied = compiled_rule
                     .rule
                     .description
@@ -5549,6 +5556,73 @@ mod tests {
             filters::apply_filter(&compiled, ""),
             "ok (working tree clean)",
             "on_empty should fire on empty input"
+        );
+    }
+
+    #[test]
+    fn test_filter_applied_to_interleaved_with_both_streams() {
+        // Happy path: apply_filter on an interleaved string that mixes stdout and stderr lines.
+        // Lines matching the strip pattern are removed; stderr-origin lines are preserved.
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+pull").unwrap(),
+            strip_patterns: vec![Regex::new("^\\s*\\|\\s*\\d+\\s*[+\\-]+").unwrap()],
+            keep_patterns: vec![],
+            rule: types::FilterRule {
+                match_command: "^git\\s+pull".to_string(),
+                description: None,
+                strip_ansi: false,
+                strip_lines_matching: vec!["^\\s*\\|\\s*\\d+\\s*[+\\-]+".to_string()],
+                keep_lines_matching: vec![],
+                max_lines: None,
+                on_empty: None,
+            },
+        };
+
+        // Arrange: interleaved with one stdout-origin strip-matched line and one stderr-origin line
+        let interleaved = " | 42  ++++++++++++\nFrom https://github.com/example/repo\n";
+
+        // Act
+        let result = filters::apply_filter(&compiled, interleaved);
+
+        // Assert: strip-matched line gone; stderr-origin line present
+        assert!(
+            !result.contains("| 42"),
+            "strip-matched line should be absent from filtered interleaved"
+        );
+        assert!(
+            result.contains("From https://github.com/example/repo"),
+            "stderr-origin line should be preserved in filtered interleaved"
+        );
+    }
+
+    #[test]
+    fn test_on_empty_substitution_in_interleaved() {
+        // Edge case: when filter strips all lines in interleaved, on_empty text is returned.
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+pull").unwrap(),
+            strip_patterns: vec![Regex::new(".*").unwrap()],
+            keep_patterns: vec![],
+            rule: types::FilterRule {
+                match_command: "^git\\s+pull".to_string(),
+                description: None,
+                strip_ansi: false,
+                strip_lines_matching: vec![".*".to_string()],
+                keep_lines_matching: vec![],
+                max_lines: None,
+                on_empty: Some("ok (up-to-date)".to_string()),
+            },
+        };
+
+        // Arrange: interleaved where every line matches the strip pattern
+        let interleaved = "Already up to date.\nFrom https://github.com/example/repo\n";
+
+        // Act
+        let result = filters::apply_filter(&compiled, interleaved);
+
+        // Assert: on_empty substitution text returned
+        assert_eq!(
+            result, "ok (up-to-date)",
+            "on_empty should be returned when filter strips all lines in interleaved"
         );
     }
 
