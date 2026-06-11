@@ -27,7 +27,6 @@ tracing = "0.1"
 tokio-util = "0.7"
 rmcp = { version = "1", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "process", "signal"] }
-async-trait = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 schemars = { version = "1", features = ["derive"] }
 tempfile = "=3.27.0"
@@ -51,7 +50,6 @@ opentelemetry-appender-tracing = { version = "0.32", features = ["log"] }
 tracing-opentelemetry = "0.33"
 
 rustls = "0.23"
-url = "2"
 axum = { version = "0.8", features = ["http1", "tokio"], default-features = false }
 
 [workspace.lints.clippy]
