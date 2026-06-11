@@ -214,6 +214,10 @@ A built-in filter table suppresses per-file noise from chatty CLI tools before o
 | `git push` | Strips `remote:` lines; caps at 10 lines |
 | `git log` | Caps at 20 lines |
 | `git status` | Caps at 20 lines |
+| `git show` | Strips patch hunks (`@@` headers and `+`/`-` diff lines); caps at 200 lines |
+| `git commit` | Strips GPG signing and gitleaks hook output; caps at 10 lines; empty output replaced with `ok committed` |
+| `git diff` | Strips ANSI escape sequences; caps at 100 lines; empty output replaced with `ok (working tree clean)` |
+| `git add` | Strips gitleaks hook output; caps at 5 lines; empty output replaced with `ok staged` |
 | `cargo build` | Strips `Compiling` / `Checking` / `Downloading` / `Fresh` lines |
 | `cargo test` | Strips `Compiling` / `Checking` / `Fresh` lines |
 
