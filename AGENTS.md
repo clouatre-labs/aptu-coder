@@ -65,7 +65,11 @@ For richer analysis, use `python scripts/mcp-metrics.py --help`.
 
 ## API verification (critical)
 
-Do not rely on training data for `rmcp`, `schemars`, or `thiserror` APIs. **Read `crates/aptu-coder/src/lib.rs` before adding or modifying any tool** -- it is the authoritative reference for tool handler patterns.
+Do not rely on training data for `rmcp`, `schemars`, or `thiserror` APIs. **Read `crates/aptu-coder/src/lib.rs` before adding or modifying any tool** -- it is the authoritative reference for tool handler patterns. Path validation logic lives in `src/validation.rs`; shell detection in `src/shell.rs`; exec output filtering (built-in rules, project-local `.aptu/filters.toml`, `schema_version` enforcement) in `src/filters.rs`. Read the relevant module before touching those subsystems.
+
+## Integration tests
+
+Integration tests for the `aptu-coder` crate live in `crates/aptu-coder/tests/`. A shared MCP harness in `tests/common/mod.rs` provides `make_test_analyzer()` and `call_tool_raw(tool_name, params)` -- use these in new integration tests rather than duplicating the server setup. `call_tool_raw` spins up a real in-process MCP server over a duplex pipe, runs the full initialize/call/shutdown handshake, and returns the raw JSON response.
 
 ## rmcp footguns
 
