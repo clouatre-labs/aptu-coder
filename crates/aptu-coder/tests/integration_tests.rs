@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
+
+mod common;
+
 use aptu_coder::logging::LogEvent;
+use common::call_tool_raw;
 use rmcp::model::{CallToolResult, Content, LoggingLevel, Meta};
+
 #[tokio::test]
 async fn test_batch_draining_with_multiple_events() {
     use serde_json::json;
@@ -50,25 +55,27 @@ fn test_call_tool_result_cache_hint_metadata() {
     );
 }
 
-#[test]
-fn test_path_outside_cwd_rejected() {
-    // S4: Verify that paths outside the current working directory are rejected.
-    // The validate_path function is called by all tool handlers at entry.
-    // This regression test ensures that absolute paths outside CWD are properly rejected.
-    let path = "/etc/passwd";
+#[tokio::test]
+async fn test_path_outside_cwd_rejected() {
+    // Arrange: path=/etc/passwd is outside the server's CWD
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": "/etc/passwd",
+            "max_depth": 0,
+            "page_size": 10
+        }),
+    )
+    .await;
 
-    // Verify the path is actually outside CWD (safety check)
-    let cwd = std::env::current_dir().expect("should get cwd");
+    // Assert: handler must reject with isError=true and mention 'outside'
     assert!(
-        !std::path::Path::new(path).starts_with(&cwd),
-        "Test setup error: /etc/passwd should be outside CWD"
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for path outside CWD: {resp}"
     );
-
-    // The validate_path function (tested in lib.rs unit tests) rejects this path.
-    // This test verifies the error message is accurate.
-    let error_msg = "path is outside the allowed root";
+    let content_text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
     assert!(
-        error_msg.contains("outside"),
-        "Error message should mention 'outside': {error_msg}"
+        content_text.contains("outside"),
+        "error message should contain 'outside': {content_text}"
     );
 }

@@ -1,105 +1,12 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex as TokioMutex;
-use tracing_subscriber::filter::LevelFilter;
+mod common;
 
-fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
-    let peer = Arc::new(TokioMutex::new(None));
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<aptu_coder::logging::LogEvent>();
-    let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    aptu_coder::CodeAnalyzer::new(
-        peer,
-        log_level_filter,
-        rx,
-        aptu_coder::metrics::MetricsSender(metrics_tx),
-    )
-}
+use common::call_tool_raw;
 
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
-    let analyzer = make_test_analyzer();
-    let (client, server) = tokio::io::duplex(65536);
-
-    // Spawn the analyzer server on the server half
-    let mut server_handle = tokio::spawn(async move {
-        let (server_rx, server_tx) = tokio::io::split(server);
-        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
-            let _ = service.waiting().await;
-        }
-    });
-
-    let (client_rx, mut client_tx) = tokio::io::split(client);
-    let mut reader = BufReader::new(client_rx).lines();
-
-    // Step 1: Send initialize request
-    let init = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {},
-            "clientInfo": {"name": "test-client", "version": "0.1.0"}
-        }
-    })
-    .to_string()
-        + "\n";
-    client_tx.write_all(init.as_bytes()).await.unwrap();
-    client_tx.flush().await.unwrap();
-
-    // Step 2: Read initialize response (discard)
-    let _resp = reader.next_line().await.unwrap().unwrap();
-
-    // Step 3: Send initialized notification (no id)
-    let notif = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-        "params": {}
-    })
-    .to_string()
-        + "\n";
-    client_tx.write_all(notif.as_bytes()).await.unwrap();
-    client_tx.flush().await.unwrap();
-
-    // Step 4: Send tools/call
-    let call = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/call",
-        "params": {
-            "name": "exec_command",
-            "arguments": params
-        }
-    })
-    .to_string()
-        + "\n";
-    client_tx.write_all(call.as_bytes()).await.unwrap();
-    client_tx.flush().await.unwrap();
-
-    // Step 5: Race response loop against server handle to surface server panics
-    tokio::select! {
-        result = async {
-            loop {
-                let line = reader.next_line().await.unwrap().unwrap();
-                let v: serde_json::Value = serde_json::from_str(&line).unwrap();
-                if v.get("id") == Some(&serde_json::json!(2)) {
-                    return v;
-                }
-            }
-        } => {
-            server_handle.abort();
-            result
-        }
-        outcome = &mut server_handle => {
-            match outcome {
-                Ok(_) => panic!("server task exited unexpectedly before tool response"),
-                Err(e) => panic!("server task panicked: {e}"),
-            }
-        }
-    }
+    call_tool_raw("exec_command", params).await
 }
 
 #[tokio::test]
@@ -247,24 +154,22 @@ async fn exec_command_timeout() {
 
 #[tokio::test]
 async fn exec_command_working_dir_rejection() {
-    // Arrange: pass a working_dir that points outside the server's CWD
-    // This test verifies that the handler rejects paths outside the allowed directory
-    // We'll use a path like "/tmp" or "../../etc" which should be rejected
+    // Arrange: working_dir=/tmp is outside the server's CWD
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo hi",
+        "working_dir": "/tmp"
+    }))
+    .await;
 
-    // Note: This test is a placeholder that documents the expected behavior.
-    // The actual handler validation happens in the exec_command tool handler in lib.rs,
-    // which calls validate_path() and checks if the directory exists and is within bounds.
-    // A full integration test would require setting up the MCP server context.
-
-    // For now, we verify that attempting to use an absolute path like /tmp
-    // would be rejected by the validate_path function.
-    let invalid_path = "/tmp";
-
-    // The validate_path function should reject this because it's outside the server's CWD
-    // This is tested implicitly by the handler's validation logic.
+    // Assert: handler must reject with isError=true and mention 'outside'
     assert!(
-        invalid_path.starts_with("/"),
-        "absolute paths should be rejected by validate_path"
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for working_dir outside CWD: {resp}"
+    );
+    let content_text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        content_text.contains("outside"),
+        "error message should contain 'outside': {content_text}"
     );
 }
 
