@@ -5487,6 +5487,72 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_git_show_strips_patch_hunks() {
+        // Happy path: verifies ^[+-][^+-] keeps ---/+++ file headers while stripping diff lines
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+show").unwrap(),
+            strip_patterns: vec![
+                Regex::new("^@@").unwrap(),
+                Regex::new("^[+-][^+-]").unwrap(),
+            ],
+            keep_patterns: vec![],
+            rule: types::FilterRule {
+                match_command: "^git\\s+show".to_string(),
+                description: None,
+                strip_ansi: true,
+                strip_lines_matching: vec!["^@@".to_string(), "^[+-][^+-]".to_string()],
+                keep_lines_matching: vec![],
+                max_lines: Some(200),
+                on_empty: None,
+            },
+        };
+
+        let stdout = "commit abc123\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,4 @@\n-old line\n+new line\n context line\n";
+        let filtered = filters::apply_filter(&compiled, stdout);
+
+        assert!(
+            filtered.contains("--- a/src/lib.rs"),
+            "should keep --- file header"
+        );
+        assert!(
+            filtered.contains("+++ b/src/lib.rs"),
+            "should keep +++ file header"
+        );
+        assert!(!filtered.contains("@@ -1,3"), "should strip hunk headers");
+        assert!(
+            !filtered.contains("-old line"),
+            "should strip removed lines"
+        );
+        assert!(!filtered.contains("+new line"), "should strip added lines");
+    }
+
+    #[test]
+    fn test_filter_on_empty_from_empty_input() {
+        // Edge case: on_empty fires when stdout is already empty (not just stripped-to-empty);
+        // complements test_filter_on_empty_substitution which covers stripped-to-empty
+        let compiled = filters::CompiledRule {
+            pattern: Regex::new("^git\\s+diff").unwrap(),
+            strip_patterns: vec![],
+            keep_patterns: vec![],
+            rule: types::FilterRule {
+                match_command: "^git\\s+diff".to_string(),
+                description: None,
+                strip_ansi: true,
+                strip_lines_matching: vec![],
+                keep_lines_matching: vec![],
+                max_lines: Some(100),
+                on_empty: Some("ok (working tree clean)".to_string()),
+            },
+        };
+
+        assert_eq!(
+            filters::apply_filter(&compiled, ""),
+            "ok (working tree clean)",
+            "on_empty should fire on empty input"
+        );
+    }
+
+    #[test]
     fn test_line_cap_fires_before_byte_cap() {
         // Edge case: 2500 lines x 5 chars each = 12500 bytes (under 30k byte cap)
         // Line cap (2000) should fire; returned content has ~50 lines (OVERFLOW_PREVIEW_LINES)
