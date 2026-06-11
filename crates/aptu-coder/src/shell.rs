@@ -51,7 +51,10 @@ mod tests {
         unsafe { std::env::remove_var("APTU_SHELL") };
 
         // Assert: APTU_SHELL wins over PATH-based detection
-        assert_eq!(shell, "zsh", "APTU_SHELL must take priority over PATH detection");
+        assert_eq!(
+            shell, "zsh",
+            "APTU_SHELL must take priority over PATH detection"
+        );
     }
 
     #[test]
@@ -75,6 +78,9 @@ mod tests {
         }
 
         // Assert: falls back to /bin/sh when bash is not on PATH
-        assert_eq!(shell, "/bin/sh", "must fall back to /bin/sh when bash is not on PATH");
+        assert_eq!(
+            shell, "/bin/sh",
+            "must fall back to /bin/sh when bash is not on PATH"
+        );
     }
 }
