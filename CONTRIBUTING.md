@@ -109,7 +109,8 @@ This project follows a Rust adaptation of the [NASA/JPL Power of 10](https://en.
 
 - **Zero warnings:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test`, and `cargo deny check` must all pass
 - **Every unsafe block requires a SAFETY comment:** Enforced by `clippy::undocumented_unsafe_blocks = deny` in workspace lints
-- **No `.unwrap()` in production code:** Enforced by `clippy::unwrap_used = "deny"`. Test code is exempted via `#[cfg_attr(test, allow(clippy::unwrap_used))]` at each crate root.
+- **No `.unwrap()` in production code:** Enforced by `clippy::unwrap_used = "deny"`. Test code is exempted via `#[cfg_attr(test, allow(clippy::unwrap_used))]` at each crate root. Use `.expect("reason")` in tests instead of `.unwrap()`.
+- **Shared MCP test harness:** Integration tests for `aptu-coder` live in `crates/aptu-coder/tests/`. Use `make_test_analyzer()` and `call_tool_raw(tool_name, params)` from `tests/common/mod.rs` rather than duplicating server setup. Unit tests for `validation`, `shell`, and `filters` logic live as `#[cfg(test)]` modules in their respective source files.
 - **No unchecked indexing on untrusted data:** Use `.get()` with explicit error propagation instead of `[]`
 - **Loops over untrusted or externally-driven data must have an explicit bound or checked max-iteration guard**
 - **Minimize #[cfg] feature combinations:** Each supported combination must be covered by CI

@@ -20,30 +20,33 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 
 | Module | File | Responsibility |
 |--------|------|-----------------|
-| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed |
+| **`aptu-coder`** | | |
+| `filters` | `crates/aptu-coder/src/filters.rs` | `exec_command` output filtering: `build_builtin_filter_rules`, `load_filter_table` (built-in + project-local `.aptu/filters.toml`), `apply_filter`, `maybe_inject_no_stat`; `FilterTableConfig` validates `schema_version` on deserialization and falls back to built-in rules on mismatch or parse error |
 | `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command`; exec plumbing (`build_exec_command`, `run_exec_impl`, `handle_output_persist`) |
-| `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative), `validate_path_in_dir` (working_dir-relative with traversal prevention), `io_error_to_path_error` |
-| `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
 | `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients via `notifications/message` |
-| `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
-| `schema_helpers` | `crates/aptu-coder-core/src/schema_helpers.rs` | Core JSON Schema helpers for integer and page_size field validation |
+| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed |
 | `metrics` | `crates/aptu-coder/src/metrics.rs` | Always-on JSONL metrics: daily-rotating files, `MetricEvent`, `MetricsSender`, `MetricsWriter`; includes `migrate_legacy_metrics_dir` for the `code-analyze-mcp` → `aptu-coder` XDG path migration |
+| `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
+| `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
+| `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative), `validate_path_in_dir` (working_dir-relative with traversal prevention), `io_error_to_path_error` |
+| **`aptu-coder-core`** | | |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
-| `parser` | `crates/aptu-coder-core/src/parser.rs` | Tree-sitter parsing; ElementExtractor and SemanticExtractor |
-| `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all seven tools |
-| `traversal` | `crates/aptu-coder-core/src/traversal.rs` | Directory walking with .gitignore support via ignore crate |
-| `types` | `crates/aptu-coder-core/src/types.rs` | Shared data structures (`AnalyzeDirectoryParams`, `AnalyzeFileParams`, `AnalyzeModuleParams`, `AnalyzeSymbolParams`, `AnalysisResult`, etc.) |
-| `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
-| `languages/mod` | `crates/aptu-coder-core/src/languages/mod.rs` | LanguageInfo registry and handler function types |
-| `languages/rust` | `crates/aptu-coder-core/src/languages/rust.rs` | Rust-specific queries and semantic handlers |
-| `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
-| `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
 | `cache` | `crates/aptu-coder-core/src/cache.rs` | LRU cache with mtime invalidation and lock_or_recover pattern |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
-| `test_detection` | `crates/aptu-coder-core/src/test_detection.rs` | Test file detection by path heuristics (directory and filename patterns) |
-| `pagination` | `crates/aptu-coder-core/src/pagination.rs` | Cursor-based pagination with CursorData and PaginationMode (Default, Callers, Callees) |
+| `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all seven tools |
 | `graph` | `crates/aptu-coder-core/src/graph.rs` | CallGraph struct and BFS traversal for symbol focus mode |
+| `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
+| `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
+| `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
+| `languages/mod` | `crates/aptu-coder-core/src/languages/mod.rs` | LanguageInfo registry and handler function types |
+| `languages/rust` | `crates/aptu-coder-core/src/languages/rust.rs` | Rust-specific queries and semantic handlers |
+| `pagination` | `crates/aptu-coder-core/src/pagination.rs` | Cursor-based pagination with CursorData and PaginationMode (Default, Callers, Callees) |
+| `parser` | `crates/aptu-coder-core/src/parser.rs` | Tree-sitter parsing; ElementExtractor and SemanticExtractor |
+| `schema_helpers` | `crates/aptu-coder-core/src/schema_helpers.rs` | Core JSON Schema helpers for integer and page_size field validation |
+| `test_detection` | `crates/aptu-coder-core/src/test_detection.rs` | Test file detection by path heuristics (directory and filename patterns) |
+| `traversal` | `crates/aptu-coder-core/src/traversal.rs` | Directory walking with .gitignore support via ignore crate |
+| `types` | `crates/aptu-coder-core/src/types.rs` | Shared data structures (`AnalyzeDirectoryParams`, `AnalyzeFileParams`, `AnalyzeModuleParams`, `AnalyzeSymbolParams`, `AnalysisResult`, etc.) |
 
 ## Data Flow
 
