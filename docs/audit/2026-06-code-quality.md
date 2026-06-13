@@ -1,5 +1,10 @@
 # Audit: Dependency Trim, Dead Code, and Clarity -- June 2026
 
+Audit date: 2026-06-11
+
+Status: Historical audit, preserved for issue traceability. Findings were verified against the
+repository state audited on 2026-06-11 and have not been revalidated against current `origin/main`.
+
 ## See Also
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) -- module map and data flow
