@@ -150,6 +150,7 @@ impl FileAnalysisOutput {
     }
 }
 /// Reason a file was skipped during eligibility check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SkipReason {
     Oversized,
     Unreadable,
