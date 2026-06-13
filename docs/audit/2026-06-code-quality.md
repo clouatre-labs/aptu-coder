@@ -1,10 +1,15 @@
 # Audit: Dependency Trim, Dead Code, and Clarity -- June 2026
 
+Audit date: 2026-06-11
+
+Status: Historical audit, preserved for issue traceability. Findings were verified against the
+repository state audited on 2026-06-11 and have not been revalidated against current `origin/main`.
+
 ## See Also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) -- module map and data flow
-- [DESIGN-GUIDE.md](DESIGN-GUIDE.md) -- idiom and naming conventions
-- [REPO-STANDARDS.md](REPO-STANDARDS.md) -- contribution and CI standards
+- [ARCHITECTURE.md](../ARCHITECTURE.md) -- module map and data flow
+- [DESIGN-GUIDE.md](../DESIGN-GUIDE.md) -- idiom and naming conventions
+- [REPO-STANDARDS.md](../REPO-STANDARDS.md) -- contribution and CI standards
 
 ## Purpose
 
@@ -30,19 +35,21 @@ the rationale is preserved rather than scattered across issue comments.
 
 ## Summary Table
 
+Issue status last checked: 2026-06-13
+
 | # | Category | Severity | Finding | Guard Verdict | Issue | Status |
 |---|---|---|---|---|---|---|
-| 1 | Dependency | High | `async-trait` declared but unused | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Open |
-| 2 | Dependency | High | `regex` in core crate, only used in server | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Open |
-| 3 | Dead Code | Medium | Stale `#[allow(dead_code)]` on `tool_router` | CONFIRMED | [#1020](https://github.com/clouatre-labs/aptu-coder/issues/1020) | Open |
-| 4 | Dependency | Medium | `which` crate for one PATH check | CONFIRMED | [#1022](https://github.com/clouatre-labs/aptu-coder/issues/1022) | Open |
-| 5 | Dead Code | Medium | `schema_version` parsed but never validated | CONFIRMED | [#1023](https://github.com/clouatre-labs/aptu-coder/issues/1023) | Open |
-| 6 | Test | Medium | 4 per-language empty-file tests clone one code path | PARTIAL | [#1021](https://github.com/clouatre-labs/aptu-coder/issues/1021) | Open |
-| 7 | Clarity | Medium | `lib.rs` at 5,818 lines -- all concerns in one file | PARTIAL | [#1024](https://github.com/clouatre-labs/aptu-coder/issues/1024) | Open |
-| 8 | Test | Medium | `MutexGuard` held across `.await` in test files | CONFIRMED | [#1021](https://github.com/clouatre-labs/aptu-coder/issues/1021) | Open |
-| 9 | Idiomacy | Low | Manual `Default` impl suppressed by stale allow | CONFIRMED | [#1020](https://github.com/clouatre-labs/aptu-coder/issues/1020) | Open |
-| 10 | Dependency | Low | `url = "2"` orphan in workspace deps | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Open |
-| 11 | Dependency | Medium | `toml` in core crate, zero call sites (bonus) | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Open |
+| 1 | Dependency | High | `async-trait` declared but unused | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Closed |
+| 2 | Dependency | High | `regex` in core crate, only used in server | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Closed |
+| 3 | Dead Code | Medium | Stale `#[allow(dead_code)]` on `tool_router` | CONFIRMED | [#1020](https://github.com/clouatre-labs/aptu-coder/issues/1020) | Closed |
+| 4 | Dependency | Medium | `which` crate for one PATH check | CONFIRMED | [#1022](https://github.com/clouatre-labs/aptu-coder/issues/1022) | Closed |
+| 5 | Dead Code | Medium | `schema_version` parsed but never validated | CONFIRMED | [#1023](https://github.com/clouatre-labs/aptu-coder/issues/1023) | Closed |
+| 6 | Test | Medium | 4 per-language empty-file tests clone one code path | PARTIAL | [#1021](https://github.com/clouatre-labs/aptu-coder/issues/1021) | Closed |
+| 7 | Clarity | Medium | `lib.rs` at 5,818 lines -- all concerns in one file | PARTIAL | [#1024](https://github.com/clouatre-labs/aptu-coder/issues/1024) | Closed |
+| 8 | Test | Medium | `MutexGuard` held across `.await` in test files | CONFIRMED | [#1021](https://github.com/clouatre-labs/aptu-coder/issues/1021) | Closed |
+| 9 | Idiomacy | Low | Manual `Default` impl suppressed by stale allow | CONFIRMED | [#1020](https://github.com/clouatre-labs/aptu-coder/issues/1020) | Closed |
+| 10 | Dependency | Low | `url = "2"` orphan in workspace deps | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Closed |
+| 11 | Dependency | Medium | `toml` in core crate, zero call sites (bonus) | CONFIRMED | [#1019](https://github.com/clouatre-labs/aptu-coder/issues/1019) | Closed |
 
 ---
 
