@@ -2,9 +2,9 @@
 
 ## See Also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) -- module map and data flow
-- [DESIGN-GUIDE.md](DESIGN-GUIDE.md) -- idiom and naming conventions
-- [REPO-STANDARDS.md](REPO-STANDARDS.md) -- contribution and CI standards
+- [ARCHITECTURE.md](../ARCHITECTURE.md) -- module map and data flow
+- [DESIGN-GUIDE.md](../DESIGN-GUIDE.md) -- idiom and naming conventions
+- [REPO-STANDARDS.md](../REPO-STANDARDS.md) -- contribution and CI standards
 
 ## Purpose
 
