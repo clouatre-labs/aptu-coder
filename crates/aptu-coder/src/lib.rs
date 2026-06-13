@@ -4200,52 +4200,33 @@ mod tests {
         assert_eq!(hit2, CacheTier::L1Memory, "second call must be a cache hit");
     }
 
-    #[tokio::test]
-    async fn test_analyze_module_cache_hit_metrics() {
+    #[test]
+    fn test_analyze_module_cache_hit_metrics() {
         use std::io::Write as _;
         use tempfile::NamedTempFile;
 
-        // Arrange: create a temp Rust file
-        let mut f = NamedTempFile::with_suffix(".rs").unwrap();
-        writeln!(f, "fn bar() {{}}").unwrap();
-        let path = f.path().to_str().unwrap().to_string();
+        // Arrange: create a temp Rust file inside CWD so validate_path accepts it
+        let cwd = std::env::current_dir().unwrap();
+        let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+        write!(f, "use std::io;\nfn bar() {{}}\n").unwrap();
+        f.flush().unwrap();
 
-        let analyzer = make_analyzer();
+        // Act
+        let result = analyze::analyze_module_file(f.path().to_str().unwrap());
 
-        // Act: call analyze_module (new fast path: analyze_module_file, no FileDetails cache)
-        let mut module_params = aptu_coder_core::types::AnalyzeModuleParams::default();
-        module_params.path = path.clone();
-
-        // Assert: the analyze_module handler must NOT populate the FileDetails L1 cache.
-        // The new path routes through analyze_module_file and caches ModuleInfo in L2 only.
-        let file_cache_key = std::fs::metadata(&path).ok().and_then(|meta| {
-            meta.modified()
-                .ok()
-                .map(|mtime| aptu_coder_core::cache::CacheKey {
-                    path: std::path::PathBuf::from(&path),
-                    modified: mtime,
-                    mode: aptu_coder_core::types::AnalysisMode::FileDetails,
-                })
-        });
-        // Before any call, FileDetails cache is empty
-        let before = file_cache_key
-            .as_ref()
-            .and_then(|k| analyzer.cache.get(k))
-            .is_some();
-        assert!(
-            !before,
-            "FileDetails cache must be empty before analyze_module call"
+        // Assert
+        let module_info = result.expect("analyze_module_file must succeed");
+        assert_eq!(
+            module_info.functions.len(),
+            1,
+            "expected exactly one function"
         );
-
-        // After analyze_module, FileDetails cache must still be empty (fast path does not populate it)
-        drop(module_params);
-        let after = file_cache_key
-            .as_ref()
-            .and_then(|k| analyzer.cache.get(k))
-            .is_some();
+        assert_eq!(module_info.functions[0].name, "bar");
+        assert_eq!(module_info.imports.len(), 1, "expected exactly one import");
         assert!(
-            !after,
-            "analyze_module must not populate the FileDetails cache; it uses ModuleOnly fast path"
+            module_info.imports[0].module.contains("std"),
+            "import module must contain 'std', got: {}",
+            module_info.imports[0].module
         );
     }
 
