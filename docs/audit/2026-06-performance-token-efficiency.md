@@ -63,7 +63,7 @@ Observed cache impact:
 
 | ID | Severity | Type | Finding | Issue | Status |
 |---|---|---|---|---|---|
-| F1 | High | Bug | `exec_command` cache behavior is documented but inactive | [#1039](https://github.com/clouatre-labs/aptu-coder/issues/1039) | Open |
+| F1 | High | Bug | `exec_command` cache behavior is documented but inactive | [#1039](https://github.com/clouatre-labs/aptu-coder/issues/1039) | Closed |
 | F2 | High | Refactor | `analyze_module` does full file analysis instead of the existing module fast path | [#1046](https://github.com/clouatre-labs/aptu-coder/issues/1046) | Open |
 | F3 | High | Refactor | Shallow `analyze_directory` still performs an unbounded tree walk | [#1044](https://github.com/clouatre-labs/aptu-coder/issues/1044) | Open |
 | F4 | Medium | Refactor | Directory analysis reads eligible files twice | [#1041](https://github.com/clouatre-labs/aptu-coder/issues/1041) | Open |

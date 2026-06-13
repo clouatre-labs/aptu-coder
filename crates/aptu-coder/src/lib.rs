@@ -56,10 +56,6 @@ pub struct ExecCommandParams {
     pub cpu_limit_secs: Option<u64>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
-    /// Enable caching of command results. None or true = enabled (default); false = disabled.
-    /// Caching is skipped if stdin is provided, regardless of this setting.
-    #[serde(default)]
-    pub cache: Option<bool>,
 }
 
 impl ExecCommandParams {
