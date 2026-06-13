@@ -2313,7 +2313,7 @@ impl CodeAnalyzer {
         // Uses AnalysisMode::ModuleOnly disk key so entries are distinct from analyze_file.
         // L1 in-memory cache is not used here: the existing L1 stores Arc<FileAnalysisOutput>
         // and adding a new typed slot is out of scope; L2 avoids the parse cost across restarts.
-        let file_bytes = match std::fs::read(&params.path) {
+        let file_bytes = match tokio::fs::read(&params.path).await {
             Ok(b) => b,
             Err(e) => {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
