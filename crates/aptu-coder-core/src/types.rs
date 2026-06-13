@@ -559,37 +559,43 @@ impl SemanticAnalysis {
         let Some(fields) = fields else {
             return self.clone();
         };
-        if fields.iter().any(|f| matches!(f, AnalyzeFileField::All)) {
+
+        // Single pass: derive a presence bitmask so each variant is checked exactly once.
+        let mut want_all = false;
+        let mut want_functions = false;
+        let mut want_classes = false;
+        let mut want_imports = false;
+        for f in fields {
+            match f {
+                AnalyzeFileField::All => {
+                    want_all = true;
+                    break;
+                }
+                AnalyzeFileField::Functions => want_functions = true,
+                AnalyzeFileField::Classes => want_classes = true,
+                AnalyzeFileField::Imports => want_imports = true,
+            }
+        }
+        if want_all {
             return self.clone();
         }
-        let functions = if fields
-            .iter()
-            .any(|f| matches!(f, AnalyzeFileField::Functions))
-        {
-            self.functions.clone()
-        } else {
-            Vec::new()
-        };
-        let classes = if fields
-            .iter()
-            .any(|f| matches!(f, AnalyzeFileField::Classes))
-        {
-            self.classes.clone()
-        } else {
-            Vec::new()
-        };
-        let imports = if fields
-            .iter()
-            .any(|f| matches!(f, AnalyzeFileField::Imports))
-        {
-            self.imports.clone()
-        } else {
-            Vec::new()
-        };
+
         Self {
-            functions,
-            classes,
-            imports,
+            functions: if want_functions {
+                self.functions.clone()
+            } else {
+                Vec::new()
+            },
+            classes: if want_classes {
+                self.classes.clone()
+            } else {
+                Vec::new()
+            },
+            imports: if want_imports {
+                self.imports.clone()
+            } else {
+                Vec::new()
+            },
             references: self.references.clone(),
             call_frequency: self.call_frequency.clone(),
             calls: self.calls.clone(),
