@@ -211,3 +211,234 @@ async fn test_analyze_module_moduleonly_cache_tier_metrics() {
         "second call output must contain function 'hello'; got: {text2}"
     );
 }
+
+#[tokio::test]
+async fn test_fields_functions_only_structured() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: temp Rust file with functions, a class, and an import
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(
+        f,
+        "use std::collections::HashMap;\npub struct Foo {{}}\nimpl Foo {{\n    pub fn bar(&self) {{}}\n}}\npub fn baz() {{}}\n"
+    )
+    .unwrap();
+
+    // Act: analyze_file with fields=[functions]
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": f.path().to_str().unwrap(),
+            "ast_recursion_limit": null,
+            "page_size": null,
+            "fields": ["functions"]
+        }),
+    )
+    .await;
+
+    // Assert: no error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success; got: {resp}"
+    );
+
+    // Inspect structuredContent.semantic
+    let sc = &resp["result"]["structuredContent"];
+    let functions = sc["semantic"]["functions"]
+        .as_array()
+        .expect("functions must be array");
+    let classes = sc["semantic"]["classes"]
+        .as_array()
+        .expect("classes must be array");
+    let imports = sc["semantic"]["imports"]
+        .as_array()
+        .expect("imports must be array");
+
+    assert!(
+        !functions.is_empty(),
+        "functions must be non-empty for fields=[functions]; got: {sc}"
+    );
+    assert!(
+        classes.is_empty(),
+        "classes must be empty for fields=[functions]; got: {sc}"
+    );
+    assert!(
+        imports.is_empty(),
+        "imports must be empty for fields=[functions]; got: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_fields_classes_only_structured() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: temp Rust file with functions, a class, and an import
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(
+        f,
+        "use std::collections::HashMap;\npub struct Foo {{}}\nimpl Foo {{\n    pub fn bar(&self) {{}}\n}}\npub fn baz() {{}}\n"
+    )
+    .unwrap();
+
+    // Act: analyze_file with fields=[classes]
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": f.path().to_str().unwrap(),
+            "ast_recursion_limit": null,
+            "page_size": null,
+            "fields": ["classes"]
+        }),
+    )
+    .await;
+
+    // Assert: no error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success; got: {resp}"
+    );
+
+    // Inspect structuredContent.semantic
+    let sc = &resp["result"]["structuredContent"];
+    let functions = sc["semantic"]["functions"]
+        .as_array()
+        .expect("functions must be array");
+    let classes = sc["semantic"]["classes"]
+        .as_array()
+        .expect("classes must be array");
+    let imports = sc["semantic"]["imports"]
+        .as_array()
+        .expect("imports must be array");
+
+    assert!(
+        functions.is_empty(),
+        "functions must be empty for fields=[classes]; got: {sc}"
+    );
+    assert!(
+        !classes.is_empty(),
+        "classes must be non-empty for fields=[classes]; got: {sc}"
+    );
+    assert!(
+        imports.is_empty(),
+        "imports must be empty for fields=[classes]; got: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_fields_imports_only_structured() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: temp Rust file with functions, a class, and an import
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(
+        f,
+        "use std::collections::HashMap;\npub struct Foo {{}}\nimpl Foo {{\n    pub fn bar(&self) {{}}\n}}\npub fn baz() {{}}\n"
+    )
+    .unwrap();
+
+    // Act: analyze_file with fields=[imports]
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": f.path().to_str().unwrap(),
+            "ast_recursion_limit": null,
+            "page_size": null,
+            "fields": ["imports"]
+        }),
+    )
+    .await;
+
+    // Assert: no error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success; got: {resp}"
+    );
+
+    // Inspect structuredContent.semantic
+    let sc = &resp["result"]["structuredContent"];
+    let functions = sc["semantic"]["functions"]
+        .as_array()
+        .expect("functions must be array");
+    let classes = sc["semantic"]["classes"]
+        .as_array()
+        .expect("classes must be array");
+    let imports = sc["semantic"]["imports"]
+        .as_array()
+        .expect("imports must be array");
+
+    assert!(
+        functions.is_empty(),
+        "functions must be empty for fields=[imports]; got: {sc}"
+    );
+    assert!(
+        classes.is_empty(),
+        "classes must be empty for fields=[imports]; got: {sc}"
+    );
+    assert!(
+        !imports.is_empty(),
+        "imports must be non-empty for fields=[imports]; got: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_fields_none_structured_full() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: temp Rust file with functions, a class, and an import
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(
+        f,
+        "use std::collections::HashMap;\npub struct Foo {{}}\nimpl Foo {{\n    pub fn bar(&self) {{}}\n}}\npub fn baz() {{}}\n"
+    )
+    .unwrap();
+
+    // Act: analyze_file with fields=None (no projection)
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": f.path().to_str().unwrap(),
+            "ast_recursion_limit": null,
+            "page_size": null
+        }),
+    )
+    .await;
+
+    // Assert: no error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success; got: {resp}"
+    );
+
+    // Inspect structuredContent.semantic -- all sections must be present (regression)
+    let sc = &resp["result"]["structuredContent"];
+    let functions = sc["semantic"]["functions"]
+        .as_array()
+        .expect("functions must be array");
+    let classes = sc["semantic"]["classes"]
+        .as_array()
+        .expect("classes must be array");
+    let imports = sc["semantic"]["imports"]
+        .as_array()
+        .expect("imports must be array");
+
+    assert!(
+        !functions.is_empty(),
+        "functions must be non-empty when fields=None; got: {sc}"
+    );
+    assert!(
+        !classes.is_empty(),
+        "classes must be non-empty when fields=None; got: {sc}"
+    );
+    assert!(
+        !imports.is_empty(),
+        "imports must be non-empty when fields=None; got: {sc}"
+    );
+}

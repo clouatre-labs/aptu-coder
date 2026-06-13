@@ -1731,10 +1731,10 @@ impl CodeAnalyzer {
             final_text.push_str(cursor);
         }
 
-        // Build the response output, sharing SemanticAnalysis from the Arc to avoid cloning it.
+        // Build the response output, projecting SemanticAnalysis to only the requested sections.
         let response_output = analyze::FileAnalysisOutput::new(
             formatted,
-            arc_output.semantic.clone(),
+            arc_output.semantic.project(params.fields.as_deref()),
             line_count,
             next_cursor,
         );

@@ -546,6 +546,63 @@ impl SemanticAnalysis {
             def_use_sites: Vec::new(),
         }
     }
+
+    /// Return a filtered copy of this `SemanticAnalysis` based on the requested field set.
+    ///
+    /// - `None` (or a slice containing `AnalyzeFileField::All`) returns a full clone.
+    /// - Otherwise each of `functions`, `classes`, and `imports` is populated only when the
+    ///   corresponding `AnalyzeFileField` variant is present in `fields`.
+    /// - All other fields (`references`, `call_frequency`, `calls`, `impl_traits`,
+    ///   `def_use_sites`) are always preserved unchanged.
+    #[must_use]
+    pub fn project(&self, fields: Option<&[AnalyzeFileField]>) -> Self {
+        let Some(fields) = fields else {
+            return self.clone();
+        };
+
+        // Single pass: derive a presence bitmask so each variant is checked exactly once.
+        let mut want_all = false;
+        let mut want_functions = false;
+        let mut want_classes = false;
+        let mut want_imports = false;
+        for f in fields {
+            match f {
+                AnalyzeFileField::All => {
+                    want_all = true;
+                    break;
+                }
+                AnalyzeFileField::Functions => want_functions = true,
+                AnalyzeFileField::Classes => want_classes = true,
+                AnalyzeFileField::Imports => want_imports = true,
+            }
+        }
+        if want_all {
+            return self.clone();
+        }
+
+        Self {
+            functions: if want_functions {
+                self.functions.clone()
+            } else {
+                Vec::new()
+            },
+            classes: if want_classes {
+                self.classes.clone()
+            } else {
+                Vec::new()
+            },
+            imports: if want_imports {
+                self.imports.clone()
+            } else {
+                Vec::new()
+            },
+            references: self.references.clone(),
+            call_frequency: self.call_frequency.clone(),
+            calls: self.calls.clone(),
+            impl_traits: self.impl_traits.clone(),
+            def_use_sites: self.def_use_sites.clone(),
+        }
+    }
 }
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
