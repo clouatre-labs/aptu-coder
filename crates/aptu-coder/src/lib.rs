@@ -541,8 +541,8 @@ impl CodeAnalyzer {
         let max_depth = params.max_depth;
         let ct_clone = ct.clone();
 
-        // Single unbounded walk; filter in-memory to respect max_depth for analysis.
-        let all_entries = walk_directory(path, None).map_err(|e| {
+        // Bounded walk: pass max_depth directly so the walker stops at the right depth.
+        let all_entries = walk_directory(path, params.max_depth).map_err(|e| {
             ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
                 format!("Failed to walk directory: {e}"),

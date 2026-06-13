@@ -56,6 +56,55 @@ fn test_call_tool_result_cache_hint_metadata() {
 }
 
 #[tokio::test]
+async fn test_analyze_directory_bounded_traversal_skips_deep() {
+    use tempfile::TempDir;
+
+    // Arrange: three-level directory tree within CWD so validate_path accepts it.
+    let cwd = std::env::current_dir().unwrap();
+    let dir = TempDir::new_in(&cwd).unwrap();
+    let root = dir.path();
+    // depth 1
+    std::fs::create_dir(root.join("a")).unwrap();
+    std::fs::write(root.join("a/file1.rs"), "fn a1() {}").unwrap();
+    // depth 2
+    std::fs::create_dir(root.join("a/b")).unwrap();
+    std::fs::write(root.join("a/b/file2.rs"), "fn b1() {}").unwrap();
+    // depth 3 -- must be omitted
+    std::fs::create_dir(root.join("a/b/c")).unwrap();
+    std::fs::write(root.join("a/b/c/deep.rs"), "fn deep() {}").unwrap();
+
+    // Act: analyze_directory with max_depth=2
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": root.to_str().unwrap(),
+            "max_depth": 2,
+            "page_size": 100
+        }),
+    )
+    .await;
+
+    // Assert: no error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success; got: {resp}"
+    );
+
+    // The text output must not mention the depth-3 file
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        !text.contains("deep.rs"),
+        "depth-3 file 'deep.rs' must not appear in max_depth=2 output; got: {text}"
+    );
+
+    // The text must mention the depth-1 and depth-2 files
+    assert!(
+        text.contains("file1.rs") || text.contains("file2.rs"),
+        "shallow files must appear in max_depth=2 output; got: {text}"
+    );
+}
+
+#[tokio::test]
 async fn test_path_outside_cwd_rejected() {
     // Arrange: path=/etc/passwd is outside the server's CWD
     let resp = call_tool_raw(
