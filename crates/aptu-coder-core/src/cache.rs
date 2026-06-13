@@ -5,9 +5,9 @@
 //! Provides thread-safe, capacity-bounded caching of file analysis outputs using LRU eviction.
 //! Recovers gracefully from poisoned mutex conditions.
 
-use crate::analyze::{AnalysisOutput, FileAnalysisOutput};
+use crate::analyze::{AnalysisOutput, FileAnalysisOutput, FocusedAnalysisOutput};
 use crate::traversal::WalkEntry;
-use crate::types::AnalysisMode;
+use crate::types::{AnalysisMode, SymbolMatchMode};
 use lru::LruCache;
 use rayon::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
@@ -103,6 +103,105 @@ where
             let mut guard = poisoned.into_inner();
             *guard = new_cache;
             recovery(&mut guard)
+        }
+    }
+}
+
+/// Cache key for call graph analysis combining path, parameters, and file mtimes.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct CallGraphCacheKey {
+    root_path: PathBuf,
+    git_ref: Option<String>,
+    follow_depth: u32,
+    match_mode: SymbolMatchMode,
+    impl_only: bool,
+    ast_recursion_limit: Option<usize>,
+    /// Sorted (path, mtime_as_unix_nanos) pairs for all non-dir entries.
+    file_mtimes: Vec<(PathBuf, u64)>,
+}
+
+impl CallGraphCacheKey {
+    /// Build a `CallGraphCacheKey` from walk entries and analysis parameters.
+    /// Files are sorted by path for deterministic hashing.
+    /// Directories are filtered out; only file entries contribute to the key.
+    #[must_use]
+    pub fn from_entries(
+        root: &std::path::Path,
+        entries: &[WalkEntry],
+        git_ref: Option<&str>,
+        follow_depth: u32,
+        match_mode: &SymbolMatchMode,
+        impl_only: bool,
+        ast_recursion_limit: Option<usize>,
+    ) -> Self {
+        let mut file_mtimes: Vec<(PathBuf, u64)> = entries
+            .par_iter()
+            .filter(|e| !e.is_dir)
+            .map(|e| {
+                let mtime = e
+                    .mtime
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0);
+                (e.path.clone(), mtime)
+            })
+            .collect();
+        file_mtimes.sort_by(|a, b| a.0.cmp(&b.0));
+        Self {
+            root_path: root.to_path_buf(),
+            git_ref: git_ref.map(ToOwned::to_owned),
+            follow_depth,
+            match_mode: match_mode.clone(),
+            impl_only,
+            ast_recursion_limit,
+            file_mtimes,
+        }
+    }
+}
+
+/// Cached call graph result: the fully-built `FocusedAnalysisOutput`.
+/// `CallGraph` is not serializable, so caching is L1 memory only.
+pub type CallGraphCacheValue = Arc<FocusedAnalysisOutput>;
+
+/// L1 in-memory LRU cache for call graph results.
+/// Capacity is controlled via `APTU_CODER_SYMBOL_CACHE_CAPACITY` env var (default 32).
+pub struct CallGraphCache {
+    capacity: usize,
+    cache: Arc<Mutex<LruCache<CallGraphCacheKey, CallGraphCacheValue>>>,
+}
+
+impl CallGraphCache {
+    /// Create a new `CallGraphCache` with the given capacity.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
+        // SAFETY: capacity is >= 1 due to .max(1) applied above
+        let cache_size = unsafe { NonZeroUsize::new_unchecked(capacity) };
+        Self {
+            capacity,
+            cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
+        }
+    }
+
+    /// Look up a cached result by key. Returns `None` on miss or mutex poison.
+    pub fn get(&self, key: &CallGraphCacheKey) -> Option<CallGraphCacheValue> {
+        lock_or_recover(&self.cache, self.capacity, |guard| guard.get(key).cloned())
+    }
+
+    /// Store a result in the cache.
+    pub fn put(&self, key: CallGraphCacheKey, value: CallGraphCacheValue) {
+        lock_or_recover(&self.cache, self.capacity, |guard| {
+            guard.put(key, value);
+        });
+    }
+}
+
+impl Clone for CallGraphCache {
+    fn clone(&self) -> Self {
+        Self {
+            capacity: self.capacity,
+            cache: Arc::clone(&self.cache),
         }
     }
 }
