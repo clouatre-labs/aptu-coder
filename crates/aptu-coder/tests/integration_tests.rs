@@ -157,8 +157,41 @@ async fn test_analyze_module_moduleonly_cache_tier_metrics() {
         "first call output must contain function 'hello'; got: {text1}"
     );
 
-    // Allow the write-behind L2 task to complete
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    // Wait for the write-behind L2 task to flush the cache entry to disk.
+    // Poll for the expected cache file rather than sleeping a fixed duration to avoid flakiness.
+    {
+        let file_bytes = std::fs::read(f.path()).expect("temp file must be readable");
+        let hash = blake3::hash(&file_bytes);
+        let hex = hash.to_hex();
+        let cache_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let xdg = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+                    std::env::var("HOME")
+                        .map(|h| format!("{h}/.local/share"))
+                        .unwrap_or_else(|_| ".".to_string())
+                });
+                std::path::PathBuf::from(xdg)
+                    .join("aptu-coder")
+                    .join("analysis-cache")
+            });
+        let entry = cache_dir
+            .join("analyze_module")
+            .join(&hex[..2])
+            .join(format!("{}.json.snap", hex.as_str()));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if entry.exists() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "L2 disk cache entry not written within 5 s; expected path: {}",
+                entry.display()
+            );
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    }
 
     // Act: second call on same file -- content hash unchanged so L2 disk cache should hit
     let resp2 = call_tool_raw(
