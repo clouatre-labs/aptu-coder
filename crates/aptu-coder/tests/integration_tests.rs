@@ -128,3 +128,53 @@ async fn test_path_outside_cwd_rejected() {
         "error message should contain 'outside': {content_text}"
     );
 }
+
+#[tokio::test]
+async fn test_analyze_module_moduleonly_cache_tier_metrics() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: a temp Rust file inside CWD so validate_path accepts it
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(f, "fn hello() {{}}").unwrap();
+
+    // Act: first call -- cache miss (L2 disk cache is empty for a fresh unique file)
+    let resp1 = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    // Assert first call succeeds and returns the function name
+    assert!(
+        !resp1["result"]["isError"].as_bool().unwrap_or(false),
+        "first analyze_module call must succeed; got: {resp1}"
+    );
+    let text1 = resp1["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text1.contains("hello"),
+        "first call output must contain function 'hello'; got: {text1}"
+    );
+
+    // Allow the write-behind L2 task to complete
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    // Act: second call on same file -- content hash unchanged so L2 disk cache should hit
+    let resp2 = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    // Assert second call succeeds with consistent output
+    assert!(
+        !resp2["result"]["isError"].as_bool().unwrap_or(false),
+        "second analyze_module call must succeed; got: {resp2}"
+    );
+    let text2 = resp2["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text2.contains("hello"),
+        "second call output must contain function 'hello'; got: {text2}"
+    );
+}

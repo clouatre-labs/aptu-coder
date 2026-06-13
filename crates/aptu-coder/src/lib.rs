@@ -2309,90 +2309,118 @@ impl CodeAnalyzer {
             )));
         }
 
-        // Route through handle_file_details_mode to inherit L1+L2 caching
-        let mut analyze_file_params: AnalyzeFileParams = Default::default();
-        analyze_file_params.path = params.path.clone();
-        let (arc_output, module_tier) = match self
-            .handle_file_details_mode(&analyze_file_params)
-            .await
-        {
-            Ok((output, tier)) => (output, tier),
-            Err(e) => {
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                let error_type = match e.code {
-                    rmcp::model::ErrorCode::INVALID_PARAMS => Some("invalid_params".to_string()),
-                    rmcp::model::ErrorCode::INTERNAL_ERROR => Some("internal_error".to_string()),
-                    _ => None,
-                };
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "analyze_module",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type,
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    file_ext: crate::metrics::path_file_ext(&param_path),
-                    ..Default::default()
-                });
-                let error_data = match e.code {
-                    rmcp::model::ErrorCode::INVALID_PARAMS => e,
-                    _ => ErrorData::new(
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        format!("Failed to analyze module: {}", e.message),
-                        Some(error_meta("internal", false, "report this as a bug")),
-                    ),
-                };
-                return Ok(err_to_tool_result(error_data));
-            }
-        };
+        // Module-only cache path: L2 (content hash) -> analyze_module_file fast path.
+        // Uses AnalysisMode::ModuleOnly disk key so entries are distinct from analyze_file.
+        // L1 in-memory cache is not used here: the existing L1 stores Arc<FileAnalysisOutput>
+        // and adding a new typed slot is out of scope; L2 avoids the parse cost across restarts.
+        let file_bytes = std::fs::read(&params.path).unwrap_or_default();
+        let disk_key = blake3::hash(&file_bytes);
 
-        // Reconstruct ModuleInfo from FileAnalysisOutput
-        let file_path = std::path::Path::new(&params.path);
-        let name = file_path
-            .file_name()
-            .and_then(|n: &std::ffi::OsStr| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let language = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .and_then(aptu_coder_core::lang::language_for_extension)
-            .unwrap_or("unknown")
-            .to_string();
-        let functions = arc_output
-            .semantic
-            .functions
-            .iter()
-            .map(|f| {
-                let mut mfi = types::ModuleFunctionInfo::default();
-                mfi.name = f.name.clone();
-                mfi.line = f.line;
-                mfi
-            })
-            .collect();
-        let imports = arc_output
-            .semantic
-            .imports
-            .iter()
-            .map(|i| {
-                let mut mii = types::ModuleImportInfo::default();
-                mii.module = i.module.clone();
-                mii.items = i.items.clone();
-                mii
-            })
-            .collect();
-        let module_info =
-            types::ModuleInfo::new(name, arc_output.line_count, language, functions, imports);
+        let (module_info, module_tier) = if let Some(cached) = self
+            .disk_cache
+            .get::<types::ModuleInfo>("analyze_module", &disk_key)
+        {
+            (cached, CacheTier::L2Disk)
+        } else {
+            // Cache miss: run the lightweight fast path
+            let mi = match analyze::analyze_module_file(&params.path) {
+                Ok(mi) => mi,
+                Err(e) => {
+                    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                    let (error_type, error_data) = match &e {
+                        analyze::AnalyzeError::Parser(
+                            aptu_coder_core::parser::ParserError::UnsupportedLanguage(lang),
+                        ) => (
+                            Some("invalid_params".to_string()),
+                            ErrorData::new(
+                                rmcp::model::ErrorCode::INVALID_PARAMS,
+                                format!(
+                                    "Unsupported language: {lang}. Supported extensions: {}",
+                                    aptu_coder_core::lang::supported_extensions().join(", ")
+                                ),
+                                Some(error_meta(
+                                    "invalid_request",
+                                    false,
+                                    "provide a file with a supported extension",
+                                )),
+                            ),
+                        ),
+                        _ => (
+                            Some("internal_error".to_string()),
+                            ErrorData::new(
+                                rmcp::model::ErrorCode::INTERNAL_ERROR,
+                                format!("Failed to analyze module: {e}"),
+                                Some(error_meta("internal", false, "report this as a bug")),
+                            ),
+                        ),
+                    };
+                    self.metrics_tx.send(crate::metrics::MetricEvent {
+                        ts: crate::metrics::unix_ms(),
+                        tool: "analyze_module",
+                        duration_ms: dur,
+                        output_chars: 0,
+                        param_path_depth: crate::metrics::path_component_count(&param_path),
+                        max_depth: None,
+                        result: "error",
+                        error_type,
+                        session_id: sid.clone(),
+                        seq: Some(seq),
+                        cache_hit: None,
+                        cache_write_failure: None,
+                        cache_tier: None,
+                        exit_code: None,
+                        timed_out: false,
+                        output_truncated: None,
+                        file_ext: crate::metrics::path_file_ext(&param_path),
+                        ..Default::default()
+                    });
+                    return Ok(err_to_tool_result(error_data));
+                }
+            };
+            // Write-behind: store ModuleInfo in L2 disk cache
+            {
+                let dc = self.disk_cache.clone();
+                let k = disk_key;
+                let mi_clone = mi.clone();
+                let metrics_tx2 = self.metrics_tx.clone();
+                let sid2 = sid.clone();
+                tokio::spawn(async move {
+                    let handle = tokio::task::spawn_blocking(move || {
+                        dc.put("analyze_module", &k, &mi_clone);
+                        dc.drain_write_failures()
+                    });
+                    if let Ok(failures) = handle.await
+                        && failures > 0
+                    {
+                        tracing::warn!(
+                            tool = "analyze_module",
+                            failures,
+                            "L2 disk cache write failed"
+                        );
+                        metrics_tx2.send(crate::metrics::MetricEvent {
+                            ts: crate::metrics::unix_ms(),
+                            tool: "analyze_module",
+                            duration_ms: 0,
+                            output_chars: 0,
+                            param_path_depth: 0,
+                            max_depth: None,
+                            result: "ok",
+                            error_type: None,
+                            session_id: sid2,
+                            seq: None,
+                            cache_hit: None,
+                            cache_write_failure: Some(true),
+                            cache_tier: None,
+                            exit_code: None,
+                            timed_out: false,
+                            output_truncated: None,
+                            ..Default::default()
+                        });
+                    }
+                });
+            }
+            (mi, CacheTier::Miss)
+        };
 
         let text = format_module_info(&module_info);
 
@@ -4143,34 +4171,20 @@ mod tests {
         use std::io::Write as _;
         use tempfile::NamedTempFile;
 
-        // Arrange: create a temp Rust file; prime the file cache via analyze_file handler
+        // Arrange: create a temp Rust file
         let mut f = NamedTempFile::with_suffix(".rs").unwrap();
         writeln!(f, "fn bar() {{}}").unwrap();
         let path = f.path().to_str().unwrap().to_string();
 
         let analyzer = make_analyzer();
 
-        // Prime the file cache by calling handle_file_details_mode once
-        let mut file_params = aptu_coder_core::types::AnalyzeFileParams::default();
-        file_params.path = path.clone();
-        file_params.ast_recursion_limit = None;
-        file_params.fields = None;
-        file_params.pagination.cursor = None;
-        file_params.pagination.page_size = None;
-        file_params.output_control.summary = None;
-        file_params.output_control.force = None;
-        file_params.output_control.verbose = None;
-        let (_cached, _) = analyzer
-            .handle_file_details_mode(&file_params)
-            .await
-            .unwrap();
-
-        // Act: now call analyze_module; the cache key is mtime-based so same file = hit
+        // Act: call analyze_module (new fast path: analyze_module_file, no FileDetails cache)
         let mut module_params = aptu_coder_core::types::AnalyzeModuleParams::default();
         module_params.path = path.clone();
 
-        // Replicate the cache lookup the handler does (no public method; test via build path)
-        let module_cache_key = std::fs::metadata(&path).ok().and_then(|meta| {
+        // Assert: the analyze_module handler must NOT populate the FileDetails L1 cache.
+        // The new path routes through analyze_module_file and caches ModuleInfo in L2 only.
+        let file_cache_key = std::fs::metadata(&path).ok().and_then(|meta| {
             meta.modified()
                 .ok()
                 .map(|mtime| aptu_coder_core::cache::CacheKey {
@@ -4179,17 +4193,26 @@ mod tests {
                     mode: aptu_coder_core::types::AnalysisMode::FileDetails,
                 })
         });
-        let cache_hit = module_cache_key
+        // Before any call, FileDetails cache is empty
+        let before = file_cache_key
             .as_ref()
             .and_then(|k| analyzer.cache.get(k))
             .is_some();
-
-        // Assert: the file cache must have been populated by the earlier handle_file_details_mode call
         assert!(
-            cache_hit,
-            "analyze_module should find the file in the shared file cache"
+            !before,
+            "FileDetails cache must be empty before analyze_module call"
         );
+
+        // After analyze_module, FileDetails cache must still be empty (fast path does not populate it)
         drop(module_params);
+        let after = file_cache_key
+            .as_ref()
+            .and_then(|k| analyzer.cache.get(k))
+            .is_some();
+        assert!(
+            !after,
+            "analyze_module must not populate the FileDetails cache; it uses ModuleOnly fast path"
+        );
     }
 
     // --- import_lookup tests ---
