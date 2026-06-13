@@ -455,6 +455,8 @@ pub enum AnalysisMode {
     FileDetails,
     /// Call graph and dataflow analysis focused on a specific symbol.
     SymbolFocus,
+    /// Fast function and import index for a single file (analyze_module fast path).
+    ModuleOnly,
 }
 
 #[non_exhaustive]

@@ -56,6 +56,55 @@ fn test_call_tool_result_cache_hint_metadata() {
 }
 
 #[tokio::test]
+async fn test_analyze_directory_bounded_traversal_skips_deep() {
+    use tempfile::TempDir;
+
+    // Arrange: three-level directory tree within CWD so validate_path accepts it.
+    let cwd = std::env::current_dir().unwrap();
+    let dir = TempDir::new_in(&cwd).unwrap();
+    let root = dir.path();
+    // depth 1
+    std::fs::create_dir(root.join("a")).unwrap();
+    std::fs::write(root.join("a/file1.rs"), "fn a1() {}").unwrap();
+    // depth 2
+    std::fs::create_dir(root.join("a/b")).unwrap();
+    std::fs::write(root.join("a/b/file2.rs"), "fn b1() {}").unwrap();
+    // depth 3 -- must be omitted
+    std::fs::create_dir(root.join("a/b/c")).unwrap();
+    std::fs::write(root.join("a/b/c/deep.rs"), "fn deep() {}").unwrap();
+
+    // Act: analyze_directory with max_depth=2
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": root.to_str().unwrap(),
+            "max_depth": 2,
+            "page_size": 100
+        }),
+    )
+    .await;
+
+    // Assert: no error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success; got: {resp}"
+    );
+
+    // The text output must not mention the depth-3 file
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        !text.contains("deep.rs"),
+        "depth-3 file 'deep.rs' must not appear in max_depth=2 output; got: {text}"
+    );
+
+    // The text must mention the depth-1 and depth-2 files
+    assert!(
+        text.contains("file1.rs") || text.contains("file2.rs"),
+        "shallow files must appear in max_depth=2 output; got: {text}"
+    );
+}
+
+#[tokio::test]
 async fn test_path_outside_cwd_rejected() {
     // Arrange: path=/etc/passwd is outside the server's CWD
     let resp = call_tool_raw(
@@ -77,5 +126,88 @@ async fn test_path_outside_cwd_rejected() {
     assert!(
         content_text.contains("outside"),
         "error message should contain 'outside': {content_text}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_module_moduleonly_cache_tier_metrics() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: a temp Rust file inside CWD so validate_path accepts it
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(f, "fn hello() {{}}").unwrap();
+
+    // Act: first call -- cache miss (L2 disk cache is empty for a fresh unique file)
+    let resp1 = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    // Assert first call succeeds and returns the function name
+    assert!(
+        !resp1["result"]["isError"].as_bool().unwrap_or(false),
+        "first analyze_module call must succeed; got: {resp1}"
+    );
+    let text1 = resp1["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text1.contains("hello"),
+        "first call output must contain function 'hello'; got: {text1}"
+    );
+
+    // Wait for the write-behind L2 task to flush the cache entry to disk.
+    // Poll for the expected cache file rather than sleeping a fixed duration to avoid flakiness.
+    {
+        let file_bytes = std::fs::read(f.path()).expect("temp file must be readable");
+        let hash = blake3::hash(&file_bytes);
+        let hex = hash.to_hex();
+        let cache_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let xdg = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+                    std::env::var("HOME")
+                        .map(|h| format!("{h}/.local/share"))
+                        .unwrap_or_else(|_| ".".to_string())
+                });
+                std::path::PathBuf::from(xdg)
+                    .join("aptu-coder")
+                    .join("analysis-cache")
+            });
+        let entry = cache_dir
+            .join("analyze_module")
+            .join(&hex[..2])
+            .join(format!("{}.json.snap", hex.as_str()));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if entry.exists() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "L2 disk cache entry not written within 5 s; expected path: {}",
+                entry.display()
+            );
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    // Act: second call on same file -- content hash unchanged so L2 disk cache should hit
+    let resp2 = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    // Assert second call succeeds with consistent output
+    assert!(
+        !resp2["result"]["isError"].as_bool().unwrap_or(false),
+        "second analyze_module call must succeed; got: {resp2}"
+    );
+    let text2 = resp2["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text2.contains("hello"),
+        "second call output must contain function 'hello'; got: {text2}"
     );
 }
