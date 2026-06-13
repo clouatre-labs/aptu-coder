@@ -654,24 +654,36 @@ async fn test_exec_cache_hit_on_sequential_repeat() {
     let sc1 = &resp1["result"]["structuredContent"];
     let stdout1 = sc1["stdout"].as_str().unwrap_or("").to_string();
 
-    // Second call should hit the cache (same command, no stdin)
+    // Second call executes independently (exec_command is non-cacheable)
     let resp2 = call_exec_command_raw(params2).await;
     let sc2 = &resp2["result"]["structuredContent"];
     let stdout2 = sc2["stdout"].as_str().unwrap_or("").to_string();
 
-    // Assert: both calls succeeded and returned the same output
+    // Assert: both calls succeeded with identical output (both ran the command)
     assert_eq!(sc1["exit_code"], 0, "first call should succeed: {sc1}");
     assert_eq!(sc2["exit_code"], 0, "second call should succeed: {sc2}");
-    assert_eq!(stdout1, stdout2, "cached output should match original");
+    assert_eq!(
+        stdout1, stdout2,
+        "both calls should produce the same output"
+    );
     assert!(
         stdout1.contains("cache_test_123"),
         "output should contain the echo string"
+    );
+    // Assert: cache_hit is absent (exec_command is non-cacheable)
+    assert!(
+        sc1["cache_hit"].is_null(),
+        "cache_hit must be absent for exec_command: {sc1}"
+    );
+    assert!(
+        sc2["cache_hit"].is_null(),
+        "cache_hit must be absent for exec_command: {sc2}"
     );
 }
 
 #[tokio::test]
 async fn test_exec_cache_skipped_with_stdin() {
-    // Arrange: run a command with stdin (should bypass cache)
+    // Arrange: run a command with stdin
     let cmd = "cat";
     let stdin_content = "test_stdin_data";
     let params = serde_json::json!({
@@ -692,6 +704,11 @@ async fn test_exec_cache_skipped_with_stdin() {
             .contains("test_stdin_data"),
         "stdout should contain the stdin content: {sc}"
     );
+    // Assert: cache_hit is absent (exec_command is non-cacheable regardless of stdin)
+    assert!(
+        sc["cache_hit"].is_null(),
+        "cache_hit must be absent for exec_command with stdin: {sc}"
+    );
 }
 
 #[tokio::test]
@@ -705,36 +722,23 @@ async fn test_exec_cache_not_populated_on_failure() {
     let resp1 = call_exec_command_raw(params1).await;
     let sc1 = &resp1["result"]["structuredContent"];
 
-    // Second call should re-execute (not cached because first failed)
+    // Second call re-executes independently
     let resp2 = call_exec_command_raw(params2).await;
     let sc2 = &resp2["result"]["structuredContent"];
 
-    // Assert: both calls failed (non-zero exit)
+    // Assert: both calls failed (non-zero exit) and cache_hit is absent
     assert_ne!(sc1["exit_code"], 0, "false command should fail: {sc1}");
     assert_ne!(
         sc2["exit_code"], 0,
         "false command should fail on second call too: {sc2}"
     );
-}
-
-#[tokio::test]
-async fn test_exec_cache_bypassed_with_false_param() {
-    // Arrange: run a command with cache: false parameter
-    let cmd = "echo bypass_cache";
-    let params = serde_json::json!({
-        "command": cmd,
-        "cache": false
-    });
-
-    // Act: call with cache disabled
-    let resp = call_exec_command_raw(params).await;
-    let sc = &resp["result"]["structuredContent"];
-
-    // Assert: command executed successfully
-    assert_eq!(sc["exit_code"], 0, "command should succeed: {sc}");
     assert!(
-        sc["stdout"].as_str().unwrap_or("").contains("bypass_cache"),
-        "output should contain the echo string: {sc}"
+        sc1["cache_hit"].is_null(),
+        "cache_hit must be absent for failing exec_command: {sc1}"
+    );
+    assert!(
+        sc2["cache_hit"].is_null(),
+        "cache_hit must be absent for failing exec_command: {sc2}"
     );
 }
 
