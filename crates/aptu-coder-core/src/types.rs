@@ -546,6 +546,57 @@ impl SemanticAnalysis {
             def_use_sites: Vec::new(),
         }
     }
+
+    /// Return a filtered copy of this `SemanticAnalysis` based on the requested field set.
+    ///
+    /// - `None` (or a slice containing `AnalyzeFileField::All`) returns a full clone.
+    /// - Otherwise each of `functions`, `classes`, and `imports` is populated only when the
+    ///   corresponding `AnalyzeFileField` variant is present in `fields`.
+    /// - All other fields (`references`, `call_frequency`, `calls`, `impl_traits`,
+    ///   `def_use_sites`) are always preserved unchanged.
+    #[must_use]
+    pub fn project(&self, fields: Option<&[AnalyzeFileField]>) -> Self {
+        let Some(fields) = fields else {
+            return self.clone();
+        };
+        if fields.iter().any(|f| matches!(f, AnalyzeFileField::All)) {
+            return self.clone();
+        }
+        let functions = if fields
+            .iter()
+            .any(|f| matches!(f, AnalyzeFileField::Functions))
+        {
+            self.functions.clone()
+        } else {
+            Vec::new()
+        };
+        let classes = if fields
+            .iter()
+            .any(|f| matches!(f, AnalyzeFileField::Classes))
+        {
+            self.classes.clone()
+        } else {
+            Vec::new()
+        };
+        let imports = if fields
+            .iter()
+            .any(|f| matches!(f, AnalyzeFileField::Imports))
+        {
+            self.imports.clone()
+        } else {
+            Vec::new()
+        };
+        Self {
+            functions,
+            classes,
+            imports,
+            references: self.references.clone(),
+            call_frequency: self.call_frequency.clone(),
+            calls: self.calls.clone(),
+            impl_traits: self.impl_traits.clone(),
+            def_use_sites: self.def_use_sites.clone(),
+        }
+    }
 }
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
