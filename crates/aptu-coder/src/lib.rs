@@ -2313,7 +2313,41 @@ impl CodeAnalyzer {
         // Uses AnalysisMode::ModuleOnly disk key so entries are distinct from analyze_file.
         // L1 in-memory cache is not used here: the existing L1 stores Arc<FileAnalysisOutput>
         // and adding a new typed slot is out of scope; L2 avoids the parse cost across restarts.
-        let file_bytes = std::fs::read(&params.path).unwrap_or_default();
+        let file_bytes = match std::fs::read(&params.path) {
+            Ok(b) => b,
+            Err(e) => {
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "analyze_module",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("internal_error".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    file_ext: crate::metrics::path_file_ext(&param_path),
+                    ..Default::default()
+                });
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to read file '{}': {e}", params.path),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check file path and permissions",
+                    )),
+                )));
+            }
+        };
         let disk_key = blake3::hash(&file_bytes);
 
         let (module_info, module_tier) = if let Some(cached) = self
