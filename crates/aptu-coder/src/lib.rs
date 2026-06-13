@@ -3114,15 +3114,7 @@ impl CodeAnalyzer {
         let command = params.command.clone();
         let timeout_secs = params.timeout_secs;
 
-        // Determine cache key and whether to use cache
-        let _cache_key = (
-            command.clone(),
-            working_dir_path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default(),
-        );
-        // Execute command (caching disabled; explicit opt-in via cache=true not implemented)
+        // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
         let resolved_path_str = self.resolved_path.as_ref().as_deref();
         let output = run_exec_impl(
             command.clone(),
@@ -3229,7 +3221,7 @@ impl CodeAnalyzer {
                     error_type: Some("internal_error".to_string()),
                     session_id: sid.clone(),
                     seq: Some(seq),
-                    cache_hit: Some(false),
+                    cache_hit: None,
                     cache_write_failure: None,
                     cache_tier: None,
                     exit_code,
@@ -3257,7 +3249,7 @@ impl CodeAnalyzer {
             error_subtype: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(false),
+            cache_hit: None,
             cache_write_failure: None,
             cache_tier: None,
             exit_code,
