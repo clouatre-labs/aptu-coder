@@ -130,7 +130,7 @@ impl ShellOutput {
     }
 }
 
-use aptu_coder_core::cache::{AnalysisCache, CacheTier};
+use aptu_coder_core::cache::{AnalysisCache, CacheTier, CallGraphCache, CallGraphCacheKey};
 use aptu_coder_core::formatter::{
     format_file_details_paginated, format_file_details_summary, format_focused_paginated,
     format_module_info, format_structure_paginated, format_summary,
@@ -390,6 +390,9 @@ pub struct CodeAnalyzer {
     // Compiled filter rules table (built-in + project-local from .aptu/filters.toml).
     // Immutable after init; no lock needed.
     filter_table: Arc<Vec<CompiledRule>>,
+    // L1 in-memory LRU cache for call graph results (analyze_symbol).
+    // Capacity controlled by APTU_CODER_SYMBOL_CACHE_CAPACITY env var (default 32).
+    call_graph_cache: CallGraphCache,
 }
 
 #[tool_router]
@@ -496,6 +499,12 @@ impl CodeAnalyzer {
             client_version: Arc::new(TokioMutex::new(None)),
             resolved_path,
             filter_table,
+            call_graph_cache: {
+                CallGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
+                    "APTU_CODER_SYMBOL_CACHE_CAPACITY",
+                    32,
+                ))
+            },
         }
     }
 
@@ -1150,14 +1159,14 @@ impl CodeAnalyzer {
     }
 
     /// Private helper: Extract analysis logic for focused mode (`analyze_symbol`).
-    /// Returns the complete focused analysis output after spawning and monitoring progress.
-    /// Cancels the blocking task when `ct` is triggered; returns an error on cancellation.
+    /// Returns `(CacheTier, FocusedAnalysisOutput)` -- tier is `L1Memory` on cache hit,
+    /// `Miss` on cache miss. Cancels the blocking task when `ct` is triggered.
     #[instrument(skip(self, params, ct))]
     async fn handle_focused_mode(
         &self,
         params: &AnalyzeSymbolParams,
         ct: tokio_util::sync::CancellationToken,
-    ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
+    ) -> Result<(CacheTier, analyze::FocusedAnalysisOutput), ErrorData> {
         let path = Path::new(&params.path);
         let raw_entries = match walk_directory(path, params.max_depth) {
             Ok(e) => e,
@@ -1196,6 +1205,22 @@ impl CodeAnalyzer {
 
         if params.impl_only == Some(true) {
             Self::validate_impl_only(&entries)?;
+        }
+
+        // Build cache key for this call-graph request.
+        let cache_key = CallGraphCacheKey::from_entries(
+            path,
+            &entries,
+            params.git_ref.as_deref(),
+            params.follow_depth.unwrap_or(1),
+            &params.match_mode.clone().unwrap_or_default(),
+            params.impl_only.unwrap_or(false),
+            params.ast_recursion_limit,
+        );
+
+        // Check L1 cache first.
+        if let Some(cached) = self.call_graph_cache.get(&cache_key) {
+            return Ok((CacheTier::L1Memory, (*cached).clone()));
         }
 
         let total_files = entries.iter().filter(|e| !e.is_dir).count();
@@ -1239,7 +1264,11 @@ impl CodeAnalyzer {
             }
         }
 
-        Ok(output)
+        // Store in L1 cache for subsequent calls.
+        self.call_graph_cache
+            .put(cache_key, std::sync::Arc::new(output.clone()));
+
+        Ok((CacheTier::Miss, output))
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -1969,10 +1998,13 @@ impl CodeAnalyzer {
         }
 
         // Call handler for analysis and progress tracking
-        let mut output = match self.handle_focused_mode(&params, ct).await {
+        let (graph_cache_tier, mut output) = match self.handle_focused_mode(&params, ct).await {
             Ok(v) => v,
             Err(e) => return Ok(err_to_tool_result(e)),
         };
+
+        // Surface cache tier in structuredContent for observability and testing.
+        output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
 
         // Decode pagination cursor if provided (analyze_symbol)
         let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
@@ -2173,7 +2205,7 @@ impl CodeAnalyzer {
         }
 
         // Record cache tier in span
-        tracing::Span::current().record("cache_tier", "Miss");
+        tracing::Span::current().record("cache_tier", graph_cache_tier.as_str());
 
         // Add content_hash to _meta
         let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
@@ -2205,8 +2237,8 @@ impl CodeAnalyzer {
             error_type: None,
             session_id: sid,
             seq: Some(seq),
-            cache_hit: Some(false),
-            cache_tier: Some(CacheTier::Miss.as_str()),
+            cache_hit: Some(graph_cache_tier != CacheTier::Miss),
+            cache_tier: Some(graph_cache_tier.as_str()),
             cache_write_failure: None,
             exit_code: None,
             timed_out: false,

@@ -480,7 +480,7 @@ pub struct CallChainEntry {
 }
 
 /// Result of focused symbol analysis.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[non_exhaustive]
 pub struct FocusedAnalysisOutput {
@@ -540,6 +540,22 @@ pub struct FocusedAnalysisOutput {
     /// Definition and use sites for the symbol.
     #[serde(default)]
     pub def_use_sites: Vec<crate::types::DefUseSite>,
+    /// Cache tier for this result: `"l1_memory"`, `"l2_disk"`, or `"miss"`.
+    /// Populated by the MCP handler after cache lookup.
+    ///
+    /// This field is `None` in the following cases:
+    /// - `import_lookup=true` responses: the import-lookup path does not consult the call
+    ///   graph cache, so no tier is recorded.
+    /// - Non-symbol analysis modes (directory and file tools): `FocusedAnalysisOutput` is
+    ///   not produced by those handlers, and the field is therefore absent.
+    /// - Any `FocusedAnalysisOutput` constructed outside the `handle_focused_mode` return
+    ///   path (e.g. legacy cached entries that pre-date this field).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(description = "Cache tier for this result: l1_memory, l2_disk, or miss")
+    )]
+    pub cache_tier: Option<String>,
 }
 
 /// Parameters for focused symbol analysis. Groups high-arity parameters to keep
@@ -933,6 +949,7 @@ fn analyze_focused_with_progress_with_entries_internal(
             test_callers: None,
             callees: None,
             def_use_sites: vec![],
+            cache_tier: None,
         });
     }
 
@@ -1022,6 +1039,7 @@ fn analyze_focused_with_progress_with_entries_internal(
                 unfiltered_caller_count: 0,
                 impl_trait_caller_count: 0,
                 def_use_sites,
+                cache_tier: None,
             });
         }
     }
@@ -1093,6 +1111,7 @@ fn analyze_focused_with_progress_with_entries_internal(
         unfiltered_caller_count,
         impl_trait_caller_count,
         def_use_sites,
+        cache_tier: None,
     })
 }
 
@@ -1319,6 +1338,7 @@ pub fn analyze_import_lookup(
         test_callers: None,
         callees: None,
         def_use_sites: vec![],
+        cache_tier: None,
     })
 }
 
