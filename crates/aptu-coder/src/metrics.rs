@@ -57,6 +57,10 @@ pub struct MetricEvent {
     /// Only populated for `analyze_file` and `analyze_module`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_ext: Option<&'static str>,
+    /// Name of the filter rule that matched and transformed exec_command output.
+    /// `None` when no filter fired or for non-`exec_command` tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter_applied: Option<String>,
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -574,6 +578,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         };
         tx.send(make_event()).unwrap();
         tx.send(make_event()).unwrap();
@@ -632,6 +637,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("analyze_directory"));
@@ -663,6 +669,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""result":"error""#));
@@ -694,6 +701,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""error_subtype":"not_found""#));
@@ -721,6 +729,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""error_subtype":"ambiguous""#));
@@ -748,6 +757,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
@@ -821,6 +831,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         })
         .unwrap();
         tx.send(MetricEvent {
@@ -843,6 +854,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         })
         .unwrap();
         drop(tx);
@@ -930,6 +942,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         })
         .unwrap();
         drop(tx);
@@ -992,6 +1005,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
+            filter_applied: None,
         })
         .unwrap();
         drop(tx);

@@ -149,16 +149,24 @@ impl FileAnalysisOutput {
         }
     }
 }
-/// Check if a file is eligible for analysis based on size and language support.
-fn check_file_eligibility(entry: &WalkEntry) -> bool {
+/// Reason a file was skipped during eligibility check.
+enum SkipReason {
+    Oversized,
+    Unreadable,
+}
+
+/// Check if a file is eligible for analysis based on size and readability.
+///
+/// Returns `Ok(content)` when the file should be analyzed, `Err(reason)` to skip it.
+fn check_file_eligibility(entry: &WalkEntry) -> Result<String, SkipReason> {
     // Check file size before reading
     if entry.path.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
         tracing::debug!("skipping large file: {}", entry.path.display());
-        return false;
+        return Err(SkipReason::Oversized);
     }
 
     // Try to read file content; skip binary or unreadable files
-    std::fs::read_to_string(&entry.path).is_ok()
+    std::fs::read_to_string(&entry.path).map_err(|_| SkipReason::Unreadable)
 }
 
 /// Process a single file entry and extract its analysis data.
@@ -205,16 +213,13 @@ fn analyze_single_file(
         return None;
     }
 
-    // Check file eligibility
-    if !check_file_eligibility(entry) {
-        progress.fetch_add(1, Ordering::Relaxed);
-        return None;
-    }
-
-    // Read file content (already checked in check_file_eligibility)
-    let Ok(source) = std::fs::read_to_string(&entry.path) else {
-        progress.fetch_add(1, Ordering::Relaxed);
-        return None;
+    // Check file eligibility; progress accounting happens on all exit paths below
+    let source = match check_file_eligibility(entry) {
+        Ok(content) => content,
+        Err(_) => {
+            progress.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
     };
 
     let file_info = process_file_entry(entry, &source);

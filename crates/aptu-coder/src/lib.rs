@@ -3257,6 +3257,7 @@ impl CodeAnalyzer {
             output_truncated: Some(output_truncated),
             chars_threshold_breach: text.len() > 30_000,
             file_ext: None,
+            filter_applied: output.filter_applied.clone(),
         });
         Ok(result)
     }
@@ -5735,6 +5736,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: output_chars > 30_000,
             file_ext: None,
+            filter_applied: None,
         };
         assert!(
             event.chars_threshold_breach,
@@ -5766,6 +5768,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: output_chars > 30_000,
             file_ext: None,
+            filter_applied: None,
         };
         assert!(
             !event.chars_threshold_breach,
