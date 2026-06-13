@@ -540,8 +540,16 @@ pub struct FocusedAnalysisOutput {
     /// Definition and use sites for the symbol.
     #[serde(default)]
     pub def_use_sites: Vec<crate::types::DefUseSite>,
-    /// Cache tier for this result: "l1_memory", "l2_disk", or "miss".
-    /// Populated by the MCP handler after cache lookup; absent on import_lookup responses.
+    /// Cache tier for this result: `"l1_memory"`, `"l2_disk"`, or `"miss"`.
+    /// Populated by the MCP handler after cache lookup.
+    ///
+    /// This field is `None` in the following cases:
+    /// - `import_lookup=true` responses: the import-lookup path does not consult the call
+    ///   graph cache, so no tier is recorded.
+    /// - Non-symbol analysis modes (directory and file tools): `FocusedAnalysisOutput` is
+    ///   not produced by those handlers, and the field is therefore absent.
+    /// - Any `FocusedAnalysisOutput` constructed outside the `handle_focused_mode` return
+    ///   path (e.g. legacy cached entries that pre-date this field).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(
         feature = "schemars",

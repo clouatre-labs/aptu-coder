@@ -28,6 +28,21 @@ pub enum CacheTier {
     Miss,
 }
 
+/// Parse an LRU cache capacity from an environment variable.
+///
+/// Reads `env_key`, parses it as `usize`, and returns the value clamped to a minimum of 1.
+/// Falls back to `default` when the variable is absent or unparseable, then also clamps
+/// the fallback to at least 1.
+///
+/// This helper centralises all three LRU init sites so the `.max(1)` guard lives in one place.
+pub fn parse_cache_capacity(env_key: &str, default: usize) -> usize {
+    std::env::var(env_key)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+        .max(1)
+}
+
 impl CacheTier {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -173,6 +188,8 @@ pub struct CallGraphCache {
 
 impl CallGraphCache {
     /// Create a new `CallGraphCache` with the given capacity.
+    ///
+    /// `capacity` is clamped to a minimum of 1 so a zero value does not panic.
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
@@ -221,14 +238,10 @@ impl AnalysisCache {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         let file_capacity = capacity.max(1);
-        let dir_capacity: usize = std::env::var("APTU_CODER_DIR_CACHE_CAPACITY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(20);
-        let dir_capacity = dir_capacity.max(1);
+        let dir_capacity = parse_cache_capacity("APTU_CODER_DIR_CACHE_CAPACITY", 20);
         // SAFETY: file_capacity is >= 1 due to .max(1) applied above
         let cache_size = unsafe { NonZeroUsize::new_unchecked(file_capacity) };
-        // SAFETY: dir_capacity is >= 1 due to .max(1) applied above
+        // SAFETY: dir_capacity is >= 1 due to parse_cache_capacity's .max(1) guarantee
         let dir_cache_size = unsafe { NonZeroUsize::new_unchecked(dir_capacity) };
         Self {
             file_capacity,
@@ -478,6 +491,74 @@ mod tests {
 
         // Assert
         assert_eq!(cache.dir_capacity, 7);
+    }
+
+    // Mutex serialises parse_cache_capacity tests that set env vars.
+    static PARSE_CAP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_parse_cache_capacity_missing_returns_default() {
+        let _guard = PARSE_CAP_ENV_LOCK.lock().unwrap();
+
+        // Arrange: env var is absent
+        unsafe { std::env::remove_var("_TEST_APTU_PARSE_CAP") };
+
+        // Act
+        let result = parse_cache_capacity("_TEST_APTU_PARSE_CAP", 42);
+
+        // Assert: default is returned as-is
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn test_parse_cache_capacity_valid_returns_value() {
+        let _guard = PARSE_CAP_ENV_LOCK.lock().unwrap();
+
+        // Arrange
+        unsafe { std::env::set_var("_TEST_APTU_PARSE_CAP", "64") };
+
+        // Act
+        let result = parse_cache_capacity("_TEST_APTU_PARSE_CAP", 10);
+
+        // Cleanup
+        unsafe { std::env::remove_var("_TEST_APTU_PARSE_CAP") };
+
+        // Assert: parsed value is returned
+        assert_eq!(result, 64);
+    }
+
+    #[test]
+    fn test_parse_cache_capacity_zero_returns_one() {
+        let _guard = PARSE_CAP_ENV_LOCK.lock().unwrap();
+
+        // Arrange: zero is below the minimum of 1
+        unsafe { std::env::set_var("_TEST_APTU_PARSE_CAP", "0") };
+
+        // Act
+        let result = parse_cache_capacity("_TEST_APTU_PARSE_CAP", 10);
+
+        // Cleanup
+        unsafe { std::env::remove_var("_TEST_APTU_PARSE_CAP") };
+
+        // Assert: clamped to 1
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_parse_cache_capacity_garbage_returns_default() {
+        let _guard = PARSE_CAP_ENV_LOCK.lock().unwrap();
+
+        // Arrange: unparseable string
+        unsafe { std::env::set_var("_TEST_APTU_PARSE_CAP", "not_a_number") };
+
+        // Act
+        let result = parse_cache_capacity("_TEST_APTU_PARSE_CAP", 8);
+
+        // Cleanup
+        unsafe { std::env::remove_var("_TEST_APTU_PARSE_CAP") };
+
+        // Assert: falls back to default
+        assert_eq!(result, 8);
     }
 }
 

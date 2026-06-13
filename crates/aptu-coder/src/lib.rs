@@ -500,11 +500,10 @@ impl CodeAnalyzer {
             resolved_path,
             filter_table,
             call_graph_cache: {
-                let cap: usize = std::env::var("APTU_CODER_SYMBOL_CACHE_CAPACITY")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(32);
-                CallGraphCache::new(cap)
+                CallGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
+                    "APTU_CODER_SYMBOL_CACHE_CAPACITY",
+                    32,
+                ))
             },
         }
     }
