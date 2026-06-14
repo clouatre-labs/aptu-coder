@@ -15,12 +15,16 @@ pub mod csharp;
 pub mod fortran;
 #[cfg(feature = "lang-go")]
 pub mod go;
+#[cfg(feature = "lang-html")]
+pub mod html;
 #[cfg(feature = "lang-java")]
 pub mod java;
 #[cfg(feature = "lang-javascript")]
 pub mod javascript;
 #[cfg(feature = "lang-kotlin")]
 pub mod kotlin;
+#[cfg(feature = "lang-markdown")]
+pub mod markdown;
 #[cfg(feature = "lang-python")]
 pub mod python;
 #[cfg(feature = "lang-rust")]
@@ -251,6 +255,24 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_method_for_receiver: Some(javascript::find_method_for_receiver),
             find_receiver_type: Some(javascript::find_receiver_type),
             extract_inheritance: Some(javascript::extract_inheritance),
+        }),
+        #[cfg(feature = "lang-html")]
+        "html" => None,
+        #[cfg(feature = "lang-markdown")]
+        "markdown" => Some(LanguageInfo {
+            name: "markdown",
+            language: tree_sitter_md::LANGUAGE.into(),
+            element_query: markdown::ELEMENT_QUERY,
+            call_query: markdown::CALL_QUERY,
+            reference_query: None,
+            import_query: None,
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: None,
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: None,
         }),
         _ => None,
     }

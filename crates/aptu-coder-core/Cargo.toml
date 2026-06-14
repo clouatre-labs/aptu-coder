@@ -21,7 +21,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["lang-rust", "lang-go", "lang-java", "lang-kotlin", "lang-python", "lang-typescript", "lang-tsx", "lang-fortran", "lang-javascript", "lang-cpp", "lang-csharp"]
+default = ["lang-rust", "lang-go", "lang-java", "lang-kotlin", "lang-python", "lang-typescript", "lang-tsx", "lang-fortran", "lang-javascript", "lang-cpp", "lang-csharp", "lang-markdown"]
 schemars = ["dep:schemars"]
 lang-rust = ["dep:tree-sitter-rust"]
 lang-go = ["dep:tree-sitter-go"]
@@ -34,6 +34,8 @@ lang-javascript = ["dep:tree-sitter-javascript"]
 lang-tsx = ["dep:tree-sitter-typescript"]
 lang-fortran = ["dep:tree-sitter-fortran"]
 lang-csharp = ["dep:tree-sitter-c-sharp"]
+lang-markdown = ["dep:tree-sitter-md"]
+lang-html = []
 
 [dependencies]
 tree-sitter = { workspace = true }
@@ -59,6 +61,7 @@ tree-sitter-python = { workspace = true, optional = true }
 tree-sitter-typescript = { workspace = true, optional = true }
 tree-sitter-javascript = { workspace = true, optional = true }
 tree-sitter-fortran = { workspace = true, optional = true }
+tree-sitter-md = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]

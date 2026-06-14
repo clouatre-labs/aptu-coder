@@ -54,6 +54,8 @@ All languages are enabled by default. Disable individual languages at compile ti
 | JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
 | C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
 | C# | `.cs` | `lang-csharp` |
+| Markdown | `.md`, `.mdx` | `lang-markdown` |
+| HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
 
 ## Installation
 

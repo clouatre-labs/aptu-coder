@@ -43,6 +43,7 @@ tree-sitter-python = "0.25.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-fortran = "0.6.0"
+tree-sitter-md = "0.5.3"
 opentelemetry = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
 opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-client"] }
