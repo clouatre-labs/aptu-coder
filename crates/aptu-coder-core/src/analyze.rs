@@ -188,7 +188,12 @@ fn process_file_entry(entry: &WalkEntry, source: &str) -> FileInfo {
             Err(_) => (lang_str, 0, 0),
         }
     } else {
-        ("unknown".to_string(), 0, 0)
+        (
+            ext.map(|e| e.to_lowercase())
+                .unwrap_or_else(|| "unknown".to_string()),
+            0,
+            0,
+        )
     };
 
     let is_test = is_test_file(&entry.path);
