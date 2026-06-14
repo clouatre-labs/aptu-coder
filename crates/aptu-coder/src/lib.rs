@@ -877,9 +877,10 @@ impl CodeAnalyzer {
             }
             Err(e) => match &e {
                 analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(_)) => {
-                    // Graceful fallback: read source and return structured output with
-                    // empty semantic fields and a first-50-lines preview.
-                    let source = std::fs::read_to_string(&params.path).unwrap_or_default();
+                    // Graceful fallback: reuse the file_bytes already read above for the
+                    // cache key rather than re-reading the file (avoids a second I/O and
+                    // the silent-empty-string risk of unwrap_or_default on a second read).
+                    let source = String::from_utf8_lossy(&file_bytes);
                     let line_count = source.lines().count();
                     let ext = std::path::Path::new(&params.path)
                         .extension()
@@ -897,8 +898,7 @@ impl CodeAnalyzer {
                         line_count,
                         None,
                     );
-                    // Store language on output via formatted; ext is available for callers
-                    let _ = ext; // used in formatted string above
+                    let _ = ext;
                     Ok((std::sync::Arc::new(output), CacheTier::Miss))
                 }
                 _ => Err(ErrorData::new(
