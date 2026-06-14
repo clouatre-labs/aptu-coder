@@ -27,7 +27,7 @@ Five approaches were evaluated by independent read-only validation delegates. Fi
 | analyze_file errors | 146 (28%) |
 | Error type | 100% INVALID_PARAMS |
 | analyze_directory errors | 0 |
-| Most common failing extension | .astro (9 attempts, all from clouatre.ca sessions) |
+| Most common failing extension | .astro (9 attempts) |
 | Other failing extensions observed | .css (1 attempt) |
 
 Agent fallback when analyze_file fails: `exec_command` with `cat`, `head -N`, `grep -n`, `sed -n 'M,Np'`, `wc -l`. Zero semantic extraction. Token cost is O(file size).
@@ -185,10 +185,10 @@ Approach E is not filed as a separate issue. If section-marker extraction proves
 
 Issue #969 covers HTML (no-op stub, no grammar dependency) and Markdown (`tree-sitter-md 0.5.3`). It does not cover:
 
-- CSS (5 files observed in clouatre.ca sessions)
+- CSS (5 files observed across sessions)
 - YAML, JSON, TOML (config files present in all repos)
 - Astro (9 failed attempts, highest observed impact)
-- SVG (59 files in clouatre.ca, semantic extraction not useful -- Approach B fallback is sufficient)
+- SVG (observed across sessions, semantic extraction not useful -- Approach B fallback is sufficient)
 
 Issue #969 must be implemented before or concurrently with the issues filed below, since its patterns (feature flag, `EXTENSION_MAP` entry, `LanguageInfo` stub, schema pattern update) are the template for all subsequent grammar additions.
 
@@ -198,14 +198,12 @@ Issue #969 must be implemented before or concurrently with the issues filed belo
 
 The approaches are complementary and not mutually exclusive. Recommended sequencing:
 
-1. **Issue #969** (already open): HTML stub + Markdown grammar. Establishes the integration template.
-2. **Approach C** (new issue): Extension label in `analyze_directory`. Two-line change, two test updates. Zero dependencies. Immediate win for language summaries.
-3. **Approach B** (new issue): Graceful fallback in `analyze_file`. Eliminates the 28% error rate. Blocks on nothing; can ship in parallel with #969.
-4. **Approach D -- Astro frontmatter** (new issue): Zero-dependency Astro import extraction. Highest semantic value for the observed failure cases.
-5. **Approach A -- CSS + YAML grammars** (new issue): Add `tree-sitter-css 0.25.0` and `tree-sitter-yaml 0.7.2`. Full structural extraction for the two remaining high-frequency file types.
-6. **Approach D -- JSON/TOML regex** (deferred to Approach A issue or separate): JSON via regex is lower-value than tree-sitter (Approach A JSON deferred due to age gate); TOML regex is a small addition alongside CSS/YAML.
-7. **Approach A -- JSON grammar** (deferred): Re-evaluate `tree-sitter-json` when a version compatible with `tree-sitter 0.26.6` without the age-gate bypass is available.
-8. **Approach A -- Astro grammar** (deferred): Re-evaluate `tree-sitter-astro-next` when download count and query coverage mature.
+1. **#969** (already open): HTML stub + Markdown grammar. Establishes the integration template.
+2. **#1060**: Extension label in `analyze_directory`. Two-line change, two test updates. Zero dependencies. Independent of #969.
+3. **#1061**: Graceful fallback in `analyze_file`. Eliminates the 28% error rate. Independent of #969; can ship in parallel.
+4. **#1062**: Regex-based extraction for Astro, CSS, YAML, JSON, TOML. Depends on #1061.
+5. **#1063**: `tree-sitter-css 0.25.0` and `tree-sitter-yaml 0.7.2` grammars. Depends on #969, #1061, #1062.
+6. **#1064** (tracking, no code): Re-evaluate `tree-sitter-json` and `tree-sitter-astro-next` when age gate and query coverage criteria are met.
 
 ---
 
