@@ -1279,7 +1279,7 @@ pub fn analyze_module_file(path: &str) -> Result<crate::types::ModuleInfo, Analy
                 file_path
                     .extension()
                     .and_then(|e| e.to_str())
-                    .unwrap_or("unknown")
+                    .unwrap_or("(no extension)")
                     .to_string(),
             ))
         })?;
