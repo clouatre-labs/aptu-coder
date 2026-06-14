@@ -876,19 +876,30 @@ impl CodeAnalyzer {
                 Ok((arc_output, CacheTier::Miss))
             }
             Err(e) => match &e {
-                analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(lang)) => {
-                    Err(ErrorData::new(
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        format!(
-                            "Unsupported language: {lang}. Supported extensions: {}",
-                            aptu_coder_core::lang::supported_extensions().join(", ")
-                        ),
-                        Some(error_meta(
-                            "invalid_request",
-                            false,
-                            "provide a file with a supported extension",
-                        )),
-                    ))
+                analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(_)) => {
+                    // Graceful fallback: read source and return structured output with
+                    // empty semantic fields and a first-50-lines preview.
+                    let source = std::fs::read_to_string(&params.path).unwrap_or_default();
+                    let line_count = source.lines().count();
+                    let ext = std::path::Path::new(&params.path)
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let preview = source.lines().take(50).collect::<Vec<_>>().join("\n");
+                    let formatted = format!(
+                        "File: {path}\n[Unsupported extension: semantic analysis not available]\n\n{preview}",
+                        path = params.path,
+                    );
+                    let output = analyze::FileAnalysisOutput::new(
+                        formatted,
+                        aptu_coder_core::types::SemanticAnalysis::default(),
+                        line_count,
+                        None,
+                    );
+                    // Store language on output via formatted; ext is available for callers
+                    let _ = ext; // used in formatted string above
+                    Ok((std::sync::Arc::new(output), CacheTier::Miss))
                 }
                 _ => Err(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -1495,7 +1506,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file. Returns functions (name, signature, line range), classes (methods, fields, inheritance), imports; paginate with cursor/page_size. Use fields=[\"functions\",\"classes\",\"imports\"] to limit output sections. Fails if directory path supplied; use analyze_directory instead. Fails if summary=true and cursor. git_ref not supported for single-file analysis. Use analyze_module for lightweight function/import index (~75% smaller). Supported: C/C++, C#, Fortran, Go, HTML, Java, JavaScript, Markdown, Python, Rust, TypeScript, TSX. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
+        description = "Functions, types, classes, and imports from a single source file. Returns functions (name, signature, line range), classes (methods, fields, inheritance), imports; paginate with cursor/page_size. Use fields=[\"functions\",\"classes\",\"imports\"] to limit output sections. Fails if directory path supplied; use analyze_directory instead. Fails if summary=true and cursor. git_ref not supported for single-file analysis. Use analyze_module for lightweight function/import index (~75% smaller). For unsupported extensions, returns line_count and first 50 lines; semantic fields are empty. Supported: C/C++, C#, Fortran, Go, HTML, Java, JavaScript, Markdown, Python, Rust, TypeScript, TSX. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -1709,8 +1720,12 @@ impl CodeAnalyzer {
             };
 
         // Regenerate formatted output using the paginated formatter (handles verbose and pagination correctly)
+        // Skip regeneration when the output is an unsupported-extension fallback (sentinel in formatted).
+        let is_unsupported_fallback = arc_output
+            .formatted
+            .contains("[Unsupported extension: semantic analysis not available]");
         let verbose = params.output_control.verbose.unwrap_or(false);
-        if !use_summary {
+        if !use_summary && !is_unsupported_fallback {
             // fields: serde rejects unknown enum variants at deserialization; no runtime validation required
             formatted = format_file_details_paginated(
                 &paginated.items,
@@ -2260,7 +2275,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: C/C++, C#, Fortran, Go, HTML, Java, JavaScript, Markdown, Python, Rust, TypeScript, TSX. Example queries: What functions are defined in src/analyze.rs?",
+        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. For unsupported extensions, returns line_count and empty function/import lists. Supported: C/C++, C#, Fortran, Go, HTML, Java, JavaScript, Markdown, Python, Rust, TypeScript, TSX. Example queries: What functions are defined in src/analyze.rs?",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
             title = "Analyze Module",
@@ -2401,33 +2416,78 @@ impl CodeAnalyzer {
                 Ok(mi) => mi,
                 Err(e) => {
                     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                    let (error_type, error_data) = match &e {
+                    // Graceful fallback for unsupported extensions: return empty ModuleInfo
+                    // with a note instead of INVALID_PARAMS.
+                    if matches!(
+                        &e,
                         analyze::AnalyzeError::Parser(
-                            aptu_coder_core::parser::ParserError::UnsupportedLanguage(lang),
-                        ) => (
-                            Some("invalid_params".to_string()),
-                            ErrorData::new(
-                                rmcp::model::ErrorCode::INVALID_PARAMS,
-                                format!(
-                                    "Unsupported language: {lang}. Supported extensions: {}",
-                                    aptu_coder_core::lang::supported_extensions().join(", ")
-                                ),
-                                Some(error_meta(
-                                    "invalid_request",
-                                    false,
-                                    "provide a file with a supported extension",
-                                )),
-                            ),
+                            aptu_coder_core::parser::ParserError::UnsupportedLanguage(_)
+                        )
+                    ) {
+                        let source = String::from_utf8_lossy(&file_bytes).into_owned();
+                        let line_count = source.lines().count();
+                        let name = std::path::Path::new(&params.path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let ext = std::path::Path::new(&params.path)
+                            .extension()
+                            .and_then(|x| x.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        self.metrics_tx.send(crate::metrics::MetricEvent {
+                            ts: crate::metrics::unix_ms(),
+                            tool: "analyze_module",
+                            duration_ms: dur,
+                            output_chars: 0,
+                            param_path_depth: crate::metrics::path_component_count(&param_path),
+                            max_depth: None,
+                            result: "ok",
+                            error_type: None,
+                            session_id: sid.clone(),
+                            seq: Some(seq),
+                            cache_hit: None,
+                            cache_write_failure: None,
+                            cache_tier: None,
+                            exit_code: None,
+                            timed_out: false,
+                            output_truncated: None,
+                            file_ext: crate::metrics::path_file_ext(&param_path),
+                            ..Default::default()
+                        });
+                        return {
+                            let mi = types::ModuleInfo::new(name, line_count, ext, vec![], vec![]);
+                            let text = format_module_info(&mi);
+                            let content_hash = format!("{}", blake3::hash(text.as_bytes()));
+                            let mut meta = no_cache_meta().0;
+                            meta.insert(
+                                "content_hash".to_string(),
+                                serde_json::Value::String(content_hash),
+                            );
+                            let mut result = CallToolResult::success(vec![Content::text(text)])
+                                .with_meta(Some(Meta(meta)));
+                            match serde_json::to_value(&mi) {
+                                Ok(v) => {
+                                    result.structured_content = Some(v);
+                                    Ok(result)
+                                }
+                                Err(se) => Ok(err_to_tool_result(ErrorData::new(
+                                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                                    format!("serialization failed: {se}"),
+                                    Some(error_meta("internal", false, "report this as a bug")),
+                                ))),
+                            }
+                        };
+                    }
+                    let (error_type, error_data) = (
+                        Some("internal_error".to_string()),
+                        ErrorData::new(
+                            rmcp::model::ErrorCode::INTERNAL_ERROR,
+                            format!("Failed to analyze module: {e}"),
+                            Some(error_meta("internal", false, "report this as a bug")),
                         ),
-                        _ => (
-                            Some("internal_error".to_string()),
-                            ErrorData::new(
-                                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                                format!("Failed to analyze module: {e}"),
-                                Some(error_meta("internal", false, "report this as a bug")),
-                            ),
-                        ),
-                    };
+                    );
                     self.metrics_tx.send(crate::metrics::MetricEvent {
                         ts: crate::metrics::unix_ms(),
                         tool: "analyze_module",
@@ -5023,12 +5083,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unsupported_extension_returns_invalid_params() {
-        // Arrange: unsupported extension; both analyze_file and analyze_module
-        // route through handle_file_details_mode so one test covers both.
+    async fn test_unsupported_extension_returns_success() {
+        // Arrange: unsupported extension; handle_file_details_mode should return
+        // a structured success (empty semantic, first-50-lines preview).
         let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
         let unsupported_file = temp_dir.path().join("notes.txt");
-        std::fs::write(&unsupported_file, "some notes").expect("should write file");
+        std::fs::write(&unsupported_file, "line one\nline two\nline three")
+            .expect("should write file");
 
         let analyzer = make_analyzer();
         let mut params = AnalyzeFileParams::default();
@@ -5036,10 +5097,46 @@ mod tests {
 
         let result = analyzer.handle_file_details_mode(&params).await;
 
-        assert!(result.is_err(), "should error for unsupported extension");
-        let err = result.unwrap_err();
-        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        assert!(err.message.to_lowercase().contains("unsupported"));
+        assert!(
+            result.is_ok(),
+            "should succeed for unsupported extension; got: {:?}",
+            result
+        );
+        let (output, _tier) = result.unwrap();
+        assert_eq!(output.line_count, 3, "line_count must be 3");
+        assert!(
+            output.semantic.functions.is_empty(),
+            "functions must be empty"
+        );
+        assert!(output.semantic.classes.is_empty(), "classes must be empty");
+        assert!(output.semantic.imports.is_empty(), "imports must be empty");
+    }
+
+    #[tokio::test]
+    async fn test_unsupported_extension_fallback_note_in_formatted() {
+        // Edge case: formatted output must contain an unsupported-extension note.
+        let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+        let unsupported_file = temp_dir.path().join("readme.txt");
+        std::fs::write(
+            &unsupported_file,
+            "This is a plain text file.\nSecond line.",
+        )
+        .expect("should write file");
+
+        let analyzer = make_analyzer();
+        let mut params = AnalyzeFileParams::default();
+        params.path = unsupported_file.to_string_lossy().to_string();
+
+        let (output, _tier) = analyzer
+            .handle_file_details_mode(&params)
+            .await
+            .expect("must succeed");
+        let lower = output.formatted.to_lowercase();
+        assert!(
+            lower.contains("unsupported"),
+            "formatted must contain 'unsupported' note; got: {}",
+            output.formatted
+        );
     }
 
     #[test]

@@ -442,3 +442,121 @@ async fn test_fields_none_structured_full() {
         "imports must be non-empty when fields=None; got: {sc}"
     );
 }
+
+#[tokio::test]
+async fn test_analyze_unsupported_file_type() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: .txt file inside CWD so validate_path accepts it
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".txt", &cwd).expect("should create temp file");
+    writeln!(f, "hello world").expect("should write");
+    writeln!(f, "second line").expect("should write");
+
+    // Act: analyze_file must succeed (no INVALID_PARAMS)
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    // Assert: success response
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "analyze_file on unsupported extension must succeed; got: {resp}"
+    );
+
+    // Assert: line_count is correct
+    let line_count = resp["result"]["structuredContent"]["line_count"]
+        .as_u64()
+        .expect("line_count must be present");
+    assert_eq!(line_count, 2, "line_count must be 2; got: {resp}");
+
+    // Assert: semantic sections are empty
+    let sc = &resp["result"]["structuredContent"];
+    let functions = sc["semantic"]["functions"]
+        .as_array()
+        .expect("functions must be array");
+    let classes = sc["semantic"]["classes"]
+        .as_array()
+        .expect("classes must be array");
+    let imports = sc["semantic"]["imports"]
+        .as_array()
+        .expect("imports must be array");
+    assert!(
+        functions.is_empty(),
+        "functions must be empty for unsupported extension"
+    );
+    assert!(
+        classes.is_empty(),
+        "classes must be empty for unsupported extension"
+    );
+    assert!(
+        imports.is_empty(),
+        "imports must be empty for unsupported extension"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_file_unsupported_includes_note() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Edge case: formatted text must include the unsupported-extension note.
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".txt", &cwd).expect("should create temp file");
+    writeln!(f, "plain text content").expect("should write");
+
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "analyze_file on unsupported extension must succeed; got: {resp}"
+    );
+
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.to_lowercase().contains("unsupported"),
+        "formatted output must include unsupported-extension note; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_module_unsupported_fallback() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Happy path: analyze_module on unsupported extension returns success
+    // with empty functions and imports lists.
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".txt", &cwd).expect("should create temp file");
+    writeln!(f, "some content").expect("should write");
+
+    let resp = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({ "path": f.path().to_str().unwrap() }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "analyze_module on unsupported extension must succeed; got: {resp}"
+    );
+
+    let sc = &resp["result"]["structuredContent"];
+    let functions = sc["functions"].as_array().expect("functions must be array");
+    let imports = sc["imports"].as_array().expect("imports must be array");
+    assert!(
+        functions.is_empty(),
+        "functions must be empty for unsupported extension"
+    );
+    assert!(
+        imports.is_empty(),
+        "imports must be empty for unsupported extension"
+    );
+}
