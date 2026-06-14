@@ -262,8 +262,9 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
         // `None` here, which causes `analyze_file` to emit an INVALID_PARAMS error with the
         // message "unsupported language: html". This is intentional: the extension is registered
         // so that the file-type is recognised and a clear error surfaces rather than silently
-        // skipping the file. Track https://github.com/tree-sitter/tree-sitter-html for the
-        // ^0.25 release.
+        // skipping the file.
+        // TODO: implement once tree-sitter-html ^0.25 ships.
+        //       Track releases: https://github.com/tree-sitter/tree-sitter-html/releases
         #[cfg(feature = "lang-html")]
         "html" => None,
         #[cfg(feature = "lang-markdown")]
