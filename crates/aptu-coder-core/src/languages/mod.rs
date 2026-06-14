@@ -256,6 +256,14 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(javascript::find_receiver_type),
             extract_inheritance: Some(javascript::extract_inheritance),
         }),
+        // HTML is a reserved feature stub. `tree-sitter-html` 0.23.x is incompatible with the
+        // tree-sitter 0.26 API used by this crate; full HTML support is blocked on the
+        // tree-sitter-html ^0.25 release. Until then, analysis of `.html`/`.htm` files returns
+        // `None` here, which causes `analyze_file` to emit an INVALID_PARAMS error with the
+        // message "unsupported language: html". This is intentional: the extension is registered
+        // so that the file-type is recognised and a clear error surfaces rather than silently
+        // skipping the file. Track https://github.com/tree-sitter/tree-sitter-html for the
+        // ^0.25 release.
         #[cfg(feature = "lang-html")]
         "html" => None,
         #[cfg(feature = "lang-markdown")]
