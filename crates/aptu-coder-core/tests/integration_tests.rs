@@ -210,7 +210,7 @@ fn test_analyze_unsupported_file_type() {
     assert_eq!(txt.line_count, 2);
     assert_eq!(txt.function_count, 0);
     assert_eq!(txt.class_count, 0);
-    assert_eq!(txt.language, "unknown");
+    assert_eq!(txt.language, "txt");
 }
 
 #[test]
