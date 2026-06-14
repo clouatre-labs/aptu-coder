@@ -1275,8 +1275,12 @@ pub fn analyze_module_file(path: &str) -> Result<crate::types::ModuleInfo, Analy
         .and_then(|e| e.to_str())
         .and_then(language_for_extension)
         .ok_or_else(|| {
-            AnalyzeError::Parser(crate::parser::ParserError::ParseError(
-                "unsupported or missing file extension".to_string(),
+            AnalyzeError::Parser(crate::parser::ParserError::UnsupportedLanguage(
+                file_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("(no extension)")
+                    .to_string(),
             ))
         })?;
 
