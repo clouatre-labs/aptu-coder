@@ -15,12 +15,16 @@ pub mod csharp;
 pub mod fortran;
 #[cfg(feature = "lang-go")]
 pub mod go;
+#[cfg(feature = "lang-html")]
+pub mod html;
 #[cfg(feature = "lang-java")]
 pub mod java;
 #[cfg(feature = "lang-javascript")]
 pub mod javascript;
 #[cfg(feature = "lang-kotlin")]
 pub mod kotlin;
+#[cfg(feature = "lang-markdown")]
+pub mod markdown;
 #[cfg(feature = "lang-python")]
 pub mod python;
 #[cfg(feature = "lang-rust")]
@@ -251,6 +255,33 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_method_for_receiver: Some(javascript::find_method_for_receiver),
             find_receiver_type: Some(javascript::find_receiver_type),
             extract_inheritance: Some(javascript::extract_inheritance),
+        }),
+        // HTML is a reserved feature stub. `tree-sitter-html` 0.23.x is incompatible with the
+        // tree-sitter 0.26 API used by this crate; full HTML support is blocked on the
+        // tree-sitter-html ^0.25 release. Until then, analysis of `.html`/`.htm` files returns
+        // `None` here, which causes `analyze_file` to emit an INVALID_PARAMS error with the
+        // message "unsupported language: html". This is intentional: the extension is registered
+        // so that the file-type is recognised and a clear error surfaces rather than silently
+        // skipping the file.
+        // TODO: implement once tree-sitter-html ^0.25 ships.
+        //       Track releases: https://github.com/tree-sitter/tree-sitter-html/releases
+        #[cfg(feature = "lang-html")]
+        "html" => None,
+        #[cfg(feature = "lang-markdown")]
+        "markdown" => Some(LanguageInfo {
+            name: "markdown",
+            language: tree_sitter_md::LANGUAGE.into(),
+            element_query: markdown::ELEMENT_QUERY,
+            call_query: markdown::CALL_QUERY,
+            reference_query: None,
+            import_query: None,
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: None,
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: None,
         }),
         _ => None,
     }

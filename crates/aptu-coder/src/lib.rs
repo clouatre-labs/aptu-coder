@@ -1495,7 +1495,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file. Returns functions (name, signature, line range), classes (methods, fields, inheritance), imports; paginate with cursor/page_size. Use fields=[\"functions\",\"classes\",\"imports\"] to limit output sections. Fails if directory path supplied; use analyze_directory instead. Fails if summary=true and cursor. git_ref not supported for single-file analysis. Use analyze_module for lightweight function/import index (~75% smaller). Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
+        description = "Functions, types, classes, and imports from a single source file. Returns functions (name, signature, line range), classes (methods, fields, inheritance), imports; paginate with cursor/page_size. Use fields=[\"functions\",\"classes\",\"imports\"] to limit output sections. Fails if directory path supplied; use analyze_directory instead. Fails if summary=true and cursor. git_ref not supported for single-file analysis. Use analyze_module for lightweight function/import index (~75% smaller). Supported: C/C++, C#, Fortran, Go, HTML, Java, JavaScript, Markdown, Python, Rust, TypeScript, TSX. Example queries: What functions are defined in src/lib.rs?; Show me the classes and their methods in src/analyzer.py.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -2260,7 +2260,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C#. Example queries: What functions are defined in src/analyze.rs?",
+        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: C/C++, C#, Fortran, Go, HTML, Java, JavaScript, Markdown, Python, Rust, TypeScript, TSX. Example queries: What functions are defined in src/analyze.rs?",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
             title = "Analyze Module",
@@ -5027,8 +5027,8 @@ mod tests {
         // Arrange: unsupported extension; both analyze_file and analyze_module
         // route through handle_file_details_mode so one test covers both.
         let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
-        let unsupported_file = temp_dir.path().join("notes.md");
-        std::fs::write(&unsupported_file, "# notes").expect("should write file");
+        let unsupported_file = temp_dir.path().join("notes.txt");
+        std::fs::write(&unsupported_file, "some notes").expect("should write file");
 
         let analyzer = make_analyzer();
         let mut params = AnalyzeFileParams::default();

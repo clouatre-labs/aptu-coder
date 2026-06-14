@@ -59,13 +59,22 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
     ("ts", "typescript"),
     #[cfg(feature = "lang-tsx")]
     ("tsx", "tsx"),
+    #[cfg(feature = "lang-html")]
+    ("html", "html"),
+    #[cfg(feature = "lang-html")]
+    ("htm", "html"),
+    #[cfg(feature = "lang-markdown")]
+    ("md", "markdown"),
+    #[cfg(feature = "lang-markdown")]
+    ("mdx", "markdown"),
 ];
 
 /// Returns the language identifier for the given file extension, or `None` if unsupported.
 ///
 /// The lookup is case-insensitive. Supported extensions include `rs`, `py`, `go`, `java`,
 /// `ts`, `tsx`, `js`, `mjs`, `cjs`, `c`, `cc`, `cpp`, `cxx`, `h`, `hpp`, `hxx`, `cs`,
-/// and Fortran variants `f`, `f77`, `f90`, `f95`, `f03`, `f08`, `for`, `ftn`.
+/// Fortran variants `f`, `f77`, `f90`, `f95`, `f03`, `f08`, `for`, `ftn`,
+/// HTML variants `html`, `htm`, and Markdown variants `md`, `mdx`.
 #[must_use]
 pub fn language_for_extension(ext: &str) -> Option<&'static str> {
     EXTENSION_MAP
@@ -114,6 +123,10 @@ pub fn supported_languages() -> &'static [&'static str] {
         "cpp",
         #[cfg(feature = "lang-csharp")]
         "csharp",
+        #[cfg(feature = "lang-html")]
+        "html",
+        #[cfg(feature = "lang-markdown")]
+        "markdown",
     ]
 }
 
