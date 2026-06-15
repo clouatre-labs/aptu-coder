@@ -11,6 +11,8 @@
 pub mod cpp;
 #[cfg(feature = "lang-csharp")]
 pub mod csharp;
+#[cfg(feature = "lang-css")]
+pub mod css;
 #[cfg(feature = "lang-fortran")]
 pub mod fortran;
 #[cfg(feature = "lang-go")]
@@ -32,6 +34,8 @@ pub mod regex_fallback;
 pub mod rust;
 #[cfg(any(feature = "lang-typescript", feature = "lang-tsx"))]
 pub mod typescript;
+#[cfg(feature = "lang-yaml")]
+pub mod yaml;
 
 use tree_sitter::{Language, Node};
 
@@ -284,6 +288,38 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: None,
         }),
+        #[cfg(feature = "lang-css")]
+        "css" => Some(LanguageInfo {
+            name: "css",
+            language: tree_sitter_css::LANGUAGE.into(),
+            element_query: css::ELEMENT_QUERY,
+            call_query: css::CALL_QUERY,
+            reference_query: None,
+            import_query: Some(css::IMPORT_QUERY),
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: None,
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: None,
+        }),
+        #[cfg(feature = "lang-yaml")]
+        "yaml" => Some(LanguageInfo {
+            name: "yaml",
+            language: tree_sitter_yaml::LANGUAGE.into(),
+            element_query: yaml::ELEMENT_QUERY,
+            call_query: yaml::CALL_QUERY,
+            reference_query: None,
+            import_query: None,
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: None,
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: None,
+        }),
         _ => None,
     }
 }
@@ -316,6 +352,10 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
         "csharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
         #[cfg(feature = "lang-javascript")]
         "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        #[cfg(feature = "lang-css")]
+        "css" => Some(tree_sitter_css::LANGUAGE.into()),
+        #[cfg(feature = "lang-yaml")]
+        "yaml" => Some(tree_sitter_yaml::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -327,7 +367,9 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
 #[must_use]
 pub fn try_regex_fallback(source: &str, language: &str) -> Option<crate::types::SemanticAnalysis> {
     match language {
+        #[cfg(not(feature = "lang-css"))]
         "css" => Some(regex_fallback::extract_css(source)),
+        #[cfg(not(feature = "lang-yaml"))]
         "yaml" => Some(regex_fallback::extract_yaml(source)),
         "json" => Some(regex_fallback::extract_json(source)),
         "toml" => Some(regex_fallback::extract_toml(source)),
