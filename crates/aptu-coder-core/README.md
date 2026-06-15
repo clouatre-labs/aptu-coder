@@ -16,10 +16,10 @@ Core library for code structure analysis using tree-sitter.
 - **Directory analysis** - File tree with LOC, function, and class counts
 - **File analysis** - Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions
 - **Symbol call graphs** - Callers and callees across a directory with configurable depth
-- **Module index** - Lightweight function and import index (~75% smaller than full file analysis); returns `INVALID_PARAMS` for unsupported extensions
+- **Module index** - Lightweight function and import index (~75% smaller than full file analysis); returns graceful fallback (empty index with note) for unsupported extensions
 - **Edit operations** - In-file edits: overwrite, exact-block replace
 - **In-memory analysis** - `analyze_str` parses source text directly without a file path; returns the same `FileAnalysisOutput` as `analyze_file`
-- **Multi-language** - Rust, Python, TypeScript, TSX, Go, Java, Kotlin, Fortran, JavaScript, C/C++, C#
+- **Multi-language** - Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML
 - **Pagination** - Cursor-based pagination for large outputs
 - **Caching** - LRU cache for parsed results with mtime-based invalidation
 - **Parallel** - Rayon-based parallel file analysis
@@ -61,7 +61,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Supported Languages
 
-Rust, Python, TypeScript, TSX, Go, Java, Kotlin, Fortran, JavaScript, C/C++, C#. See the [MCP server README](https://github.com/clouatre-labs/aptu-coder/blob/main/README.md#supported-languages) for the full table with file extensions and feature flags.
+See the [MCP server README](https://github.com/clouatre-labs/aptu-coder/blob/main/README.md#supported-languages) for the full table with file extensions and feature flags.
+
+**Tree-sitter (full AST extraction):** C/C++, C#, CSS (`lang-css`), Fortran, Go, HTML, Java, JavaScript, Kotlin, Markdown, Python, Rust, TSX, TypeScript, YAML (`lang-yaml`)
+
+**Regex extraction (imports/symbols via pattern matching):** Astro, JSON, TOML; CSS and YAML fall back to regex when compiled without their tree-sitter feature flag
+
+For any other extension, `analyze_file` returns a graceful fallback (line count and the first 50 lines of the file) rather than an error.
 
 ## Configuration
 

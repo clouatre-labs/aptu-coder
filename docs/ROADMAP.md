@@ -3,7 +3,7 @@
 ## Wave History
 
 ### [Complete] Wave 1: Core Analysis
-Initial release. Four tools (`analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`), seven languages (Rust, Go, Java, Python, TypeScript, TSX, Fortran), tree-sitter AST extraction, rayon parallelism, .gitignore-aware walk via `ignore` crate. (language support has since grown to 12; see [Supported Languages](../README.md))
+Initial release. Four tools (`analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`), seven languages (Rust, Go, Java, Python, TypeScript, TSX, Fortran), tree-sitter AST extraction, rayon parallelism, .gitignore-aware walk via `ignore` crate. (language support has since grown to 18; see [Supported Languages](../README.md))
 
 ### [Complete] Wave 2: MCP Protocol (milestone 7)
 Summary-first output, `outputSchema` per tool, cursor pagination.

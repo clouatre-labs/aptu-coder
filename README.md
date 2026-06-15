@@ -56,6 +56,11 @@ All languages are enabled by default. Disable individual languages at compile ti
 | C# | `.cs` | `lang-csharp` |
 | Markdown | `.md`, `.mdx` | `lang-markdown` |
 | HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
+| CSS | `.css` | `lang-css` (tree-sitter; regex fallback when disabled) |
+| YAML | `.yaml`, `.yml` | `lang-yaml` (tree-sitter; regex fallback when disabled) |
+| Astro | `.astro` | always-on (regex via TypeScript frontmatter extractor) |
+| JSON | `.json` | always-on (regex; first-level key extraction) |
+| TOML | `.toml` | always-on (regex; section header extraction) |
 
 ## Installation
 
@@ -169,7 +174,7 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 |------|---------|-----------|
 | `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
 | `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions | all |
-| `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns `INVALID_PARAMS` for unsupported extensions | all |
+| `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |

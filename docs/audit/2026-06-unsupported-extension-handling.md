@@ -244,3 +244,35 @@ Order 1 items are independent and can be developed in parallel. Order 2 gates on
 (#1061 provides the fallback path #1062 extends). Order 3 (#1072) gates on #1062. Order 4 gates on #969, #1061, and #1062.
 
 All items through order 3 (including #1072) are merged; the unsupported-extension-handling milestone is complete.
+
+---
+
+## Resolution
+
+**Closed:** 2026-06-15  
+**Release:** v0.17.0 (tag `52d4456`, Homebrew tap deployed 03:47 UTC)
+
+| Issue | PR | Merged (UTC) |
+|---|---|---|
+| #1060 -- extension label in `analyze_directory` | #1067 | Jun 14 18:23 |
+| #1061 -- graceful fallback in `analyze_file` | #1068 | Jun 14 20:01 |
+| #1062 -- regex extraction for Astro, CSS, YAML, JSON, TOML | #1069 | Jun 15 00:38 |
+| #1063 -- `tree-sitter-css` + `tree-sitter-yaml` grammars | #1073 | Jun 15 01:20 |
+| #1072 -- `tracing::warn` on Astro extractor error | #1076 | Jun 15 02:11 |
+| #1064 -- deferred grammar tracking (no code) | -- | intentionally open |
+
+### Production validation
+
+JSONL metrics confirm zero `analyze_file invalid_params` errors after the 0.17.0 binary went live. All 8 `invalid_params` records logged on Jun 15 occurred between 00:10--01:32 UTC, before the Homebrew binary was installed.
+
+Post-binary `analyze_file` call breakdown (Jun 15, 10:00+ UTC, 12 calls, 0 errors):
+
+| Extension | Calls | Result | Extraction tier |
+|---|---|---|---|
+| `.astro` | 6 | ok | regex (TypeScript extractor via frontmatter) |
+| `.toml` | 2 | ok | regex (section headers) |
+| `.yml` | 2 | ok | graceful fallback (line count + file head) |
+| `.md` | 1 | ok | tree-sitter (lang-markdown) |
+| `.rs` | 1 | ok | tree-sitter (lang-rust) |
+
+Live-tested in session 20260615_77: `Cargo.toml` returns 7 TOML sections; `ci.yml` returns `[Unsupported extension: semantic analysis not available]` + file head -- no error in either case.

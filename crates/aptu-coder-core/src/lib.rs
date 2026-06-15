@@ -8,7 +8,7 @@
 //!
 //! # Features
 //!
-//! - **Language support**: Rust, Go, Java, Python, TypeScript, TSX, Fortran, JavaScript, C/C++, C# (feature-gated)
+//! - **Language support**: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML (feature-gated)
 //! - **Schema generation**: Optional JSON schema support via the `schemars` feature
 //! - **Async-friendly**: Uses tokio for concurrent analysis
 //! - **Cancellation support**: Built-in cancellation token support
