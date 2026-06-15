@@ -14,7 +14,7 @@ Core library for code structure analysis using tree-sitter.
 ## Features
 
 - **Directory analysis** - File tree with LOC, function, and class counts
-- **File analysis** - Functions, classes, and imports with signatures and line ranges; returns `INVALID_PARAMS` for unsupported extensions
+- **File analysis** - Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions
 - **Symbol call graphs** - Callers and callees across a directory with configurable depth
 - **Module index** - Lightweight function and import index (~75% smaller than full file analysis); returns `INVALID_PARAMS` for unsupported extensions
 - **Edit operations** - In-file edits: overwrite, exact-block replace
