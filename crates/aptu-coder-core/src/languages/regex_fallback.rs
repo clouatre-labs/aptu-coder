@@ -12,6 +12,7 @@ use crate::parser::SemanticExtractor;
 use crate::types::{FunctionInfo, SemanticAnalysis};
 use regex::Regex;
 use std::sync::LazyLock;
+use tracing;
 
 // --- compiled patterns (compiled once at startup) ---
 
@@ -134,7 +135,10 @@ pub fn extract_astro(source: &str) -> SemanticAnalysis {
     let Some(frontmatter) = block else {
         return SemanticAnalysis::default();
     };
-    SemanticExtractor::extract(&frontmatter, "typescript", None, None).unwrap_or_default()
+    SemanticExtractor::extract(&frontmatter, "typescript", None, None).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "astro TypeScript extractor failed; returning empty analysis");
+        SemanticAnalysis::default()
+    })
 }
 
 fn extract_frontmatter(source: &str) -> Option<String> {
