@@ -2661,10 +2661,7 @@ impl CodeAnalyzer {
                     return Ok(err_to_tool_result(e));
                 }
             }
-        }
-        // Normalize away any trailing separator that PathBuf::join(empty) may add.
-        .components()
-        .collect();
+        };
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
@@ -2912,10 +2909,7 @@ impl CodeAnalyzer {
                     return Ok(err_to_tool_result(e));
                 }
             }
-        }
-        // Normalize away any trailing separator that PathBuf::join(empty) may add.
-        .components()
-        .collect();
+        };
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
