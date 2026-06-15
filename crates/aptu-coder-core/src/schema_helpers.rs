@@ -49,7 +49,7 @@ pub fn option_ast_limit_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
 /// `AnalyzeFileParams` and `AnalyzeModuleParams`. Covers every extension in
 /// `lang.rs` `EXTENSION_MAP`. Centralised here so adding a language requires
 /// one change, not two.
-pub const SUPPORTED_FILE_EXT_PATTERN: &str = r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn|html|htm|md|mdx)$";
+pub const SUPPORTED_FILE_EXT_PATTERN: &str = r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn|html|htm|md|mdx|astro|css|yaml|yml|json|toml)$";
 
 /// Returns a string schema with a `pattern` constraint covering all supported
 /// source file extensions. Used as `schema_with` on `path` fields.

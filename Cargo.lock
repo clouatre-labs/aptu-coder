@@ -93,6 +93,7 @@ dependencies = [
  "ignore",
  "lru",
  "rayon",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

@@ -67,6 +67,12 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
     ("md", "markdown"),
     #[cfg(feature = "lang-markdown")]
     ("mdx", "markdown"),
+    ("astro", "astro"),
+    ("css", "css"),
+    ("yaml", "yaml"),
+    ("yml", "yaml"),
+    ("json", "json"),
+    ("toml", "toml"),
 ];
 
 /// Returns the language identifier for the given file extension, or `None` if unsupported.
