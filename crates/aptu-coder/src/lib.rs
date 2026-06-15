@@ -2643,7 +2643,7 @@ impl CodeAnalyzer {
         span.record("gen_ai.operation.name", "execute_tool");
         span.record("gen_ai.tool.name", "edit_overwrite");
         span.record("path", &params.path);
-        let _validated_path = if let Some(ref wd) = params.working_dir {
+        let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
             match validate_path_in_dir(&params.path, false, std::path::Path::new(wd)) {
                 Ok(p) => p,
                 Err(e) => {
@@ -2661,7 +2661,10 @@ impl CodeAnalyzer {
                     return Ok(err_to_tool_result(e));
                 }
             }
-        };
+        }
+        // Normalize away any trailing separator that PathBuf::join(empty) may add.
+        .components()
+        .collect();
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
@@ -2670,7 +2673,7 @@ impl CodeAnalyzer {
         let sid = self.session_id.lock().await.clone();
 
         // Guard against directory paths
-        if std::fs::metadata(&params.path)
+        if std::fs::metadata(&resolved_path)
             .map(|m| m.is_dir())
             .unwrap_or(false)
         {
@@ -2707,10 +2710,9 @@ impl CodeAnalyzer {
             )));
         }
 
-        let path = std::path::PathBuf::from(&params.path);
         let content = params.content.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            aptu_coder_core::edit_overwrite_content(&path, &content)
+            aptu_coder_core::edit_overwrite_content(&resolved_path, &content)
         });
 
         let output = match handle.await {
@@ -2892,7 +2894,7 @@ impl CodeAnalyzer {
         span.record("gen_ai.operation.name", "execute_tool");
         span.record("gen_ai.tool.name", "edit_replace");
         span.record("path", &params.path);
-        let _validated_path = if let Some(ref wd) = params.working_dir {
+        let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
             match validate_path_in_dir(&params.path, true, std::path::Path::new(wd)) {
                 Ok(p) => p,
                 Err(e) => {
@@ -2910,7 +2912,10 @@ impl CodeAnalyzer {
                     return Ok(err_to_tool_result(e));
                 }
             }
-        };
+        }
+        // Normalize away any trailing separator that PathBuf::join(empty) may add.
+        .components()
+        .collect();
         let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
@@ -2919,7 +2924,7 @@ impl CodeAnalyzer {
         let sid = self.session_id.lock().await.clone();
 
         // Guard against directory paths
-        if std::fs::metadata(&params.path)
+        if std::fs::metadata(&resolved_path)
             .map(|m| m.is_dir())
             .unwrap_or(false)
         {
@@ -2956,11 +2961,10 @@ impl CodeAnalyzer {
             )));
         }
 
-        let path = std::path::PathBuf::from(&params.path);
         let old_text = params.old_text.clone();
         let new_text = params.new_text.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            aptu_coder_core::edit_replace_block(&path, &old_text, &new_text)
+            aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
         });
 
         let output = match handle.await {
