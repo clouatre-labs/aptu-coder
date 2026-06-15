@@ -169,7 +169,9 @@ pub(crate) fn validate_path_in_dir(
         // below catches any residual traversal regardless.
         let p = std::path::Path::new(path);
         let mut ancestor = p.to_path_buf();
-        let mut suffix = std::path::PathBuf::new();
+        // Collect suffix components in reverse order, then reassemble without
+        // join(PathBuf::new()) to avoid a trailing separator on the first push.
+        let mut suffix_components: Vec<std::ffi::OsString> = Vec::new();
 
         loop {
             let full_path = canonical_working_dir.join(&ancestor);
@@ -179,7 +181,7 @@ pub(crate) fn validate_path_in_dir(
             if let Some(parent) = ancestor.parent()
                 && let Some(file_name) = ancestor.file_name()
             {
-                suffix = std::path::PathBuf::from(file_name).join(&suffix);
+                suffix_components.push(file_name.to_owned());
                 ancestor = parent.to_path_buf();
             } else {
                 // No existing ancestor found (or path contains `..`) --
@@ -188,6 +190,9 @@ pub(crate) fn validate_path_in_dir(
                 break;
             }
         }
+
+        // Reassemble suffix in the original (forward) order without trailing separator.
+        let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
 
         let canonical_base = canonical_working_dir.join(&ancestor);
         let canonical_base =
