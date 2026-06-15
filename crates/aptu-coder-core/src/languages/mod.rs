@@ -4,8 +4,8 @@
 //!
 //! Provides query strings and extraction handlers for supported languages.
 //! Language support is controlled by Cargo `lang-*` features (by default all
-//! available language handlers are enabled): Rust, Go, Java, JavaScript, Python,
-//! TypeScript, TSX, Fortran, C/C++, and C#.
+//! available language handlers are enabled): Astro, C/C++, C#, CSS, Fortran, Go,
+//! HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.
 
 #[cfg(feature = "lang-cpp")]
 pub mod cpp;
