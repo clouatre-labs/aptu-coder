@@ -102,7 +102,7 @@ When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the
 
 ### analyze_file (File Details)
 
-1. Detect language from extension; return `INVALID_PARAMS` immediately if the extension is not in the supported set
+1. Detect language from extension; dispatch to graceful fallback for unsupported extensions (returns line count, file head, no AST)
 2. SemanticExtractor parses the file: functions with signatures, classes/structs with fields, imports, type references
 3. Format as structured sections
 

@@ -158,7 +158,7 @@ Added `--port N` flag. When set, aptu-coder binds to `127.0.0.1:N` and serves al
 
 Four PRs shipped together to make `exec_command` output safe for large contexts:
 
-- **#955**: `analyze_file` and `analyze_module` return `INVALID_PARAMS` for unsupported file extensions instead of a generic error; `inputSchema` pattern constraint added so MCP clients surface the restriction before calling.
+- **#955**: `analyze_file` and `analyze_module` return `INVALID_PARAMS` for unsupported file extensions instead of a generic error; `inputSchema` pattern constraint added so MCP clients surface the restriction before calling. (Superseded by #1061 and #1062, which replaced `analyze_file` with graceful fallback and regex extraction.)
 - **#957**: CI runners migrated to `ubuntu-24.04-arm` everywhere (ARM64).
 - **#961**: Byte-level output caps on `exec_command`: stdout 30k chars (tail-preserving), stderr 10k chars (tail-preserving), combined `output_text` 50k chars. Cap thresholds are data-driven from 27,981 observed calls (0.33% exceed 30k stdout). `output_truncated: Option<bool>` added to `MetricEvent` and the JSONL schema.
 - **#962**: Command-pattern output filter table: 7 built-in rules (git pull/fetch/push/log/status, cargo build/test) suppress per-file noise before output reaches the model. `git pull` additionally injects `--no-stat` before execution. Project-local rules via `.aptu/filters.toml`. `filter_applied` field in `structuredContent` identifies which rule fired. Filters apply on success only; raw output preserved on failure.

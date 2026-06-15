@@ -168,7 +168,7 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | Tool | Purpose | Languages |
 |------|---------|-----------|
 | `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
-| `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns `INVALID_PARAMS` for unsupported extensions | all |
+| `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions | all |
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns `INVALID_PARAMS` for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |

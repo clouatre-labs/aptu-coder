@@ -236,8 +236,11 @@ Binary size delta must be documented in PR description. Existing language extrac
 | 1 | #1060 | Extension label in `analyze_directory`; two-line change | Zero |
 | 2 | #1061 | Graceful fallback in `analyze_file`; eliminates 28% error rate | Low |
 | 3 | #1062 | Regex extraction for Astro, CSS, YAML, JSON, TOML | Low |
+| 3 | #1072 | Observability: `tracing::warn` on Astro TypeScript extractor error | Zero |
 | 4 | #1063 | `tree-sitter-css` + `tree-sitter-yaml` grammars | Medium |
 | -- | #1064 | Tracking: deferred grammar candidates; no code | Zero |
 
 Order 1 items are independent and can be developed in parallel. Order 2 gates on Order 1
-(#1061 provides the fallback path #1062 extends). Order 4 gates on #969, #1061, and #1062.
+(#1061 provides the fallback path #1062 extends). Order 3 (#1072) gates on #1062. Order 4 gates on #969, #1061, and #1062.
+
+All items through order 3 (including #1072) are merged; the unsupported-extension-handling milestone is complete.
