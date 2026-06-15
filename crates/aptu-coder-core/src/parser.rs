@@ -9,7 +9,7 @@
 //! - [`ElementExtractor`]: Quick extraction of function and class counts.
 //! - [`SemanticExtractor`]: Detailed semantic analysis with calls, imports, and references.
 
-use crate::languages::get_language_info;
+use crate::languages::{get_language_info, try_regex_fallback};
 use crate::types::{
     CallInfo, ClassInfo, FunctionInfo, ImplTraitInfo, ImportInfo, ReferenceInfo, ReferenceType,
     SemanticAnalysis,
@@ -521,6 +521,12 @@ impl SemanticExtractor {
         if tc.is_exceeded() {
             return Err(ParserError::Timeout(tc.micros));
         }
+
+        // Try regex-based fallback for formats without a tree-sitter grammar.
+        if let Some(analysis) = try_regex_fallback(source, language) {
+            return Ok(analysis);
+        }
+
         let lang_info = get_language_info(language)
             .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
 

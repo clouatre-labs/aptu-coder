@@ -27,6 +27,7 @@ pub mod kotlin;
 pub mod markdown;
 #[cfg(feature = "lang-python")]
 pub mod python;
+pub mod regex_fallback;
 #[cfg(feature = "lang-rust")]
 pub mod rust;
 #[cfg(any(feature = "lang-typescript", feature = "lang-tsx"))]
@@ -315,6 +316,22 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
         "csharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
         #[cfg(feature = "lang-javascript")]
         "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        _ => None,
+    }
+}
+
+/// Attempt regex-based extraction for formats without a tree-sitter grammar.
+///
+/// Returns `Some(SemanticAnalysis)` for CSS, YAML, JSON, TOML, and Astro;
+/// `None` for all other language identifiers (caller should treat as unsupported).
+#[must_use]
+pub fn try_regex_fallback(source: &str, language: &str) -> Option<crate::types::SemanticAnalysis> {
+    match language {
+        "css" => Some(regex_fallback::extract_css(source)),
+        "yaml" => Some(regex_fallback::extract_yaml(source)),
+        "json" => Some(regex_fallback::extract_json(source)),
+        "toml" => Some(regex_fallback::extract_toml(source)),
+        "astro" => Some(regex_fallback::extract_astro(source)),
         _ => None,
     }
 }
