@@ -261,7 +261,16 @@ jobs:
           fi
       - name: Install cargo-semver-checks
         if: steps.published.outputs.available == 'true'
-        run: cargo install --locked cargo-semver-checks
+        env:
+          VERSION: "0.48.0"
+          SHA256: "1bc0d4d70af9c3ae086af958e67da2a12eaa4978896596f5499792755b62ea60"
+        run: |
+          curl -fsSL "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${VERSION}/cargo-semver-checks-aarch64-unknown-linux-gnu.tar.gz" \
+            -o cargo-semver-checks.tar.gz
+          echo "${SHA256}  cargo-semver-checks.tar.gz" | sha256sum -c -
+          tar -xzf cargo-semver-checks.tar.gz
+          mv cargo-semver-checks ~/.cargo/bin/cargo-semver-checks
+          chmod +x ~/.cargo/bin/cargo-semver-checks
       - name: Run semver checks
         if: steps.published.outputs.available == 'true'
         run: cargo semver-checks --package aptu-coder-core
