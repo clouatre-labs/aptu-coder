@@ -47,7 +47,7 @@ pub struct ExecCommandParams {
     /// Timeout in seconds before SIGKILL. None = no timeout (default).
     #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub timeout_secs: Option<u64>,
-    /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
+    /// Working directory for the command. Set this instead of prepending cd to the command string. Validated against path traversal; does not sandbox the process.
     pub working_dir: Option<String>,
     /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
     /// None = no limit (default).
@@ -2709,7 +2709,11 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
+                        wd, e.message
+                    ))])
+                    .with_meta(Some(no_cache_meta())));
                 }
             }
         } else {
@@ -2957,7 +2961,11 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
+                        wd, e.message
+                    ))])
+                    .with_meta(Some(no_cache_meta())));
                 }
             }
         } else {
@@ -3246,7 +3254,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. Prefer working_dir over cd <path> && in command -- set working_dir and use relative paths; cd and absolute paths still work but are redundant when working_dir is set. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3290,26 +3298,66 @@ impl CodeAnalyzer {
                     if !std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
-                        return Ok(err_to_tool_result(ErrorData::new(
-                            rmcp::model::ErrorCode::INVALID_PARAMS,
-                            "working_dir must be a directory".to_string(),
-                            Some(error_meta(
-                                "validation",
-                                false,
-                                "provide a valid directory path",
-                            )),
-                        )));
+                        return Ok(CallToolResult::error(vec![Content::text(format!(
+                            "working_dir {:?} is not a directory. Provide an existing directory path.",
+                            wd
+                        ))]).with_meta(Some(no_cache_meta())));
                     }
                     Some(p)
                 }
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
+                        wd, e.message
+                    ))])
+                    .with_meta(Some(no_cache_meta())));
                 }
             }
         } else {
             None
+        };
+
+        // Strip leading cd <path> && prefix from command if present
+        let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
+        let command = effective_command.to_owned();
+        let working_dir_path = if let Some(cd_path) = cd_extracted_path {
+            if working_dir_path.is_none() {
+                // Promote the cd path as working_dir, run through validation
+                match validate_path(cd_path, true) {
+                    Ok(p) if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) => {
+                        tracing::debug!(
+                            "exec_command: promoting cd prefix path as working_dir: {}",
+                            cd_path
+                        );
+                        Some(p)
+                    }
+                    Ok(_) => {
+                        span.record("error", true);
+                        span.record("error.type", "invalid_params");
+                        return Ok(CallToolResult::error(vec![Content::text(format!(
+                            "cd prefix path {:?} is not a directory. Set working_dir explicitly or use a valid directory path.",
+                            cd_path
+                        ))]).with_meta(Some(no_cache_meta())));
+                    }
+                    Err(_) => {
+                        span.record("error", true);
+                        span.record("error.type", "invalid_params");
+                        return Ok(CallToolResult::error(vec![Content::text(format!(
+                            "cd prefix path {:?} does not exist or is outside CWD. Set working_dir explicitly.",
+                            cd_path
+                        ))]).with_meta(Some(no_cache_meta())));
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    "exec_command: stripped redundant cd prefix from command; working_dir already set"
+                );
+                working_dir_path
+            }
+        } else {
+            working_dir_path
         };
 
         let param_path = params.working_dir.clone();
@@ -3331,7 +3379,6 @@ impl CodeAnalyzer {
             )));
         }
 
-        let command = params.command.clone();
         let timeout_secs = params.timeout_secs;
 
         // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
@@ -3543,6 +3590,26 @@ fn build_exec_command(
     }
 
     cmd
+}
+
+/// Strip a leading `cd <path> &&` prefix from a command string.
+///
+/// Returns `(stripped_command, Some(extracted_path))` when the command starts with
+/// `cd <path> &&`. Returns `(cmd, None)` when no `cd ... &&` prefix is found.
+///
+/// Uses only `str` methods (no regex). Leading whitespace is trimmed before matching.
+fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
+    let trimmed = cmd.trim_start();
+    let Some(rest) = trimmed.strip_prefix("cd ") else {
+        return (cmd, None);
+    };
+    // Find the && separator
+    let Some((path_part, rest_part)) = rest.split_once("&&") else {
+        return (cmd, None);
+    };
+    let path = path_part.trim();
+    let stripped = rest_part.trim();
+    (stripped, Some(path))
 }
 
 /// Run a spawned child process with timeout handling and output draining.
@@ -6094,5 +6161,35 @@ mod tests {
             result.is_ok(),
             "handle_overview_mode with None token must succeed"
         );
+    }
+
+    // ── strip_cd_prefix tests ──
+
+    #[test]
+    fn test_strip_cd_prefix_basic() {
+        let (cmd, path) = strip_cd_prefix("cd /tmp && echo hello");
+        assert_eq!(cmd, "echo hello");
+        assert_eq!(path, Some("/tmp"));
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_no_ampersand() {
+        let (cmd, path) = strip_cd_prefix("cd /tmp");
+        assert_eq!(cmd, "cd /tmp");
+        assert_eq!(path, None);
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_no_cd() {
+        let (cmd, path) = strip_cd_prefix("echo hello");
+        assert_eq!(cmd, "echo hello");
+        assert_eq!(path, None);
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_with_spaces() {
+        let (cmd, path) = strip_cd_prefix("cd  /tmp  &&  echo hello");
+        assert_eq!(path, Some("/tmp"));
+        assert_eq!(cmd.trim(), "echo hello");
     }
 }
