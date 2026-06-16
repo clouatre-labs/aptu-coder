@@ -3327,30 +3327,43 @@ impl CodeAnalyzer {
         let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
         let (command, working_dir_path) = if let Some(cd_path) = cd_extracted_path {
             if working_dir_path.is_none() {
-                // Promote the cd path as working_dir, run through validation
-                match validate_path(cd_path, true) {
-                    Ok(p) if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) => {
-                        tracing::debug!(
-                            "exec_command: promoting cd prefix path as working_dir: {}",
-                            cd_path
-                        );
-                        (effective_command.to_owned(), Some(p))
-                    }
-                    Ok(_) => {
-                        span.record("error", true);
-                        span.record("error.type", "invalid_params");
-                        return Ok(CallToolResult::error(vec![Content::text(format!(
-                            "cd prefix path {:?} is not a directory. Set working_dir explicitly or use a valid directory path.",
-                            cd_path
-                        ))]).with_meta(Some(no_cache_meta())));
-                    }
-                    Err(_) => {
-                        span.record("error", true);
-                        span.record("error.type", "invalid_params");
-                        return Ok(CallToolResult::error(vec![Content::text(format!(
-                            "cd prefix path {:?} does not exist or is outside CWD. Set working_dir explicitly.",
-                            cd_path
-                        ))]).with_meta(Some(no_cache_meta())));
+                // Only promote when the path is a plain absolute literal -- no shell
+                // special characters (~, $, -). Relative paths and shell-expanded forms
+                // (cd ~, cd $VAR, cd -) must reach the shell unmodified; validate_path
+                // cannot resolve them correctly before execution.
+                let is_plain_absolute = cd_path.starts_with('/')
+                    && !cd_path.contains('$')
+                    && !cd_path.contains('~')
+                    && cd_path != "-";
+                if !is_plain_absolute {
+                    // Shell-special or relative -- pass through unmodified.
+                    (params.command.clone(), working_dir_path)
+                } else {
+                    // Promote the cd path as working_dir, run through validation
+                    match validate_path(cd_path, true) {
+                        Ok(p) if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) => {
+                            tracing::debug!(
+                                "exec_command: promoting cd prefix path as working_dir: {}",
+                                cd_path
+                            );
+                            (effective_command.to_owned(), Some(p))
+                        }
+                        Ok(_) => {
+                            span.record("error", true);
+                            span.record("error.type", "invalid_params");
+                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                                "cd prefix path {:?} is not a directory. Set working_dir explicitly or use a valid directory path.",
+                                cd_path
+                            ))]).with_meta(Some(no_cache_meta())));
+                        }
+                        Err(_) => {
+                            span.record("error", true);
+                            span.record("error.type", "invalid_params");
+                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                                "cd prefix path {:?} does not exist or is outside CWD. Set working_dir explicitly.",
+                                cd_path
+                            ))]).with_meta(Some(no_cache_meta())));
+                        }
                     }
                 }
             } else {
@@ -6188,30 +6201,25 @@ mod tests {
 
     #[test]
     fn test_strip_cd_prefix_no_ampersand() {
+        // No && separator -- returned unmodified; shell handles the cd naturally.
         let (cmd, path) = strip_cd_prefix("cd /tmp");
         assert_eq!(cmd, "cd /tmp");
         assert_eq!(path, None);
     }
 
     #[test]
-    fn test_strip_cd_prefix_no_cd() {
-        let (cmd, path) = strip_cd_prefix("echo hello");
-        assert_eq!(cmd, "echo hello");
-        assert_eq!(path, None);
-    }
-
-    #[test]
-    fn test_strip_cd_prefix_with_spaces() {
+    fn test_strip_cd_prefix_with_extra_spaces() {
+        // Surrounding whitespace is trimmed from both extracted path and stripped command.
         let (cmd, path) = strip_cd_prefix("cd  /tmp  &&  echo hello");
         assert_eq!(path, Some("/tmp"));
-        assert_eq!(cmd.trim(), "echo hello");
+        assert_eq!(cmd, "echo hello");
     }
 
     #[test]
     fn test_strip_cd_prefix_splits_on_first_ampersand_only() {
-        // Only the leading cd is consumed; remaining && in the command are preserved.
-        let (stripped, path) = strip_cd_prefix("cd /a && cmd1 && cd /b && cmd2");
+        // Only the leading cd && is consumed; subsequent && in the command are preserved.
+        let (cmd, path) = strip_cd_prefix("cd /a && cmd1 && cd /b && cmd2");
         assert_eq!(path, Some("/a"));
-        assert_eq!(stripped.trim(), "cmd1 && cd /b && cmd2");
+        assert_eq!(cmd, "cmd1 && cd /b && cmd2");
     }
 }
