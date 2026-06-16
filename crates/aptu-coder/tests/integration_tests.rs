@@ -550,3 +550,116 @@ async fn test_analyze_module_unsupported_fallback() {
         "imports must be empty for unsupported extension"
     );
 }
+
+/// Recursively walk a `serde_json::Value` (a raw JSON Schema object), collecting paths
+/// where `"format"` equals one of the forbidden values.
+/// Covers: properties, $defs, allOf, anyOf, oneOf, items, additionalProperties.
+fn collect_forbidden_formats(
+    val: &serde_json::Value,
+    forbidden: &[&str],
+    path: &str,
+    found: &mut Vec<String>,
+) {
+    let serde_json::Value::Object(map) = val else {
+        return;
+    };
+    if let Some(fmt) = map.get("format").and_then(|v| v.as_str()) {
+        if forbidden.contains(&fmt) {
+            found.push(format!("{path}: format={fmt}"));
+        }
+    }
+    for (key, child) in map {
+        let child_path = if path.is_empty() {
+            key.clone()
+        } else {
+            format!("{path}.{key}")
+        };
+        match key.as_str() {
+            "properties" | "$defs" => {
+                if let Some(props) = child.as_object() {
+                    for (name, val) in props {
+                        collect_forbidden_formats(
+                            val,
+                            forbidden,
+                            &format!("{child_path}.{name}"),
+                            found,
+                        );
+                    }
+                }
+            }
+            "allOf" | "anyOf" | "oneOf" => {
+                if let Some(arr) = child.as_array() {
+                    for (i, item) in arr.iter().enumerate() {
+                        collect_forbidden_formats(
+                            item,
+                            forbidden,
+                            &format!("{child_path}[{i}]"),
+                            found,
+                        );
+                    }
+                }
+            }
+            "items" => collect_forbidden_formats(child, forbidden, &child_path, found),
+            "additionalProperties" => {
+                if child.is_object() {
+                    collect_forbidden_formats(child, forbidden, &child_path, found);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_schema_compliance_no_nonstandard_formats() {
+    use common::make_test_analyzer;
+    use rmcp::ServiceExt as _;
+
+    // Spin up the MCP server and connect a typed rmcp client over an in-process duplex pipe.
+    let analyzer = make_test_analyzer();
+    let (client_io, server_io) = tokio::io::duplex(65536);
+    tokio::spawn(async move {
+        let (rx, tx) = tokio::io::split(server_io);
+        if let Ok(svc) = rmcp::serve_server(analyzer, (rx, tx)).await {
+            let _ = svc.waiting().await;
+        }
+    });
+    let (client_rx, client_tx) = tokio::io::split(client_io);
+    let client = ().serve((client_rx, client_tx)).await.expect("client handshake failed");
+
+    let result = client
+        .peer()
+        .list_tools(None)
+        .await
+        .expect("tools/list failed");
+
+    assert!(!result.tools.is_empty(), "expected at least one tool");
+
+    let forbidden = &["uint", "uint64"];
+    let mut found = Vec::new();
+
+    for tool in &result.tools {
+        // inputSchema is a serde_json::Value on rmcp's Tool struct.
+        collect_forbidden_formats(
+            &serde_json::to_value(&tool.input_schema).expect("inputSchema serialization failed"),
+            forbidden,
+            &tool.name,
+            &mut found,
+        );
+        // outputSchema is optional.
+        if let Some(output_schema) = &tool.output_schema {
+            collect_forbidden_formats(
+                &serde_json::to_value(output_schema).expect("outputSchema serialization failed"),
+                forbidden,
+                &format!("{}.outputSchema", tool.name),
+                &mut found,
+            );
+        }
+    }
+
+    assert!(
+        found.is_empty(),
+        "found forbidden format values in tool schemas:\n{}",
+        found.join("\n")
+    );
+}
