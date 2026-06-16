@@ -53,7 +53,7 @@ pub struct ExecCommandParams {
     /// None = no limit (default).
     #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub memory_limit_mb: Option<u64>,
-    /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
+    /// CPU time limit in seconds. SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
     /// None = no limit (default).
     #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub cpu_limit_secs: Option<u64>,
@@ -3299,7 +3299,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; timeout_secs kills the process after N seconds (wall-clock); omit for no limit. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3634,10 +3634,6 @@ fn build_exec_command(
 
     #[cfg(unix)]
     {
-        #[cfg(not(target_os = "linux"))]
-        if memory_limit_mb.is_some() {
-            warn!("memory_limit_mb is not enforced on this platform (Linux only)");
-        }
         if memory_limit_mb.is_some() || cpu_limit_secs.is_some() {
             // SAFETY: This closure runs in the child process after fork() and before exec(),
             // making it safe to call setrlimit (a signal-safe syscall). No Rust objects are
