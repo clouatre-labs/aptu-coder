@@ -3910,7 +3910,7 @@ impl ServerHandler for CodeAnalyzer {
             3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types.\n\
             4. Use analyze_symbol to trace call graphs.\n\
             Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with cursor/page_size. For subagents: DISABLE_PROMPT_CACHING=1.\n\
-            JSONL metrics: always-on at $HOME/.local/share/aptu-coder/metrics-YYYY-MM-DD.jsonl ($XDG_DATA_HOME/aptu-coder/ if set). Query from that directory: cd to it before running jq glob patterns."
+            JSONL metrics at $HOME/.local/share/aptu-coder/ (or $XDG_DATA_HOME/aptu-coder/). Always cd there before jq glob queries."
         );
         let capabilities = ServerCapabilities::builder()
             .enable_logging()
