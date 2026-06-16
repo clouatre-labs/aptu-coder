@@ -115,13 +115,13 @@ pub(crate) fn validate_path(
 /// Maps an io::Error to an ErrorData with kind-specific message and preserved context.
 pub(crate) fn io_error_to_path_error(
     err: &std::io::Error,
-    _path_context: &str,
+    path_context: &str,
     suggested_action: &'static str,
 ) -> ErrorData {
     let msg = match err.kind() {
-        std::io::ErrorKind::NotFound => "path not found".to_string(),
-        std::io::ErrorKind::PermissionDenied => "permission denied".to_string(),
-        _ => "path is invalid".to_string(),
+        std::io::ErrorKind::NotFound => format!("path not found: {path_context}"),
+        std::io::ErrorKind::PermissionDenied => format!("permission denied: {path_context}"),
+        _ => format!("path is invalid: {path_context}"),
     };
     let mut meta = error_meta("validation", false, suggested_action);
     // Preserve io::Error context in data field
