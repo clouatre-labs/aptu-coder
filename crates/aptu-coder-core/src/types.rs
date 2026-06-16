@@ -51,8 +51,16 @@ pub struct DefUseSite {
     /// File path (relative to the analysis root).
     pub file: String,
     /// Line number (1-indexed) in the file.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
     pub line: usize,
     /// Column offset (0-indexed, byte offset from line start).
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
     pub column: usize,
     /// 3-line code context: lines N-1, N, N+1 from source.
     pub snippet: String,
@@ -842,6 +850,10 @@ pub struct EditOverwriteOutput {
     /// Path of the file that was written.
     pub path: String,
     /// Number of bytes written (UTF-8 byte length of content).
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
     pub bytes_written: usize,
 }
 
@@ -866,8 +878,16 @@ pub struct EditReplaceOutput {
     /// Path of the file that was edited.
     pub path: String,
     /// File size in bytes before the edit.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
     pub bytes_before: usize,
     /// File size in bytes after the edit.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
     pub bytes_after: usize,
 }
 
@@ -890,6 +910,10 @@ pub struct FilterRule {
     #[serde(default)]
     pub keep_lines_matching: Vec<String>,
     /// Maximum number of lines to keep in output.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::option_integer_schema")
+    )]
     pub max_lines: Option<usize>,
     /// Replacement text if filtered output is empty (success-only).
     pub on_empty: Option<String>,

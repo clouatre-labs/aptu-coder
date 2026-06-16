@@ -45,14 +45,17 @@ pub struct ExecCommandParams {
     /// Shell command to execute via sh -c (or $SHELL if set).
     pub command: String,
     /// Timeout in seconds before SIGKILL. None = no timeout (default).
+    #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub timeout_secs: Option<u64>,
     /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
     pub working_dir: Option<String>,
     /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
     /// None = no limit (default).
+    #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub memory_limit_mb: Option<u64>,
     /// CPU time limit in seconds. Complements timeout_secs (wall-clock). SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
     /// None = no limit (default).
+    #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub cpu_limit_secs: Option<u64>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
