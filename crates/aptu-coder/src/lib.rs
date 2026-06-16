@@ -47,7 +47,7 @@ pub struct ExecCommandParams {
     /// Timeout in seconds before SIGKILL. None = no timeout (default).
     #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
     pub timeout_secs: Option<u64>,
-    /// Working directory relative to server CWD. Validated against path traversal, but best-effort only -- does not sandbox the process.
+    /// Working directory for the command. Set this instead of prepending cd to the command string. Validated against path traversal; does not sandbox the process.
     pub working_dir: Option<String>,
     /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
     /// None = no limit (default).
@@ -292,7 +292,12 @@ fn error_meta(
 
 #[must_use]
 fn err_to_tool_result(e: ErrorData) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(e.message)])
+    CallToolResult::error(vec![Content::text(e.message)]).with_meta(Some(no_cache_meta()))
+}
+
+#[must_use]
+fn tool_error(msg: String) -> CallToolResult {
+    CallToolResult::error(vec![Content::text(msg)]).with_meta(Some(no_cache_meta()))
 }
 
 fn err_to_tool_result_from_pagination(
@@ -2709,7 +2714,10 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
+                    return Ok(tool_error(format!(
+                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
+                        wd, e.message
+                    )));
                 }
             }
         } else {
@@ -2957,7 +2965,10 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
+                    return Ok(tool_error(format!(
+                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
+                        wd, e.message
+                    )));
                 }
             }
         } else {
@@ -3246,7 +3257,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. Prefer working_dir over cd <path> && in command -- set working_dir and use relative paths; cd and absolute paths still work but are redundant when working_dir is set. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; use timeout_secs to limit execution time. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3290,14 +3301,9 @@ impl CodeAnalyzer {
                     if !std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
-                        return Ok(err_to_tool_result(ErrorData::new(
-                            rmcp::model::ErrorCode::INVALID_PARAMS,
-                            "working_dir must be a directory".to_string(),
-                            Some(error_meta(
-                                "validation",
-                                false,
-                                "provide a valid directory path",
-                            )),
+                        return Ok(tool_error(format!(
+                            "working_dir {:?} is not a directory. Provide an existing directory path.",
+                            wd
                         )));
                     }
                     Some(p)
@@ -3305,11 +3311,82 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
+                    return Ok(tool_error(format!(
+                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
+                        wd, e.message
+                    )));
                 }
             }
         } else {
             None
+        };
+
+        // Strip leading "cd <path> &&" prefix from command only when provably redundant.
+        // - No working_dir: promote the cd path as working_dir (unambiguous).
+        // - working_dir already set: strip only if the cd path resolves to the same
+        //   directory; otherwise pass the command through unmodified (the cd is
+        //   load-bearing, e.g. a multi-step chain like "cd sub && build && cd ../other && build").
+        let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
+        let (command, working_dir_path) = if let Some(cd_path) = cd_extracted_path {
+            if working_dir_path.is_none() {
+                // Only promote when the path is a plain absolute literal -- no shell
+                // special characters (~, $, -). Relative paths and shell-expanded forms
+                // (cd ~, cd $VAR, cd -) must reach the shell unmodified; validate_path
+                // cannot resolve them correctly before execution.
+                let is_plain_absolute = cd_path.starts_with('/')
+                    && !cd_path.contains('$')
+                    && !cd_path.contains('~')
+                    && cd_path != "-";
+                if !is_plain_absolute {
+                    // Shell-special or relative -- pass through unmodified.
+                    (params.command.clone(), working_dir_path)
+                } else {
+                    // Promote the cd path as working_dir, run through validation
+                    match validate_path(cd_path, true) {
+                        Ok(p) if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) => {
+                            tracing::debug!(
+                                "exec_command: promoting cd prefix path as working_dir: {}",
+                                cd_path
+                            );
+                            (effective_command.to_owned(), Some(p))
+                        }
+                        Ok(_) => {
+                            span.record("error", true);
+                            span.record("error.type", "invalid_params");
+                            return Ok(tool_error(format!(
+                                "cd prefix path {:?} is not a directory. Set working_dir explicitly or use a valid directory path.",
+                                cd_path
+                            )));
+                        }
+                        Err(_) => {
+                            span.record("error", true);
+                            span.record("error.type", "invalid_params");
+                            return Ok(tool_error(format!(
+                                "cd prefix path {:?} does not exist or is outside CWD. Set working_dir explicitly.",
+                                cd_path
+                            )));
+                        }
+                    }
+                }
+            } else {
+                // working_dir is already set -- only strip if the cd path resolves to
+                // the same directory (redundant). Otherwise keep the full original command.
+                let cd_resolves_to_same = validate_path(cd_path, true)
+                    .ok()
+                    .map(|p| Some(&p) == working_dir_path.as_ref())
+                    .unwrap_or(false);
+                if cd_resolves_to_same {
+                    tracing::debug!(
+                        "exec_command: stripped redundant cd prefix; matches explicit working_dir"
+                    );
+                    (effective_command.to_owned(), working_dir_path)
+                } else {
+                    // cd path differs from working_dir -- the cd is load-bearing; pass through.
+                    (params.command.clone(), working_dir_path)
+                }
+            }
+        } else {
+            (params.command.clone(), working_dir_path)
         };
 
         let param_path = params.working_dir.clone();
@@ -3331,7 +3408,6 @@ impl CodeAnalyzer {
             )));
         }
 
-        let command = params.command.clone();
         let timeout_secs = params.timeout_secs;
 
         // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
@@ -3543,6 +3619,26 @@ fn build_exec_command(
     }
 
     cmd
+}
+
+/// Strip a leading `cd <path> &&` prefix from a command string.
+///
+/// Returns `(stripped_command, Some(extracted_path))` when the command starts with
+/// `cd <path> &&`. Returns `(cmd, None)` when no `cd ... &&` prefix is found.
+///
+/// Uses only `str` methods (no regex). Leading whitespace is trimmed before matching.
+fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
+    let trimmed = cmd.trim_start();
+    let Some(rest) = trimmed.strip_prefix("cd ") else {
+        return (cmd, None);
+    };
+    // Find the && separator
+    let Some((path_part, rest_part)) = rest.split_once("&&") else {
+        return (cmd, None);
+    };
+    let path = path_part.trim();
+    let stripped = rest_part.trim();
+    (stripped, Some(path))
 }
 
 /// Run a spawned child process with timeout handling and output draining.
@@ -6094,5 +6190,38 @@ mod tests {
             result.is_ok(),
             "handle_overview_mode with None token must succeed"
         );
+    }
+
+    // ── strip_cd_prefix tests ──
+
+    #[test]
+    fn test_strip_cd_prefix_basic() {
+        let (cmd, path) = strip_cd_prefix("cd /tmp && echo hello");
+        assert_eq!(cmd, "echo hello");
+        assert_eq!(path, Some("/tmp"));
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_no_ampersand() {
+        // No && separator -- returned unmodified; shell handles the cd naturally.
+        let (cmd, path) = strip_cd_prefix("cd /tmp");
+        assert_eq!(cmd, "cd /tmp");
+        assert_eq!(path, None);
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_with_extra_spaces() {
+        // Surrounding whitespace is trimmed from both extracted path and stripped command.
+        let (cmd, path) = strip_cd_prefix("cd  /tmp  &&  echo hello");
+        assert_eq!(path, Some("/tmp"));
+        assert_eq!(cmd, "echo hello");
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_splits_on_first_ampersand_only() {
+        // Only the leading cd && is consumed; subsequent && in the command are preserved.
+        let (cmd, path) = strip_cd_prefix("cd /a && cmd1 && cd /b && cmd2");
+        assert_eq!(path, Some("/a"));
+        assert_eq!(cmd, "cmd1 && cd /b && cmd2");
     }
 }

@@ -764,3 +764,79 @@ async fn test_exec_slot_files_not_written_for_small_output() {
         "stderr_path must be absent for small output: {sc}"
     );
 }
+
+#[tokio::test]
+async fn test_cd_prefix_chain_passthrough_with_working_dir() {
+    // When working_dir is set and the leading cd path differs, the sanitizer must
+    // pass the full command through unmodified so the shell executes every cd in order.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cd /tmp && pwd && cd /var && pwd",
+        "working_dir": std::env::current_dir().unwrap().to_str().unwrap()
+    }))
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success: {resp}"
+    );
+    let stdout = resp["result"]["structuredContent"]["stdout"]
+        .as_str()
+        .unwrap_or("");
+    let tmp_pos = stdout.find("/tmp").expect("expected /tmp in stdout");
+    let var_pos = stdout.find("/var").expect("expected /var in stdout");
+    assert!(
+        tmp_pos < var_pos,
+        "/tmp must precede /var in stdout: {stdout}"
+    );
+}
+
+#[tokio::test]
+async fn test_cd_prefix_plain_absolute_promoted_when_no_working_dir() {
+    // When no working_dir is supplied and the command starts with a plain absolute
+    // cd path, the sanitizer promotes the path as working_dir and strips the prefix.
+    // The server CWD is crates/aptu-coder; use its src/ subdir as the target.
+    let cwd = std::env::current_dir().unwrap();
+    let target = cwd.join("src");
+    let target_str = target.to_str().unwrap().to_owned();
+
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": format!("cd {} && pwd", target_str)
+    }))
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success: {resp}"
+    );
+    let stdout = resp["result"]["structuredContent"]["stdout"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        stdout.trim().ends_with("/src"),
+        "pwd should resolve to the src subdir: {stdout}"
+    );
+}
+
+#[tokio::test]
+async fn test_cd_prefix_shell_special_passes_through() {
+    // Shell-special cd forms (cd ~, cd $HOME, cd -, relative paths without working_dir)
+    // must not be intercepted by the sanitizer; they pass through to the shell unmodified.
+    // cd ~ is universally supported and expands to the home directory.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cd ~ && pwd"
+    }))
+    .await;
+
+    // The shell handles cd ~ naturally; the command must succeed.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "cd ~ must reach the shell unmodified and succeed: {resp}"
+    );
+    let stdout = resp["result"]["structuredContent"]["stdout"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        !stdout.trim().is_empty(),
+        "pwd after cd ~ must produce output: {stdout}"
+    );
+}
