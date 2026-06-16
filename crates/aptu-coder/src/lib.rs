@@ -6208,15 +6208,11 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_cd_prefix_load_bearing_chain() {
-        // "cd sub && build && cd ../other && build" -- the first cd navigates to a
-        // subdirectory that the rest of the chain depends on. split_once("&&") extracts
-        // "sub" as the path and the tail as the stripped command; the caller must detect
-        // that "sub" != working_dir and pass the original command through unmodified.
+    fn test_strip_cd_prefix_multi_step_chain() {
+        // Parser splits on first &&; the caller is responsible for deciding whether to use it.
         let (stripped, path) =
-            strip_cd_prefix("cd workers/dashboard && bunx build && cd ../digest && bunx build");
-        // strip_cd_prefix itself splits on first &&; caller decides whether to use it.
+            strip_cd_prefix("cd workers/dashboard && bunx wrangler build 2>&1 | tail -8 && cd ../digest && bunx wrangler build 2>&1 | tail -8");
         assert_eq!(path, Some("workers/dashboard"));
-        assert_eq!(stripped.trim(), "bunx build && cd ../digest && bunx build");
+        assert_eq!(stripped.trim(), "bunx wrangler build 2>&1 | tail -8 && cd ../digest && bunx wrangler build 2>&1 | tail -8");
     }
 }

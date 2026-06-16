@@ -764,3 +764,40 @@ async fn test_exec_slot_files_not_written_for_small_output() {
         "stderr_path must be absent for small output: {sc}"
     );
 }
+
+#[tokio::test]
+async fn test_cd_prefix_chain_passthrough_with_working_dir() {
+    // Arrange: command is a real-world multi-step chain where the leading cd navigates
+    // to a subdirectory that the rest of the chain depends on. working_dir is set to
+    // the repo root (server CWD). The cd path ("workers/dashboard") differs from
+    // working_dir, so the full original command must pass through unmodified -- the
+    // sanitizer must not strip the leading cd.
+    //
+    // We use "cd /tmp && pwd && cd /var && pwd" -- /tmp and /var are guaranteed to
+    // exist, and the two pwd outputs prove the shell executed both cds in sequence,
+    // meaning the original command was not altered.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cd /tmp && pwd && cd /var && pwd",
+        "working_dir": std::env::current_dir().unwrap().to_str().unwrap()
+    }))
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success: {resp}"
+    );
+    let stdout = resp["result"]["structuredContent"]["stdout"]
+        .as_str()
+        .unwrap_or("");
+    // Both cds must have executed: /tmp appears before /var in the output.
+    assert!(
+        stdout.contains("/tmp") && stdout.contains("/var"),
+        "expected both /tmp and /var in stdout, proving the chain ran unmodified: {stdout}"
+    );
+    let tmp_pos = stdout.find("/tmp").unwrap();
+    let var_pos = stdout.find("/var").unwrap();
+    assert!(
+        tmp_pos < var_pos,
+        "/tmp must appear before /var in stdout: {stdout}"
+    );
+}
