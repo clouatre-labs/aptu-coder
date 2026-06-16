@@ -6208,11 +6208,10 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_cd_prefix_multi_step_chain() {
-        // Parser splits on first &&; the caller is responsible for deciding whether to use it.
-        let (stripped, path) =
-            strip_cd_prefix("cd workers/dashboard && bunx wrangler build 2>&1 | tail -8 && cd ../digest && bunx wrangler build 2>&1 | tail -8");
-        assert_eq!(path, Some("workers/dashboard"));
-        assert_eq!(stripped.trim(), "bunx wrangler build 2>&1 | tail -8 && cd ../digest && bunx wrangler build 2>&1 | tail -8");
+    fn test_strip_cd_prefix_splits_on_first_ampersand_only() {
+        // Only the leading cd is consumed; remaining && in the command are preserved.
+        let (stripped, path) = strip_cd_prefix("cd /a && cmd1 && cd /b && cmd2");
+        assert_eq!(path, Some("/a"));
+        assert_eq!(stripped.trim(), "cmd1 && cd /b && cmd2");
     }
 }
