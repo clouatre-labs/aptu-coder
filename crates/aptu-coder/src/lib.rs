@@ -3028,6 +3028,7 @@ impl CodeAnalyzer {
 
         let old_text = params.old_text.clone();
         let new_text = params.new_text.clone();
+        let old_text_for_hint = old_text.clone();
         let handle = tokio::task::spawn_blocking(move || {
             aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
         });
@@ -3036,6 +3037,7 @@ impl CodeAnalyzer {
             Ok(Ok(v)) => v,
             Ok(Err(aptu_coder_core::EditError::NotFound {
                 path: notfound_path,
+                first_20_lines,
             })) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
@@ -3060,11 +3062,45 @@ impl CodeAnalyzer {
                     output_truncated: None,
                     ..Default::default()
                 });
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
+
+                let message = if first_20_lines.is_empty() {
                     format!(
                         "old_text not found (0 matches) in {notfound_path}. Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
-                    ),
+                    )
+                } else {
+                    let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
+                    let mut best_line_idx = 1usize;
+                    let mut best_line = "";
+                    let mut best_lcp = 0usize;
+
+                    for (i, file_line) in first_20_lines.lines().enumerate() {
+                        let lcp = file_line
+                            .chars()
+                            .zip(first_old_line.chars())
+                            .take_while(|(a, b)| a == b)
+                            .count();
+                        if lcp > best_lcp {
+                            best_lcp = lcp;
+                            best_line = file_line;
+                            best_line_idx = i + 1;
+                        }
+                    }
+
+                    let numbered_lines: String = first_20_lines
+                        .lines()
+                        .enumerate()
+                        .map(|(i, line)| format!("  Line {}: {}", i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    format!(
+                        "old_text not found (0 matches) in {notfound_path}.\nThe file begins:\n{numbered_lines}\n\nNearest match: line {best_line_idx} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
+                    )
+                };
+
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    message,
                     Some(error_meta(
                         "validation",
                         false,
@@ -3075,6 +3111,7 @@ impl CodeAnalyzer {
             Ok(Err(aptu_coder_core::EditError::Ambiguous {
                 count,
                 path: ambiguous_path,
+                match_lines,
             })) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
@@ -3099,10 +3136,15 @@ impl CodeAnalyzer {
                     output_truncated: None,
                     ..Default::default()
                 });
+                let line_numbers_csv = match_lines
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
                     format!(
-                        "old_text matched {count} locations in {ambiguous_path}. Extend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
+                        "old_text matched {count} locations in {ambiguous_path}.\nOccurrences at lines: {line_numbers_csv}\nExtend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
                     ),
                     Some(error_meta(
                         "validation",

@@ -23,11 +23,18 @@ pub enum EditError {
     #[error(
         "old_text not found in {path} — verify the text matches exactly, including whitespace and newlines"
     )]
-    NotFound { path: String },
+    NotFound {
+        path: String,
+        first_20_lines: String,
+    },
     #[error(
         "old_text appears {count} times in {path} — make old_text longer and more specific to uniquely identify the block"
     )]
-    Ambiguous { count: usize, path: String },
+    Ambiguous {
+        count: usize,
+        path: String,
+        match_lines: Vec<usize>,
+    },
 }
 
 fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
@@ -75,15 +82,22 @@ pub fn edit_replace_block(
     let count = content.matches(old_text).count();
     match count {
         0 => {
+            let first_20_lines = content.lines().take(20).collect::<Vec<_>>().join("\n");
             return Err(EditError::NotFound {
                 path: path.display().to_string(),
+                first_20_lines,
             });
         }
         1 => {}
         n => {
+            let match_lines: Vec<usize> = content
+                .match_indices(old_text)
+                .map(|(offset, _)| content[..offset].bytes().filter(|&b| b == b'\n').count() + 1)
+                .collect();
             return Err(EditError::Ambiguous {
                 count: n,
                 path: path.display().to_string(),
+                match_lines,
             });
         }
     }
@@ -154,7 +168,7 @@ mod tests {
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
         let err = edit_replace_block(&path, "missing", "x").unwrap_err();
-        std::assert_matches!(err, EditError::NotFound { .. });
+        std::assert_matches!(&err, EditError::NotFound { first_20_lines, .. } if !first_20_lines.is_empty());
     }
 
     #[test]
@@ -163,7 +177,7 @@ mod tests {
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo foo baz").unwrap();
         let err = edit_replace_block(&path, "foo", "x").unwrap_err();
-        std::assert_matches!(err, EditError::Ambiguous { count: 2, .. });
+        std::assert_matches!(&err, EditError::Ambiguous { count: 2, match_lines, .. } if match_lines == &[1, 1]);
     }
 
     #[test]
