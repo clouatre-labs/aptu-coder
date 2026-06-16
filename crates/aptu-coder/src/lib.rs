@@ -3038,7 +3038,6 @@ impl CodeAnalyzer {
             Ok(Err(aptu_coder_core::EditError::NotFound {
                 path: notfound_path,
                 first_20_lines,
-                ..
             })) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
@@ -3113,7 +3112,6 @@ impl CodeAnalyzer {
                 count,
                 path: ambiguous_path,
                 match_lines,
-                ..
             })) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");

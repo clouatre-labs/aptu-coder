@@ -20,7 +20,6 @@ pub enum EditError {
     },
     #[error("path is a directory, not a file: {0}")]
     NotAFile(PathBuf),
-    #[non_exhaustive]
     #[error(
         "old_text not found in {path} — verify the text matches exactly, including whitespace and newlines"
     )]
@@ -28,7 +27,6 @@ pub enum EditError {
         path: String,
         first_20_lines: String,
     },
-    #[non_exhaustive]
     #[error(
         "old_text appears {count} times in {path} — make old_text longer and more specific to uniquely identify the block"
     )]
