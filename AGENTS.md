@@ -53,7 +53,9 @@ Daily-rotated JSONL files live at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.
 
 Key schema fields: `ts` (u64), `tool` (string), `duration_ms` (u64), `output_chars` (usize), `result` (string), `error_type` (nullable), `session_id` (nullable), `seq` (nullable), `cache_hit` (nullable), `cache_tier` (nullable), `exit_code` (nullable), `timed_out` (bool).
 
-Five validated jq one-liners:
+**Query rule:** always `cd` to the metrics directory before running jq glob patterns. Never pass brace-expanded filenames (`metrics-2026-06-1{0,1,2}.jsonl`) from a different working directory -- globs expand against CWD and silently produce no matches when the files are not there.
+
+Five validated jq one-liners (run from `~/.local/share/aptu-coder/`):
 
 1. Tool call volume: `jq -r '.tool' metrics-*.jsonl | sort | uniq -c | sort -rn`
 2. Avg duration by tool: `jq -r '[.tool, .duration_ms] | @tsv' metrics-*.jsonl | awk -F'\t' '{c[$1]++;s[$1]+=$2} END{for(t in c) printf "%s\t%dms avg\n",t,s[t]/c[t]}' | sort -t$'\t' -k2 -rn`
