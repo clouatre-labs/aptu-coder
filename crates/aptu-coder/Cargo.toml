@@ -49,3 +49,4 @@ tokio = { workspace = true }
 tempfile = { workspace = true }
 serial_test = "=3.5.0"
 tower = { version = "=0.5.3", features = ["util"] }
+rmcp = { workspace = true, features = ["client"] }
