@@ -55,7 +55,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "aptu-coder"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "aptu-coder-core",
  "axum",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "aptu-coder-core"
-version = "0.17.2"
+version = "0.17.3"
 dependencies = [
  "base64",
  "blake3",
