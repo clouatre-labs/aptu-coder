@@ -151,16 +151,15 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
     CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
-    LoggingLevel, LoggingMessageNotificationParam, Meta, Notification, NumberOrString,
-    ProgressNotificationParam, ProgressToken, ServerCapabilities, ServerNotification,
-    SetLevelRequestParams,
+    LoggingLevel, LoggingMessageNotificationParam, Meta, Notification, ProgressNotificationParam,
+    ProgressToken, ServerCapabilities, ServerNotification, SetLevelRequestParams,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc};
+use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc, watch};
 use tracing::{instrument, warn};
 use tracing_subscriber::filter::LevelFilter;
 
@@ -542,6 +541,7 @@ impl CodeAnalyzer {
         &self,
         params: &AnalyzeDirectoryParams,
         ct: tokio_util::sync::CancellationToken,
+        progress_token: Option<ProgressToken>,
     ) -> Result<(std::sync::Arc<analyze::AnalysisOutput>, CacheTier), ErrorData> {
         let path = Path::new(&params.path);
         let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -664,53 +664,75 @@ impl CodeAnalyzer {
             analyze::analyze_directory_with_progress(&path_owned, entries, counter_clone, ct_clone)
         });
 
-        // Poll and emit progress every 100ms
-        let token = ProgressToken(NumberOrString::String(
-            format!(
-                "analyze-overview-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            )
-            .into(),
-        ));
-        let peer = self.peer.lock().await.clone();
-        let mut last_progress = 0usize;
-        let mut cancelled = false;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            if ct.is_cancelled() {
-                cancelled = true;
-                break;
+        // Gate progress on client-supplied token; skip all machinery when absent.
+        if let Some(ref token) = progress_token {
+            let (tx, mut rx) = watch::channel(0usize);
+            let peer = self.peer.lock().await.clone();
+            let mut last_progress = 0usize;
+            let mut cancelled = false;
+
+            // Spawn a notifier that watches the counter and sends on the watch channel.
+            let counter_notify = counter.clone();
+            let tx_notify = tx.clone();
+            let ct_notify = ct.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    if ct_notify.is_cancelled() {
+                        break;
+                    }
+                    let current = counter_notify.load(std::sync::atomic::Ordering::Relaxed);
+                    if tx_notify.send(current).is_err() {
+                        break; // receiver dropped
+                    }
+                }
+            });
+
+            loop {
+                tokio::select! {
+                    _ = ct.cancelled() => {
+                        cancelled = true;
+                        break;
+                    }
+                    changed = rx.changed() => {
+                        match changed {
+                            Ok(()) => {
+                                let current = *rx.borrow();
+                                if current != last_progress && total_files > 0 {
+                                    self.emit_progress(
+                                        peer.clone(),
+                                        token,
+                                        current as f64,
+                                        total_files as f64,
+                                        format!("Analyzing {current}/{total_files} files"),
+                                    )
+                                    .await;
+                                    last_progress = current;
+                                }
+                            }
+                            Err(_) => {
+                                // Sender dropped: analysis complete or notifier exited.
+                                break;
+                            }
+                        }
+                    }
+                }
+                if handle.is_finished() {
+                    break;
+                }
             }
-            let current = counter.load(std::sync::atomic::Ordering::Relaxed);
-            if current != last_progress && total_files > 0 {
+
+            // Emit final 100% progress only if not cancelled
+            if !cancelled && total_files > 0 {
                 self.emit_progress(
                     peer.clone(),
-                    &token,
-                    current as f64,
+                    token,
                     total_files as f64,
-                    format!("Analyzing {current}/{total_files} files"),
+                    total_files as f64,
+                    format!("Completed analyzing {total_files} files"),
                 )
                 .await;
-                last_progress = current;
             }
-            if handle.is_finished() {
-                break;
-            }
-        }
-
-        // Emit final 100% progress only if not cancelled
-        if !cancelled && total_files > 0 {
-            self.emit_progress(
-                peer.clone(),
-                &token,
-                total_files as f64,
-                total_files as f64,
-                format!("Completed analyzing {total_files} files"),
-            )
-            .await;
         }
 
         match handle.await {
@@ -956,7 +978,7 @@ impl CodeAnalyzer {
     }
 
     // Poll progress until analysis task completes.
-    #[allow(clippy::cast_precision_loss)] // progress percentage display; precision loss acceptable for usize counts
+    #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)] // progress percentage display; precision loss acceptable for usize counts
     async fn poll_progress_until_done(
         &self,
         analysis_params: &FocusedAnalysisParams,
@@ -965,6 +987,7 @@ impl CodeAnalyzer {
         entries: std::sync::Arc<Vec<WalkEntry>>,
         total_files: usize,
         symbol_display: &str,
+        progress_token: Option<ProgressToken>,
     ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
         let counter_clone = counter.clone();
         let ct_clone = ct.clone();
@@ -1000,54 +1023,78 @@ impl CodeAnalyzer {
             )
         });
 
-        let token = ProgressToken(NumberOrString::String(
-            format!(
-                "analyze-symbol-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            )
-            .into(),
-        ));
-        let peer = self.peer.lock().await.clone();
-        let mut last_progress = 0usize;
-        let mut cancelled = false;
+        // Gate progress on client-supplied token; skip all machinery when absent.
+        if let Some(ref token) = progress_token {
+            let (tx, mut rx) = watch::channel(0usize);
+            let peer = self.peer.lock().await.clone();
+            let mut last_progress = 0usize;
+            let mut cancelled = false;
 
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            if ct.is_cancelled() {
-                cancelled = true;
-                break;
+            // Spawn a notifier that watches the counter and sends on the watch channel.
+            let counter_notify = counter.clone();
+            let tx_notify = tx.clone();
+            let ct_notify = ct.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    if ct_notify.is_cancelled() {
+                        break;
+                    }
+                    let current = counter_notify.load(std::sync::atomic::Ordering::Relaxed);
+                    if tx_notify.send(current).is_err() {
+                        break; // receiver dropped
+                    }
+                }
+            });
+
+            loop {
+                tokio::select! {
+                    _ = ct.cancelled() => {
+                        cancelled = true;
+                        break;
+                    }
+                    changed = rx.changed() => {
+                        match changed {
+                            Ok(()) => {
+                                let current = *rx.borrow();
+                                if current != last_progress && total_files > 0 {
+                                    self.emit_progress(
+                                        peer.clone(),
+                                        token,
+                                        current as f64,
+                                        total_files as f64,
+                                        format!(
+                                            "Analyzing {current}/{total_files} files for symbol '{symbol_display}'"
+                                        ),
+                                    )
+                                    .await;
+                                    last_progress = current;
+                                }
+                            }
+                            Err(_) => {
+                                // Sender dropped: analysis complete or notifier exited.
+                                break;
+                            }
+                        }
+                    }
+                }
+                if handle.is_finished() {
+                    break;
+                }
             }
-            let current = counter.load(std::sync::atomic::Ordering::Relaxed);
-            if current != last_progress && total_files > 0 {
+
+            if !cancelled && total_files > 0 {
                 self.emit_progress(
                     peer.clone(),
-                    &token,
-                    current as f64,
+                    token,
+                    total_files as f64,
                     total_files as f64,
                     format!(
-                        "Analyzing {current}/{total_files} files for symbol '{symbol_display}'"
+                        "Completed analyzing {total_files} files for symbol '{symbol_display}'"
                     ),
                 )
                 .await;
-                last_progress = current;
             }
-            if handle.is_finished() {
-                break;
-            }
-        }
-
-        if !cancelled && total_files > 0 {
-            self.emit_progress(
-                peer.clone(),
-                &token,
-                total_files as f64,
-                total_files as f64,
-                format!("Completed analyzing {total_files} files for symbol '{symbol_display}'"),
-            )
-            .await;
         }
 
         match handle.await {
@@ -1071,6 +1118,7 @@ impl CodeAnalyzer {
     }
 
     // Run focused analysis with auto-summary retry on SIZE_LIMIT overflow.
+    #[allow(clippy::too_many_arguments)]
     async fn run_focused_with_auto_summary(
         &self,
         params: &AnalyzeSymbolParams,
@@ -1079,6 +1127,7 @@ impl CodeAnalyzer {
         ct: tokio_util::sync::CancellationToken,
         entries: std::sync::Arc<Vec<WalkEntry>>,
         total_files: usize,
+        progress_token: Option<ProgressToken>,
     ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
         let use_summary_for_task = params.output_control.force != Some(true)
             && params.output_control.summary == Some(true);
@@ -1096,6 +1145,7 @@ impl CodeAnalyzer {
                 entries.clone(),
                 total_files,
                 &params.symbol,
+                progress_token.clone(),
             )
             .await?;
 
@@ -1120,6 +1170,7 @@ impl CodeAnalyzer {
                     entries,
                     total_files,
                     &params.symbol,
+                    progress_token,
                 )
                 .await;
 
@@ -1177,6 +1228,7 @@ impl CodeAnalyzer {
         &self,
         params: &AnalyzeSymbolParams,
         ct: tokio_util::sync::CancellationToken,
+        progress_token: Option<ProgressToken>,
     ) -> Result<(CacheTier, analyze::FocusedAnalysisOutput), ErrorData> {
         let path = Path::new(&params.path);
         let raw_entries = match walk_directory(path, params.max_depth) {
@@ -1258,6 +1310,7 @@ impl CodeAnalyzer {
                 ct,
                 entries,
                 total_files,
+                progress_token,
             )
             .await?;
 
@@ -1337,14 +1390,16 @@ impl CodeAnalyzer {
         let sid = self.session_id.lock().await.clone();
 
         // Call handler for analysis and progress tracking
-        let (arc_output, dir_cache_hit) = match self.handle_overview_mode(&params, ct).await {
-            Ok(v) => v,
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                return Ok(err_to_tool_result(e));
-            }
-        };
+        let progress_token = context.meta.get_progress_token();
+        let (arc_output, dir_cache_hit) =
+            match self.handle_overview_mode(&params, ct, progress_token).await {
+                Ok(v) => v,
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "internal_error");
+                    return Ok(err_to_tool_result(e));
+                }
+            };
         // Extract the value from Arc for modification. On a cache hit the Arc is shared,
         // so try_unwrap may fail; fall back to cloning the underlying value in that case.
         let mut output = match std::sync::Arc::try_unwrap(arc_output) {
@@ -2021,10 +2076,12 @@ impl CodeAnalyzer {
         }
 
         // Call handler for analysis and progress tracking
-        let (graph_cache_tier, mut output) = match self.handle_focused_mode(&params, ct).await {
-            Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
-        };
+        let progress_token = context.meta.get_progress_token();
+        let (graph_cache_tier, mut output) =
+            match self.handle_focused_mode(&params, ct, progress_token).await {
+                Ok(v) => v,
+                Err(e) => return Ok(err_to_tool_result(e)),
+            };
 
         // Surface cache tier in structuredContent for observability and testing.
         output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
@@ -4102,6 +4159,7 @@ impl ServerHandler for CodeAnalyzer {
 mod tests {
     use super::*;
     use regex::Regex;
+    use rmcp::model::NumberOrString;
 
     #[tokio::test]
     async fn test_emit_progress_none_peer_is_noop() {
@@ -4178,7 +4236,10 @@ mod tests {
         }))
         .unwrap();
         let ct = tokio_util::sync::CancellationToken::new();
-        let (arc_output, _cache_hit) = analyzer.handle_overview_mode(&params, ct).await.unwrap();
+        let (arc_output, _cache_hit) = analyzer
+            .handle_overview_mode(&params, ct, None)
+            .await
+            .unwrap();
         // Verify the no_cache_meta shape by constructing it directly and checking the shape
         let meta = no_cache_meta();
         assert_eq!(
@@ -4229,7 +4290,10 @@ mod tests {
         .unwrap();
 
         let ct = tokio_util::sync::CancellationToken::new();
-        let (output, _cache_hit) = analyzer.handle_overview_mode(&params, ct).await.unwrap();
+        let (output, _cache_hit) = analyzer
+            .handle_overview_mode(&params, ct, None)
+            .await
+            .unwrap();
 
         // summary=None with small output: handler uses format_structure (tree), which is
         // already stored in output.formatted from build_analysis_output.
@@ -4283,7 +4347,10 @@ mod tests {
 
         // Act: call the full handler via handle_overview_mode + replicate handler path
         let ct = tokio_util::sync::CancellationToken::new();
-        let (output, _cache_hit) = analyzer.handle_overview_mode(&params, ct).await.unwrap();
+        let (output, _cache_hit) = analyzer
+            .handle_overview_mode(&params, ct, None)
+            .await
+            .unwrap();
 
         // Assert: output is small (confirms SIZE_LIMIT would not trigger auto-summary)
         assert!(
@@ -4331,11 +4398,17 @@ mod tests {
 
         // Act: first call (cache miss)
         let ct1 = tokio_util::sync::CancellationToken::new();
-        let (_out1, hit1) = analyzer.handle_overview_mode(&params, ct1).await.unwrap();
+        let (_out1, hit1) = analyzer
+            .handle_overview_mode(&params, ct1, None)
+            .await
+            .unwrap();
 
         // Act: second call (cache hit)
         let ct2 = tokio_util::sync::CancellationToken::new();
-        let (_out2, hit2) = analyzer.handle_overview_mode(&params, ct2).await.unwrap();
+        let (_out2, hit2) = analyzer
+            .handle_overview_mode(&params, ct2, None)
+            .await
+            .unwrap();
 
         // Assert
         assert_eq!(hit1, CacheTier::Miss, "first call must be a cache miss");
@@ -4594,7 +4667,7 @@ mod tests {
         .unwrap();
         let ct = tokio_util::sync::CancellationToken::new();
         let (arc_output, _cache_hit) = analyzer
-            .handle_overview_mode(&params, ct)
+            .handle_overview_mode(&params, ct, None)
             .await
             .expect("handle_overview_mode with git_ref must succeed");
 
@@ -5990,6 +6063,32 @@ mod tests {
         assert!(
             !event.chars_threshold_breach,
             "chars_threshold_breach should be false for output_chars=5000"
+        );
+    }
+
+    // ── Progress token gating and watch channel tests ──
+
+    /// When no progressToken is present, handle_overview_mode skips all progress
+    /// machinery (no peer lock acquisition for progress, no watch channel, no
+    /// emit_progress calls) and returns the analysis result directly.
+    #[tokio::test]
+    async fn test_progress_bypassed_when_no_token() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
+        let analyzer = make_analyzer();
+        let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+        }))
+        .unwrap();
+        let ct = tokio_util::sync::CancellationToken::new();
+
+        // Act: call with None progress_token -- must complete without error.
+        let result = analyzer.handle_overview_mode(&params, ct, None).await;
+        assert!(
+            result.is_ok(),
+            "handle_overview_mode with None token must succeed"
         );
     }
 }
