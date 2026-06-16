@@ -3,6 +3,7 @@
 //! Path validation helpers used by the edit_overwrite and edit_replace tool handlers.
 
 use rmcp::model::ErrorData;
+use tracing::warn;
 
 use crate::error_meta;
 
@@ -85,8 +86,14 @@ pub(crate) fn validate_path(
         // Reassemble suffix in the original (forward) order without trailing separator.
         let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
 
-        let canonical_base =
-            std::fs::canonicalize(&ancestor).unwrap_or_else(|_| allowed_root.clone());
+        let canonical_base = std::fs::canonicalize(&ancestor).unwrap_or_else(|e| {
+            warn!(
+                path = %ancestor.display(),
+                error = %e,
+                "canonicalize of existing ancestor failed (race condition); falling back to allowed_root"
+            );
+            allowed_root.clone()
+        });
         canonical_base.join(&suffix)
     };
 
