@@ -14,7 +14,7 @@ pub(crate) fn validate_path(
     require_exists: bool,
 ) -> Result<std::path::PathBuf, ErrorData> {
     // Canonicalize the allowed root (CWD) to resolve symlinks
-    let allowed_root = std::fs::canonicalize(std::env::current_dir().map_err(|_| {
+    let cwd = std::env::current_dir().map_err(|_| {
         ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "path is outside the allowed root".to_string(),
@@ -24,8 +24,18 @@ pub(crate) fn validate_path(
                 "ensure the working directory is accessible",
             )),
         )
-    })?)
-    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+    })?;
+    let allowed_root = std::fs::canonicalize(&cwd).map_err(|_| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path is outside the allowed root".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "ensure the working directory is accessible",
+            )),
+        )
+    })?;
 
     let canonical_path = if require_exists {
         std::fs::canonicalize(path).map_err(|e| {
