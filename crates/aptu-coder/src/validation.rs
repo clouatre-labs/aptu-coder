@@ -115,7 +115,7 @@ pub(crate) fn validate_path(
 /// Maps an io::Error to an ErrorData with kind-specific message and preserved context.
 pub(crate) fn io_error_to_path_error(
     err: &std::io::Error,
-    path_context: &str,
+    _path_context: &str,
     suggested_action: &'static str,
 ) -> ErrorData {
     let msg = match err.kind() {
