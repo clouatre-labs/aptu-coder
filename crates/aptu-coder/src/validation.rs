@@ -41,8 +41,8 @@ pub(crate) fn validate_path(
     let canonical_path = if require_exists {
         std::fs::canonicalize(path).map_err(|e| {
             let msg = match e.kind() {
-                std::io::ErrorKind::NotFound => format!("path not found: {path}"),
-                std::io::ErrorKind::PermissionDenied => format!("permission denied: {path}"),
+                std::io::ErrorKind::NotFound => "path not found".to_string(),
+                std::io::ErrorKind::PermissionDenied => "permission denied".to_string(),
                 _ => "path is outside the allowed root".to_string(),
             };
             ErrorData::new(
