@@ -3319,10 +3319,13 @@ impl CodeAnalyzer {
             None
         };
 
-        // Strip leading cd <path> && prefix from command if present
+        // Strip leading "cd <path> &&" prefix from command only when provably redundant.
+        // - No working_dir: promote the cd path as working_dir (unambiguous).
+        // - working_dir already set: strip only if the cd path resolves to the same
+        //   directory; otherwise pass the command through unmodified (the cd is
+        //   load-bearing, e.g. a multi-step chain like "cd sub && build && cd ../other && build").
         let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
-        let command = effective_command.to_owned();
-        let working_dir_path = if let Some(cd_path) = cd_extracted_path {
+        let (command, working_dir_path) = if let Some(cd_path) = cd_extracted_path {
             if working_dir_path.is_none() {
                 // Promote the cd path as working_dir, run through validation
                 match validate_path(cd_path, true) {
@@ -3331,7 +3334,7 @@ impl CodeAnalyzer {
                             "exec_command: promoting cd prefix path as working_dir: {}",
                             cd_path
                         );
-                        Some(p)
+                        (effective_command.to_owned(), Some(p))
                     }
                     Ok(_) => {
                         span.record("error", true);
@@ -3351,13 +3354,24 @@ impl CodeAnalyzer {
                     }
                 }
             } else {
-                tracing::debug!(
-                    "exec_command: stripped redundant cd prefix from command; working_dir already set"
-                );
-                working_dir_path
+                // working_dir is already set -- only strip if the cd path resolves to
+                // the same directory (redundant). Otherwise keep the full original command.
+                let cd_resolves_to_same = validate_path(cd_path, true)
+                    .ok()
+                    .map(|p| Some(&p) == working_dir_path.as_ref())
+                    .unwrap_or(false);
+                if cd_resolves_to_same {
+                    tracing::debug!(
+                        "exec_command: stripped redundant cd prefix; matches explicit working_dir"
+                    );
+                    (effective_command.to_owned(), working_dir_path)
+                } else {
+                    // cd path differs from working_dir -- the cd is load-bearing; pass through.
+                    (params.command.clone(), working_dir_path)
+                }
             }
         } else {
-            working_dir_path
+            (params.command.clone(), working_dir_path)
         };
 
         let param_path = params.working_dir.clone();
@@ -6191,5 +6205,18 @@ mod tests {
         let (cmd, path) = strip_cd_prefix("cd  /tmp  &&  echo hello");
         assert_eq!(path, Some("/tmp"));
         assert_eq!(cmd.trim(), "echo hello");
+    }
+
+    #[test]
+    fn test_strip_cd_prefix_load_bearing_chain() {
+        // "cd sub && build && cd ../other && build" -- the first cd navigates to a
+        // subdirectory that the rest of the chain depends on. split_once("&&") extracts
+        // "sub" as the path and the tail as the stripped command; the caller must detect
+        // that "sub" != working_dir and pass the original command through unmodified.
+        let (stripped, path) =
+            strip_cd_prefix("cd workers/dashboard && bunx build && cd ../digest && bunx build");
+        // strip_cd_prefix itself splits on first &&; caller decides whether to use it.
+        assert_eq!(path, Some("workers/dashboard"));
+        assert_eq!(stripped.trim(), "bunx build && cd ../digest && bunx build");
     }
 }
