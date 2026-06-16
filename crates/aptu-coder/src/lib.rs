@@ -292,7 +292,12 @@ fn error_meta(
 
 #[must_use]
 fn err_to_tool_result(e: ErrorData) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(e.message)])
+    CallToolResult::error(vec![Content::text(e.message)]).with_meta(Some(no_cache_meta()))
+}
+
+#[must_use]
+fn tool_error(msg: String) -> CallToolResult {
+    CallToolResult::error(vec![Content::text(msg)]).with_meta(Some(no_cache_meta()))
 }
 
 fn err_to_tool_result_from_pagination(
@@ -2709,11 +2714,10 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                    return Ok(tool_error(format!(
                         "working_dir {:?} is not valid: {}. Provide an existing directory path.",
                         wd, e.message
-                    ))])
-                    .with_meta(Some(no_cache_meta())));
+                    )));
                 }
             }
         } else {
@@ -2961,11 +2965,10 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                    return Ok(tool_error(format!(
                         "working_dir {:?} is not valid: {}. Provide an existing directory path.",
                         wd, e.message
-                    ))])
-                    .with_meta(Some(no_cache_meta())));
+                    )));
                 }
             }
         } else {
@@ -3298,21 +3301,20 @@ impl CodeAnalyzer {
                     if !std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
-                        return Ok(CallToolResult::error(vec![Content::text(format!(
+                        return Ok(tool_error(format!(
                             "working_dir {:?} is not a directory. Provide an existing directory path.",
                             wd
-                        ))]).with_meta(Some(no_cache_meta())));
+                        )));
                     }
                     Some(p)
                 }
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                    return Ok(tool_error(format!(
                         "working_dir {:?} is not valid: {}. Provide an existing directory path.",
                         wd, e.message
-                    ))])
-                    .with_meta(Some(no_cache_meta())));
+                    )));
                 }
             }
         } else {
@@ -3351,18 +3353,18 @@ impl CodeAnalyzer {
                         Ok(_) => {
                             span.record("error", true);
                             span.record("error.type", "invalid_params");
-                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                            return Ok(tool_error(format!(
                                 "cd prefix path {:?} is not a directory. Set working_dir explicitly or use a valid directory path.",
                                 cd_path
-                            ))]).with_meta(Some(no_cache_meta())));
+                            )));
                         }
                         Err(_) => {
                             span.record("error", true);
                             span.record("error.type", "invalid_params");
-                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                            return Ok(tool_error(format!(
                                 "cd prefix path {:?} does not exist or is outside CWD. Set working_dir explicitly.",
                                 cd_path
-                            ))]).with_meta(Some(no_cache_meta())));
+                            )));
                         }
                     }
                 }

@@ -784,7 +784,10 @@ async fn test_cd_prefix_chain_passthrough_with_working_dir() {
         .unwrap_or("");
     let tmp_pos = stdout.find("/tmp").expect("expected /tmp in stdout");
     let var_pos = stdout.find("/var").expect("expected /var in stdout");
-    assert!(tmp_pos < var_pos, "/tmp must precede /var in stdout: {stdout}");
+    assert!(
+        tmp_pos < var_pos,
+        "/tmp must precede /var in stdout: {stdout}"
+    );
 }
 
 #[tokio::test]
@@ -832,5 +835,8 @@ async fn test_cd_prefix_shell_special_passes_through() {
     let stdout = resp["result"]["structuredContent"]["stdout"]
         .as_str()
         .unwrap_or("");
-    assert!(!stdout.trim().is_empty(), "pwd after cd ~ must produce output: {stdout}");
+    assert!(
+        !stdout.trim().is_empty(),
+        "pwd after cd ~ must produce output: {stdout}"
+    );
 }
