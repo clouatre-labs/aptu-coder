@@ -3,6 +3,7 @@
 //! Path validation helpers used by the edit_overwrite and edit_replace tool handlers.
 
 use rmcp::model::ErrorData;
+use tracing::warn;
 
 use crate::error_meta;
 
@@ -14,7 +15,7 @@ pub(crate) fn validate_path(
     require_exists: bool,
 ) -> Result<std::path::PathBuf, ErrorData> {
     // Canonicalize the allowed root (CWD) to resolve symlinks
-    let allowed_root = std::fs::canonicalize(std::env::current_dir().map_err(|_| {
+    let cwd = std::env::current_dir().map_err(|_| {
         ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "path is outside the allowed root".to_string(),
@@ -24,8 +25,18 @@ pub(crate) fn validate_path(
                 "ensure the working directory is accessible",
             )),
         )
-    })?)
-    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+    })?;
+    let allowed_root = std::fs::canonicalize(&cwd).map_err(|_| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path is outside the allowed root".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "ensure the working directory is accessible",
+            )),
+        )
+    })?;
 
     let canonical_path = if require_exists {
         std::fs::canonicalize(path).map_err(|e| {
@@ -45,10 +56,16 @@ pub(crate) fn validate_path(
             )
         })?
     } else {
-        // For non-existent files (edit_overwrite), walk up the path until we find an existing ancestor
+        // For non-existent files (edit_overwrite), walk up the path until we find an existing ancestor.
+        // `..` components are safe here: file_name() returns None for `..`, so the
+        // loop hits the else branch and resets ancestor to allowed_root, anchoring
+        // the resolved path inside allowed_root.  The starts_with check below catches
+        // any residual traversal regardless.
         let p = std::path::Path::new(path);
         let mut ancestor = p.to_path_buf();
-        let mut suffix = std::path::PathBuf::new();
+        // Collect suffix components in reverse order, then reassemble without
+        // join(PathBuf::new()) to avoid a trailing separator on the first push.
+        let mut suffix_components: Vec<std::ffi::OsString> = Vec::new();
 
         loop {
             if ancestor.exists() {
@@ -57,7 +74,7 @@ pub(crate) fn validate_path(
             if let Some(parent) = ancestor.parent()
                 && let Some(file_name) = ancestor.file_name()
             {
-                suffix = std::path::PathBuf::from(file_name).join(&suffix);
+                suffix_components.push(file_name.to_owned());
                 ancestor = parent.to_path_buf();
             } else {
                 // No existing ancestor found — use allowed_root as anchor
@@ -66,8 +83,17 @@ pub(crate) fn validate_path(
             }
         }
 
-        let canonical_base =
-            std::fs::canonicalize(&ancestor).unwrap_or_else(|_| allowed_root.clone());
+        // Reassemble suffix in the original (forward) order without trailing separator.
+        let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
+
+        let canonical_base = std::fs::canonicalize(&ancestor).unwrap_or_else(|e| {
+            warn!(
+                path = %ancestor.display(),
+                error = %e,
+                "canonicalize of existing ancestor failed (race condition); falling back to allowed_root"
+            );
+            allowed_root.clone()
+        });
         canonical_base.join(&suffix)
     };
 
@@ -220,4 +246,38 @@ pub(crate) fn validate_path_in_dir(
     }
 
     Ok(canonical_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_path_no_trailing_slash() {
+        // Arrange: a multi-component path for a non-existent file
+        let input = "subdir/new_file.txt";
+
+        // Act: validate with require_exists=false
+        let result = validate_path(input, false);
+
+        // Assert: resolved path must not have a trailing slash
+        // The old bug (PathBuf::from(file_name).join(&suffix) with an empty
+        // PathBuf as the initial suffix) injected a trailing separator,
+        // producing ".../subdir/new_file.txt/" instead of
+        // ".../subdir/new_file.txt".
+        if let Ok(resolved) = result {
+            let path_str = resolved.to_string_lossy();
+            // PathBuf::to_string_lossy surrogates the trailing separator as "",
+            // but the canonical representation still carries it.  Check both.
+            assert!(
+                !path_str.ends_with('/'),
+                "resolved path must not end with trailing slash: {path_str}"
+            );
+            assert_eq!(
+                resolved.extension(),
+                Some(std::ffi::OsStr::new("txt")),
+                "file extension should be txt, path has trailing separator"
+            );
+        }
+    }
 }

@@ -43,6 +43,47 @@ async fn edit_overwrite_working_dir_writes_inside_working_dir() {
     assert_eq!(written, "hello from working_dir");
 }
 
+/// edit_overwrite without working_dir creates a new file relative to server CWD.
+#[tokio::test]
+async fn edit_overwrite_new_file_no_working_dir() {
+    // Arrange: create a temp dir inside CWD for the target file.
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let file_name = "new_output.txt";
+    let expected_path = temp_dir.path().join(file_name);
+    // Build the relative path from CWD to the temp dir file.
+    let temp_stem = temp_dir
+        .path()
+        .file_name()
+        .expect("temp dir has file name")
+        .to_str()
+        .expect("temp dir name is valid UTF-8");
+    let relative_path = format!("{temp_stem}/{file_name}");
+
+    // Act: call edit_overwrite without working_dir
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": relative_path,
+            "content": "hello no working_dir"
+        }),
+    )
+    .await;
+
+    // Assert: tool must succeed and file must exist and contain correct content
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    assert!(
+        expected_path.exists(),
+        "file should exist at {:?}",
+        expected_path
+    );
+    let written = std::fs::read_to_string(&expected_path).expect("should read written file");
+    assert_eq!(written, "hello no working_dir");
+}
+
 /// edit_replace with working_dir modifies the correct file inside working_dir, not server CWD.
 #[tokio::test]
 async fn edit_replace_working_dir_modifies_inside_working_dir() {
