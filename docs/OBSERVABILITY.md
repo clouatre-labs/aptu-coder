@@ -68,7 +68,7 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
 
 ```bash
-jq -r 'select(.output_truncated==true) | [.tool, .output_chars, (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn
+cd ~/.local/share/aptu-coder && jq -r 'select(.output_truncated==true) | [.tool, .output_chars, (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn
 ```
 
 ## Daily Rotation and 30-Day Retention

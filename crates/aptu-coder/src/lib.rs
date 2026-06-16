@@ -3909,7 +3909,8 @@ impl ServerHandler for CodeAnalyzer {
             2. Re-run analyze_directory(path=<source_package>, max_depth=2, summary=true) for module map. Include test directories (tests/, *_test.go, test_*.py, test_*.rs, *.spec.ts, *.spec.js).\n\
             3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types.\n\
             4. Use analyze_symbol to trace call graphs.\n\
-            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with cursor/page_size. For subagents: DISABLE_PROMPT_CACHING=1."
+            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with cursor/page_size. For subagents: DISABLE_PROMPT_CACHING=1.\n\
+            JSONL metrics at $HOME/.local/share/aptu-coder/ (or $XDG_DATA_HOME/aptu-coder/). Always cd there before jq glob queries."
         );
         let capabilities = ServerCapabilities::builder()
             .enable_logging()
