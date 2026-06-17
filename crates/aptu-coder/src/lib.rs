@@ -44,9 +44,6 @@ pub const STDIN_MAX_BYTES: usize = 1_048_576;
 pub struct ExecCommandParams {
     /// Shell command to execute via sh -c (or $SHELL if set).
     pub command: String,
-    /// Timeout in seconds before SIGKILL. None = no timeout (default).
-    #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
-    pub timeout_secs: Option<u64>,
     /// Working directory for the command. Set this instead of prepending cd to the command string. Validated against path traversal; does not sandbox the process.
     pub working_dir: Option<String>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
@@ -55,10 +52,9 @@ pub struct ExecCommandParams {
 
 impl ExecCommandParams {
     /// Creates a new ExecCommandParams with the given command.
-    pub fn new(command: String, timeout_secs: Option<u64>, working_dir: Option<String>) -> Self {
+    pub fn new(command: String, working_dir: Option<String>) -> Self {
         Self {
             command,
-            timeout_secs,
             working_dir,
             ..Default::default()
         }
@@ -73,10 +69,8 @@ pub struct ShellOutput {
     pub stderr: String,
     /// Stdout and stderr interleaved in arrival order.
     pub interleaved: String,
-    /// Exit code; null if killed by timeout.
+    /// Exit code; null if the process could not be waited on (e.g. drain timeout from a background process holding pipes).
     pub exit_code: Option<i32>,
-    /// True if the command was killed due to timeout.
-    pub timed_out: bool,
     /// True if the post-exit drain timed out (backgrounded process kept pipes open).
     /// When true, any available output is still included; use the overflow file path
     /// from the truncation notice Content block to recover the full output.
@@ -103,7 +97,6 @@ impl ShellOutput {
         stderr: String,
         interleaved: String,
         exit_code: Option<i32>,
-        timed_out: bool,
         output_truncated: bool,
     ) -> Self {
         Self {
@@ -111,7 +104,6 @@ impl ShellOutput {
             stderr,
             interleaved,
             exit_code,
-            timed_out,
             output_truncated,
             output_collection_error: None,
             stdout_path: None,
@@ -3288,7 +3280,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; timeout_secs kills the process after N seconds (wall-clock); omit for no limit. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3298,7 +3290,7 @@ impl CodeAnalyzer {
             open_world_hint = true
         )
     )]
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, command = tracing::field::Empty, exit_code = tracing::field::Empty, timed_out = tracing::field::Empty, output_truncated = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, command = tracing::field::Empty, exit_code = tracing::field::Empty, output_truncated = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
     pub async fn exec_command(
         &self,
         params: Parameters<ExecCommandParams>,
@@ -3439,14 +3431,11 @@ impl CodeAnalyzer {
             )));
         }
 
-        let timeout_secs = params.timeout_secs;
-
         // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
         let resolved_path_str = self.resolved_path.as_ref().as_deref();
         let output = run_exec_impl(
             command.clone(),
             working_dir_path.clone(),
-            timeout_secs,
             params.stdin.clone(),
             seq,
             resolved_path_str,
@@ -3455,14 +3444,12 @@ impl CodeAnalyzer {
         .await;
 
         let exit_code = output.exit_code;
-        let timed_out = output.timed_out;
         let mut output_truncated = output.output_truncated;
 
         // Record execution results on span
         if let Some(code) = exit_code {
             span.record("exit_code", code);
         }
-        span.record("timed_out", timed_out);
         span.record("output_truncated", output_truncated);
 
         // Emit debug event for truncation
@@ -3496,23 +3483,23 @@ impl CodeAnalyzer {
         output_truncated = output_truncated || combined_truncated;
 
         let text = format!(
-            "Command: {}\nExit code: {}\nTimed out: {}\nOutput truncated: {}\n\n{}",
+            "Command: {}\nExit code: {}\nOutput truncated: {}\n\n{}",
             params.command,
             exit_code
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "null".to_string()),
-            timed_out,
             output_truncated,
             truncated_output_text,
         );
 
         let content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
 
-        // Determine if command failed: timeout or non-zero exit code.
-        // exit_code is None when: (a) process killed by O1 post-exit drain timeout (background child
-        // holding pipes -- command work was done, treat as success) or (b) externally killed; both
-        // cases use unwrap_or(false) to avoid false negatives.
-        let command_failed = timed_out || exit_code.map(|c| c != 0).unwrap_or(false);
+        // Determine if command failed: non-zero exit code.
+        // exit_code is None when the post-exit drain times out (background child
+        // holding pipes -- command work was done, treat as success) or when the
+        // process is externally killed; both cases use unwrap_or(false) to avoid
+        // false negatives.
+        let command_failed = exit_code.map(|c| c != 0).unwrap_or(false);
 
         let mut result = if command_failed {
             CallToolResult::error(content_blocks)
@@ -3550,7 +3537,7 @@ impl CodeAnalyzer {
                     cache_write_failure: None,
                     cache_tier: None,
                     exit_code,
-                    timed_out,
+                    timed_out: false,
                     output_truncated: Some(output_truncated),
                     ..Default::default()
                 });
@@ -3578,7 +3565,7 @@ impl CodeAnalyzer {
             cache_write_failure: None,
             cache_tier: None,
             exit_code,
-            timed_out,
+            timed_out: false,
             output_truncated: Some(output_truncated),
             chars_threshold_breach: text.len() > 30_000,
             file_ext: None,
@@ -3640,13 +3627,12 @@ fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
     (stripped, Some(path))
 }
 
-/// Run a spawned child process with timeout handling and output draining.
-/// Returns (exit_code, timed_out, output_truncated, output_collection_error).
+/// Run a spawned child process with output draining.
+/// Returns (exit_code, output_truncated, output_collection_error).
 async fn run_with_timeout(
     mut child: tokio::process::Child,
-    timeout_secs: Option<u64>,
     tx: tokio::sync::mpsc::UnboundedSender<(bool, String)>,
-) -> (Option<i32>, bool, bool, Option<String>) {
+) -> (Option<i32>, bool, Option<String>) {
     use tokio::io::AsyncBufReadExt as _;
     use tokio_stream::StreamExt as TokioStreamExt;
     use tokio_stream::wrappers::LinesStream;
@@ -3654,7 +3640,7 @@ async fn run_with_timeout(
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
 
-    let mut drain_task = tokio::spawn(async move {
+    let drain_task = tokio::spawn(async move {
         let so_stream = stdout_pipe.map(|p| {
             LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (false, s)))
         });
@@ -3685,51 +3671,34 @@ async fn run_with_timeout(
         }
     });
 
-    tokio::select! {
-        _ = &mut drain_task => {
-            let (status, drain_truncated) = match tokio::time::timeout(
-                std::time::Duration::from_millis(500),
-                child.wait()
-            ).await {
-                Ok(Ok(s)) => (Some(s), false),
-                Ok(Err(_)) => (None, false),
-                Err(_) => {
-                    child.start_kill().ok();
-                    let _ = child.wait().await;
-                    (None, true)
-                }
-            };
-            let exit_code = status.and_then(|s| s.code());
-            let ocerr = if drain_truncated {
-                Some("post-exit drain timeout: background process held pipes".to_string())
-            } else {
-                None
-            };
-            (exit_code, false, drain_truncated, ocerr)
-        }
-        _ = async {
-            if let Some(secs) = timeout_secs {
-                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
-            } else {
-                std::future::pending::<()>().await;
+    drain_task.await.ok();
+
+    let (status, drain_truncated) =
+        match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await {
+            Ok(Ok(s)) => (Some(s), false),
+            Ok(Err(_)) => (None, false),
+            Err(_) => {
+                child.start_kill().ok();
+                let _ = child.wait().await;
+                (None, true)
             }
-        } => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            drain_task.abort();
-            (None, true, false, None)
-        }
-    }
+        };
+    let exit_code = status.and_then(|s| s.code());
+    let ocerr = if drain_truncated {
+        Some("post-exit drain timeout: background process held pipes".to_string())
+    } else {
+        None
+    };
+    (exit_code, drain_truncated, ocerr)
 }
 
 /// Executes a shell command and returns the output.
 /// This is a free async function (not a method) to allow use in moka::future::Cache::get_with().
-/// It spawns the command, collects output with timeout handling, and persists output to slot files.
+/// It spawns the command, collects output, and persists output to slot files.
 #[allow(clippy::too_many_arguments)]
 async fn run_exec_impl(
     command: String,
     working_dir_path: Option<std::path::PathBuf>,
-    timeout_secs: Option<u64>,
     stdin: Option<String>,
     seq: u32,
     resolved_path: Option<&str>,
@@ -3754,7 +3723,6 @@ async fn run_exec_impl(
                 format!("failed to spawn command: {e}"),
                 None,
                 false,
-                false,
             );
         }
     };
@@ -3776,8 +3744,8 @@ async fn run_exec_impl(
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, String)>();
 
-    let (exit_code, timed_out, mut output_truncated, output_collection_error) =
-        run_with_timeout(child, timeout_secs, tx).await;
+    let (exit_code, mut output_truncated, output_collection_error) =
+        run_with_timeout(child, tx).await;
 
     let mut lines: Vec<(bool, String)> = Vec::new();
     while let Some(item) = rx.recv().await {
@@ -3814,20 +3782,13 @@ async fn run_exec_impl(
         handle_output_persist(stdout_str, stderr_str, slot);
     output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;
 
-    let mut output = ShellOutput::new(
-        stdout,
-        stderr,
-        interleaved_str,
-        exit_code,
-        timed_out,
-        output_truncated,
-    );
+    let mut output = ShellOutput::new(stdout, stderr, interleaved_str, exit_code, output_truncated);
     output.output_collection_error = output_collection_error;
     output.stdout_path = stdout_path;
     output.stderr_path = stderr_path;
 
-    // Apply filter if exit_code == 0 and not timed out
-    if exit_code == Some(0) && !timed_out {
+    // Apply filter if exit_code == 0
+    if exit_code == Some(0) {
         for compiled_rule in filter_table.iter() {
             if compiled_rule.pattern.is_match(&command) {
                 let filtered_stdout = apply_filter(compiled_rule, &output.stdout);
@@ -5577,11 +5538,10 @@ mod tests {
             "".to_string(),
             Some(1), // non-zero exit
             false,
-            false,
         );
 
-        // Simulate the guard: if exit_code == Some(0) && !timed_out { apply filter }
-        if output.exit_code == Some(0) && !output.timed_out {
+        // Simulate the guard: if exit_code == Some(0) { apply filter }
+        if output.exit_code == Some(0) {
             output.stdout = apply_filter(&compiled, &output.stdout);
             output.filter_applied = compiled
                 .rule
@@ -5607,10 +5567,9 @@ mod tests {
             "".to_string(),
             Some(0), // zero exit
             false,
-            false,
         );
 
-        if output2.exit_code == Some(0) && !output2.timed_out {
+        if output2.exit_code == Some(0) {
             output2.stdout = apply_filter(&compiled, &output2.stdout);
             output2.filter_applied = compiled
                 .rule
@@ -5701,14 +5660,7 @@ mod tests {
         );
 
         // Simulate the guard and field assignment from run_exec_impl
-        let mut output = ShellOutput::new(
-            filtered,
-            "".to_string(),
-            "".to_string(),
-            Some(0),
-            false,
-            false,
-        );
+        let mut output = ShellOutput::new(filtered, "".to_string(), "".to_string(), Some(0), false);
 
         // Set filter_applied as run_exec_impl does
         output.filter_applied = compiled

@@ -42,7 +42,6 @@ Each line in the JSONL file is one JSON object:
 | `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
 | `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable |
-| `timed_out` | `bool` | `true` if the call timed out; `false` otherwise |
 | `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap, per-stream byte cap, or combined cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
 | `filter_applied` | `string \| null` | Name of the filter rule that matched and transformed the output (e.g., `"git pull"`, `"cargo build"`); `null` when no filter fired or for non-`exec_command` tools. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
 | `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
