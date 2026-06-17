@@ -30,19 +30,6 @@ pub fn option_integer_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     Schema::from(map)
 }
 
-/// Returns a nullable integer schema for `Option<usize>` `ast_recursion_limit` fields.
-/// `None` = library default, `0` = unlimited traversal depth, `n` = limit to n levels.
-pub fn option_ast_limit_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
-    let map = json!({
-        "type": ["integer", "null"],
-        "minimum": 0
-    })
-    .as_object()
-    .expect("json! object literal is always a Value::Object")
-    .clone();
-    Schema::from(map)
-}
-
 /// Regex matching all supported source file extensions (case-insensitive).
 ///
 /// Used as the `inputSchema` `pattern` constraint on `path` fields in

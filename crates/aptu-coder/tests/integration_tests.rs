@@ -231,7 +231,6 @@ async fn test_fields_functions_only_structured() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "ast_recursion_limit": null,
             "page_size": null,
             "fields": ["functions"]
         }),
@@ -289,7 +288,6 @@ async fn test_fields_classes_only_structured() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "ast_recursion_limit": null,
             "page_size": null,
             "fields": ["classes"]
         }),
@@ -347,7 +345,6 @@ async fn test_fields_imports_only_structured() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "ast_recursion_limit": null,
             "page_size": null,
             "fields": ["imports"]
         }),
@@ -405,7 +402,6 @@ async fn test_fields_none_structured_full() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "ast_recursion_limit": null,
             "page_size": null
         }),
     )
