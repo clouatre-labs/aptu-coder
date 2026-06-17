@@ -178,7 +178,7 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code, and timeout status; supports progress notifications; output capped and filtered automatically | any |
+| `exec_command` | Run a shell command; returns stdout, stderr, and exit code; supports progress notifications; output capped and filtered automatically | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 

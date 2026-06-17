@@ -103,56 +103,6 @@ async fn exec_command_nonzero_exit() {
 }
 
 #[tokio::test]
-async fn exec_command_timeout() {
-    // Arrange: command that sleeps for 60 seconds with 1 second timeout
-    let command = "sleep 60";
-    let timeout_duration = std::time::Duration::from_millis(500);
-
-    // Act: spawn command in a blocking task
-    let cmd = command.to_string();
-    let wait_result = tokio::time::timeout(
-        timeout_duration,
-        tokio::task::spawn_blocking(move || {
-            let mut child = std::process::Command::new(
-                std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
-            )
-            .arg("-c")
-            .arg(&cmd)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .expect("should spawn command");
-
-            let _stdout = child
-                .stdout
-                .take()
-                .map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    String::from_utf8_lossy(&buf).to_string()
-                })
-                .unwrap_or_default();
-
-            let _stderr = child
-                .stderr
-                .take()
-                .map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    String::from_utf8_lossy(&buf).to_string()
-                })
-                .unwrap_or_default();
-
-            child.wait().ok()
-        }),
-    )
-    .await;
-
-    // Assert: timeout should occur
-    assert!(wait_result.is_err(), "timeout should occur");
-}
-
-#[tokio::test]
 async fn exec_command_working_dir_rejection() {
     // exec_command has no CWD confinement; working_dir=/tmp (outside server CWD) must succeed.
     // Only edit_overwrite/edit_replace enforce CWD confinement.
@@ -297,21 +247,6 @@ async fn test_handler_structured_output() {
         sc["stdout"].as_str().unwrap_or("").contains("hello"),
         "stdout missing 'hello': {sc}"
     );
-    assert!(
-        !sc["timed_out"].as_bool().unwrap_or(true),
-        "unexpected timed_out: {sc}"
-    );
-}
-
-#[tokio::test]
-async fn test_handler_timeout_respected() {
-    let resp =
-        call_exec_command_raw(serde_json::json!({"command": "sleep 10", "timeout_secs": 1})).await;
-    let sc = &resp["result"]["structuredContent"];
-    assert!(
-        sc["timed_out"].as_bool().unwrap_or(false),
-        "expected timed_out=true: {sc}"
-    );
 }
 
 #[tokio::test]
@@ -335,23 +270,6 @@ async fn test_handler_nonzero_exit() {
     assert!(
         resp["result"]["isError"].as_bool().unwrap_or(false),
         "expected isError=true for non-zero exit: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_handler_timeout_partial_output() {
-    // Command prints output immediately then sleeps longer than timeout
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "echo partial_output && sleep 10",
-        "timeout_secs": 1
-    }))
-    .await;
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["timed_out"], true, "expected timed_out=true: {sc}");
-    let stdout = sc["stdout"].as_str().unwrap_or("");
-    assert!(
-        stdout.contains("partial_output"),
-        "expected partial_output in stdout on timeout, got: {stdout}"
     );
 }
 
@@ -394,16 +312,11 @@ async fn test_exec_command_large_stdout_no_deadlock() {
     // Test that large stdout (>64KB) completes without deadlock
     // Use a simpler command that writes just under 50KB to avoid truncation by MAX_BYTES
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "seq 1 500",
-        "timeout_secs": 10
+        "command": "seq 1 500"
     }))
     .await;
 
     let sc = &resp["result"]["structuredContent"];
-    assert_eq!(
-        sc["timed_out"], false,
-        "large stdout must not trigger timeout: {sc}"
-    );
     assert_eq!(sc["exit_code"], 0, "exit code should be 0: {sc}");
     assert!(
         sc["stdout"].as_str().unwrap_or("").contains("1"),
@@ -415,16 +328,11 @@ async fn test_exec_command_large_stdout_no_deadlock() {
 async fn test_exec_command_backgrounded_process() {
     // Test that backgrounded process returns with output_truncated=false (normal case)
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "echo 'parent done'",
-        "timeout_secs": 5
+        "command": "echo 'parent done'"
     }))
     .await;
 
     let sc = &resp["result"]["structuredContent"];
-    assert_eq!(
-        sc["timed_out"], false,
-        "normal command should not timeout: {sc}"
-    );
     assert_eq!(
         sc["output_truncated"], false,
         "normal command should not truncate: {sc}"
@@ -439,8 +347,7 @@ async fn test_exec_command_backgrounded_process() {
 async fn test_exec_command_overflow_to_temp_file() {
     // Test that output >2000 lines sets output_truncated and populates slot file paths.
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "seq 1 3000",
-        "timeout_secs": 10
+        "command": "seq 1 3000"
     }))
     .await;
 
@@ -470,8 +377,7 @@ async fn test_exec_command_slot_isolation() {
 
     for _ in 0..8 {
         let resp = call_exec_command_raw(serde_json::json!({
-            "command": "seq 1 3000",
-            "timeout_secs": 10
+            "command": "seq 1 3000"
         }))
         .await;
 
@@ -539,7 +445,6 @@ fn test_handler_output_collection_error() {
         "err".into(),
         "out\nerr\n".into(),
         Some(0),
-        false,
         false,
     );
     assert!(
@@ -782,8 +687,7 @@ async fn test_exec_command_working_dir_outside_cwd() {
     let tmp_path = tmp.path().to_str().expect("utf8").to_owned();
     let resp = call_exec_command_raw(serde_json::json!({
         "command": "echo hello",
-        "working_dir": tmp_path,
-        "timeout_secs": 10
+        "working_dir": tmp_path
     }))
     .await;
     assert!(

@@ -253,7 +253,7 @@ fn test_mcp_server_exec_command() {
         thread::sleep(Duration::from_millis(200));
 
         // Tool call: exec_command with echo
-        let tool_call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec_command","arguments":{"command":"echo smoke_test","timeout_secs":10}}}"#;
+        let tool_call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exec_command","arguments":{"command":"echo smoke_test"}}}"#;
         stdin
             .write_all(tool_call.as_bytes())
             .expect("write tool call");
