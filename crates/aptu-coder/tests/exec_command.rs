@@ -154,23 +154,21 @@ async fn exec_command_timeout() {
 
 #[tokio::test]
 async fn exec_command_working_dir_rejection() {
-    // Arrange: working_dir=/tmp is outside the server's CWD
+    // exec_command has no CWD confinement; working_dir=/tmp (outside server CWD) must succeed.
+    // Only edit_overwrite/edit_replace enforce CWD confinement.
     let resp = call_exec_command_raw(serde_json::json!({
         "command": "echo hi",
         "working_dir": "/tmp"
     }))
     .await;
 
-    // Assert: handler must reject with isError=true and mention 'outside'
+    // Assert: handler must succeed (no confinement for exec_command)
     assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for working_dir outside CWD: {resp}"
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "exec_command with working_dir outside CWD must succeed: {resp}"
     );
-    let content_text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        content_text.contains("outside"),
-        "error message should contain 'outside': {content_text}"
-    );
+    let sc = &resp["result"]["structuredContent"];
+    assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
 }
 
 #[tokio::test]
@@ -838,5 +836,28 @@ async fn test_cd_prefix_shell_special_passes_through() {
     assert!(
         !stdout.trim().is_empty(),
         "pwd after cd ~ must produce output: {stdout}"
+    );
+}
+
+#[tokio::test]
+async fn test_exec_command_working_dir_outside_cwd() {
+    // working_dir pointing outside server CWD must succeed (no CWD confinement for exec_command)
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let tmp_path = tmp.path().to_str().expect("utf8").to_owned();
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo hello",
+        "working_dir": tmp_path,
+        "timeout_secs": 10
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "working_dir outside server CWD must succeed for exec_command: {resp}"
+    );
+    let sc = &resp["result"]["structuredContent"];
+    assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
+    assert!(
+        sc["stdout"].as_str().unwrap_or("").contains("hello"),
+        "stdout missing 'hello': {sc}"
     );
 }
