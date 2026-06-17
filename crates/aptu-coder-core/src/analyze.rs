@@ -130,6 +130,14 @@ pub struct FileAnalysisOutput {
         )
     )]
     pub next_cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(
+            description = "True when the file extension is not supported; semantic fields are empty and formatted contains a raw preview"
+        )
+    )]
+    pub unsupported: Option<bool>,
 }
 
 impl FileAnalysisOutput {
@@ -146,6 +154,7 @@ impl FileAnalysisOutput {
             semantic,
             line_count,
             next_cursor,
+            unsupported: None,
         }
     }
 }
