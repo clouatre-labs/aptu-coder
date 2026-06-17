@@ -700,6 +700,63 @@ async fn test_analyze_file_directory_error_no_path_leak() {
     );
 }
 
+/// analyze_module on an unreadable file returns error without leaking path in message.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_analyze_module_read_error_no_path_leak() {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange: create a temp file inside CWD with a supported extension
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let file_name = "secret.rs";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, "fn foo() {}").expect("should write file");
+    let relative_path = format!(
+        "{}/{}",
+        temp_dir.path().file_name().unwrap().to_str().unwrap(),
+        file_name
+    );
+
+    // chmod 000
+    std::fs::set_permissions(&file_path, Permissions::from_mode(0o000))
+        .expect("should set permissions");
+
+    // Root-skip: if we can still read the file, we are root -- skip
+    if std::fs::read(&file_path).is_ok() {
+        std::fs::set_permissions(&file_path, Permissions::from_mode(0o644)).ok();
+        return;
+    }
+
+    // Act
+    let resp = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({ "path": relative_path }),
+    )
+    .await;
+
+    // Restore before TempDir drops
+    std::fs::set_permissions(&file_path, Permissions::from_mode(0o644)).ok();
+
+    // Assert: error without path in message
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(file_name),
+        "error message must not contain file name: {msg}"
+    );
+    assert!(
+        !msg.contains(temp_dir.path().to_str().unwrap()),
+        "error message must not contain dir path: {msg}"
+    );
+}
+
 /// analyze_module with a directory path returns error without leaking path in message.
 #[tokio::test]
 async fn test_analyze_module_directory_error_no_path_leak() {

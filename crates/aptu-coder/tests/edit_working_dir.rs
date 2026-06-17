@@ -119,6 +119,66 @@ async fn edit_replace_working_dir_modifies_inside_working_dir() {
     assert_eq!(updated, "new text here");
 }
 
+/// edit_overwrite on a read-only file returns an Io error without leaking path in message.
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_overwrite_io_error_no_path_leak() {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Arrange: create a temp file inside CWD, then make it read-only
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let file_name = "readonly.txt";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, "original content").expect("should write file");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+
+    // chmod 444 (read-only)
+    std::fs::set_permissions(&file_path, Permissions::from_mode(0o444))
+        .expect("should set permissions");
+
+    // Root-skip: if we can still write the file, we are root -- skip
+    if std::fs::write(&file_path, "probe").is_ok() {
+        std::fs::set_permissions(&file_path, Permissions::from_mode(0o644)).ok();
+        return;
+    }
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "new content",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    // Restore before TempDir drops
+    std::fs::set_permissions(&file_path, Permissions::from_mode(0o644)).ok();
+
+    // Assert: error without path in message
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(file_name),
+        "error message must not contain file name: {msg}"
+    );
+    assert!(
+        !msg.contains(working_dir),
+        "error message must not contain working_dir path: {msg}"
+    );
+}
+
 /// edit_overwrite reports invalid working_dir without exposing path in error message.
 #[tokio::test]
 async fn edit_overwrite_invalid_working_dir_no_path_leak() {
