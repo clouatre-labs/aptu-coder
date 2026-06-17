@@ -656,6 +656,15 @@ pub struct ModuleInfo {
     pub functions: Vec<ModuleFunctionInfo>,
     /// Import statements (module and items only)
     pub imports: Vec<ModuleImportInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(
+            description = "True when the file extension is not supported; semantic fields are empty"
+        )
+    )]
+    /// True when the file extension is not supported; semantic fields are empty.
+    pub unsupported: Option<bool>,
 }
 
 impl ModuleInfo {
@@ -674,6 +683,7 @@ impl ModuleInfo {
             language,
             functions,
             imports,
+            unsupported: None,
         }
     }
 }

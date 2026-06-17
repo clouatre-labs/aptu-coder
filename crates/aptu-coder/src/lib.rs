@@ -910,6 +910,8 @@ impl CodeAnalyzer {
                         None,
                     );
                     let _ = ext;
+                    let mut output = output;
+                    output.unsupported = Some(true);
                     Ok((std::sync::Arc::new(output), CacheTier::Miss))
                 }
                 _ => Err(ErrorData::new(
@@ -2508,7 +2510,9 @@ impl CodeAnalyzer {
                             ..Default::default()
                         });
                         return {
-                            let mi = types::ModuleInfo::new(name, line_count, ext, vec![], vec![]);
+                            let mut mi =
+                                types::ModuleInfo::new(name, line_count, ext, vec![], vec![]);
+                            mi.unsupported = Some(true);
                             let text = format_module_info(&mi);
                             let content_hash = format!("{}", blake3::hash(text.as_bytes()));
                             let mut meta = no_cache_meta().0;
