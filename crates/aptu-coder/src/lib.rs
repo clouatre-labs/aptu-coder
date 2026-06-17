@@ -836,7 +836,7 @@ impl CodeAnalyzer {
         }
 
         // Cache miss or no cache key, analyze and optionally store
-        match analyze::analyze_file(&params.path, params.ast_recursion_limit) {
+        match analyze::analyze_file(&params.path, None) {
             Ok(output) => {
                 let arc_output = std::sync::Arc::new(output);
                 if let Some(key) = cache_key {
@@ -988,7 +988,6 @@ impl CodeAnalyzer {
         let match_mode_owned = analysis_params.match_mode.clone();
         let follow_depth = analysis_params.follow_depth;
         let max_depth = analysis_params.max_depth;
-        let ast_recursion_limit = analysis_params.ast_recursion_limit;
         let use_summary = analysis_params.use_summary;
         let impl_only = analysis_params.impl_only;
         let def_use = analysis_params.def_use;
@@ -999,7 +998,7 @@ impl CodeAnalyzer {
                 match_mode: match_mode_owned,
                 follow_depth,
                 max_depth,
-                ast_recursion_limit,
+                ast_recursion_limit: None,
                 use_summary,
                 impl_only,
                 def_use,
@@ -1120,8 +1119,7 @@ impl CodeAnalyzer {
         total_files: usize,
         progress_token: Option<ProgressToken>,
     ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
-        let use_summary_for_task = params.output_control.force != Some(true)
-            && params.output_control.summary == Some(true);
+        let use_summary_for_task = params.output_control.summary == Some(true);
 
         let analysis_params_initial = FocusedAnalysisParams {
             use_summary: use_summary_for_task,
@@ -1140,10 +1138,7 @@ impl CodeAnalyzer {
             )
             .await?;
 
-        if params.output_control.summary.is_none()
-            && params.output_control.force != Some(true)
-            && output.formatted.len() > SIZE_LIMIT
-        {
+        if params.output_control.summary.is_none() && output.formatted.len() > SIZE_LIMIT {
             tracing::debug!(
                 auto_summary = true,
                 message = "output exceeded size limit, retrying with summary"
@@ -1170,7 +1165,7 @@ impl CodeAnalyzer {
             } else {
                 let estimated_tokens = output.formatted.len() / 4;
                 let message = format!(
-                    "Output exceeds 50K chars ({} chars, ~{} tokens). Use summary=true or force=true.",
+                    "Output exceeds 50K chars ({} chars, ~{} tokens). Use summary=true or narrow your scope.",
                     output.formatted.len(),
                     estimated_tokens
                 );
@@ -1180,18 +1175,16 @@ impl CodeAnalyzer {
                     Some(error_meta(
                         "validation",
                         false,
-                        "use summary=true or force=true",
+                        "use summary=true or narrow scope",
                     )),
                 ));
             }
         } else if output.formatted.len() > SIZE_LIMIT
-            && params.output_control.force != Some(true)
             && params.output_control.summary == Some(false)
         {
             let estimated_tokens = output.formatted.len() / 4;
             let message = format!(
                 "Output exceeds 50K chars ({} chars, ~{} tokens). Use one of:\n\
-                 - force=true to return full output\n\
                  - summary=true to get compact summary\n\
                  - Narrow your scope (smaller directory, specific file)",
                 output.formatted.len(),
@@ -1203,7 +1196,7 @@ impl CodeAnalyzer {
                 Some(error_meta(
                     "validation",
                     false,
-                    "use force=true, summary=true, or narrow scope",
+                    "use summary=true or narrow scope",
                 )),
             ));
         }
@@ -1269,7 +1262,7 @@ impl CodeAnalyzer {
             params.follow_depth.unwrap_or(1),
             &params.match_mode.clone().unwrap_or_default(),
             params.impl_only.unwrap_or(false),
-            params.ast_recursion_limit,
+            None,
         );
 
         // Check L1 cache first.
@@ -1286,7 +1279,6 @@ impl CodeAnalyzer {
             match_mode: params.match_mode.clone().unwrap_or_default(),
             follow_depth: params.follow_depth.unwrap_or(1),
             max_depth: params.max_depth,
-            ast_recursion_limit: params.ast_recursion_limit,
             use_summary: false,
             impl_only: params.impl_only,
             def_use: params.def_use.unwrap_or(false),
@@ -1423,14 +1415,11 @@ impl CodeAnalyzer {
         // Determine output mode:
         //   summary=true  -> compact summary (format_summary)
         //   summary=false -> explicit paginated flat list (format_structure_paginated)
-        //   summary=None, force=true -> tree as-is (format_structure, no auto-compact)
         //   summary=None, small output (<=SIZE_LIMIT) -> tree as-is (format_structure)
         //   summary=None, large output (>SIZE_LIMIT)  -> compact summary (format_summary)
         let use_summary = if params.output_control.summary == Some(true) {
             true
-        } else if params.output_control.summary == Some(false)
-            || params.output_control.force == Some(true)
-        {
+        } else if params.output_control.summary == Some(false) {
             false
         } else {
             output.formatted.len() > SIZE_LIMIT
@@ -1485,14 +1474,13 @@ impl CodeAnalyzer {
                 }
             };
 
-        let verbose = params.output_control.verbose.unwrap_or(false);
         if use_paginated {
             output.formatted = format_structure_paginated(
                 &paginated.items,
                 paginated.total,
                 params.max_depth,
                 Some(Path::new(&params.path)),
-                verbose,
+                false,
             );
         }
 
@@ -1682,9 +1670,7 @@ impl CodeAnalyzer {
         let line_count = arc_output.line_count;
 
         // Apply summary/output size limiting logic
-        let use_summary = if params.output_control.force == Some(true) {
-            false
-        } else if params.output_control.summary == Some(true) {
+        let use_summary = if params.output_control.summary == Some(true) {
             true
         } else if params.output_control.summary == Some(false) {
             false
@@ -1694,15 +1680,14 @@ impl CodeAnalyzer {
 
         if use_summary {
             formatted = format_file_details_summary(&arc_output.semantic, &params.path, line_count);
-        } else if formatted.len() > SIZE_LIMIT && params.output_control.force != Some(true) {
+        } else if formatted.len() > SIZE_LIMIT {
             span.record("error", true);
             span.record("error.type", "invalid_params");
             let estimated_tokens = formatted.len() / 4;
             let message = format!(
                 "Output exceeds 50K chars ({} chars, ~{} tokens). Use one of:\n\
-                 - force=true to return full output\n\
-                 - Use fields to limit output to specific sections (functions, classes, or imports)\n\
-                 - Use summary=true for a compact overview",
+                 - Use summary=true for a compact overview\n\
+                 - Use fields to limit output to specific sections (functions, classes, or imports)",
                 formatted.len(),
                 estimated_tokens
             );
@@ -1772,7 +1757,6 @@ impl CodeAnalyzer {
         let is_unsupported_fallback = arc_output
             .formatted
             .contains("[Unsupported extension: semantic analysis not available]");
-        let verbose = params.output_control.verbose.unwrap_or(false);
         if !use_summary && !is_unsupported_fallback {
             // fields: serde rejects unknown enum variants at deserialization; no runtime validation required
             formatted = format_file_details_paginated(
@@ -1782,7 +1766,7 @@ impl CodeAnalyzer {
                 &params.path,
                 line_count,
                 offset,
-                verbose,
+                false,
                 params.fields.as_deref(),
             );
         }
@@ -1954,7 +1938,6 @@ impl CodeAnalyzer {
             let symbol = params.symbol.clone();
             let git_ref = params.git_ref.clone();
             let max_depth = params.max_depth;
-            let ast_recursion_limit = params.ast_recursion_limit;
 
             let handle = tokio::task::spawn_blocking(move || {
                 let path = path_owned.as_path();
@@ -1994,12 +1977,7 @@ impl CodeAnalyzer {
                 } else {
                     raw_entries
                 };
-                let output = match analyze::analyze_import_lookup(
-                    path,
-                    &symbol,
-                    &entries,
-                    ast_recursion_limit,
-                ) {
+                let output = match analyze::analyze_import_lookup(path, &symbol, &entries, None) {
                     Ok(v) => v,
                     Err(e) => {
                         return Err(ErrorData::new(
@@ -2106,11 +2084,7 @@ impl CodeAnalyzer {
             PaginationMode::Callers
         };
 
-        let mut use_summary = params.output_control.summary == Some(true);
-        if params.output_control.force == Some(true) {
-            use_summary = false;
-        }
-        let verbose = params.output_control.verbose.unwrap_or(false);
+        let use_summary = params.output_control.summary == Some(true);
 
         let mut callee_cursor = match cursor_mode {
             PaginationMode::Callers => {
@@ -2127,7 +2101,6 @@ impl CodeAnalyzer {
                 if !use_summary
                     && (paginated_next.is_some()
                         || offset > 0
-                        || !verbose
                         || !output.outgoing_chains.is_empty())
                 {
                     let base_path = Path::new(&params.path);
@@ -2142,7 +2115,7 @@ impl CodeAnalyzer {
                         output.def_count,
                         offset,
                         Some(base_path),
-                        verbose,
+                        false,
                     );
                     paginated_next
                 } else {
@@ -2160,7 +2133,7 @@ impl CodeAnalyzer {
                     Err(e) => return Ok(err_to_tool_result(e)),
                 };
 
-                if paginated_next.is_some() || offset > 0 || !verbose {
+                if paginated_next.is_some() || offset > 0 {
                     let base_path = Path::new(&params.path);
                     output.formatted = format_focused_paginated(
                         &paginated_items,
@@ -2173,7 +2146,7 @@ impl CodeAnalyzer {
                         output.def_count,
                         offset,
                         Some(base_path),
-                        verbose,
+                        false,
                     );
                     paginated_next
                 } else {
@@ -2204,7 +2177,7 @@ impl CodeAnalyzer {
                 };
 
                 // Always regenerate formatted output for DefUse mode so the
-                // first page (offset=0, verbose=true) is not skipped.
+                // first page (offset=0) is not skipped.
                 if !use_summary {
                     let base_path = Path::new(&params.path);
                     output.formatted = format_focused_paginated_defuse(
@@ -2213,7 +2186,7 @@ impl CodeAnalyzer {
                         &params.symbol,
                         offset,
                         Some(base_path),
-                        verbose,
+                        false,
                     );
                 }
 
@@ -2325,7 +2298,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination, summary, force, verbose, git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML. Example queries: What functions are defined in src/analyze.rs?",
+        description = "Function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination and git_ref not supported. Use analyze_file when you need signatures, types, or class details. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML. Example queries: What functions are defined in src/analyze.rs?",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
             title = "Analyze Module",
@@ -4062,7 +4035,6 @@ struct FocusedAnalysisParams {
     match_mode: SymbolMatchMode,
     follow_depth: u32,
     max_depth: Option<u32>,
-    ast_recursion_limit: Option<usize>,
     use_summary: bool,
     impl_only: Option<bool>,
     def_use: bool,
@@ -4474,7 +4446,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_overview_mode_verbose_no_summary_block() {
+    async fn test_handle_overview_mode_no_summary_block() {
         use aptu_coder_core::types::AnalyzeDirectoryParams;
         use tempfile::TempDir;
 
@@ -4494,7 +4466,6 @@ mod tests {
 
         let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
             "path": tmp.path().to_str().unwrap(),
-            "verbose": true,
         }))
         .unwrap();
 

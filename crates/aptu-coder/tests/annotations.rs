@@ -134,7 +134,7 @@ fn test_all_tool_parameters_have_descriptions() {
 #[test]
 fn test_flatten_fields_have_descriptions() {
     let tools = CodeAnalyzer::list_tools();
-    let flatten_fields = ["cursor", "page_size", "summary", "force", "verbose"];
+    let flatten_fields = ["cursor", "page_size", "summary"];
     for tool in &tools {
         let tool_name = tool.name.as_ref();
         if tool_name == "analyze_module" {

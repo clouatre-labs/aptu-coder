@@ -88,13 +88,9 @@ pub struct PaginationParams {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct OutputControlParams {
-    /// Return full output even when it exceeds the 50K char limit. Prefer summary=true or narrowing scope over force=true; force=true can produce very large responses.
-    pub force: Option<bool>,
     /// true = compact summary (totals plus directory tree, no per-file function lists); false = full output; unset = auto-summarize when output exceeds 50K chars.
     /// Mutually exclusive with cursor; passing both returns INVALID_PARAMS.
     pub summary: Option<bool>,
-    /// true = full output with section headers and imports (Markdown-style); false or unset = compact one-line-per-item format (default).
-    pub verbose: Option<bool>,
 }
 
 #[non_exhaustive]
@@ -154,13 +150,6 @@ pub struct AnalyzeFileParams {
         schemars(schema_with = "crate::schema_helpers::supported_file_path_schema")
     )]
     pub path: String,
-
-    /// AST traversal depth limit for tree-sitter queries. Leave unset in normal use; increase only for deeply nested generated code. None=library default, 0=unlimited, n=limit to n levels.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::option_ast_limit_schema")
-    )]
-    pub ast_recursion_limit: Option<usize>,
 
     /// Limit output to specific sections. Valid values: "functions", "classes", "imports", "all".
     /// The FILE header (path, line count, section counts) is always emitted regardless.
@@ -227,13 +216,6 @@ pub struct AnalyzeSymbolParams {
         schemars(schema_with = "crate::schema_helpers::option_integer_schema")
     )]
     pub max_depth: Option<u32>,
-
-    /// AST traversal depth limit for tree-sitter queries. Leave unset in normal use; increase only for deeply nested generated code. None=library default, 0=unlimited, n=limit to n levels.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::option_ast_limit_schema")
-    )]
-    pub ast_recursion_limit: Option<usize>,
 
     #[serde(flatten)]
     pub pagination: PaginationParams,
@@ -763,10 +745,6 @@ mod tests {
             "page_size must be top-level in AnalyzeDirectoryParams schema"
         );
         assert!(
-            dir_props.contains_key("force"),
-            "force must be top-level in AnalyzeDirectoryParams schema"
-        );
-        assert!(
             dir_props.contains_key("summary"),
             "summary must be top-level in AnalyzeDirectoryParams schema"
         );
@@ -786,10 +764,6 @@ mod tests {
         assert!(
             file_props.contains_key("page_size"),
             "page_size must be top-level in AnalyzeFileParams schema"
-        );
-        assert!(
-            file_props.contains_key("force"),
-            "force must be top-level in AnalyzeFileParams schema"
         );
         assert!(
             file_props.contains_key("summary"),
@@ -813,30 +787,38 @@ mod tests {
             "page_size must be top-level in AnalyzeSymbolParams schema"
         );
         assert!(
-            symbol_props.contains_key("force"),
-            "force must be top-level in AnalyzeSymbolParams schema"
-        );
-        assert!(
             symbol_props.contains_key("summary"),
             "summary must be top-level in AnalyzeSymbolParams schema"
         );
 
-        // Verify ast_recursion_limit enforces minimum: 0 in both parameter schemas.
-        let file_ast = file_props
-            .get("ast_recursion_limit")
-            .expect("ast_recursion_limit must be present in AnalyzeFileParams schema");
-        assert_eq!(
-            file_ast.get("minimum").and_then(|v| v.as_u64()),
-            Some(0),
-            "ast_recursion_limit in AnalyzeFileParams must have minimum: 0"
+        // Verify verbose is NOT present in either param schema (removed per issue 1129)
+        assert!(
+            !file_props.contains_key("verbose"),
+            "verbose must be removed from AnalyzeFileParams schema"
         );
-        let symbol_ast = symbol_props
-            .get("ast_recursion_limit")
-            .expect("ast_recursion_limit must be present in AnalyzeSymbolParams schema");
-        assert_eq!(
-            symbol_ast.get("minimum").and_then(|v| v.as_u64()),
-            Some(0),
-            "ast_recursion_limit in AnalyzeSymbolParams must have minimum: 0"
+        assert!(
+            !symbol_props.contains_key("verbose"),
+            "verbose must be removed from AnalyzeSymbolParams schema"
+        );
+
+        // Verify force is NOT present in either param schema (removed per issue 1129)
+        assert!(
+            !file_props.contains_key("force"),
+            "force must be removed from AnalyzeFileParams schema"
+        );
+        assert!(
+            !symbol_props.contains_key("force"),
+            "force must be removed from AnalyzeSymbolParams schema"
+        );
+
+        // Verify ast_recursion_limit is NOT present in either param schema (removed per issue 1129)
+        assert!(
+            !file_props.contains_key("ast_recursion_limit"),
+            "ast_recursion_limit must be removed from AnalyzeFileParams schema"
+        );
+        assert!(
+            !symbol_props.contains_key("ast_recursion_limit"),
+            "ast_recursion_limit must be removed from AnalyzeSymbolParams schema"
         );
     }
 }

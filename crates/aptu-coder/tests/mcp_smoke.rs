@@ -136,7 +136,7 @@ fn test_mcp_server_recovers_after_tool_error() {
         thread::sleep(Duration::from_millis(500));
 
         // Tool call with a nonexistent path — must return isError=true, not crash.
-        let bad = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_file","arguments":{"path":"/nonexistent/does_not_exist.py","ast_recursion_limit":null,"page_size":null}}}"#;
+        let bad = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_file","arguments":{"path":"/nonexistent/does_not_exist.py","page_size":null}}}"#;
         stdin.write_all(bad.as_bytes()).expect("write bad call");
         stdin.write_all(b"\n").expect("newline");
 
