@@ -1328,7 +1328,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
-        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Returns per-file stats plus next_cursor for pagination. For large directories the output is automatically compacted to a summary; pass summary=false to get a cursor-paginated per-file flat list instead. Fails if summary=true and cursor. For 1000+ files, use max_depth=2-3 and summary=true. git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts. Example queries: Analyze the src/ directory to understand module structure; What files are in the tests/ directory and how large are they?",
+        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Returns per-file stats plus next_cursor for pagination. Default max_depth is 3; pass 0 for unlimited depth. Large directories (1000+ files) are auto-compacted to a summary; pass summary=false for a cursor-paginated per-file flat list (summary and cursor are mutually exclusive). git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts. Example queries: Analyze the src/ directory to understand module structure; What files are in the tests/ directory and how large are they?",
         output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
             title = "Analyze Directory",
@@ -1343,7 +1343,9 @@ impl CodeAnalyzer {
         params: Parameters<AnalyzeDirectoryParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        let params = params.0;
+        let mut params = params.0;
+        // Apply max_depth default: 3. Pass 0 for unlimited depth.
+        params.max_depth = params.max_depth.or(Some(3));
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2959,7 +2961,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). If invalid_params is returned, re-read the target file with analyze_file or analyze_module before retrying. Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD). Example queries: Update the function signature in lib.rs.",
+        description = "Replaces a unique exact text block; old_text must match character-for-character and appear exactly once. Returns path, bytes_before, bytes_after. Fails if zero matches; fails if multiple matches (extend old_text to be more specific). If invalid_params is returned, re-read the target file with analyze_file or analyze_module before retrying. Whitespace-sensitive exact match. Use edit_overwrite to replace the whole file. Pass empty string for new_text to delete the matched block. working_dir sets the base directory for path resolution (default: server CWD). Example queries: Update the function signature in lib.rs.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
@@ -3392,7 +3394,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). Note: on macOS, login shell profile sourcing adds ~100-200ms latency per call. For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3712,15 +3714,32 @@ fn build_exec_command(
     stdin_present: bool,
     resolved_path: Option<&str>,
 ) -> tokio::process::Command {
+    // On macOS the login shell (-l) already sources the profile PATH; suppress the
+    // unused-variable lint that fires when the non-macOS injection block is cfg'd out.
+    #[cfg(target_os = "macos")]
+    let _ = resolved_path;
     let shell = resolve_shell();
     let mut cmd = tokio::process::Command::new(shell);
-    cmd.arg("-c").arg(command);
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, use login shell (-l) to source the user profile for PATH resolution.
+        cmd.args(["-l", "-c", command]);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        cmd.arg("-c").arg(command);
+    }
 
     if let Some(wd) = working_dir_path {
         cmd.current_dir(wd);
     }
 
-    // Inject resolved login shell PATH if available
+    // Inject resolved login shell PATH if available (non-macOS only).
+    // On macOS the login shell (-l) sources the profile which includes the live PATH,
+    // so we skip the stale snapshot injection to avoid overriding it.
+    #[cfg(not(target_os = "macos"))]
     if let Some(path) = resolved_path {
         cmd.env("PATH", path);
     }
