@@ -49,14 +49,6 @@ pub struct ExecCommandParams {
     pub timeout_secs: Option<u64>,
     /// Working directory for the command. Set this instead of prepending cd to the command string. Validated against path traversal; does not sandbox the process.
     pub working_dir: Option<String>,
-    /// Cap on virtual address space in megabytes (Linux only; silently accepted but not enforced on macOS).
-    /// None = no limit (default).
-    #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
-    pub memory_limit_mb: Option<u64>,
-    /// CPU time limit in seconds. SIGXCPU on soft-limit breach, SIGKILL on hard-limit breach.
-    /// None = no limit (default).
-    #[schemars(schema_with = "aptu_coder_core::schema_helpers::option_integer_schema")]
-    pub cpu_limit_secs: Option<u64>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
 }
@@ -165,9 +157,6 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc, watch};
 use tracing::{instrument, warn};
 use tracing_subscriber::filter::LevelFilter;
-
-#[cfg(unix)]
-use nix::sys::resource::{Resource, setrlimit};
 
 static GLOBAL_SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -3458,8 +3447,6 @@ impl CodeAnalyzer {
             command.clone(),
             working_dir_path.clone(),
             timeout_secs,
-            params.memory_limit_mb,
-            params.cpu_limit_secs,
             params.stdin.clone(),
             seq,
             resolved_path_str,
@@ -3605,8 +3592,6 @@ impl CodeAnalyzer {
 fn build_exec_command(
     command: &str,
     working_dir_path: Option<&std::path::PathBuf>,
-    memory_limit_mb: Option<u64>,
-    cpu_limit_secs: Option<u64>,
     stdin_present: bool,
     resolved_path: Option<&str>,
 ) -> tokio::process::Command {
@@ -3630,30 +3615,6 @@ fn build_exec_command(
         cmd.stdin(std::process::Stdio::piped());
     } else {
         cmd.stdin(std::process::Stdio::null());
-    }
-
-    #[cfg(unix)]
-    {
-        if memory_limit_mb.is_some() || cpu_limit_secs.is_some() {
-            // SAFETY: This closure runs in the child process after fork() and before exec(),
-            // making it safe to call setrlimit (a signal-safe syscall). No Rust objects are
-            // accessed or mutated, and the closure does not unwind.
-            unsafe {
-                cmd.pre_exec(move || {
-                    #[cfg(target_os = "linux")]
-                    if let Some(mb) = memory_limit_mb {
-                        let bytes = mb.saturating_mul(1024 * 1024);
-                        setrlimit(Resource::RLIMIT_AS, bytes, bytes)
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    if let Some(cpu) = cpu_limit_secs {
-                        setrlimit(Resource::RLIMIT_CPU, cpu, cpu)
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    Ok(())
-                });
-            }
-        }
     }
 
     cmd
@@ -3769,8 +3730,6 @@ async fn run_exec_impl(
     command: String,
     working_dir_path: Option<std::path::PathBuf>,
     timeout_secs: Option<u64>,
-    memory_limit_mb: Option<u64>,
-    cpu_limit_secs: Option<u64>,
     stdin: Option<String>,
     seq: u32,
     resolved_path: Option<&str>,
@@ -3782,8 +3741,6 @@ async fn run_exec_impl(
     let mut cmd = build_exec_command(
         &command,
         working_dir_path.as_ref(),
-        memory_limit_mb,
-        cpu_limit_secs,
         stdin.is_some(),
         resolved_path,
     );
@@ -5246,7 +5203,7 @@ mod tests {
     fn test_exec_command_path_injected() {
         // Arrange: call build_exec_command with Some("...") resolved_path
         let resolved_path = Some("/usr/local/bin:/usr/bin:/bin");
-        let cmd = build_exec_command("echo test", None, None, None, false, resolved_path);
+        let cmd = build_exec_command("echo test", None, false, resolved_path);
 
         // Act: verify the command was created without panic
         // (We cannot directly inspect env vars on the Command object,
@@ -5263,7 +5220,7 @@ mod tests {
     #[test]
     fn test_exec_command_path_fallback() {
         // Arrange: call build_exec_command with None resolved_path
-        let cmd = build_exec_command("echo test", None, None, None, false, None);
+        let cmd = build_exec_command("echo test", None, false, None);
 
         // Act: verify the command was created without panic
         let cmd_str = format!("{:?}", cmd);

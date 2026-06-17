@@ -34,7 +34,6 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 blake3 = { workspace = true }
-nix = { version = "0.31", features = ["resource"] }
 regex = { workspace = true }
 toml = { workspace = true }
 opentelemetry = { workspace = true }
