@@ -701,3 +701,46 @@ async fn test_exec_command_working_dir_outside_cwd() {
         "stdout missing 'hello': {sc}"
     );
 }
+
+/// exec_command invalid working_dir must not expose raw path in error message.
+#[tokio::test]
+async fn test_exec_command_invalid_working_dir_no_path_leak() {
+    let bad_wd = "/nonexistent-exec-working-dir-test";
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo hi",
+        "working_dir": bad_wd
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(bad_wd),
+        "error message must not contain working_dir path: {msg}"
+    );
+}
+
+/// exec_command invalid cd prefix path must not expose raw path in error message.
+#[tokio::test]
+async fn test_exec_command_invalid_cd_path_no_path_leak() {
+    let bad_cd_path = "/nonexistent-cd-prefix-path-test";
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": format!("cd {bad_cd_path} && pwd")
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(bad_cd_path),
+        "error message must not contain cd prefix path: {msg}"
+    );
+}

@@ -53,6 +53,15 @@ async fn test_edit_replace_not_found_shows_file_preview() {
         msg.contains("Nearest match:"),
         "error message should contain nearest match hint but got: {msg}"
     );
+    // Path must not leak into model-visible error message
+    assert!(
+        !msg.contains(working_dir),
+        "error message must not contain working_dir path: {msg}"
+    );
+    assert!(
+        !msg.contains(file_name),
+        "error message must not contain file path: {msg}"
+    );
 }
 
 /// When old_text matches multiple locations, the error message includes
@@ -98,5 +107,14 @@ async fn test_edit_replace_ambiguous_shows_line_numbers() {
     assert!(
         msg.contains("2 locations"),
         "error message should mention match count but got: {msg}"
+    );
+    // Path must not leak into model-visible error message
+    assert!(
+        !msg.contains(working_dir),
+        "error message must not contain working_dir path: {msg}"
+    );
+    assert!(
+        !msg.contains(file_name),
+        "error message must not contain file path: {msg}"
     );
 }

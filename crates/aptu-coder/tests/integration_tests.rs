@@ -663,3 +663,75 @@ async fn test_schema_compliance_no_nonstandard_formats() {
         found.join("\n")
     );
 }
+
+/// analyze_file with a directory path returns error without leaking path in message.
+#[tokio::test]
+async fn test_analyze_file_directory_error_no_path_leak() {
+    // Arrange: create a temp dir inside CWD
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let dir_name = temp_dir
+        .path()
+        .file_name()
+        .expect("temp dir has file name")
+        .to_str()
+        .expect("temp dir name is valid UTF-8");
+
+    // Act: call analyze_file with the directory path
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": dir_name,
+        }),
+    )
+    .await;
+
+    // Assert: error without path leak
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(dir_name),
+        "error message must not contain directory path: {msg}"
+    );
+}
+
+/// analyze_module with a directory path returns error without leaking path in message.
+#[tokio::test]
+async fn test_analyze_module_directory_error_no_path_leak() {
+    // Arrange: create a temp dir inside CWD
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let dir_name = temp_dir
+        .path()
+        .file_name()
+        .expect("temp dir has file name")
+        .to_str()
+        .expect("temp dir name is valid UTF-8");
+
+    // Act: call analyze_module with the directory path
+    let resp = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({
+            "path": dir_name,
+        }),
+    )
+    .await;
+
+    // Assert: error without path leak
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(dir_name),
+        "error message must not contain directory path: {msg}"
+    );
+}

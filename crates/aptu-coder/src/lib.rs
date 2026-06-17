@@ -273,12 +273,12 @@ fn error_meta(
 
 #[must_use]
 fn err_to_tool_result(e: ErrorData) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(e.message)]).with_meta(Some(no_cache_meta()))
-}
-
-#[must_use]
-fn tool_error(msg: String) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(msg)]).with_meta(Some(no_cache_meta()))
+    let mut result =
+        CallToolResult::error(vec![Content::text(e.message)]).with_meta(Some(no_cache_meta()));
+    if let Some(data) = e.data {
+        result.structured_content = Some(data);
+    }
+    result
 }
 
 fn err_to_tool_result_from_pagination(
@@ -1604,15 +1604,15 @@ impl CodeAnalyzer {
             span.record("error.type", "invalid_params");
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!(
-                    "'{}' is a directory; use analyze_directory instead",
-                    params.path
-                ),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "pass a file path, not a directory",
-                )),
+                "path is a directory; use analyze_directory instead",
+                {
+                    let mut meta =
+                        error_meta("validation", false, "pass a file path, not a directory");
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("path".to_string(), serde_json::json!(params.path));
+                    }
+                    Some(meta)
+                },
             )));
         }
 
@@ -2398,15 +2398,15 @@ impl CodeAnalyzer {
             });
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!(
-                    "'{}' is a directory. Use analyze_directory to analyze a directory, or pass a specific file path to analyze_module.",
-                    params.path
-                ),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use analyze_directory for directories",
-                )),
+                "path is a directory; use analyze_directory for directories, or pass a file path to analyze_module",
+                {
+                    let mut meta =
+                        error_meta("validation", false, "use analyze_directory for directories");
+                    if let Some(obj) = meta.as_object_mut() {
+                        obj.insert("path".to_string(), serde_json::json!(params.path));
+                    }
+                    Some(meta)
+                },
             )));
         }
 
@@ -2416,7 +2416,7 @@ impl CodeAnalyzer {
         // and adding a new typed slot is out of scope; L2 avoids the parse cost across restarts.
         let file_bytes = match tokio::fs::read(&params.path).await {
             Ok(b) => b,
-            Err(e) => {
+            Err(_e) => {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
@@ -2440,12 +2440,15 @@ impl CodeAnalyzer {
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("Failed to read file '{}': {e}", params.path),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check file path and permissions",
-                    )),
+                    "failed to read file; check file path and permissions",
+                    {
+                        let mut meta =
+                            error_meta("resource", false, "check file path and permissions");
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(params.path));
+                        }
+                        Some(meta)
+                    },
                 )));
             }
         };
@@ -2695,10 +2698,15 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(tool_error(format!(
-                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
-                        wd, e.message
-                    )));
+                    let mut result = CallToolResult::error(vec![Content::text(
+                        "working_dir is not valid; provide an existing directory path".to_string(),
+                    )])
+                    .with_meta(Some(no_cache_meta()));
+                    result.structured_content = Some(serde_json::json!({
+                        "workingDir": wd,
+                        "error": e.message,
+                    }));
+                    return Ok(result);
                 }
             }
         } else {
@@ -2794,6 +2802,50 @@ impl CodeAnalyzer {
                         false,
                         "provide a file path, not a directory",
                     )),
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::Io(io_err))) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "edit_overwrite",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("internal_error".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    ..Default::default()
+                });
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    "I/O error writing file; check file path and permissions".to_string(),
+                    {
+                        let mut meta =
+                            error_meta("resource", false, "check file path and permissions");
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(param_path));
+                            obj.insert(
+                                "ioErrorKind".to_string(),
+                                serde_json::json!(format!("{:?}", io_err.kind())),
+                            );
+                            obj.insert(
+                                "ioErrorSource".to_string(),
+                                serde_json::json!(io_err.to_string()),
+                            );
+                        }
+                        Some(meta)
+                    },
                 )));
             }
             Ok(Err(e)) => {
@@ -2946,10 +2998,15 @@ impl CodeAnalyzer {
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(tool_error(format!(
-                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
-                        wd, e.message
-                    )));
+                    let mut result = CallToolResult::error(vec![Content::text(
+                        "working_dir is not valid; provide an existing directory path".to_string(),
+                    )])
+                    .with_meta(Some(no_cache_meta()));
+                    result.structured_content = Some(serde_json::json!({
+                        "workingDir": wd,
+                        "error": e.message,
+                    }));
+                    return Ok(result);
                 }
             }
         } else {
@@ -3045,9 +3102,8 @@ impl CodeAnalyzer {
                 });
 
                 let message = if first_20_lines.is_empty() {
-                    format!(
-                        "old_text not found (0 matches) in {notfound_path}. Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
-                    )
+                    "old_text not found (0 matches). Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
+                        .to_string()
                 } else {
                     let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
                     let mut best_line_idx = 1usize;
@@ -3075,18 +3131,24 @@ impl CodeAnalyzer {
                         .join("\n");
 
                     format!(
-                        "old_text not found (0 matches) in {notfound_path}.\nThe file begins:\n{numbered_lines}\n\nNearest match: line {best_line_idx} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
+                        "old_text not found (0 matches).\nThe file begins:\n{numbered_lines}\n\nNearest match: line {best_line_idx} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
                     )
                 };
 
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
                     message,
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "re-read the file with analyze_file or analyze_module, then derive old_text from the live content",
-                    )),
+                    {
+                        let mut meta = error_meta(
+                            "validation",
+                            false,
+                            "re-read the file with analyze_file or analyze_module, then derive old_text from the live content",
+                        );
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(notfound_path));
+                        }
+                        Some(meta)
+                    },
                 )));
             }
             Ok(Err(aptu_coder_core::EditError::Ambiguous {
@@ -3125,13 +3187,19 @@ impl CodeAnalyzer {
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
                     format!(
-                        "old_text matched {count} locations in {ambiguous_path}.\nOccurrences at lines: {line_numbers_csv}\nExtend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
+                        "old_text matched {count} locations.\nOccurrences at lines: {line_numbers_csv}\nExtend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
                     ),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "extend old_text with more surrounding context, or re-read with analyze_file to confirm the exact text",
-                    )),
+                    {
+                        let mut meta = error_meta(
+                            "validation",
+                            false,
+                            "extend old_text with more surrounding context, or re-read with analyze_file to confirm the exact text",
+                        );
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(ambiguous_path));
+                        }
+                        Some(meta)
+                    },
                 )));
             }
             Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
@@ -3165,6 +3233,50 @@ impl CodeAnalyzer {
                         false,
                         "provide a file path, not a directory",
                     )),
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::Io(io_err))) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "edit_replace",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("internal_error".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    ..Default::default()
+                });
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    "I/O error editing file; check file path and permissions".to_string(),
+                    {
+                        let mut meta =
+                            error_meta("resource", false, "check file path and permissions");
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(param_path));
+                            obj.insert(
+                                "ioErrorKind".to_string(),
+                                serde_json::json!(format!("{:?}", io_err.kind())),
+                            );
+                            obj.insert(
+                                "ioErrorSource".to_string(),
+                                serde_json::json!(io_err.to_string()),
+                            );
+                        }
+                        Some(meta)
+                    },
                 )));
             }
             Ok(Err(e)) => {
@@ -3324,20 +3436,30 @@ impl CodeAnalyzer {
                     if !p.is_dir() {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
-                        return Ok(tool_error(format!(
-                            "working_dir {:?} is not a directory. Provide an existing directory path.",
-                            wd
-                        )));
+                        let mut result = CallToolResult::error(vec![Content::text(
+                            "working_dir is not a directory; provide an existing directory path"
+                                .to_string(),
+                        )])
+                        .with_meta(Some(no_cache_meta()));
+                        result.structured_content = Some(serde_json::json!({
+                            "workingDir": wd,
+                        }));
+                        return Ok(result);
                     }
                     Some(p)
                 }
                 Err(e) => {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    return Ok(tool_error(format!(
-                        "working_dir {:?} is not valid: {}. Provide an existing directory path.",
-                        wd, e
-                    )));
+                    let mut result = CallToolResult::error(vec![Content::text(
+                        "working_dir is not valid; provide an existing directory path".to_string(),
+                    )])
+                    .with_meta(Some(no_cache_meta()));
+                    result.structured_content = Some(serde_json::json!({
+                        "workingDir": wd,
+                        "error": e.to_string(),
+                    }));
+                    return Ok(result);
                 }
             }
         } else {
@@ -3376,18 +3498,26 @@ impl CodeAnalyzer {
                         Ok(_) => {
                             span.record("error", true);
                             span.record("error.type", "invalid_params");
-                            return Ok(tool_error(format!(
-                                "cd prefix path {:?} is not a directory. Set working_dir explicitly or use a valid directory path.",
-                                cd_path
-                            )));
+                            let mut result = CallToolResult::error(vec![Content::text(
+                                "cd prefix path is not a directory; set working_dir explicitly or use a valid directory path".to_string(),
+                            )])
+                            .with_meta(Some(no_cache_meta()));
+                            result.structured_content = Some(serde_json::json!({
+                                "cdPath": cd_path,
+                            }));
+                            return Ok(result);
                         }
                         Err(_) => {
                             span.record("error", true);
                             span.record("error.type", "invalid_params");
-                            return Ok(tool_error(format!(
-                                "cd prefix path {:?} does not exist or is outside CWD. Set working_dir explicitly.",
-                                cd_path
-                            )));
+                            let mut result = CallToolResult::error(vec![Content::text(
+                                "cd prefix path does not exist or is outside CWD; set working_dir explicitly".to_string(),
+                            )])
+                            .with_meta(Some(no_cache_meta()));
+                            result.structured_content = Some(serde_json::json!({
+                                "cdPath": cd_path,
+                            }));
+                            return Ok(result);
                         }
                     }
                 }

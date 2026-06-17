@@ -118,3 +118,62 @@ async fn edit_replace_working_dir_modifies_inside_working_dir() {
     let updated = std::fs::read_to_string(&file_path).expect("should read updated file");
     assert_eq!(updated, "new text here");
 }
+
+/// edit_overwrite reports invalid working_dir without exposing path in error message.
+#[tokio::test]
+async fn edit_overwrite_invalid_working_dir_no_path_leak() {
+    // Arrange: use a non-existent path as working_dir
+    let bad_wd = "/nonexistent-working-dir-for-edit-overwrite-test";
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": "test.txt",
+            "content": "hello",
+            "working_dir": bad_wd
+        }),
+    )
+    .await;
+
+    // Assert: error without raw path in message
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(bad_wd),
+        "error message must not contain working_dir path: {msg}"
+    );
+}
+
+/// edit_replace reports invalid working_dir without exposing path in error message.
+#[tokio::test]
+async fn edit_replace_invalid_working_dir_no_path_leak() {
+    // Arrange: use a non-existent path as working_dir
+    let bad_wd = "/nonexistent-working-dir-for-edit-replace-test";
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": "test.txt",
+            "old_text": "old",
+            "new_text": "new",
+            "working_dir": bad_wd
+        }),
+    )
+    .await;
+
+    // Assert: error without raw path in message
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        !msg.contains(bad_wd),
+        "error message must not contain working_dir path: {msg}"
+    );
+}
