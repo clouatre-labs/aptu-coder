@@ -3299,7 +3299,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; timeout_secs kills the process after N seconds (wall-clock); omit for no limit. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist, is not a directory, or is outside CWD. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, timed_out, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB; timeout_secs kills the process after N seconds (wall-clock); omit for no limit. Set working_dir to the target directory; write the command using relative paths only. Do not prepend cd to the command. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3335,12 +3335,12 @@ impl CodeAnalyzer {
         span.record("gen_ai.tool.name", "exec_command");
         span.record("command", &params.command);
 
-        // Validate working_dir if provided
+        // Validate working_dir if provided -- existence + is_dir only, no CWD confinement.
+        // exec_command is a shell runner; CWD confinement applies only to edit_overwrite/edit_replace.
         let working_dir_path = if let Some(ref wd) = params.working_dir {
-            match validate_path(wd, true) {
+            match std::fs::canonicalize(wd) {
                 Ok(p) => {
-                    // Verify it's a directory
-                    if !std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
+                    if !p.is_dir() {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
                         return Ok(tool_error(format!(
@@ -3355,7 +3355,7 @@ impl CodeAnalyzer {
                     span.record("error.type", "invalid_params");
                     return Ok(tool_error(format!(
                         "working_dir {:?} is not valid: {}. Provide an existing directory path.",
-                        wd, e.message
+                        wd, e
                     )));
                 }
             }
