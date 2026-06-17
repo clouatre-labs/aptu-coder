@@ -285,7 +285,7 @@ fn err_to_tool_result_from_pagination(
     e: aptu_coder_core::pagination::PaginationError,
 ) -> CallToolResult {
     let msg = format!("Pagination error: {}", e);
-    CallToolResult::error(vec![Content::text(msg)])
+    CallToolResult::error(vec![Content::text(msg)]).with_meta(Some(no_cache_meta()))
 }
 
 fn no_cache_meta() -> Meta {
