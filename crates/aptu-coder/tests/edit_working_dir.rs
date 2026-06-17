@@ -237,3 +237,68 @@ async fn edit_replace_invalid_working_dir_no_path_leak() {
         "error message must not contain working_dir path: {msg}"
     );
 }
+
+#[tokio::test]
+async fn test_edit_replace_empty_new_text_deletes_block() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "delete_block.txt";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, "line one\nDELETE ME\nline three\n").expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "DELETE ME\n",
+            "new_text": "",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success, got: {resp}"
+    );
+    let content = std::fs::read_to_string(&file_path).expect("should read updated file");
+    assert_eq!(content, "line one\nline three\n");
+}
+
+#[tokio::test]
+async fn test_edit_replace_empty_new_text_entire_file() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "whole_file.txt";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, "entire content").expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "entire content",
+            "new_text": "",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success, got: {resp}"
+    );
+    let content = std::fs::read_to_string(&file_path).expect("should read updated file");
+    assert_eq!(
+        content, "",
+        "file should be empty after full-content deletion"
+    );
+}

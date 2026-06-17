@@ -104,7 +104,7 @@ pub struct AnalyzeDirectoryParams {
     /// Directory path to analyze
     pub path: String,
 
-    /// Maximum directory traversal depth for overview mode only. 0 or unset = unlimited depth. Use 1-3 for large monorepos to manage output size. Ignored in other modes.
+    /// Maximum directory traversal depth for overview mode only. Default: 3. Pass 0 for unlimited depth. Use 1-3 for large monorepos to manage output size. Ignored in other modes.
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::option_integer_schema")
@@ -867,7 +867,7 @@ pub struct EditReplaceParams {
     pub working_dir: Option<String>,
     /// Exact text block to find and replace. Must appear exactly once in the file.
     pub old_text: String,
-    /// Replacement text.
+    /// Replacement text. Pass empty string to delete the matched block.
     pub new_text: String,
 }
 

@@ -792,3 +792,73 @@ async fn test_analyze_module_directory_error_no_path_leak() {
         "error message must not contain directory path: {msg}"
     );
 }
+
+#[tokio::test]
+async fn test_analyze_directory_default_max_depth_is_three() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let base = temp_dir.path();
+
+    std::fs::create_dir_all(base.join("a/b/c/d")).unwrap();
+    std::fs::write(base.join("a/d1.rs"), "fn d1() {}").unwrap();
+    std::fs::write(base.join("a/b/d2.rs"), "fn d2() {}").unwrap();
+    std::fs::write(base.join("a/b/c/d3.rs"), "fn d3() {}").unwrap();
+    // depth 4 -- must NOT appear with default max_depth=3
+    std::fs::write(base.join("a/b/c/d/d4.rs"), "fn d4() {}").unwrap();
+
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": base.to_str().expect("path is valid UTF-8"),
+            "page_size": 100
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success, got: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    // Summary/overview mode rolls up individual files into directory nodes;
+    // assert the depth-3 directory "c/" appears and depth-4 content does not.
+    assert!(
+        text.contains("c/") || text.contains("/c"),
+        "depth-3 directory must appear: {text}"
+    );
+    assert!(
+        !text.contains("d4.rs") && !text.contains("  d/"),
+        "depth-4 content must NOT appear with default max_depth=3: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_directory_explicit_max_depth_zero_unlimited() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let base = temp_dir.path();
+
+    // depth 4 -- must appear when max_depth=0 (unlimited)
+    std::fs::create_dir_all(base.join("a/b/c/d")).unwrap();
+    std::fs::write(base.join("a/b/c/d/deep.rs"), "fn deep() {}").unwrap();
+
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": base.to_str().expect("path is valid UTF-8"),
+            "max_depth": 0,
+            "page_size": 100
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success, got: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("deep.rs"),
+        "depth-4 file must appear when max_depth=0 (unlimited): {text}"
+    );
+}
