@@ -39,6 +39,15 @@ use validation::{validate_path, validate_path_in_dir};
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
 
+/// Number of consecutive not_found or ambiguous edit_replace failures on the same
+/// (session_id, canonical_path) pair before returning a stale-context directive error.
+pub(crate) const EDIT_STALE_THRESHOLD: u8 = 5;
+/// Maximum number of (session_id, canonical_path) entries in the failure counter map.
+/// When the map reaches this size, it is cleared entirely to prevent unbounded growth.
+/// The circuit breaker is advisory, so a full clear is safe: the worst case is one
+/// missed trip per session per path after an eviction cycle.
+pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecCommandParams {
@@ -144,6 +153,7 @@ use rmcp::model::{
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc, watch};
@@ -381,6 +391,10 @@ pub struct CodeAnalyzer {
     // L1 in-memory LRU cache for call graph results (analyze_symbol).
     // Capacity controlled by APTU_CODER_SYMBOL_CACHE_CAPACITY env var (default 32).
     call_graph_cache: CallGraphCache,
+    // Per-(session_id, canonical_path) consecutive edit_replace failure counter.
+    // Used to detect stale LLM context and return a directive error instead of
+    // repeatedly trying an old_text that no longer matches the file content.
+    edit_failure_counts: Arc<Mutex<HashMap<(String, String), u8>>>,
 }
 
 #[tool_router]
@@ -493,6 +507,7 @@ impl CodeAnalyzer {
                     32,
                 ))
             },
+            edit_failure_counts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -2912,6 +2927,18 @@ impl CodeAnalyzer {
         self.cache
             .invalidate_file(&std::path::PathBuf::from(&param_path));
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+
+        // Reset circuit breaker on successful write
+        {
+            let sid_str = sid.clone().unwrap_or_default();
+            let canonical = output.path.clone();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            counts.remove(&(sid_str, canonical));
+        }
+
         self.metrics_tx.send(crate::metrics::MetricEvent {
             ts: crate::metrics::unix_ms(),
             tool: "edit_overwrite",
@@ -3050,6 +3077,20 @@ impl CodeAnalyzer {
             aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
         });
 
+        let increment_failure = |canonical: &str| -> bool {
+            let sid_str = sid.clone().unwrap_or_default();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            if counts.len() >= EDIT_FAILURE_MAP_CAP {
+                counts.clear();
+            }
+            let entry = counts.entry((sid_str, canonical.to_owned())).or_insert(0);
+            *entry = entry.saturating_add(1);
+            *entry >= EDIT_STALE_THRESHOLD
+        };
+
         let output = match handle.await {
             Ok(Ok(v)) => v,
             Ok(Err(aptu_coder_core::EditError::NotFound {
@@ -3059,6 +3100,44 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                // Circuit breaker: track consecutive failures per (session_id, canonical_path)
+                let canonical = notfound_path.clone();
+                let tripped = increment_failure(&canonical);
+                if tripped {
+                    self.metrics_tx.send(crate::metrics::MetricEvent {
+                        ts: crate::metrics::unix_ms(),
+                        tool: "edit_replace",
+                        duration_ms: dur,
+                        output_chars: 0,
+                        param_path_depth: crate::metrics::path_component_count(&param_path),
+                        max_depth: None,
+                        result: "error",
+                        error_type: Some("invalid_params".to_string()),
+                        error_subtype: Some("stale_context".to_string()),
+                        session_id: sid.clone(),
+                        seq: Some(seq),
+                        cache_hit: None,
+                        cache_write_failure: None,
+                        cache_tier: None,
+                        exit_code: None,
+                        timed_out: false,
+                        output_truncated: None,
+                        ..Default::default()
+                    });
+                    return Ok(err_to_tool_result(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
+                            EDIT_STALE_THRESHOLD, param_path,
+                        ),
+                        Some(error_meta(
+                            "validation",
+                            false,
+                            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
+                        )),
+                    )));
+                }
+
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
                     tool: "edit_replace",
@@ -3138,6 +3217,44 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                // Circuit breaker: track consecutive failures per (session_id, canonical_path)
+                let canonical = ambiguous_path.clone();
+                let tripped = increment_failure(&canonical);
+                if tripped {
+                    self.metrics_tx.send(crate::metrics::MetricEvent {
+                        ts: crate::metrics::unix_ms(),
+                        tool: "edit_replace",
+                        duration_ms: dur,
+                        output_chars: 0,
+                        param_path_depth: crate::metrics::path_component_count(&param_path),
+                        max_depth: None,
+                        result: "error",
+                        error_type: Some("invalid_params".to_string()),
+                        error_subtype: Some("stale_context".to_string()),
+                        session_id: sid.clone(),
+                        seq: Some(seq),
+                        cache_hit: None,
+                        cache_write_failure: None,
+                        cache_tier: None,
+                        exit_code: None,
+                        timed_out: false,
+                        output_truncated: None,
+                        ..Default::default()
+                    });
+                    return Ok(err_to_tool_result(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
+                            EDIT_STALE_THRESHOLD, param_path,
+                        ),
+                        Some(error_meta(
+                            "validation",
+                            false,
+                            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
+                        )),
+                    )));
+                }
+
                 self.metrics_tx.send(crate::metrics::MetricEvent {
                     ts: crate::metrics::unix_ms(),
                     tool: "edit_replace",
@@ -3158,6 +3275,7 @@ impl CodeAnalyzer {
                     output_truncated: None,
                     ..Default::default()
                 });
+
                 let line_numbers_csv = match_lines
                     .iter()
                     .map(usize::to_string)
@@ -3346,6 +3464,18 @@ impl CodeAnalyzer {
         self.cache
             .invalidate_file(&std::path::PathBuf::from(&param_path));
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+
+        // Reset circuit breaker on successful edit
+        {
+            let sid_str = sid.clone().unwrap_or_default();
+            let canonical = output.path.clone();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            counts.remove(&(sid_str, canonical));
+        }
+
         self.metrics_tx.send(crate::metrics::MetricEvent {
             ts: crate::metrics::unix_ms(),
             tool: "edit_replace",

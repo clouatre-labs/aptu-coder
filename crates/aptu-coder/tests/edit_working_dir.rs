@@ -119,14 +119,19 @@ async fn edit_replace_working_dir_modifies_inside_working_dir() {
     assert_eq!(updated, "new text here");
 }
 
-/// edit_overwrite on a read-only file returns an Io error without leaking path in message.
+/// edit_overwrite on a read-only directory returns an Io error without leaking path in message.
+///
+/// edit_overwrite uses an atomic write (NamedTempFile + rename). rename(2) succeeds on a
+/// read-only *file* as long as the parent directory is writable, so the test locks the
+/// directory (0o555) rather than the file. A non-writable directory blocks both the temp-file
+/// creation and the rename, producing the expected Io error on any privilege level.
 #[cfg(unix)]
 #[tokio::test]
 async fn edit_overwrite_io_error_no_path_leak() {
     use std::fs::Permissions;
     use std::os::unix::fs::PermissionsExt;
 
-    // Arrange: create a temp file inside CWD, then make it read-only
+    // Arrange: create a temp dir inside CWD with a file inside it.
     let cwd = std::env::current_dir().expect("should get cwd");
     let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
     let file_name = "readonly.txt";
@@ -137,13 +142,16 @@ async fn edit_overwrite_io_error_no_path_leak() {
         .to_str()
         .expect("temp dir path is valid UTF-8");
 
-    // chmod 444 (read-only)
-    std::fs::set_permissions(&file_path, Permissions::from_mode(0o444))
-        .expect("should set permissions");
+    // Lock the parent directory (0o555). This blocks NamedTempFile::new_in and rename(2),
+    // which is what edit_overwrite uses internally (atomic write via tempfile + persist).
+    std::fs::set_permissions(temp_dir.path(), Permissions::from_mode(0o555))
+        .expect("should set directory permissions");
 
-    // Root-skip: if we can still write the file, we are root -- skip
-    if std::fs::write(&file_path, "probe").is_ok() {
-        std::fs::set_permissions(&file_path, Permissions::from_mode(0o644)).ok();
+    // Root-skip: root can create files even in a non-writable directory on some kernels.
+    // Probe by attempting to create a new file in the locked directory.
+    let probe_path = temp_dir.path().join("probe");
+    if std::fs::write(&probe_path, "probe").is_ok() {
+        std::fs::set_permissions(temp_dir.path(), Permissions::from_mode(0o755)).ok();
         return;
     }
 
@@ -158,8 +166,8 @@ async fn edit_overwrite_io_error_no_path_leak() {
     )
     .await;
 
-    // Restore before TempDir drops
-    std::fs::set_permissions(&file_path, Permissions::from_mode(0o644)).ok();
+    // Restore directory permissions before TempDir drops (drop needs write access to rmdir).
+    std::fs::set_permissions(temp_dir.path(), Permissions::from_mode(0o755)).ok();
 
     // Assert: error without path in message
     assert!(
