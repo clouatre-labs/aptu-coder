@@ -244,6 +244,10 @@ async fn test_circuit_breaker_trips_at_threshold() {
         fifth_msg.contains("5 consecutive"),
         "call 5 should mention 5 consecutive but got: {fifth_msg}"
     );
+    assert!(
+        !fifth_msg.contains(working_dir),
+        "stale_context message must not contain working_dir: {fifth_msg}"
+    );
 
     let sixth_msg = responses[5]["result"]["content"][0]["text"]
         .as_str()
@@ -251,6 +255,10 @@ async fn test_circuit_breaker_trips_at_threshold() {
     assert!(
         sixth_msg.contains("EDIT_STALE_CONTEXT"),
         "call 6 should still contain stale-context but got: {sixth_msg}"
+    );
+    assert!(
+        !sixth_msg.contains(working_dir),
+        "stale_context message must not contain working_dir: {sixth_msg}"
     );
 }
 
@@ -474,5 +482,139 @@ async fn test_circuit_breaker_path_isolation() {
     assert!(
         sixth_msg.contains("not found"),
         "call 6 on file_b should be normal not_found but got: {sixth_msg}"
+    );
+}
+
+/// 5 consecutive ambiguous failures trigger EDIT_STALE_CONTEXT.
+/// Verifies the stale_context message does not contain the absolute working_dir path.
+#[tokio::test]
+async fn test_circuit_breaker_trips_via_ambiguous() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    // Content where "foo" appears twice -> old_text "foo" matches ambiguously
+    let content = "foo\nbar\nfoo\n";
+    std::fs::write(&file_path, content).expect("should write file");
+
+    let bad_params = serde_json::json!({
+        "path": file_name,
+        "old_text": "foo",
+        "new_text": "baz",
+        "working_dir": working_dir
+    });
+    let calls: Vec<(&str, serde_json::Value)> = vec![("edit_replace", bad_params); 5];
+
+    let responses = call_tool_raw_seq(calls).await;
+
+    for (i, resp) in responses.iter().enumerate().take(4) {
+        assert!(
+            resp["result"]["isError"].as_bool().unwrap_or(false),
+            "call {} expected error: {resp}",
+            i + 1
+        );
+    }
+
+    let fifth_msg = responses[4]["result"]["content"][0]["text"]
+        .as_str()
+        .expect("call 5 should have text");
+    assert!(
+        fifth_msg.contains("EDIT_STALE_CONTEXT"),
+        "call 5 should contain EDIT_STALE_CONTEXT but got: {fifth_msg}"
+    );
+    assert!(
+        fifth_msg.contains("5 consecutive"),
+        "call 5 should mention 5 consecutive but got: {fifth_msg}"
+    );
+    assert!(
+        !fifth_msg.contains(working_dir),
+        "stale_context message must not contain working_dir: {fifth_msg}"
+    );
+}
+
+/// A successful edit_overwrite resets the circuit breaker counter for that path.
+/// After tripping with 5 not_found failures, an edit_overwrite on the same file
+/// should clear the counter so the next edit_replace returns a normal error (not stale_context).
+#[tokio::test]
+async fn test_circuit_breaker_edit_overwrite_resets() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, "hello\n").expect("should write initial file");
+
+    // Build 5 not_found failures to trip the breaker + 1 edit_overwrite + 1 edit_replace
+    let mut calls: Vec<(&str, serde_json::Value)> = Vec::new();
+    for _ in 0..5 {
+        calls.push((
+            "edit_replace",
+            serde_json::json!({
+                "path": file_name,
+                "old_text": "nonexistent",
+                "new_text": "x",
+                "working_dir": working_dir
+            }),
+        ));
+    }
+    calls.push((
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "new content\n",
+            "working_dir": working_dir
+        }),
+    ));
+    calls.push((
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "still nonexistent",
+            "new_text": "x",
+            "working_dir": working_dir
+        }),
+    ));
+
+    let responses = call_tool_raw_seq(calls).await;
+
+    // Calls 1-5 should all be errors
+    for (i, resp) in responses.iter().enumerate().take(5) {
+        assert!(
+            resp["result"]["isError"].as_bool().unwrap_or(false),
+            "call {} expected error: {resp}",
+            i + 1
+        );
+    }
+
+    // Call 6 (edit_overwrite) should be success
+    let sixth_resp = &responses[5];
+    assert!(
+        !sixth_resp["result"]["isError"].as_bool().unwrap_or(true),
+        "call 6 (edit_overwrite) expected success but got error: {sixth_resp}\nworking_dir: {working_dir}",
+    );
+
+    // Call 7 (edit_replace) should be error but NOT stale_context
+    let seventh_resp = &responses[6];
+    assert!(
+        seventh_resp["result"]["isError"].as_bool().unwrap_or(false),
+        "call 7 expected error: {seventh_resp}"
+    );
+    let seventh_msg = seventh_resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("call 7 should have text");
+    assert!(
+        !seventh_msg.contains("EDIT_STALE_CONTEXT"),
+        "call 7 should not contain EDIT_STALE_CONTEXT (counter was reset by edit_overwrite) but got: {seventh_msg}"
+    );
+    assert!(
+        !seventh_msg.contains(working_dir),
+        "error message must not contain working_dir: {seventh_msg}"
     );
 }

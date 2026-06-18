@@ -84,6 +84,7 @@ pub(crate) fn validate_path(
         }
 
         // Reassemble suffix in the original (forward) order without trailing separator.
+        let suffix_empty = suffix_components.is_empty();
         let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
 
         let canonical_base = std::fs::canonicalize(&ancestor).unwrap_or_else(|e| {
@@ -94,7 +95,11 @@ pub(crate) fn validate_path(
             );
             allowed_root.clone()
         });
-        canonical_base.join(&suffix)
+        if suffix_empty {
+            canonical_base
+        } else {
+            canonical_base.join(&suffix)
+        }
     };
 
     if !canonical_path.starts_with(&allowed_root) {
@@ -218,12 +223,17 @@ pub(crate) fn validate_path_in_dir(
         }
 
         // Reassemble suffix in the original (forward) order without trailing separator.
+        let suffix_empty = suffix_components.is_empty();
         let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
 
         let canonical_base = canonical_working_dir.join(&ancestor);
         let canonical_base =
             std::fs::canonicalize(&canonical_base).unwrap_or(canonical_working_dir.clone());
-        canonical_base.join(&suffix)
+        if suffix_empty {
+            canonical_base
+        } else {
+            canonical_base.join(&suffix)
+        }
     };
 
     // Verify the resolved path is within working_dir.

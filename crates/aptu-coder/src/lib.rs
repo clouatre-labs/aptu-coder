@@ -3086,27 +3086,6 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    error_subtype: Some("not_found".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
-
                 // Circuit breaker: track consecutive failures per (session_id, canonical_path)
                 let canonical = notfound_path.clone();
                 let sid_str = sid.clone().unwrap_or_default();
@@ -3147,7 +3126,7 @@ impl CodeAnalyzer {
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         format!(
                             "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
-                            EDIT_STALE_THRESHOLD, canonical,
+                            EDIT_STALE_THRESHOLD, param_path,
                         ),
                         Some(error_meta(
                             "validation",
@@ -3156,6 +3135,27 @@ impl CodeAnalyzer {
                         )),
                     )));
                 }
+
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "edit_replace",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("invalid_params".to_string()),
+                    error_subtype: Some("not_found".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    ..Default::default()
+                });
 
                 let message = if first_20_lines.is_empty() {
                     "old_text not found (0 matches). Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
@@ -3215,27 +3215,6 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    error_subtype: Some("ambiguous".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
-
                 // Circuit breaker: track consecutive failures per (session_id, canonical_path)
                 let canonical = ambiguous_path.clone();
                 let sid_str = sid.clone().unwrap_or_default();
@@ -3276,7 +3255,7 @@ impl CodeAnalyzer {
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         format!(
                             "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
-                            EDIT_STALE_THRESHOLD, canonical,
+                            EDIT_STALE_THRESHOLD, param_path,
                         ),
                         Some(error_meta(
                             "validation",
@@ -3285,6 +3264,27 @@ impl CodeAnalyzer {
                         )),
                     )));
                 }
+
+                self.metrics_tx.send(crate::metrics::MetricEvent {
+                    ts: crate::metrics::unix_ms(),
+                    tool: "edit_replace",
+                    duration_ms: dur,
+                    output_chars: 0,
+                    param_path_depth: crate::metrics::path_component_count(&param_path),
+                    max_depth: None,
+                    result: "error",
+                    error_type: Some("invalid_params".to_string()),
+                    error_subtype: Some("ambiguous".to_string()),
+                    session_id: sid.clone(),
+                    seq: Some(seq),
+                    cache_hit: None,
+                    cache_write_failure: None,
+                    cache_tier: None,
+                    exit_code: None,
+                    timed_out: false,
+                    output_truncated: None,
+                    ..Default::default()
+                });
 
                 let line_numbers_csv = match_lines
                     .iter()
