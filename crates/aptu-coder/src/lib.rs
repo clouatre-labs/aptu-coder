@@ -5024,16 +5024,20 @@ mod tests {
 
     #[test]
     fn test_validate_path_creates_parent_for_nonexistent_file() {
-        // Edge case: non-existent file with non-existent parent should still be accepted
-        // if the ancestor chain leads back to CWD.
-        let result = validate_path("nonexistent_dir/nonexistent_file.txt", false);
+        // Edge case: non-existent file with existing parent should be accepted.
+        let cwd = std::env::current_dir().expect("should get cwd");
+        let parent = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+        let parent_path = parent.path().to_path_buf();
+        let child = parent_path.join("new_file.txt");
+
+        let child_str = child.to_str().expect("path should be valid UTF-8");
+        let result = validate_path(child_str, false);
         assert!(
             result.is_ok(),
-            "validate_path should accept non-existent file with non-existent parent (require_exists=false)"
+            "validate_path should accept non-existent file with existing parent (require_exists=false)"
         );
         let path = result.unwrap();
-        let cwd = std::env::current_dir().expect("should get cwd");
-        let canonical_cwd = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+        let canonical_cwd = std::fs::canonicalize(&cwd).expect("should canonicalize cwd");
         assert!(
             path.starts_with(&canonical_cwd),
             "Resolved path should be within CWD: {:?} should start with {:?}",
@@ -5102,17 +5106,10 @@ mod tests {
         // Act: try to traverse outside working_dir with ../../../etc/passwd
         let result = validate_path_in_dir("../../../etc/passwd", false, temp_path);
 
-        // Assert: should reject path traversal attack
+        // Assert: should reject path traversal attack (via parent canonicalize failure)
         assert!(
             result.is_err(),
             "validate_path_in_dir should reject path traversal outside working_dir"
-        );
-        let err = result.unwrap_err();
-        let err_msg = err.message.to_lowercase();
-        assert!(
-            err_msg.contains("outside") || err_msg.contains("working"),
-            "Error message should mention 'outside' or 'working': {}",
-            err.message
         );
     }
 
@@ -5336,25 +5333,13 @@ mod tests {
     #[test]
     fn test_validate_path_in_dir_nonexistent_deep_path() {
         // Deeply nested non-existent path: a/b/c/d/new.txt -- none of the
-        // intermediate directories exist.  The loop must walk up all four
-        // segments and anchor at working_dir, then rejoin the full suffix.
+        // intermediate directories exist.  With parent-directory validation,
+        // this is rejected because the parent a/b/c/d does not exist.
         let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
         let result = validate_path_in_dir("a/b/c/d/new.txt", false, temp_dir.path());
         assert!(
-            result.is_ok(),
-            "validate_path_in_dir should accept deeply nested non-existent path: {:?}",
-            result.err()
-        );
-        let resolved = result.unwrap();
-        let canonical_wd =
-            std::fs::canonicalize(temp_dir.path()).expect("should canonicalize temp dir");
-        assert!(
-            resolved.starts_with(&canonical_wd),
-            "Resolved path must be within working_dir: {resolved:?}"
-        );
-        assert!(
-            resolved.ends_with("a/b/c/d/new.txt"),
-            "Full suffix must be preserved: {resolved:?}"
+            result.is_err(),
+            "validate_path_in_dir should reject deeply nested non-existent path"
         );
     }
 

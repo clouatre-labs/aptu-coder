@@ -310,3 +310,176 @@ async fn test_edit_replace_empty_new_text_entire_file() {
         "file should be empty after full-content deletion"
     );
 }
+
+/// edit_overwrite with a path whose parent directory does not exist returns INVALID_PARAMS.
+#[tokio::test]
+async fn test_edit_overwrite_new_file_missing_parent_dir() {
+    // Arrange: create temp working_dir and try to write into a non-existent subdirectory
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    // The parent "nonexistent" does not exist inside working_dir
+    let file_name = "nonexistent/new_file.txt";
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "should not be written",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    // Assert
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+}
+
+/// edit_overwrite with a ../ traversal path that escapes working_dir returns INVALID_PARAMS.
+#[tokio::test]
+async fn test_edit_overwrite_new_file_traversal_path() {
+    // Arrange: create temp working_dir, try to escape it with ..
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    // ../foo.txt should escape working_dir
+    let file_name = "../escaped_file.txt";
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "should not be written",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    // Assert
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+}
+
+/// edit_overwrite with a deeply nested path where only the top-level parent exists returns INVALID_PARAMS.
+#[tokio::test]
+async fn test_edit_overwrite_new_file_deeply_nested() {
+    // Arrange: create temp working_dir with only a/ directory
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    // Create only the top-level a/ directory
+    std::fs::create_dir(temp_dir.path().join("a")).expect("should create dir a");
+    // a/b/c/new.txt -- b/c does not exist
+    let file_name = "a/b/c/new.txt";
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "should not be written",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    // Assert
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+}
+
+/// edit_overwrite where the parent is a symlink to a valid directory succeeds.
+#[tokio::test]
+async fn test_edit_overwrite_new_file_symlink_parent() {
+    // Arrange: create a temp working_dir, a subdirectory, and a symlink pointing to it
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir.path();
+    // Create a real subdirectory
+    let real_sub = working_dir.join("real_dir");
+    std::fs::create_dir(&real_sub).expect("should create real_dir");
+    // Create a symlink pointing to the real subdirectory
+    let symlink_path = working_dir.join("link_to_real");
+    std::os::unix::fs::symlink(&real_sub, &symlink_path)
+        .expect("should create symlink to real_dir");
+    let working_dir_str = working_dir.to_str().expect("temp dir path is valid UTF-8");
+    let file_name = "link_to_real/through_symlink.txt";
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "written via symlink parent",
+            "working_dir": working_dir_str
+        }),
+    )
+    .await;
+
+    // Assert: success, file exists in the canonical real_dir
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    let expected_path = real_sub.join("through_symlink.txt");
+    assert!(
+        expected_path.exists(),
+        "file should exist inside real_dir at {:?}",
+        expected_path
+    );
+    let written =
+        std::fs::read_to_string(&expected_path).expect("should read written file via symlink");
+    assert_eq!(written, "written via symlink parent");
+}
+
+/// edit_overwrite where the parent component is a regular file returns INVALID_PARAMS.
+#[tokio::test]
+async fn test_edit_overwrite_parent_is_file() {
+    // Arrange: create temp working_dir with a file that will be used as a "parent"
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    // Create a regular file
+    let file_path = temp_dir.path().join("not_a_dir.txt");
+    std::fs::write(&file_path, "i am a file, not a directory").expect("should write test file");
+    // Try to write "inside" that file as if it were a directory
+    let file_name = "not_a_dir.txt/child.txt";
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": file_name,
+            "content": "should not be written",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    // Assert
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+}
