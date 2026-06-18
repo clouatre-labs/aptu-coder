@@ -3086,9 +3086,7 @@ impl CodeAnalyzer {
             if counts.len() >= EDIT_FAILURE_MAP_CAP {
                 counts.clear();
             }
-            let entry = counts
-                .entry((sid_str, canonical.to_owned()))
-                .or_insert(0);
+            let entry = counts.entry((sid_str, canonical.to_owned())).or_insert(0);
             *entry = entry.saturating_add(1);
             *entry >= EDIT_STALE_THRESHOLD
         };
