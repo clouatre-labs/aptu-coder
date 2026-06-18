@@ -3,9 +3,98 @@
 //! Path validation helpers used by the edit_overwrite and edit_replace tool handlers.
 
 use rmcp::model::ErrorData;
-use tracing::warn;
 
 use crate::error_meta;
+
+/// Validates that the parent directory of `path` exists, is a directory,
+/// and is within `root`.  Returns the resolved path (canonical_parent.join(file_name)).
+fn validate_parent_in_root(
+    path: &str,
+    root: &std::path::Path,
+) -> Result<std::path::PathBuf, ErrorData> {
+    let p = std::path::Path::new(path);
+
+    // Reject paths where file_name is None (bare '..', '.', or trailing slash).
+    let file_name = p.file_name().ok_or_else(|| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path must include a filename component".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a path with a filename, not ending in '..' or '/'",
+            )),
+        )
+    })?;
+
+    // Extract parent; empty or '.' maps to root directly.
+    // Note: if `path` is absolute, `root.join(parent)` discards `root` and returns
+    // the absolute path as-is (standard Rust Path::join behaviour).  The
+    // `starts_with(root)` check below then rejects it, so absolute paths that
+    // escape root are handled correctly without a separate is_absolute() guard.
+    let parent = p.parent().unwrap_or(std::path::Path::new(""));
+    let parent_path = if parent.as_os_str().is_empty() || parent == std::path::Path::new(".") {
+        root.to_path_buf()
+    } else {
+        root.join(parent)
+    };
+
+    // Canonicalize parent.
+    let canonical_parent = std::fs::canonicalize(&parent_path).map_err(|e| {
+        io_error_to_path_error(
+            &e,
+            parent.to_str().unwrap_or("(invalid utf-8)"),
+            "provide a valid parent directory within the working directory",
+        )
+    })?;
+
+    // Verify canonicalized parent is within root.
+    if !canonical_parent.starts_with(root) {
+        return Err(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path is outside the working directory".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a path within the working directory",
+            )),
+        ));
+    }
+
+    // Verify canonicalized parent is a directory, not a file.
+    if !std::fs::metadata(&canonical_parent)
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+    {
+        return Err(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "parent path is not a directory".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a path whose parent is a directory",
+            )),
+        ));
+    }
+
+    // Join parent with file_name to form the resolved path.
+    let resolved_path = canonical_parent.join(file_name);
+
+    // Final security check: resolved path must be within root.
+    if !resolved_path.starts_with(root) {
+        return Err(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "path is outside the working directory".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "provide a path within the working directory",
+            )),
+        ));
+    }
+
+    Ok(resolved_path)
+}
 
 /// Validates that a path is within the current working directory.
 /// For `require_exists=true`, the path must exist and be canonicalizable.
@@ -18,7 +107,7 @@ pub(crate) fn validate_path(
     let cwd = std::env::current_dir().map_err(|_| {
         ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the allowed root".to_string(),
+            "path is outside the working directory".to_string(),
             Some(error_meta(
                 "validation",
                 false,
@@ -29,7 +118,7 @@ pub(crate) fn validate_path(
     let allowed_root = std::fs::canonicalize(&cwd).map_err(|_| {
         ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the allowed root".to_string(),
+            "path is outside the working directory".to_string(),
             Some(error_meta(
                 "validation",
                 false,
@@ -43,7 +132,7 @@ pub(crate) fn validate_path(
             let msg = match e.kind() {
                 std::io::ErrorKind::NotFound => "path not found".to_string(),
                 std::io::ErrorKind::PermissionDenied => "permission denied".to_string(),
-                _ => "path is outside the allowed root".to_string(),
+                _ => "path is outside the working directory".to_string(),
             };
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -56,56 +145,13 @@ pub(crate) fn validate_path(
             )
         })?
     } else {
-        // For non-existent files (edit_overwrite), walk up the path until we find an existing ancestor.
-        // `..` components are safe here: file_name() returns None for `..`, so the
-        // loop hits the else branch and resets ancestor to allowed_root, anchoring
-        // the resolved path inside allowed_root.  The starts_with check below catches
-        // any residual traversal regardless.
-        let p = std::path::Path::new(path);
-        let mut ancestor = p.to_path_buf();
-        // Collect suffix components in reverse order, then reassemble without
-        // join(PathBuf::new()) to avoid a trailing separator on the first push.
-        let mut suffix_components: Vec<std::ffi::OsString> = Vec::new();
-
-        loop {
-            if ancestor.exists() {
-                break;
-            }
-            if let Some(parent) = ancestor.parent()
-                && let Some(file_name) = ancestor.file_name()
-            {
-                suffix_components.push(file_name.to_owned());
-                ancestor = parent.to_path_buf();
-            } else {
-                // No existing ancestor found — use allowed_root as anchor
-                ancestor = allowed_root.clone();
-                break;
-            }
-        }
-
-        // Reassemble suffix in the original (forward) order without trailing separator.
-        let suffix_empty = suffix_components.is_empty();
-        let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
-
-        let canonical_base = std::fs::canonicalize(&ancestor).unwrap_or_else(|e| {
-            warn!(
-                path = %ancestor.display(),
-                error = %e,
-                "canonicalize of existing ancestor failed (race condition); falling back to allowed_root"
-            );
-            allowed_root.clone()
-        });
-        if suffix_empty {
-            canonical_base
-        } else {
-            canonical_base.join(&suffix)
-        }
+        validate_parent_in_root(path, &allowed_root)?
     };
 
     if !canonical_path.starts_with(&allowed_root) {
         return Err(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the allowed root".to_string(),
+            "path is outside the working directory".to_string(),
             Some(error_meta(
                 "validation",
                 false,
@@ -145,6 +191,9 @@ pub(crate) fn io_error_to_path_error(
 
 /// Validates a path relative to a working directory.
 /// The working_dir may be anywhere on disk; it is not restricted to the server CWD.
+/// For `require_exists=true`, the path must exist and be canonicalizable within working_dir.
+/// For `require_exists=false`, the parent directory must exist, be a directory, and be
+/// within working_dir.  The filename is then appended without canonicalization.
 /// The resolved path must be within the working_dir.
 pub(crate) fn validate_path_in_dir(
     path: &str,
@@ -193,47 +242,7 @@ pub(crate) fn validate_path_in_dir(
             )
         })?
     } else {
-        // For non-existent files, walk up the path until we find an existing ancestor.
-        // `..` components are safe here: file_name() returns None for `..`, so the
-        // loop hits the else branch and resets ancestor to PathBuf::new(), anchoring
-        // the resolved path inside canonical_working_dir.  The starts_with check
-        // below catches any residual traversal regardless.
-        let p = std::path::Path::new(path);
-        let mut ancestor = p.to_path_buf();
-        // Collect suffix components in reverse order, then reassemble without
-        // join(PathBuf::new()) to avoid a trailing separator on the first push.
-        let mut suffix_components: Vec<std::ffi::OsString> = Vec::new();
-
-        loop {
-            let full_path = canonical_working_dir.join(&ancestor);
-            if full_path.exists() {
-                break;
-            }
-            if let Some(parent) = ancestor.parent()
-                && let Some(file_name) = ancestor.file_name()
-            {
-                suffix_components.push(file_name.to_owned());
-                ancestor = parent.to_path_buf();
-            } else {
-                // No existing ancestor found (or path contains `..`) --
-                // use working_dir as anchor; starts_with below enforces the boundary.
-                ancestor = std::path::PathBuf::new();
-                break;
-            }
-        }
-
-        // Reassemble suffix in the original (forward) order without trailing separator.
-        let suffix_empty = suffix_components.is_empty();
-        let suffix: std::path::PathBuf = suffix_components.into_iter().rev().collect();
-
-        let canonical_base = canonical_working_dir.join(&ancestor);
-        let canonical_base =
-            std::fs::canonicalize(&canonical_base).unwrap_or(canonical_working_dir.clone());
-        if suffix_empty {
-            canonical_base
-        } else {
-            canonical_base.join(&suffix)
-        }
+        validate_parent_in_root(path, &canonical_working_dir)?
     };
 
     // Verify the resolved path is within working_dir.
