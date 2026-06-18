@@ -145,7 +145,9 @@ pub fn edit_replace_block(
     }
     let bytes_before = content.len();
     // Find match offset in normalized space, then map back to original byte range
-    let norm_match_offset = norm_content.find(&norm_old).unwrap();
+    let norm_match_offset = norm_content
+        .find(&norm_old)
+        .expect("match was verified above via count check; find must succeed");
     let original_start = norm_offset_to_original(&content, norm_match_offset);
     let original_end = norm_offset_to_original_from(&content, norm_old.len(), original_start);
     let updated = [
