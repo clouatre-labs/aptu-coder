@@ -51,6 +51,43 @@ fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
     Ok(())
 }
 
+/// Normalize content for matching: replace `\r\n` with `\n`.
+/// Single `\r` bytes are left unchanged.
+fn normalize_for_match(s: &str) -> String {
+    s.replace("\r\n", "\n")
+}
+
+/// Map a byte offset in normalized content (CRLF -> LF) back to the corresponding
+/// byte offset in the original content, starting from `original_start`.
+fn norm_offset_to_original_from(
+    original: &str,
+    norm_offset: usize,
+    original_start: usize,
+) -> usize {
+    // Performance: O(n) byte walk is acceptable for the file sizes MCP tools operate on
+    // (source files, typically <1 MB). If very large file support becomes a requirement,
+    // a pre-built CRLF offset index could reduce this to O(log n) per lookup.
+    let bytes = original.as_bytes();
+    let mut norm_pos = 0usize;
+    let mut i = original_start;
+    while i < bytes.len() && norm_pos < norm_offset {
+        if bytes[i] == b'\r' && i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+            norm_pos += 1;
+            i += 2;
+        } else {
+            norm_pos += 1;
+            i += 1;
+        }
+    }
+    i
+}
+
+/// Map a byte offset in normalized content back to the corresponding byte offset
+/// in the original content.
+fn norm_offset_to_original(original: &str, norm_offset: usize) -> usize {
+    norm_offset_to_original_from(original, norm_offset, 0)
+}
+
 pub fn edit_overwrite_content(
     path: &Path,
     content: &str,
@@ -79,7 +116,9 @@ pub fn edit_replace_block(
         return Err(EditError::NotAFile(path.to_path_buf()));
     }
     let content = std::fs::read_to_string(path)?;
-    let count = content.matches(old_text).count();
+    let norm_content = normalize_for_match(&content);
+    let norm_old = normalize_for_match(old_text);
+    let count = norm_content.matches(&norm_old).count();
     match count {
         0 => {
             let first_20_lines = content.lines().take(20).collect::<Vec<_>>().join("\n");
@@ -90,9 +129,15 @@ pub fn edit_replace_block(
         }
         1 => {}
         n => {
-            let match_lines: Vec<usize> = content
-                .match_indices(old_text)
-                .map(|(offset, _)| content[..offset].bytes().filter(|&b| b == b'\n').count() + 1)
+            let match_lines: Vec<usize> = norm_content
+                .match_indices(&norm_old)
+                .map(|(offset, _)| {
+                    norm_content[..offset]
+                        .bytes()
+                        .filter(|&b| b == b'\n')
+                        .count()
+                        + 1
+                })
                 .collect();
             return Err(EditError::Ambiguous {
                 count: n,
@@ -102,7 +147,18 @@ pub fn edit_replace_block(
         }
     }
     let bytes_before = content.len();
-    let updated = content.replacen(old_text, new_text, 1);
+    // Find match offset in normalized space, then map back to original byte range
+    let norm_match_offset = norm_content
+        .find(&norm_old)
+        .expect("match was verified above via count check; find must succeed");
+    let original_start = norm_offset_to_original(&content, norm_match_offset);
+    let original_end = norm_offset_to_original_from(&content, norm_old.len(), original_start);
+    let updated = [
+        &content[..original_start],
+        new_text,
+        &content[original_end..],
+    ]
+    .concat();
     let bytes_after = updated.len();
     write_file_atomic(path, &updated)?;
     Ok(EditReplaceOutput {
@@ -185,5 +241,61 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = edit_replace_block(dir.path(), "old", "new").unwrap_err();
         std::assert_matches!(err, EditError::NotAFile(_));
+    }
+
+    #[test]
+    fn edit_replace_block_crlf_file_lf_oldtext() {
+        // CRLF file + LF old_text => match succeeds and non-replaced lines retain CRLF bytes
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crlf.txt");
+        // Write raw CRLF bytes: "foo\r\nbar\r\nbaz"
+        std::fs::write(&path, b"foo\r\nbar\r\nbaz").unwrap();
+        let result = edit_replace_block(&path, "bar", "qux").unwrap();
+        // The result should contain "foo\r\nqux\r\nbaz" (non-replaced lines retain CRLF)
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(output, "foo\r\nqux\r\nbaz");
+        assert_eq!(result.bytes_before, 13); // "foo\r\nbar\r\nbaz" = 13 bytes
+        assert_eq!(result.bytes_after, 13); // "foo\r\nqux\r\nbaz" = 13 bytes
+    }
+
+    #[test]
+    fn edit_replace_block_lf_file_crlf_oldtext() {
+        // LF file + CRLF old_text => match succeeds
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lf.txt");
+        std::fs::write(&path, b"foo\nbar\nbaz").unwrap();
+        let result = edit_replace_block(&path, "bar\r\n", "qux\n").unwrap();
+        // old_text "bar\r\n" is normalized to "bar\n", matches "bar\n" in file
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(output, "foo\nqux\nbaz");
+        assert_eq!(result.bytes_before, 11); // "foo\nbar\nbaz" = 11 bytes
+        assert_eq!(result.bytes_after, 11); // "foo\nqux\nbaz" = 11 bytes
+    }
+
+    #[test]
+    fn edit_replace_block_crlf_file_crlf_oldtext() {
+        // CRLF file + CRLF old_text => both normalized, match succeeds
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bothcrlf.txt");
+        std::fs::write(&path, b"line1\r\nline2\r\nline3").unwrap();
+        let result = edit_replace_block(&path, "line2\r\n", "replaced\n").unwrap();
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(output, "line1\r\nreplaced\nline3");
+        assert_eq!(result.bytes_before, 19); // "line1\r\nline2\r\nline3" = 19 bytes
+    }
+
+    #[test]
+    fn edit_replace_block_trailing_spaces_distinct() {
+        // Two blocks differing only by trailing spaces remain distinct after normalization
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spaces.txt");
+        std::fs::write(&path, "foo  \nbar\nfoo\nbar").unwrap();
+        // old_text "foo\nbar" should match the SECOND occurrence ("foo\nbar"),
+        // not the first ("foo  \nbar"), because trailing spaces are not stripped
+        let result = edit_replace_block(&path, "foo\nbar", "replaced").unwrap();
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(output, "foo  \nbar\nreplaced");
+        assert_eq!(result.bytes_before, 17); // "foo  \nbar\nfoo\nbar" = 17 bytes
+        assert_eq!(result.bytes_after, 18); // "foo  \nbar\nreplaced" = 18 bytes
     }
 }
