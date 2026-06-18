@@ -64,6 +64,9 @@ fn norm_offset_to_original_from(
     norm_offset: usize,
     original_start: usize,
 ) -> usize {
+    // Performance: O(n) byte walk is acceptable for the file sizes MCP tools operate on
+    // (source files, typically <1 MB). If very large file support becomes a requirement,
+    // a pre-built CRLF offset index could reduce this to O(log n) per lookup.
     let bytes = original.as_bytes();
     let mut norm_pos = 0usize;
     let mut i = original_start;
