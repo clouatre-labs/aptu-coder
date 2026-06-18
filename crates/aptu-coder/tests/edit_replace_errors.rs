@@ -503,3 +503,100 @@ async fn test_circuit_breaker_edit_overwrite_resets() {
         "error message must not contain working_dir: {seventh_msg}"
     );
 }
+
+/// CRLF file + LF old_text => match succeeds, non-replaced lines retain CRLF bytes.
+#[tokio::test]
+async fn test_edit_replace_crlf_file_lf_oldtext() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "crlf.txt";
+    let file_path = temp_dir.path().join(file_name);
+    // Write raw CRLF bytes
+    std::fs::write(&file_path, b"foo\r\nbar\r\nbaz").expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "bar",
+            "new_text": "qux",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success but got error: {resp}"
+    );
+    let output = std::fs::read_to_string(&file_path).expect("should read file");
+    assert_eq!(output, "foo\r\nqux\r\nbaz");
+}
+
+/// LF file + CRLF old_text => match succeeds (old_text normalized to LF).
+#[tokio::test]
+async fn test_edit_replace_lf_file_crlf_oldtext() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "lf.txt";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, b"foo\nbar\nbaz").expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "bar\r\n",
+            "new_text": "qux\n",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success but got error: {resp}"
+    );
+    let output = std::fs::read_to_string(&file_path).expect("should read file");
+    assert_eq!(output, "foo\nqux\nbaz");
+}
+
+/// CRLF file + CRLF old_text (both normalized) => match succeeds.
+#[tokio::test]
+async fn test_edit_replace_crlf_file_crlf_oldtext() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "bothcrlf.txt";
+    let file_path = temp_dir.path().join(file_name);
+    std::fs::write(&file_path, b"line1\r\nline2\r\nline3").expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "line2\r\n",
+            "new_text": "replaced\n",
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success but got error: {resp}"
+    );
+    let output = std::fs::read_to_string(&file_path).expect("should read file");
+    assert_eq!(output, "line1\r\nreplaced\nline3");
+}
