@@ -252,7 +252,7 @@ The following anti-patterns were identified across benchmark waves and wave post
 | Synchronous metrics/logging on the hot path | Observability adds latency to every tool call | Channel pattern: fire-and-forget into unbounded channel; writer task runs independently |
 | Optimizing only for large models | Small-model users experience regressions | Small-model-first constraint: validate against Haiku before Sonnet |
 | Missing `///` doc comments on parameter fields | Parameter appears in `inputSchema.properties` with an empty `description`; model must infer meaning from name alone | Add `///` doc comment to every parameter field; enforced by `test_all_tool_parameters_have_descriptions` in `annotations.rs` |
-| Model prepends `cd /path &&` to `exec_command` command alongside `working_dir` | Server strips the redundant prefix before execution (correct result), but the MCP client trace displays the raw submitted parameters -- the `cd` appears in the UI even though it never runs. This is a persistent model habit that tool description changes cannot fully suppress; it is cosmetic only and does not affect correctness. | No server-side fix available. The MCP client displays submitted parameters, not the sanitized command. Document as known behavior rather than filing as a bug. |
+| Model prepends `cd /path &&` to `exec_command` alongside `working_dir` | Server strips the redundant prefix before execution, but the MCP client trace displays the raw submitted command. Cosmetic only; correctness is unaffected. | No server-side fix available; the client displays submitted parameters, not the sanitized command. Treat as known model habit, not a bug. |
 
 *Table 5: Anti-patterns, consequences, and corrective patterns.*
 
