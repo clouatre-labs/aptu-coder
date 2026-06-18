@@ -42,6 +42,12 @@ pub const STDIN_MAX_BYTES: usize = 1_048_576;
 /// Number of consecutive not_found or ambiguous edit_replace failures on the same
 /// (session_id, canonical_path) pair before returning a stale-context directive error.
 pub(crate) const EDIT_STALE_THRESHOLD: u8 = 5;
+/// Maximum number of (session_id, canonical_path) entries in the failure counter map.
+/// When the map reaches this size, it is cleared entirely to prevent unbounded growth.
+/// The circuit breaker is advisory, so a full clear is safe: the worst case is one
+/// missed trip per session per path after an eviction cycle.
+pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecCommandParams {
@@ -3109,6 +3115,8 @@ impl CodeAnalyzer {
                         .edit_failure_counts
                         .lock()
                         .expect("edit_failure_counts poisoned");
+                    if counts.len() >= EDIT_FAILURE_MAP_CAP {
+                        counts.clear();
                     }
                     let entry = counts.entry((sid_str, canonical.clone())).or_insert(0);
                     *entry = entry.saturating_add(1);
@@ -3236,6 +3244,8 @@ impl CodeAnalyzer {
                         .edit_failure_counts
                         .lock()
                         .expect("edit_failure_counts poisoned");
+                    if counts.len() >= EDIT_FAILURE_MAP_CAP {
+                        counts.clear();
                     }
                     let entry = counts.entry((sid_str, canonical.clone())).or_insert(0);
                     *entry = entry.saturating_add(1);
