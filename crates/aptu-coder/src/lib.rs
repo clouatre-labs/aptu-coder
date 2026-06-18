@@ -3077,6 +3077,22 @@ impl CodeAnalyzer {
             aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
         });
 
+        let increment_failure = |canonical: &str| -> bool {
+            let sid_str = sid.clone().unwrap_or_default();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            if counts.len() >= EDIT_FAILURE_MAP_CAP {
+                counts.clear();
+            }
+            let entry = counts
+                .entry((sid_str, canonical.to_owned()))
+                .or_insert(0);
+            *entry = entry.saturating_add(1);
+            *entry >= EDIT_STALE_THRESHOLD
+        };
+
         let output = match handle.await {
             Ok(Ok(v)) => v,
             Ok(Err(aptu_coder_core::EditError::NotFound {
@@ -3088,19 +3104,7 @@ impl CodeAnalyzer {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 // Circuit breaker: track consecutive failures per (session_id, canonical_path)
                 let canonical = notfound_path.clone();
-                let sid_str = sid.clone().unwrap_or_default();
-                let tripped = {
-                    let mut counts = self
-                        .edit_failure_counts
-                        .lock()
-                        .expect("edit_failure_counts poisoned");
-                    if counts.len() >= EDIT_FAILURE_MAP_CAP {
-                        counts.clear();
-                    }
-                    let entry = counts.entry((sid_str, canonical.clone())).or_insert(0);
-                    *entry = entry.saturating_add(1);
-                    *entry >= EDIT_STALE_THRESHOLD
-                };
+                let tripped = increment_failure(&canonical);
                 if tripped {
                     self.metrics_tx.send(crate::metrics::MetricEvent {
                         ts: crate::metrics::unix_ms(),
@@ -3217,19 +3221,7 @@ impl CodeAnalyzer {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 // Circuit breaker: track consecutive failures per (session_id, canonical_path)
                 let canonical = ambiguous_path.clone();
-                let sid_str = sid.clone().unwrap_or_default();
-                let tripped = {
-                    let mut counts = self
-                        .edit_failure_counts
-                        .lock()
-                        .expect("edit_failure_counts poisoned");
-                    if counts.len() >= EDIT_FAILURE_MAP_CAP {
-                        counts.clear();
-                    }
-                    let entry = counts.entry((sid_str, canonical.clone())).or_insert(0);
-                    *entry = entry.saturating_add(1);
-                    *entry >= EDIT_STALE_THRESHOLD
-                };
+                let tripped = increment_failure(&canonical);
                 if tripped {
                     self.metrics_tx.send(crate::metrics::MetricEvent {
                         ts: crate::metrics::unix_ms(),
