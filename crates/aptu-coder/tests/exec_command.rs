@@ -874,3 +874,137 @@ async fn test_handler_heredoc_leading_space_on_non_dash_delimiter_not_accepted()
         "error message should mention heredoc: {msg}"
     );
 }
+
+#[tokio::test]
+async fn test_timeout_fires_on_slow_command() {
+    // Arrange: a command that sleeps longer than the timeout
+    // Act: wrap in harness-level timeout to guard against regression
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "sleep 60",
+            "timeout_secs": 1
+        }))
+        .await;
+
+        // Assert: error with isError=true, timed_out=true in structured content
+        assert!(
+            resp["result"]["isError"].as_bool().unwrap_or(false),
+            "expected isError=true for timed-out command: {resp}"
+        );
+        let sc = &resp["result"]["structuredContent"];
+        assert_eq!(
+            sc["timed_out"].as_bool(),
+            Some(true),
+            "expected structuredContent.timed_out=true: {resp}"
+        );
+        assert_eq!(
+            sc["timeout_secs"], 1,
+            "expected structuredContent.timeout_secs=1: {resp}"
+        );
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out (harness guard)");
+}
+
+#[tokio::test]
+async fn test_fast_command_completes_with_timed_out_false() {
+    // Arrange: a fast command with generous timeout
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo ok",
+            "timeout_secs": 10
+        }))
+        .await;
+
+        // Assert: success with timed_out=false
+        assert!(
+            !resp["result"]["isError"].as_bool().unwrap_or(false),
+            "expected isError=false for fast command: {resp}"
+        );
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("Exit code: 0"),
+            "expected exit code 0: {resp}"
+        );
+        let sc = &resp["result"]["structuredContent"];
+        // timed_out is skip_serialized when false; if present, it must be false
+        if let Some(val) = sc.as_object().and_then(|o| o.get("timed_out")) {
+            assert_eq!(
+                val.as_bool(),
+                Some(false),
+                "expected timed_out=false: {resp}"
+            );
+        }
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out (harness guard)");
+}
+
+#[tokio::test]
+async fn test_timeout_secs_zero_is_treated_as_none() {
+    // Arrange: timeout_secs=0 should be treated as no timeout (unlimited)
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo ok",
+            "timeout_secs": 0
+        }))
+        .await;
+
+        // Assert: command completes normally
+        assert!(
+            !resp["result"]["isError"].as_bool().unwrap_or(false),
+            "expected isError=false for timeout_secs=0: {resp}"
+        );
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("Exit code: 0"),
+            "expected exit code 0: {resp}"
+        );
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out (harness guard)");
+}
+
+#[tokio::test]
+async fn test_timeout_not_fires_for_immediate_command_without_timeout_secs() {
+    // Arrange: no timeout_secs (None) should not produce a timeout
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo hello"
+        }))
+        .await;
+
+        // Assert: command completes normally
+        assert!(
+            !resp["result"]["isError"].as_bool().unwrap_or(false),
+            "expected isError=false when timeout is None: {resp}"
+        );
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("Exit code: 0"),
+            "expected exit code 0: {resp}"
+        );
+        // timed_out should not be present (no timeout_secs provided)
+        let sc = resp.get("result").and_then(|r| r.get("structuredContent"));
+        if let Some(sc) = sc {
+            // If present, must be false
+            if let Some(val) = sc.as_object().and_then(|o| o.get("timed_out")) {
+                assert_eq!(
+                    val.as_bool(),
+                    Some(false),
+                    "timed_out should be false when absent: {resp}"
+                );
+            }
+        }
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out (harness guard)");
+}
