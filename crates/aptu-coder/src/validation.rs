@@ -120,24 +120,20 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
             }
 
             // Search the remainder of the command string for a line matching the
-            // closing delimiter.
-            // Walk line-by-line from after the `<<` token, looking for a line
-            // (with leading tabs stripped for <<-) that consists of just the
-            // delimiter word (trimmed).
+            // closing delimiter.  Walk line-by-line from after the `<<` token,
+            // looking for a line (with leading tabs stripped for <<-) that
+            // consists of just the delimiter word (trimmed).
+            //
+            // Using split_inclusive('\n') avoids manual index arithmetic and
+            // eliminates any off-by-one risk on the final line: the iterator
+            // yields every line including the terminating '\n' when present, and
+            // the last segment (no trailing newline) is yielded as-is.
             let mut found = false;
-            let mut scan = i;
+            let rest = &command[i..];
+            let mut consumed = i;
 
-            while scan < len {
-                let line_end = match command[scan..].find('\n') {
-                    Some(pos) => scan + pos,
-                    None => {
-                        // Last line (no trailing newline)
-                        command[scan..].len() + scan
-                    }
-                };
-
-                let line = &command[scan..line_end];
-
+            for raw_line in rest.split_inclusive('\n') {
+                let line = raw_line.trim_end_matches('\n');
                 let stripped = if strip_tabs {
                     line.trim_start_matches('\t')
                 } else {
@@ -146,18 +142,11 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
 
                 if stripped.trim() == delimiter {
                     found = true;
-                    i = line_end;
+                    i = consumed + raw_line.len();
                     break;
                 }
 
-                if line_end >= len {
-                    // No more lines to check, but if we haven't found the
-                    // delimiter after scanning everything, we'll return Err
-                    // below.
-                    break;
-                }
-
-                scan = line_end + 1;
+                consumed += raw_line.len();
             }
 
             if !found {
@@ -472,5 +461,4 @@ mod tests {
             );
         }
     }
-
 }
