@@ -24,34 +24,20 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     let len = bytes.len();
     let mut i = 0;
     let mut in_single_quote = false;
-    let mut in_double_quote = false;
 
     while i < len {
         let ch = bytes[i] as char;
 
-        // Track single-quote regions (only outside double-quoted regions)
-        if ch == '\'' && !in_double_quote {
+        // Track single-quote regions (skip `<<` inside single quotes to avoid
+        // false positives from awk bitshift: awk '{print 1 << 2}').
+        if ch == '\'' {
             in_single_quote = !in_single_quote;
             i += 1;
             continue;
         }
 
-        // Track double-quote regions (only outside single-quoted regions)
-        if ch == '"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
-            i += 1;
-            continue;
-        }
-
-        // Handle backslash-escaped characters inside double-quoted regions
-        // (e.g. \" keeps the double-quoted region open)
-        if in_double_quote && ch == '\\' && i + 1 < len {
-            i += 2; // skip the backslash and the escaped character
-            continue;
-        }
-
-        // If inside single or double quotes, skip everything (including `<<` tokens)
-        if in_single_quote || in_double_quote {
+        // If inside single quotes, skip everything (including `<<` tokens).
+        if in_single_quote {
             i += 1;
             continue;
         }
@@ -479,53 +465,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn validate_heredocs_skips_inside_double_quotes() {
-        // Arrange: a command with << inside a double-quoted string
-        // (e.g. echo "use << to redirect") must not be treated as a heredoc.
-        let cmd = r#"echo "use << to redirect""#;
-
-        // Act
-        let result = validate_heredocs(cmd);
-
-        // Assert: should pass (no heredoc to validate)
-        assert!(
-            result.is_ok(),
-            "expected Ok for << inside double quotes: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn validate_heredocs_handles_escaped_quotes_inside_double_quotes() {
-        // Arrange: escaped quotes inside double-quoted region should
-        // not close the region; << inside should still be skipped.
-        let cmd = r#"echo "use \"<<\" to redirect""#;
-
-        // Act
-        let result = validate_heredocs(cmd);
-
-        // Assert: should pass (no heredoc to validate)
-        assert!(
-            result.is_ok(),
-            "expected Ok for << inside double quotes with escaped quotes: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn validate_heredocs_rejects_unclosed_after_closing_double_quotes() {
-        // Arrange: a real heredoc after a double-quoted string
-        let cmd = "echo \"done\"\ncat << EOF\nhello\nEOF";
-
-        // Act
-        let result = validate_heredocs(cmd);
-
-        // Assert: should pass (heredoc is properly closed)
-        assert!(
-            result.is_ok(),
-            "expected Ok for valid heredoc after double-quoted string: {:?}",
-            result
-        );
-    }
 }
