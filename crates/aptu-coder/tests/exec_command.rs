@@ -871,3 +871,26 @@ async fn test_handler_no_heredoc_passes() {
         "expected isError=false for simple command: {resp}"
     );
 }
+
+#[tokio::test]
+async fn test_handler_heredoc_double_quoted_skipped() {
+    // Arrange: a command with << inside double-quoted string
+    // must not be rejected as an unclosed heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": r#"echo "use << to redirect""#
+    }))
+    .await;
+
+    // Assert: << inside double quotes passes without heredoc error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for << inside double quotes: {resp}"
+    );
+    let content = resp["result"]["structuredContent"]["interleaved"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        content.contains("use <<"),
+        "expected output to contain 'use <<', got: {content:?}"
+    );
+}
