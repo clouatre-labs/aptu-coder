@@ -32,6 +32,7 @@ Each line in the JSONL file is one JSON object:
 | `output_chars` | `usize` | Byte length (`str::len()`) of the final text returned; `0` on error paths |
 | `param_path_depth` | `usize` | `Path::components().count()` on `params.path` |
 | `file_ext` | `string \| null` | Lowercased file extension of `params.path`: known extension key (e.g. `"rs"`), `"other"` for unrecognized extensions, `null` when the path has no extension. Only populated for `analyze_file` and `analyze_module`. |
+| `language` | `string \| null` | Human-readable programming language name derived from the file extension (e.g. `"rust"` for `.rs`). `null` when the path has no extension or the extension is not recognized. Only populated for `analyze_file` and `analyze_module`. Omitted from JSONL when `null` for backward compatibility. |
 | `max_depth` | `u32 \| null` | The `max_depth` param if present; `null` for `analyze_file` and `analyze_module` |
 | `result` | `string` | `"ok"` on success, `"error"` on early-exit error paths |
 | `error_type` | `string \| null` | On error: `invalid_params`, `parse`, or `unknown`; `null` on success |

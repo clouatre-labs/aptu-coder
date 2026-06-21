@@ -61,6 +61,12 @@ pub struct MetricEvent {
     /// `None` when no filter fired or for non-`exec_command` tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter_applied: Option<String>,
+    /// Human-readable programming language name derived from the file extension
+    /// (e.g., `Some("Rust")` for `.rs` files). `None` when the path has no extension
+    /// or the extension is not recognized. Only populated for `analyze_file` and
+    /// `analyze_module`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -327,6 +333,20 @@ pub fn path_file_ext(path: &str) -> Option<&'static str> {
     }
 }
 
+/// Derive a human-readable language name from a file path.
+///
+/// - Returns `Some("Rust")` for paths with a recognized extension.
+/// - Returns `None` for paths with no extension or an unrecognized extension.
+#[must_use]
+pub fn path_language(path: &str) -> Option<String> {
+    let ext_os = Path::new(path).extension()?;
+    let ext_str = ext_os.to_str()?;
+    if ext_str.is_empty() {
+        return None;
+    }
+    language_for_extension(ext_str).map(std::borrow::ToOwned::to_owned)
+}
+
 fn xdg_metrics_dir() -> PathBuf {
     if let Ok(xdg_data_home) = std::env::var("XDG_DATA_HOME")
         && !xdg_data_home.is_empty()
@@ -579,6 +599,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         tx.send(make_event()).unwrap();
         tx.send(make_event()).unwrap();
@@ -638,6 +659,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("analyze_directory"));
@@ -670,6 +692,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""result":"error""#));
@@ -702,6 +725,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""error_subtype":"not_found""#));
@@ -730,6 +754,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""error_subtype":"ambiguous""#));
@@ -758,6 +783,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
@@ -792,6 +818,24 @@ mod tests {
     fn test_path_file_ext_multi_dot() {
         // Arrange / Act / Assert: multi-dot filename uses the last extension
         assert_eq!(path_file_ext("file.test.rs"), Some("rs"));
+    }
+
+    #[test]
+    fn test_path_language_known_ext() {
+        // Arrange / Act / Assert: known extension returns Some(language name)
+        assert_eq!(path_language("src/main.rs"), Some("rust".to_string()));
+    }
+
+    #[test]
+    fn test_path_language_unknown_ext() {
+        // Arrange / Act / Assert: unknown extension returns None
+        assert_eq!(path_language("file.xyz"), None);
+    }
+
+    #[test]
+    fn test_path_language_no_ext() {
+        // Arrange / Act / Assert: path without extension returns None
+        assert_eq!(path_language("Makefile"), None);
     }
 
     #[tokio::test]
@@ -832,6 +876,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         })
         .unwrap();
         tx.send(MetricEvent {
@@ -855,6 +900,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         })
         .unwrap();
         drop(tx);
@@ -943,6 +989,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         })
         .unwrap();
         drop(tx);
@@ -1006,6 +1053,7 @@ mod tests {
             chars_threshold_breach: false,
             file_ext: None,
             filter_applied: None,
+            language: None,
         })
         .unwrap();
         drop(tx);

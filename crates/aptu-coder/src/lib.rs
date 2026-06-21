@@ -1771,6 +1771,7 @@ impl CodeAnalyzer {
                     timed_out: false,
                     output_truncated: None,
                     file_ext: crate::metrics::path_file_ext(&param_path),
+                    language: crate::metrics::path_language(&param_path),
                     ..Default::default()
                 });
                 return Ok(err_to_tool_result(e));
@@ -1943,6 +1944,7 @@ impl CodeAnalyzer {
             timed_out: false,
             output_truncated: None,
             file_ext: crate::metrics::path_file_ext(&param_path),
+            language: crate::metrics::path_language(&param_path),
             ..Default::default()
         });
         Ok(result)
@@ -2527,6 +2529,7 @@ impl CodeAnalyzer {
                     timed_out: false,
                     output_truncated: None,
                     file_ext: crate::metrics::path_file_ext(&param_path),
+                    language: crate::metrics::path_language(&param_path),
                     ..Default::default()
                 });
                 return Ok(err_to_tool_result(ErrorData::new(
@@ -2594,6 +2597,7 @@ impl CodeAnalyzer {
                             timed_out: false,
                             output_truncated: None,
                             file_ext: crate::metrics::path_file_ext(&param_path),
+                            language: crate::metrics::path_language(&param_path),
                             ..Default::default()
                         });
                         return {
@@ -2648,6 +2652,7 @@ impl CodeAnalyzer {
                         timed_out: false,
                         output_truncated: None,
                         file_ext: crate::metrics::path_file_ext(&param_path),
+                        language: crate::metrics::path_language(&param_path),
                         ..Default::default()
                     });
                     return Ok(err_to_tool_result(error_data));
@@ -2743,6 +2748,7 @@ impl CodeAnalyzer {
             timed_out: false,
             output_truncated: None,
             file_ext: crate::metrics::path_file_ext(&param_path),
+            language: crate::metrics::path_language(&param_path),
             ..Default::default()
         });
         Ok(result)
@@ -3912,6 +3918,7 @@ impl CodeAnalyzer {
             exit_code,
             timed_out: false,
             output_truncated: Some(output_truncated),
+            language: None,
             chars_threshold_breach: text.len() > 30_000,
             file_ext: None,
             filter_applied: output.filter_applied.clone(),
@@ -6419,6 +6426,7 @@ mod tests {
             chars_threshold_breach: output_chars > 30_000,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         assert!(
             event.chars_threshold_breach,
@@ -6451,6 +6459,7 @@ mod tests {
             chars_threshold_breach: output_chars > 30_000,
             file_ext: None,
             filter_applied: None,
+            language: None,
         };
         assert!(
             !event.chars_threshold_breach,
