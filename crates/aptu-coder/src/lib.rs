@@ -1296,14 +1296,29 @@ impl CodeAnalyzer {
             }
             hasher.update(&params.follow_depth.unwrap_or(1).to_le_bytes());
             let match_mode_str =
-                serde_json::to_string(&params.match_mode.clone().unwrap_or_default())
-                    .unwrap_or_default();
+                match serde_json::to_string(&params.match_mode.clone().unwrap_or_default()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        // Serialization of a unit-like enum should never fail; if it does,
+                        // an empty string would produce a non-unique cache key, so warn loudly.
+                        tracing::warn!(
+                            error = %e,
+                            "analyze_symbol: failed to serialize match_mode for disk cache key; \
+                             falling back to empty string (cache key may collide)"
+                        );
+                        String::new()
+                    }
+                };
             hasher.update(match_mode_str.as_bytes());
             hasher.update(&[u8::from(params.impl_only.unwrap_or(false))]);
             // Stream sorted per-file (path, mtime_nanos) pairs for freshness.
             let mut sorted_entries: Vec<_> = entries.iter().filter(|e| !e.is_dir).collect();
             sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
             for entry in &sorted_entries {
+                // `path` is always a canonical absolute path (validated upstream by
+                // validate_path before handle_focused_mode is called), so strip_prefix
+                // succeeds for every entry under it. The unwrap_or fallback retains the
+                // full absolute path, which is still unique and safe for hashing.
                 let rel = entry.path.strip_prefix(path).unwrap_or(&entry.path);
                 hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
                 let mtime_nanos = entry
