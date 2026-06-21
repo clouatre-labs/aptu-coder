@@ -3769,6 +3769,13 @@ impl CodeAnalyzer {
             )));
         }
 
+        // Validate heredocs before spawning any process
+        if let Err(e) = validation::validate_heredocs(&command) {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
+            return Ok(err_to_tool_result(e));
+        }
+
         // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
         let resolved_path_str = self.resolved_path.as_ref().as_deref();
         let output = run_exec_impl(
