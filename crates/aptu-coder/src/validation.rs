@@ -6,6 +6,170 @@ use rmcp::model::ErrorData;
 
 use crate::error_meta;
 
+/// Scans a shell command string for unclosed heredocs before any process is spawned.
+///
+/// Walks `command` char-by-char, tracking single-quoted regions (skip `<<` inside
+/// single quotes to avoid false positives from awk bitshift etc.).  For each `<<`
+/// or `<<-` token found outside single quotes, extracts the delimiter word (strips
+/// surrounding single-quotes, double-quotes, or backslashes to get the bare word)
+/// and searches the remainder of the string for its matching closer on its own line.
+/// For `<<-`, leading tabs are stripped from each line when searching.
+///
+/// Returns `Ok(())` if all heredocs are properly closed, or `Err(ErrorData)` with
+/// `INVALID_PARAMS` if any heredoc is missing its closing delimiter.
+///
+/// This function does NOT spawn any process; it is a pure string scan.
+pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
+    let bytes = command.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut in_single_quote = false;
+
+    while i < len {
+        let ch = bytes[i] as char;
+
+        // Track single-quote regions
+        if ch == '\'' {
+            in_single_quote = !in_single_quote;
+            i += 1;
+            continue;
+        }
+
+        // If inside single-quotes, skip everything (including `<<` tokens)
+        if in_single_quote {
+            i += 1;
+            continue;
+        }
+
+        // Look for `<<` token
+        if ch == '<' && i + 1 < len && bytes[i + 1] == b'<' {
+            let _here_start = i;
+            i += 2;
+
+            let strip_tabs = if i < len && bytes[i] == b'-' {
+                i += 1;
+                true
+            } else {
+                false
+            };
+
+            // Skip whitespace before delimiter
+            while i < len && (bytes[i] as char).is_ascii_whitespace() {
+                i += 1;
+            }
+
+            if i >= len {
+                return Err(missing_heredoc_error());
+            }
+
+            // Extract the delimiter word, stripping quotes
+            let delimiter = if bytes[i] == b'\'' {
+                // Single-quoted delimiter: <<'EOF'
+                i += 1;
+                let start = i;
+                while i < len && bytes[i] != b'\'' {
+                    i += 1;
+                }
+                if i >= len {
+                    return Err(missing_heredoc_error());
+                }
+                let word = &command[start..i];
+                i += 1; // skip closing quote
+                word.to_string()
+            } else if bytes[i] == b'"' {
+                // Double-quoted delimiter: <<"EOF"
+                i += 1;
+                let start = i;
+                while i < len && bytes[i] != b'"' {
+                    i += 1;
+                }
+                if i >= len {
+                    return Err(missing_heredoc_error());
+                }
+                let word = &command[start..i];
+                i += 1; // skip closing quote
+                word.to_string()
+            } else if bytes[i] == b'\\' {
+                // Escaped delimiter: <<\EOF
+                i += 1;
+                let start = i;
+                while i < len && !(bytes[i] as char).is_ascii_whitespace() && bytes[i] != b'<' {
+                    i += 1;
+                }
+                command[start..i].to_string()
+            } else {
+                // Bare delimiter: <<EOF
+                let start = i;
+                while i < len && !(bytes[i] as char).is_ascii_whitespace() && bytes[i] != b'<' {
+                    i += 1;
+                }
+                command[start..i].to_string()
+            };
+
+            if delimiter.is_empty() {
+                return Err(missing_heredoc_error());
+            }
+
+            // Search the remainder of the command string for a line matching the
+            // closing delimiter.
+            // Walk line-by-line from after the `<<` token, looking for a line
+            // (with leading tabs stripped for <<-) that consists of just the
+            // delimiter word (trimmed).
+            let mut found = false;
+            let mut scan = i;
+
+            while scan < len {
+                let line_end = match command[scan..].find('\n') {
+                    Some(pos) => scan + pos,
+                    None => {
+                        // Last line (no trailing newline)
+                        command[scan..].len() + scan
+                    }
+                };
+
+                let line = &command[scan..line_end];
+
+                let stripped = if strip_tabs {
+                    line.trim_start_matches('\t')
+                } else {
+                    line
+                };
+
+                if stripped.trim() == delimiter {
+                    found = true;
+                    i = line_end;
+                    break;
+                }
+
+                if line_end >= len {
+                    // No more lines to check, but if we haven't found the
+                    // delimiter after scanning everything, we'll return Err
+                    // below.
+                    break;
+                }
+
+                scan = line_end + 1;
+            }
+
+            if !found {
+                return Err(missing_heredoc_error());
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    Ok(())
+}
+
+fn missing_heredoc_error() -> ErrorData {
+    ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        "heredoc closing delimiter not found -- likely a quoting or escaping issue; use edit_overwrite to write files instead of shell heredocs".to_string(),
+        Some(error_meta("validation", false, "use edit_overwrite to write files")),
+    )
+}
+
 /// Validates that the parent directory of `path` exists, is a directory,
 /// and is within `root`.  Returns the resolved path (canonical_parent.join(file_name)).
 fn validate_parent_in_root(

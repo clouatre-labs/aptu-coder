@@ -744,3 +744,130 @@ async fn test_exec_command_invalid_cd_path_no_path_leak() {
         "error message must not contain cd prefix path: {msg}"
     );
 }
+
+#[tokio::test]
+async fn test_handler_unclosed_heredoc() {
+    // Arrange: a heredoc with no closing delimiter
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF\nhello\nworld\n"
+    }))
+    .await;
+
+    // Assert: unclosed heredoc is rejected before spawning
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        msg.contains("heredoc"),
+        "error message should mention heredoc: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_valid_heredoc() {
+    // Arrange: a properly closed heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF\nhello\nEOF"
+    }))
+    .await;
+
+    // Assert: valid heredoc executes successfully, isError=false
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for valid heredoc: {resp}"
+    );
+    let content = resp["result"]["structuredContent"]["interleaved"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        content.trim() == "hello",
+        "expected output 'hello', got: {content:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_heredoc_awk_bitshift_not_rejected() {
+    // Arrange: awk bitshift uses << inside single quotes; should not be
+    // flagged as a heredoc.  Use a simple echo that contains << to verify
+    // the scanner does not flag it.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo 'a << 8'"
+    }))
+    .await;
+
+    // Assert: echo with << in single quotes passes without heredoc error
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for << inside single quotes: {resp}"
+    );
+    let content = resp["result"]["structuredContent"]["interleaved"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        content.trim() == "a << 8",
+        "expected output 'a << 8', got: {content:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_unclosed_dash_heredoc() {
+    // Arrange: <<- heredoc with no closing delimiter
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat <<- EOF\n\thello\n\tworld\n"
+    }))
+    .await;
+
+    // Assert: unclosed <<- heredoc is rejected
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for unclosed <<- heredoc: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        msg.contains("heredoc"),
+        "error message should mention heredoc: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_valid_dash_heredoc() {
+    // Arrange: properly closed <<- heredoc with tabs
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat <<- EOF\n\thello\nEOF"
+    }))
+    .await;
+
+    // Assert: valid <<- heredoc executes successfully
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for valid <<- heredoc: {resp}"
+    );
+    let content = resp["result"]["structuredContent"]["interleaved"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        content.trim() == "hello",
+        "expected output 'hello', got: {content:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_no_heredoc_passes() {
+    // Arrange: a simple command with no heredoc syntax
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo hello world"
+    }))
+    .await;
+
+    // Assert: simple command passes
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for simple command: {resp}"
+    );
+}
