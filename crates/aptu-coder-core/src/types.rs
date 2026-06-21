@@ -542,8 +542,9 @@ impl SemanticAnalysis {
     /// - `None` (or a slice containing `AnalyzeFileField::All`) returns a full clone.
     /// - Otherwise each of `functions`, `classes`, and `imports` is populated only when the
     ///   corresponding `AnalyzeFileField` variant is present in `fields`.
-    /// - All other fields (`references`, `call_frequency`, `calls`, `impl_traits`,
-    ///   `def_use_sites`) are always preserved unchanged.
+    /// - `references`, `calls`, `impl_traits`, and `def_use_sites` are always preserved
+    ///   unchanged.
+    /// - `call_frequency` is preserved only when `Functions` is in the projected fields.
     #[must_use]
     pub fn project(&self, fields: Option<&[AnalyzeFileField]>) -> Self {
         let Some(fields) = fields else {
@@ -587,7 +588,11 @@ impl SemanticAnalysis {
                 Vec::new()
             },
             references: self.references.clone(),
-            call_frequency: self.call_frequency.clone(),
+            call_frequency: if want_functions {
+                self.call_frequency.clone()
+            } else {
+                HashMap::new()
+            },
             calls: self.calls.clone(),
             impl_traits: self.impl_traits.clone(),
             def_use_sites: self.def_use_sites.clone(),
@@ -820,6 +825,67 @@ mod tests {
             !symbol_props.contains_key("ast_recursion_limit"),
             "ast_recursion_limit must be removed from AnalyzeSymbolParams schema"
         );
+    }
+
+    fn make_sa(name: &str, count: usize) -> SemanticAnalysis {
+        let mut cf = HashMap::new();
+        cf.insert(name.to_string(), count);
+        SemanticAnalysis {
+            functions: vec![FunctionInfo {
+                name: name.to_string(),
+                line: 1,
+                end_line: 5,
+                parameters: vec![],
+                return_type: None,
+            }],
+            classes: vec![],
+            imports: vec![],
+            references: vec![],
+            call_frequency: cf,
+            calls: vec![],
+            impl_traits: vec![],
+            def_use_sites: vec![],
+        }
+    }
+
+    #[test]
+    fn test_project_fields_none_preserves_call_frequency() {
+        let sa = make_sa("foo", 3);
+        let projected = sa.project(None);
+        assert_eq!(projected.functions.len(), 1);
+        assert_eq!(projected.call_frequency.len(), 1);
+    }
+
+    #[test]
+    fn test_project_fields_all_preserves_call_frequency() {
+        let sa = make_sa("bar", 5);
+        let projected = sa.project(Some(&[AnalyzeFileField::All]));
+        assert_eq!(projected.call_frequency.len(), 1);
+    }
+
+    #[test]
+    fn test_project_fields_functions_preserves_call_frequency() {
+        let sa = make_sa("baz", 2);
+        let projected = sa.project(Some(&[AnalyzeFileField::Functions]));
+        assert_eq!(projected.call_frequency.len(), 1);
+    }
+
+    #[test]
+    fn test_project_fields_classes_empties_call_frequency() {
+        let mut cf = HashMap::new();
+        cf.insert("qux".to_string(), 1usize);
+        let sa = SemanticAnalysis {
+            functions: vec![],
+            classes: vec![],
+            imports: vec![],
+            references: vec![],
+            call_frequency: cf,
+            calls: vec![],
+            impl_traits: vec![],
+            def_use_sites: vec![],
+        };
+        let projected = sa.project(Some(&[AnalyzeFileField::Classes]));
+        assert!(projected.call_frequency.is_empty());
     }
 }
 
