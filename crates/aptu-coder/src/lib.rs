@@ -57,6 +57,11 @@ pub struct ExecCommandParams {
     pub working_dir: Option<String>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
+    /// Maximum execution time in seconds. When the command exceeds this limit, the
+    /// child process is killed and the response indicates `timed_out: true`.
+    /// A value of 0 or None means no timeout (unlimited execution).
+    #[serde(default)]
+    pub timeout_secs: Option<i64>,
 }
 
 impl ExecCommandParams {
@@ -97,6 +102,10 @@ pub struct ShellOutput {
     /// Description of the filter applied to stdout (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_applied: Option<String>,
+    /// True when the command was killed due to exceeding `timeout_secs`.
+    /// When true, exit_code is None and no partial output is available.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub timed_out: bool,
 }
 
 impl ShellOutput {
@@ -118,6 +127,7 @@ impl ShellOutput {
             stdout_path: None,
             stderr_path: None,
             filter_applied: None,
+            timed_out: false,
         }
     }
 }
@@ -3791,8 +3801,46 @@ impl CodeAnalyzer {
             seq,
             resolved_path_str,
             &self.filter_table,
+            params.timeout_secs,
         )
         .await;
+
+        // Short-circuit on timeout: return INTERNAL_ERROR before any output processing.
+        if output.timed_out {
+            span.record("error", true);
+            span.record("error.type", "timeout");
+            let mut result = CallToolResult::error(vec![Content::text(
+                "Command execution timed out; the process was killed.".to_string(),
+            )])
+            .with_meta(Some(no_cache_meta()));
+            result.structured_content = Some(serde_json::json!({
+                "timed_out": true,
+                "timeout_secs": params.timeout_secs,
+            }));
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            self.metrics_tx.send(crate::metrics::MetricEvent {
+                ts: crate::metrics::unix_ms(),
+                tool: "exec_command",
+                duration_ms: dur,
+                output_chars: 0,
+                param_path_depth: crate::metrics::path_component_count(
+                    param_path.as_deref().unwrap_or(""),
+                ),
+                max_depth: None,
+                result: "error",
+                error_type: Some("timeout".to_string()),
+                session_id: sid,
+                seq: Some(seq),
+                cache_hit: None,
+                cache_write_failure: None,
+                cache_tier: None,
+                exit_code: None,
+                timed_out: true,
+                output_truncated: Some(false),
+                ..Default::default()
+            });
+            return Ok(result);
+        }
 
         let exit_code = output.exit_code;
         let mut output_truncated = output.output_truncated;
@@ -3888,7 +3936,7 @@ impl CodeAnalyzer {
                     cache_write_failure: None,
                     cache_tier: None,
                     exit_code,
-                    timed_out: false,
+                    timed_out: output.timed_out,
                     output_truncated: Some(output_truncated),
                     ..Default::default()
                 });
@@ -3916,7 +3964,7 @@ impl CodeAnalyzer {
             cache_write_failure: None,
             cache_tier: None,
             exit_code,
-            timed_out: false,
+            timed_out: output.timed_out,
             output_truncated: Some(output_truncated),
             language: None,
             chars_threshold_breach: text.len() > 30_000,
@@ -3996,12 +4044,22 @@ fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
     (stripped, Some(path))
 }
 
+/// Result of a timed command execution.
+struct ExecutionResult {
+    exit_code: Option<i32>,
+    output_truncated: bool,
+    output_collection_error: Option<String>,
+    timed_out: bool,
+}
+
 /// Run a spawned child process with output draining.
-/// Returns (exit_code, output_truncated, output_collection_error).
+/// When `timeout_secs` is `Some(secs)` where `secs > 0`, the entire execution (drain +
+/// wait) is bounded by that many seconds. If the timeout fires the child is killed.
 async fn run_with_timeout(
     mut child: tokio::process::Child,
     tx: tokio::sync::mpsc::UnboundedSender<(bool, String)>,
-) -> (Option<i32>, bool, Option<String>) {
+    timeout_secs: Option<i64>,
+) -> ExecutionResult {
     use tokio::io::AsyncBufReadExt as _;
     use tokio_stream::StreamExt as TokioStreamExt;
     use tokio_stream::wrappers::LinesStream;
@@ -4040,25 +4098,68 @@ async fn run_with_timeout(
         }
     });
 
-    drain_task.await.ok();
+    let drain_abort = drain_task.abort_handle();
 
-    let (status, drain_truncated) =
-        match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await {
-            Ok(Ok(s)) => (Some(s), false),
-            Ok(Err(_)) => (None, false),
-            Err(_) => {
-                child.start_kill().ok();
-                let _ = child.wait().await;
-                (None, true)
-            }
+    // Common post-exit drain handling (500ms grace for background processes)
+    let post_exit = async {
+        let (status, drain_truncated) =
+            match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await {
+                Ok(Ok(s)) => (Some(s), false),
+                Ok(Err(_)) => (None, false),
+                Err(_) => {
+                    child.start_kill().ok();
+                    let _ = child.wait().await;
+                    (None, true)
+                }
+            };
+        let exit_code = status.and_then(|s| s.code());
+        let ocerr = if drain_truncated {
+            Some("post-exit drain timeout: background process held pipes".to_string())
+        } else {
+            None
         };
-    let exit_code = status.and_then(|s| s.code());
-    let ocerr = if drain_truncated {
-        Some("post-exit drain timeout: background process held pipes".to_string())
-    } else {
-        None
+        ExecutionResult {
+            exit_code,
+            output_truncated: drain_truncated,
+            output_collection_error: ocerr,
+            timed_out: false,
+        }
     };
-    (exit_code, drain_truncated, ocerr)
+
+    match timeout_secs {
+        Some(secs) if secs > 0 => {
+            // Wrap both drain and wait in the timeout
+            let exec_future = async {
+                drain_task.await.ok();
+                post_exit.await
+            };
+
+            match tokio::time::timeout(std::time::Duration::from_secs(secs as u64), exec_future)
+                .await
+            {
+                Ok(result) => result,
+                Err(_elapsed) => {
+                    // Kill the child process. Ignore errors: the process may have already exited.
+                    child.start_kill().ok();
+                    // NOTE: abort is a no-op if the task already completed; tokio guarantees
+                    //       that calling abort on a completed JoinHandle is safe.
+                    drain_abort.abort();
+                    // Reap the zombie so the OS does not accumulate a defunct child.
+                    let _ = child.wait().await;
+                    ExecutionResult {
+                        exit_code: None,
+                        output_truncated: false,
+                        output_collection_error: None,
+                        timed_out: true,
+                    }
+                }
+            }
+        }
+        _ => {
+            drain_task.await.ok();
+            post_exit.await
+        }
+    }
 }
 
 /// Executes a shell command and returns the output.
@@ -4072,6 +4173,7 @@ async fn run_exec_impl(
     seq: u32,
     resolved_path: Option<&str>,
     filter_table: &Arc<Vec<CompiledRule>>,
+    timeout_secs: Option<i64>,
 ) -> ShellOutput {
     // Inject --no-stat for git pull if not already present
     let command = maybe_inject_no_stat(&command);
@@ -4113,8 +4215,11 @@ async fn run_exec_impl(
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, String)>();
 
-    let (exit_code, mut output_truncated, output_collection_error) =
-        run_with_timeout(child, tx).await;
+    let exec_result = run_with_timeout(child, tx, timeout_secs).await;
+    let exit_code = exec_result.exit_code;
+    let mut output_truncated = exec_result.output_truncated;
+    let output_collection_error = exec_result.output_collection_error;
+    let timed_out = exec_result.timed_out;
 
     let mut lines: Vec<(bool, String)> = Vec::new();
     while let Some(item) = rx.recv().await {
@@ -4155,6 +4260,7 @@ async fn run_exec_impl(
     output.output_collection_error = output_collection_error;
     output.stdout_path = stdout_path;
     output.stderr_path = stderr_path;
+    output.timed_out = timed_out;
 
     // Apply filter if exit_code == 0
     if exit_code == Some(0) {
