@@ -4134,8 +4134,12 @@ async fn run_with_timeout(
                 post_exit.await
             };
 
-            match tokio::time::timeout(std::time::Duration::from_secs(secs as u64), exec_future)
-                .await
+            let timeout_secs_u64 = u64::try_from(secs).unwrap_or(u64::MAX);
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(timeout_secs_u64),
+                exec_future,
+            )
+            .await
             {
                 Ok(result) => result,
                 Err(_elapsed) => {
