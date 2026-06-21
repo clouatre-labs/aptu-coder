@@ -889,3 +889,38 @@ async fn test_analyze_directory_explicit_max_depth_zero_unlimited() {
         "depth-4 file must appear when max_depth=0 (unlimited): {text}"
     );
 }
+
+#[tokio::test]
+async fn test_meta_field_ordering() {
+    // serde_json Map is BTreeMap (alphabetical), so "cache_hint" < "content_hash"
+    // alphabetically. This test is a regression guard ensuring no_cache_meta() builds
+    // the map in insertion order that still satisfies alphabetical serialization.
+    // CWD during tests is crates/aptu-coder; use src/lib.rs which is a valid file there.
+    let resp = call_tool_raw(
+        "analyze_module",
+        serde_json::json!({
+            "path": "src/lib.rs"
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "analyze_module must succeed: {resp}"
+    );
+
+    let meta_str =
+        serde_json::to_string(&resp["result"]["_meta"]).expect("_meta should serialize to string");
+
+    let cache_hint_pos = meta_str
+        .find("cache_hint")
+        .expect("cache_hint must be present");
+    let content_hash_pos = meta_str
+        .find("content_hash")
+        .expect("content_hash must be present");
+
+    assert!(
+        cache_hint_pos < content_hash_pos,
+        "cache_hint must appear before content_hash in serialized _meta JSON: {meta_str}"
+    );
+}
