@@ -8,12 +8,13 @@ use crate::error_meta;
 
 /// Scans a shell command string for unclosed heredocs before any process is spawned.
 ///
-/// Walks `command` char-by-char, tracking single-quoted regions (skip `<<` inside
-/// single quotes to avoid false positives from awk bitshift etc.).  For each `<<`
-/// or `<<-` token found outside single quotes, extracts the delimiter word (strips
-/// surrounding single-quotes, double-quotes, or backslashes to get the bare word)
-/// and searches the remainder of the string for its matching closer on its own line.
-/// For `<<-`, leading tabs are stripped from each line when searching.
+/// Walks `command` char-by-char, tracking single-quoted and double-quoted regions
+/// (skip `<<` inside either to avoid false positives from awk bitshift, echo
+/// strings, etc.).  For each `<<` or `<<-` token found outside any quoted region,
+/// extracts the delimiter word (strips surrounding single-quotes, double-quotes, or
+/// backslashes to get the bare word) and searches the remainder of the string for
+/// its matching closer on its own line.  For `<<-`, leading tabs are stripped from
+/// each line when searching.
 ///
 /// Returns `Ok(())` if all heredocs are properly closed, or `Err(ErrorData)` with
 /// `INVALID_PARAMS` if any heredoc is missing its closing delimiter.
@@ -24,20 +25,27 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     let len = bytes.len();
     let mut i = 0;
     let mut in_single_quote = false;
+    let mut in_double_quote = false;
 
     while i < len {
         let ch = bytes[i] as char;
 
-        // Track single-quote regions (skip `<<` inside single quotes to avoid
-        // false positives from awk bitshift: awk '{print 1 << 2}').
-        if ch == '\'' {
+        // Single-quote regions: no escaping inside; toggle on every `'`.
+        if ch == '\'' && !in_double_quote {
             in_single_quote = !in_single_quote;
             i += 1;
             continue;
         }
 
-        // If inside single quotes, skip everything (including `<<` tokens).
-        if in_single_quote {
+        // Double-quote regions: toggle on unescaped `"` outside single quotes.
+        if ch == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            i += 1;
+            continue;
+        }
+
+        // Inside any quoted region, skip everything (including `<<` tokens).
+        if in_single_quote || in_double_quote {
             i += 1;
             continue;
         }
