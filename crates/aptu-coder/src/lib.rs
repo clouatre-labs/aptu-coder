@@ -1285,6 +1285,47 @@ impl CodeAnalyzer {
             return Ok((CacheTier::L1Memory, (*cached).clone()));
         }
 
+        // Compute L2 disk cache key by streaming CallGraphCacheKey fields through blake3.
+        // Same pattern as analyze_directory (lib.rs:591-617): root_path + git_ref +
+        // follow_depth + match_mode + impl_only + per-file mtimes.
+        let disk_key = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(path.as_os_str().to_string_lossy().as_bytes());
+            if let Some(ref git_ref) = params.git_ref {
+                hasher.update(git_ref.as_bytes());
+            }
+            hasher.update(&params.follow_depth.unwrap_or(1).to_le_bytes());
+            let match_mode_str =
+                serde_json::to_string(&params.match_mode.clone().unwrap_or_default())
+                    .unwrap_or_default();
+            hasher.update(match_mode_str.as_bytes());
+            hasher.update(&[u8::from(params.impl_only.unwrap_or(false))]);
+            // Stream sorted per-file (path, mtime_nanos) pairs for freshness.
+            let mut sorted_entries: Vec<_> = entries.iter().filter(|e| !e.is_dir).collect();
+            sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
+            for entry in &sorted_entries {
+                let rel = entry.path.strip_prefix(path).unwrap_or(&entry.path);
+                hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
+                let mtime_nanos = entry
+                    .mtime
+                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0);
+                hasher.update(&mtime_nanos.to_le_bytes());
+            }
+            hasher.finalize()
+        };
+
+        // Check L2 disk cache.
+        if let Some(cached) = self
+            .disk_cache
+            .get::<analyze::FocusedAnalysisOutput>("analyze_symbol", &disk_key)
+        {
+            let arc = std::sync::Arc::new(cached.clone());
+            self.call_graph_cache.put(cache_key, arc);
+            return Ok((CacheTier::L2Disk, cached));
+        }
+
         let total_files = entries.iter().filter(|e| !e.is_dir).count();
         let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
@@ -1329,6 +1370,49 @@ impl CodeAnalyzer {
         // Store in L1 cache for subsequent calls.
         self.call_graph_cache
             .put(cache_key, std::sync::Arc::new(output.clone()));
+
+        // Spawn L2 write-behind; drain failure counter after write completes.
+        {
+            let dc = self.disk_cache.clone();
+            let k = disk_key;
+            let v = output.clone();
+            let handle = tokio::task::spawn_blocking(move || {
+                dc.put("analyze_symbol", &k, &v);
+                dc.drain_write_failures()
+            });
+            let metrics_tx = self.metrics_tx.clone();
+            let sid = self.session_id.lock().await.clone();
+            tokio::spawn(async move {
+                if let Ok(failures) = handle.await
+                    && failures > 0
+                {
+                    tracing::warn!(
+                        tool = "analyze_symbol",
+                        failures,
+                        "L2 disk cache write failed"
+                    );
+                    metrics_tx.send(crate::metrics::MetricEvent {
+                        ts: crate::metrics::unix_ms(),
+                        tool: "analyze_symbol",
+                        duration_ms: 0,
+                        output_chars: 0,
+                        param_path_depth: 0,
+                        max_depth: None,
+                        result: "ok",
+                        error_type: None,
+                        session_id: sid,
+                        seq: None,
+                        cache_hit: None,
+                        cache_write_failure: Some(true),
+                        cache_tier: None,
+                        exit_code: None,
+                        timed_out: false,
+                        output_truncated: None,
+                        ..Default::default()
+                    });
+                }
+            });
+        }
 
         Ok((CacheTier::Miss, output))
     }
