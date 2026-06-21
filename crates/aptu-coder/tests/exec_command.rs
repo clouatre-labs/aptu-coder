@@ -828,3 +828,49 @@ async fn test_handler_unclosed_heredoc_no_trailing_newline() {
         "error message should mention heredoc: {msg}"
     );
 }
+
+#[tokio::test]
+async fn test_handler_heredoc_trailing_space_on_delimiter_not_accepted() {
+    // Arrange: closing line is "EOF " (trailing space) -- shell does NOT treat
+    // this as the closing delimiter, so the scanner must not either.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF\nhello\nEOF \n"
+    }))
+    .await;
+
+    // Assert: scanner sees no valid closer and rejects the command
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: trailing space on delimiter must not be accepted: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        msg.contains("heredoc"),
+        "error message should mention heredoc: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_heredoc_leading_space_on_non_dash_delimiter_not_accepted() {
+    // Arrange: closing line is "  EOF" (leading spaces, non-<<- heredoc) --
+    // shell does NOT treat this as the closing delimiter.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF\nhello\n  EOF\n"
+    }))
+    .await;
+
+    // Assert: scanner sees no valid closer and rejects the command
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: leading spaces on non-<<- delimiter must not be accepted: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(
+        msg.contains("heredoc"),
+        "error message should mention heredoc: {msg}"
+    );
+}

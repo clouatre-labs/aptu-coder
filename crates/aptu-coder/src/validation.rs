@@ -121,8 +121,15 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
 
             // Search the remainder of the command string for a line matching the
             // closing delimiter.  Walk line-by-line from after the `<<` token,
-            // looking for a line (with leading tabs stripped for <<-) that
-            // consists of just the delimiter word (trimmed).
+            // looking for a line that consists of exactly the delimiter word and
+            // nothing else.
+            //
+            // POSIX rule: the closing delimiter must appear alone on its line
+            // with no leading whitespace (for `<<`) or only leading tabs (for
+            // `<<-`), and no trailing whitespace or comments.  Using a bare
+            // `.trim()` would cause false negatives (accepting `EOF ` or
+            // `  EOF` as closers when the shell does not) so we compare the
+            // stripped line to the delimiter with an exact equality check.
             //
             // Using split_inclusive('\n') avoids manual index arithmetic and
             // eliminates any off-by-one risk on the final line: the iterator
@@ -133,14 +140,17 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
             let mut consumed = i;
 
             for raw_line in rest.split_inclusive('\n') {
+                // Strip the line terminator only; preserve all other whitespace
+                // so the comparison is exact.
                 let line = raw_line.trim_end_matches('\n');
-                let stripped = if strip_tabs {
+                let candidate = if strip_tabs {
+                    // <<-: strip leading tabs only (POSIX; spaces are NOT stripped)
                     line.trim_start_matches('\t')
                 } else {
                     line
                 };
 
-                if stripped.trim() == delimiter {
+                if candidate == delimiter {
                     found = true;
                     i = consumed + raw_line.len();
                     break;
