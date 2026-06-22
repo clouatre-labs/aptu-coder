@@ -1635,8 +1635,10 @@ impl CodeAnalyzer {
         );
         let meta = rmcp::model::Meta(meta);
 
-        let mut result =
-            CallToolResult::success(vec![Content::text(final_text.clone())]).with_meta(Some(meta));
+        let mut result = CallToolResult::success(vec![
+            Content::text(final_text.clone()).with_priority(0.9_f32),
+        ])
+        .with_meta(Some(meta));
         let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -1931,8 +1933,10 @@ impl CodeAnalyzer {
         );
         let meta = rmcp::model::Meta(meta);
 
-        let mut result =
-            CallToolResult::success(vec![Content::text(final_text.clone())]).with_meta(Some(meta));
+        let mut result = CallToolResult::success(vec![
+            Content::text(final_text.clone()).with_priority(0.9_f32),
+        ])
+        .with_meta(Some(meta));
         let structured = serde_json::to_value(&response_output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -2145,8 +2149,10 @@ impl CodeAnalyzer {
                 serde_json::Value::String(content_hash),
             );
 
-            let mut result = CallToolResult::success(vec![Content::text(final_text.clone())])
-                .with_meta(Some(Meta(meta)));
+            let mut result = CallToolResult::success(vec![
+                Content::text(final_text.clone()).with_priority(0.9_f32),
+            ])
+            .with_meta(Some(Meta(meta)));
             let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
             result.structured_content = Some(structured);
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -2387,8 +2393,10 @@ impl CodeAnalyzer {
             serde_json::Value::String(content_hash),
         );
 
-        let mut result = CallToolResult::success(vec![Content::text(final_text.clone())])
-            .with_meta(Some(Meta(meta)));
+        let mut result = CallToolResult::success(vec![
+            Content::text(final_text.clone()).with_priority(0.9_f32),
+        ])
+        .with_meta(Some(Meta(meta)));
         // Only include def_use_sites in structuredContent when in DefUse mode.
         // In Callers/Callees modes, clearing the vec prevents large def-use
         // payloads from leaking into paginated non-def-use responses.
