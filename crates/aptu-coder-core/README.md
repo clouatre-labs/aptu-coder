@@ -77,8 +77,8 @@ For any other extension, `analyze_file` returns a graceful fallback (line count 
 use aptu_coder_core::AnalysisConfig;
 
 let config = AnalysisConfig {
-    max_file_bytes: Some(1_000_000), // reserved, currently a no-op
-    parse_timeout_micros: None,      // parse timeout in microseconds; None disables timeout
+    max_file_bytes: None,            // skip files exceeding this size; None = no limit (reserved, currently a no-op)
+    parse_timeout_micros: Some(500_000), // kill parse after 500 ms; None = no timeout
     cache_capacity: None,            // use default LRU capacity
 };
 ```
