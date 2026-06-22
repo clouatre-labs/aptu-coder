@@ -6142,6 +6142,23 @@ mod tests {
     }
 
     #[test]
+    fn test_no_stat_word_boundary_cases() {
+        let cases: &[(&str, &str)] = &[
+            ("gitpull some-arg", "gitpull some-arg"),
+            ("git log upstream/pull/123", "git log upstream/pull/123"),
+            (
+                "git pull origin main --rebase",
+                "git pull origin main --rebase --no-stat",
+            ),
+            ("git pull --no-stat", "git pull --no-stat"),
+            ("git log --stat", "git log --stat"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(maybe_inject_no_stat(input), *expected, "input: {input}");
+        }
+    }
+
+    #[test]
     fn test_filter_applied_field_present() {
         // Test apply_filter() end-to-end and verify filter_applied field is set correctly
         let rule = types::FilterRule {
