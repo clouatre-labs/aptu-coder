@@ -176,7 +176,7 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs`; heredoc missing delimiter rejected before spawn | any |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs` (kill on expiry) and `drain_timeout_secs` (post-exit drain window); heredoc missing delimiter rejected before spawn | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
@@ -207,6 +207,8 @@ analyze_symbol path: /my/project symbol: my_function cursor: eyJvZmZzZXQiOjUwfQ=
 | combined `output_text` | 50,000 chars | Safety net after interleaving |
 
 The 30k stdout cap is data-driven: analysis of 27,981 observed `exec_command` calls shows only 0.33% exceed this limit. When any cap fires, `output_truncated: true` is set in the response and recorded in the JSONL metrics.
+
+`drain_timeout_secs` controls how long the server waits after the child exits for any background subprocess still holding the pipe open. Default is 500 ms (0 or omitted). Negative values return INVALID_PARAMS. When the drain window expires before the pipe closes, `output_truncated: true` is set.
 
 **exec_command output filters**
 
