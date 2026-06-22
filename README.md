@@ -35,7 +35,7 @@ AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.
 
 ## Overview
 
-aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports Rust, Python, Go, Java, Kotlin, TypeScript, TSX, Fortran, JavaScript, C/C++, and C#, and integrates with any MCP-compatible orchestrator.
+aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
 
 ## Supported Languages
 
@@ -43,24 +43,24 @@ All languages are enabled by default. Disable individual languages at compile ti
 
 | Language | Extensions | Feature flag |
 |----------|------------|--------------|
-| Rust | `.rs` | `lang-rust` |
-| Python | `.py` | `lang-python` |
-| TypeScript | `.ts` | `lang-typescript` |
-| TSX | `.tsx` | `lang-tsx` |
-| Go | `.go` | `lang-go` |
-| Java | `.java` | `lang-java` |
-| Kotlin | `.kt`, `.kts` | `lang-kotlin` |
-| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
-| JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
+| Astro | `.astro` | always-on (regex via TypeScript frontmatter extractor) |
 | C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
 | C# | `.cs` | `lang-csharp` |
-| Markdown | `.md`, `.mdx` | `lang-markdown` |
-| HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
 | CSS | `.css` | `lang-css` (tree-sitter; regex fallback when disabled) |
-| YAML | `.yaml`, `.yml` | `lang-yaml` (tree-sitter; regex fallback when disabled) |
-| Astro | `.astro` | always-on (regex via TypeScript frontmatter extractor) |
+| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
+| Go | `.go` | `lang-go` |
+| HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
+| Java | `.java` | `lang-java` |
+| JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
 | JSON | `.json` | always-on (regex; first-level key extraction) |
+| Kotlin | `.kt`, `.kts` | `lang-kotlin` |
+| Markdown | `.md`, `.mdx` | `lang-markdown` |
+| Python | `.py` | `lang-python` |
+| Rust | `.rs` | `lang-rust` |
 | TOML | `.toml` | always-on (regex; section header extraction) |
+| TSX | `.tsx` | `lang-tsx` |
+| TypeScript | `.ts` | `lang-typescript` |
+| YAML | `.yaml`, `.yml` | `lang-yaml` (tree-sitter; regex fallback when disabled) |
 
 ## Installation
 
@@ -167,8 +167,6 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `summary` | boolean | auto | Compact output; auto-triggers above 50K chars |
 | `cursor` | string | -- | Pagination cursor from a previous response's `next_cursor` |
 | `page_size` | integer | 100 | Items per page |
-| `force` | boolean | false | Bypass output size warning |
-| `verbose` | boolean | false | Full output with section headers and imports |
 
 | Tool | Purpose | Languages |
 |------|---------|-----------|
@@ -177,8 +175,8 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
-| `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, and exit code; supports progress notifications; output capped and filtered automatically | any |
+| `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching | all |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs`; heredoc missing delimiter rejected before spawn | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
@@ -243,11 +241,13 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | Variable | Default | Description |
 |---|---|---|
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
-| `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
+| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 on-disk call-graph cache used by `analyze_symbol`. Created automatically if it does not exist. |
+| `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 disk cache entirely. |
 | `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | LRU cache size for `exec_command` results. |
 | `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result cache. |
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
+| `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
 | `APTU_CODER_PROFILE` | unset | Tool subset: `edit` (edit tools + `exec_command` only), `analyze` (analyze tools + `exec_command` only). Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 

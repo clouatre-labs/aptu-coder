@@ -32,7 +32,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | **`aptu-coder-core`** | | |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
-| `cache` | `crates/aptu-coder-core/src/cache.rs` | LRU cache with mtime invalidation and lock_or_recover pattern |
+| `cache` | `crates/aptu-coder-core/src/cache.rs` | Two-tier caching: L1 in-memory LRU (`AnalysisCache`, `CallGraphCache`) with mtime invalidation and lock_or_recover pattern; L2 on-disk call-graph cache (`DiskCache`) keyed by canonical path + git HEAD SHA, configurable via `APTU_CODER_DISK_CACHE_DIR` and `APTU_CODER_DISK_CACHE_DISABLED` |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
 | `formatter` | `crates/aptu-coder-core/src/formatter.rs` | Output formatting for all seven tools |
 | `graph` | `crates/aptu-coder-core/src/graph.rs` | CallGraph struct and BFS traversal for symbol focus mode |
@@ -149,7 +149,7 @@ Exported from `aptu_coder_core` as a public API for library consumers that hold 
 
 Two independent telemetry channels run in parallel; neither blocks tool execution.
 
-**JSONL metrics (always-on):** Every tool handler fires a `MetricEvent` into an unbounded Tokio channel at return. `MetricsWriter` drains the channel in a background task and appends to a daily-rotated JSONL file at `$XDG_DATA_HOME/aptu-coder/metrics/`. File retention is 30 days. `migrate_legacy_metrics_dir()` runs on startup to rename the old `code-analyze-mcp` directory to `aptu-coder` if the new path does not yet exist.
+**JSONL metrics (always-on):** Every tool handler fires a `MetricEvent` into an unbounded Tokio channel at return. `MetricsWriter` drains the channel in a background task and appends to a daily-rotated JSONL file at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (no `/metrics/` subdirectory). File retention is 30 days. `migrate_legacy_metrics_dir()` runs on startup to rename the old `code-analyze-mcp` directory to `aptu-coder` if the new path does not yet exist.
 
 **OpenTelemetry (opt-in):** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `otel.rs` initializes three providers (trace, log, meter) via OTLP/HTTP with `BatchSpanProcessor` / `PeriodicReader` export. The `tracing-opentelemetry` bridge wires `#[instrument]` spans into the OTel trace provider. `opentelemetry-appender-tracing` forwards log events as OTel `LogRecord`s, injecting `trace_id` and `span_id`. When the env var is unset, noop providers are used with zero runtime overhead; noop span creation costs ~6.6 µs.
 
