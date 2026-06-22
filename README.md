@@ -35,7 +35,7 @@ AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.
 
 ## Overview
 
-aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports Rust, Python, Go, Java, Kotlin, TypeScript, TSX, Fortran, JavaScript, C/C++, C#, Markdown, HTML, CSS, YAML, Astro, JSON, and TOML, and integrates with any MCP-compatible orchestrator.
+aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
 
 ## Supported Languages
 
@@ -43,24 +43,24 @@ All languages are enabled by default. Disable individual languages at compile ti
 
 | Language | Extensions | Feature flag |
 |----------|------------|--------------|
-| Rust | `.rs` | `lang-rust` |
-| Python | `.py` | `lang-python` |
-| TypeScript | `.ts` | `lang-typescript` |
-| TSX | `.tsx` | `lang-tsx` |
-| Go | `.go` | `lang-go` |
-| Java | `.java` | `lang-java` |
-| Kotlin | `.kt`, `.kts` | `lang-kotlin` |
-| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
-| JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
+| Astro | `.astro` | always-on (regex via TypeScript frontmatter extractor) |
 | C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
 | C# | `.cs` | `lang-csharp` |
-| Markdown | `.md`, `.mdx` | `lang-markdown` |
-| HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
 | CSS | `.css` | `lang-css` (tree-sitter; regex fallback when disabled) |
-| YAML | `.yaml`, `.yml` | `lang-yaml` (tree-sitter; regex fallback when disabled) |
-| Astro | `.astro` | always-on (regex via TypeScript frontmatter extractor) |
+| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
+| Go | `.go` | `lang-go` |
+| HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
+| Java | `.java` | `lang-java` |
+| JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
 | JSON | `.json` | always-on (regex; first-level key extraction) |
+| Kotlin | `.kt`, `.kts` | `lang-kotlin` |
+| Markdown | `.md`, `.mdx` | `lang-markdown` |
+| Python | `.py` | `lang-python` |
+| Rust | `.rs` | `lang-rust` |
 | TOML | `.toml` | always-on (regex; section header extraction) |
+| TSX | `.tsx` | `lang-tsx` |
+| TypeScript | `.ts` | `lang-typescript` |
+| YAML | `.yaml`, `.yml` | `lang-yaml` (tree-sitter; regex fallback when disabled) |
 
 ## Installation
 
