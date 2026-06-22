@@ -811,25 +811,16 @@ impl CodeAnalyzer {
                                 failures,
                                 "L2 disk cache write failed"
                             );
-                            metrics_tx.send(crate::metrics::MetricEvent {
-                                ts: crate::metrics::unix_ms(),
-                                tool: "analyze_directory",
-                                duration_ms: 0,
-                                output_chars: 0,
-                                param_path_depth: 0,
-                                max_depth: None,
-                                result: "ok",
-                                error_type: None,
-                                session_id: sid,
-                                seq: None,
-                                cache_hit: None,
-                                cache_write_failure: Some(true),
-                                cache_tier: None,
-                                exit_code: None,
-                                timed_out: false,
-                                output_truncated: None,
-                                ..Default::default()
-                            });
+                            metrics_tx.send(
+                                crate::metrics::MetricEventBuilder::new(
+                                    "analyze_directory",
+                                    "ok",
+                                    0,
+                                )
+                                .session_id(sid)
+                                .cache_write_failure(Some(true))
+                                .build(),
+                            );
                         }
                     });
                 }
@@ -924,25 +915,12 @@ impl CodeAnalyzer {
                                 failures,
                                 "L2 disk cache write failed"
                             );
-                            metrics_tx.send(crate::metrics::MetricEvent {
-                                ts: crate::metrics::unix_ms(),
-                                tool: "analyze_file",
-                                duration_ms: 0,
-                                output_chars: 0,
-                                param_path_depth: 0,
-                                max_depth: None,
-                                result: "ok",
-                                error_type: None,
-                                session_id: sid,
-                                seq: None,
-                                cache_hit: None,
-                                cache_write_failure: Some(true),
-                                cache_tier: None,
-                                exit_code: None,
-                                timed_out: false,
-                                output_truncated: None,
-                                ..Default::default()
-                            });
+                            metrics_tx.send(
+                                crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 0)
+                                    .session_id(sid)
+                                    .cache_write_failure(Some(true))
+                                    .build(),
+                            );
                         }
                     });
                 }
@@ -1453,25 +1431,12 @@ impl CodeAnalyzer {
                         failures,
                         "L2 disk cache write failed"
                     );
-                    metrics_tx.send(crate::metrics::MetricEvent {
-                        ts: crate::metrics::unix_ms(),
-                        tool: "analyze_symbol",
-                        duration_ms: 0,
-                        output_chars: 0,
-                        param_path_depth: 0,
-                        max_depth: None,
-                        result: "ok",
-                        error_type: None,
-                        session_id: sid,
-                        seq: None,
-                        cache_hit: None,
-                        cache_write_failure: Some(true),
-                        cache_tier: None,
-                        exit_code: None,
-                        timed_out: false,
-                        output_truncated: None,
-                        ..Default::default()
-                    });
+                    metrics_tx.send(
+                        crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", 0)
+                            .session_id(sid)
+                            .cache_write_failure(Some(true))
+                            .build(),
+                    );
                 }
             });
         }
@@ -1676,25 +1641,17 @@ impl CodeAnalyzer {
         let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "analyze_directory",
-            duration_ms: dur,
-            output_chars: final_text.len(),
-            param_path_depth: crate::metrics::path_component_count(&param_path),
-            max_depth: max_depth_val,
-            result: "ok",
-            error_type: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: Some(dir_cache_hit != CacheTier::Miss),
-            cache_write_failure: None,
-            cache_tier: Some(dir_cache_hit.as_str()),
-            exit_code: None,
-            timed_out: false,
-            output_truncated: None,
-            ..Default::default()
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("analyze_directory", "ok", dur)
+                .output_chars(final_text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .max_depth(max_depth_val)
+                .session_id(sid)
+                .seq(Some(seq))
+                .cache_hit(Some(dir_cache_hit != CacheTier::Miss))
+                .cache_tier(Some(dir_cache_hit.as_str()))
+                .build(),
+        );
         Ok(result)
     }
 
@@ -1796,27 +1753,16 @@ impl CodeAnalyzer {
                     rmcp::model::ErrorCode::INTERNAL_ERROR => Some("internal_error".to_string()),
                     _ => None,
                 };
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "analyze_file",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type,
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    file_ext: crate::metrics::path_file_ext(&param_path),
-                    language: crate::metrics::path_language(&param_path),
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("analyze_file", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(error_type)
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .file_ext(crate::metrics::path_file_ext(&param_path))
+                        .language(crate::metrics::path_language(&param_path))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -1971,27 +1917,18 @@ impl CodeAnalyzer {
         let structured = serde_json::to_value(&response_output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "analyze_file",
-            duration_ms: dur,
-            output_chars: final_text.len(),
-            param_path_depth: crate::metrics::path_component_count(&param_path),
-            max_depth: None,
-            result: "ok",
-            error_type: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: Some(file_cache_hit != CacheTier::Miss),
-            cache_write_failure: None,
-            cache_tier: Some(file_cache_hit.as_str()),
-            exit_code: None,
-            timed_out: false,
-            output_truncated: None,
-            file_ext: crate::metrics::path_file_ext(&param_path),
-            language: crate::metrics::path_language(&param_path),
-            ..Default::default()
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("analyze_file", "ok", dur)
+                .output_chars(final_text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .cache_hit(Some(file_cache_hit != CacheTier::Miss))
+                .cache_tier(Some(file_cache_hit.as_str()))
+                .file_ext(crate::metrics::path_file_ext(&param_path))
+                .language(crate::metrics::path_language(&param_path))
+                .build(),
+        );
         Ok(result)
     }
 
@@ -2184,25 +2121,17 @@ impl CodeAnalyzer {
             let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
             result.structured_content = Some(structured);
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "analyze_symbol",
-                duration_ms: dur,
-                output_chars: final_text.len(),
-                param_path_depth: crate::metrics::path_component_count(&param_path),
-                max_depth: max_depth_val,
-                result: "ok",
-                error_type: None,
-                session_id: sid,
-                seq: Some(seq),
-                cache_hit: Some(false),
-                cache_tier: Some(CacheTier::Miss.as_str()),
-                cache_write_failure: None,
-                exit_code: None,
-                timed_out: false,
-                output_truncated: None,
-                ..Default::default()
-            });
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
+                    .output_chars(final_text.len())
+                    .param_path_depth(crate::metrics::path_component_count(&param_path))
+                    .max_depth(max_depth_val)
+                    .session_id(sid)
+                    .seq(Some(seq))
+                    .cache_hit(Some(false))
+                    .cache_tier(Some(CacheTier::Miss.as_str()))
+                    .build(),
+            );
             return Ok(result);
         }
 
@@ -2434,25 +2363,17 @@ impl CodeAnalyzer {
         let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "analyze_symbol",
-            duration_ms: dur,
-            output_chars: final_text.len(),
-            param_path_depth: crate::metrics::path_component_count(&param_path),
-            max_depth: max_depth_val,
-            result: "ok",
-            error_type: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: Some(graph_cache_tier != CacheTier::Miss),
-            cache_tier: Some(graph_cache_tier.as_str()),
-            cache_write_failure: None,
-            exit_code: None,
-            timed_out: false,
-            output_truncated: None,
-            ..Default::default()
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
+                .output_chars(final_text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .max_depth(max_depth_val)
+                .session_id(sid)
+                .seq(Some(seq))
+                .cache_hit(Some(graph_cache_tier != CacheTier::Miss))
+                .cache_tier(Some(graph_cache_tier.as_str()))
+                .build(),
+        );
         Ok(result)
     }
 
@@ -2513,25 +2434,14 @@ impl CodeAnalyzer {
             span.record("error", true);
             span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "analyze_module",
-                duration_ms: dur,
-                output_chars: 0,
-                param_path_depth: crate::metrics::path_component_count(&param_path),
-                max_depth: None,
-                result: "error",
-                error_type: Some("invalid_params".to_string()),
-                session_id: sid.clone(),
-                seq: Some(seq),
-                cache_hit: None,
-                cache_write_failure: None,
-                cache_tier: None,
-                exit_code: None,
-                timed_out: false,
-                output_truncated: None,
-                ..Default::default()
-            });
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(&param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid.clone())
+                    .seq(Some(seq))
+                    .build(),
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "path is a directory; use analyze_directory for directories, or pass a file path to analyze_module",
@@ -2554,27 +2464,16 @@ impl CodeAnalyzer {
             Ok(b) => b,
             Err(_e) => {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "analyze_module",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    file_ext: crate::metrics::path_file_ext(&param_path),
-                    language: crate::metrics::path_language(&param_path),
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .file_ext(crate::metrics::path_file_ext(&param_path))
+                        .language(crate::metrics::path_language(&param_path))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     "failed to read file; check file path and permissions",
@@ -2622,27 +2521,15 @@ impl CodeAnalyzer {
                             .and_then(|x| x.to_str())
                             .unwrap_or("unknown")
                             .to_string();
-                        self.metrics_tx.send(crate::metrics::MetricEvent {
-                            ts: crate::metrics::unix_ms(),
-                            tool: "analyze_module",
-                            duration_ms: dur,
-                            output_chars: 0,
-                            param_path_depth: crate::metrics::path_component_count(&param_path),
-                            max_depth: None,
-                            result: "ok",
-                            error_type: None,
-                            session_id: sid.clone(),
-                            seq: Some(seq),
-                            cache_hit: None,
-                            cache_write_failure: None,
-                            cache_tier: None,
-                            exit_code: None,
-                            timed_out: false,
-                            output_truncated: None,
-                            file_ext: crate::metrics::path_file_ext(&param_path),
-                            language: crate::metrics::path_language(&param_path),
-                            ..Default::default()
-                        });
+                        self.metrics_tx.send(
+                            crate::metrics::MetricEventBuilder::new("analyze_module", "ok", dur)
+                                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                                .session_id(sid.clone())
+                                .seq(Some(seq))
+                                .file_ext(crate::metrics::path_file_ext(&param_path))
+                                .language(crate::metrics::path_language(&param_path))
+                                .build(),
+                        );
                         return {
                             let mut mi =
                                 types::ModuleInfo::new(name, line_count, ext, vec![], vec![]);
@@ -2677,27 +2564,16 @@ impl CodeAnalyzer {
                             Some(error_meta("internal", false, "report this as a bug")),
                         ),
                     );
-                    self.metrics_tx.send(crate::metrics::MetricEvent {
-                        ts: crate::metrics::unix_ms(),
-                        tool: "analyze_module",
-                        duration_ms: dur,
-                        output_chars: 0,
-                        param_path_depth: crate::metrics::path_component_count(&param_path),
-                        max_depth: None,
-                        result: "error",
-                        error_type,
-                        session_id: sid.clone(),
-                        seq: Some(seq),
-                        cache_hit: None,
-                        cache_write_failure: None,
-                        cache_tier: None,
-                        exit_code: None,
-                        timed_out: false,
-                        output_truncated: None,
-                        file_ext: crate::metrics::path_file_ext(&param_path),
-                        language: crate::metrics::path_language(&param_path),
-                        ..Default::default()
-                    });
+                    self.metrics_tx.send(
+                        crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
+                            .param_path_depth(crate::metrics::path_component_count(&param_path))
+                            .error_type(error_type)
+                            .session_id(sid.clone())
+                            .seq(Some(seq))
+                            .file_ext(crate::metrics::path_file_ext(&param_path))
+                            .language(crate::metrics::path_language(&param_path))
+                            .build(),
+                    );
                     return Ok(err_to_tool_result(error_data));
                 }
             };
@@ -2721,25 +2597,12 @@ impl CodeAnalyzer {
                             failures,
                             "L2 disk cache write failed"
                         );
-                        metrics_tx2.send(crate::metrics::MetricEvent {
-                            ts: crate::metrics::unix_ms(),
-                            tool: "analyze_module",
-                            duration_ms: 0,
-                            output_chars: 0,
-                            param_path_depth: 0,
-                            max_depth: None,
-                            result: "ok",
-                            error_type: None,
-                            session_id: sid2,
-                            seq: None,
-                            cache_hit: None,
-                            cache_write_failure: Some(true),
-                            cache_tier: None,
-                            exit_code: None,
-                            timed_out: false,
-                            output_truncated: None,
-                            ..Default::default()
-                        });
+                        metrics_tx2.send(
+                            crate::metrics::MetricEventBuilder::new("analyze_module", "ok", 0)
+                                .session_id(sid2)
+                                .cache_write_failure(Some(true))
+                                .build(),
+                        );
                     }
                 });
             }
@@ -2773,27 +2636,18 @@ impl CodeAnalyzer {
         };
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "analyze_module",
-            duration_ms: dur,
-            output_chars: text.len(),
-            param_path_depth: crate::metrics::path_component_count(&param_path),
-            max_depth: None,
-            result: "ok",
-            error_type: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: Some(module_tier != CacheTier::Miss),
-            cache_tier: Some(module_tier.as_str()),
-            cache_write_failure: None,
-            exit_code: None,
-            timed_out: false,
-            output_truncated: None,
-            file_ext: crate::metrics::path_file_ext(&param_path),
-            language: crate::metrics::path_language(&param_path),
-            ..Default::default()
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("analyze_module", "ok", dur)
+                .output_chars(text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .cache_hit(Some(module_tier != CacheTier::Miss))
+                .cache_tier(Some(module_tier.as_str()))
+                .file_ext(crate::metrics::path_file_ext(&param_path))
+                .language(crate::metrics::path_language(&param_path))
+                .build(),
+        );
         Ok(result)
     }
 
@@ -2873,25 +2727,14 @@ impl CodeAnalyzer {
             span.record("error", true);
             span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "edit_overwrite",
-                duration_ms: dur,
-                output_chars: 0,
-                param_path_depth: crate::metrics::path_component_count(&param_path),
-                max_depth: None,
-                result: "error",
-                error_type: Some("invalid_params".to_string()),
-                session_id: sid.clone(),
-                seq: Some(seq),
-                cache_hit: None,
-                cache_write_failure: None,
-                cache_tier: None,
-                exit_code: None,
-                timed_out: false,
-                output_truncated: None,
-                ..Default::default()
-            });
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(&param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid.clone())
+                    .seq(Some(seq))
+                    .build(),
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "path is a directory; cannot write to a directory".to_string(),
@@ -2914,25 +2757,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_overwrite",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
                     "path is a directory".to_string(),
@@ -2947,25 +2779,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_overwrite",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     "I/O error writing file; check file path and permissions".to_string(),
@@ -2991,25 +2812,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_overwrite",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     e.to_string(),
@@ -3024,25 +2834,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_overwrite",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     e.to_string(),
@@ -3084,25 +2883,14 @@ impl CodeAnalyzer {
             counts.remove(&(sid_str, canonical));
         }
 
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "edit_overwrite",
-            duration_ms: dur,
-            output_chars: text.len(),
-            param_path_depth: crate::metrics::path_component_count(&param_path),
-            max_depth: None,
-            result: "ok",
-            error_type: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: None,
-            cache_write_failure: None,
-            cache_tier: None,
-            exit_code: None,
-            timed_out: false,
-            output_truncated: None,
-            ..Default::default()
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("edit_overwrite", "ok", dur)
+                .output_chars(text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .build(),
+        );
         Ok(result)
     }
 
@@ -3182,25 +2970,14 @@ impl CodeAnalyzer {
             span.record("error", true);
             span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "edit_replace",
-                duration_ms: dur,
-                output_chars: 0,
-                param_path_depth: crate::metrics::path_component_count(&param_path),
-                max_depth: None,
-                result: "error",
-                error_type: Some("invalid_params".to_string()),
-                session_id: sid.clone(),
-                seq: Some(seq),
-                cache_hit: None,
-                cache_write_failure: None,
-                cache_tier: None,
-                exit_code: None,
-                timed_out: false,
-                output_truncated: None,
-                ..Default::default()
-            });
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(&param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid.clone())
+                    .seq(Some(seq))
+                    .build(),
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "path is a directory; cannot edit a directory".to_string(),
@@ -3246,26 +3023,15 @@ impl CodeAnalyzer {
                 let canonical = notfound_path.clone();
                 let tripped = increment_failure(&canonical);
                 if tripped {
-                    self.metrics_tx.send(crate::metrics::MetricEvent {
-                        ts: crate::metrics::unix_ms(),
-                        tool: "edit_replace",
-                        duration_ms: dur,
-                        output_chars: 0,
-                        param_path_depth: crate::metrics::path_component_count(&param_path),
-                        max_depth: None,
-                        result: "error",
-                        error_type: Some("invalid_params".to_string()),
-                        error_subtype: Some("stale_context".to_string()),
-                        session_id: sid.clone(),
-                        seq: Some(seq),
-                        cache_hit: None,
-                        cache_write_failure: None,
-                        cache_tier: None,
-                        exit_code: None,
-                        timed_out: false,
-                        output_truncated: None,
-                        ..Default::default()
-                    });
+                    self.metrics_tx.send(
+                        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                            .param_path_depth(crate::metrics::path_component_count(&param_path))
+                            .error_type(Some("invalid_params".to_string()))
+                            .error_subtype(Some("stale_context".to_string()))
+                            .session_id(sid.clone())
+                            .seq(Some(seq))
+                            .build(),
+                    );
                     return Ok(err_to_tool_result(ErrorData::new(
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         format!(
@@ -3280,26 +3046,15 @@ impl CodeAnalyzer {
                     )));
                 }
 
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    error_subtype: Some("not_found".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .error_subtype(Some("not_found".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
 
                 let message = if first_20_lines.is_empty() {
                     "old_text not found (0 matches). Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
@@ -3363,26 +3118,15 @@ impl CodeAnalyzer {
                 let canonical = ambiguous_path.clone();
                 let tripped = increment_failure(&canonical);
                 if tripped {
-                    self.metrics_tx.send(crate::metrics::MetricEvent {
-                        ts: crate::metrics::unix_ms(),
-                        tool: "edit_replace",
-                        duration_ms: dur,
-                        output_chars: 0,
-                        param_path_depth: crate::metrics::path_component_count(&param_path),
-                        max_depth: None,
-                        result: "error",
-                        error_type: Some("invalid_params".to_string()),
-                        error_subtype: Some("stale_context".to_string()),
-                        session_id: sid.clone(),
-                        seq: Some(seq),
-                        cache_hit: None,
-                        cache_write_failure: None,
-                        cache_tier: None,
-                        exit_code: None,
-                        timed_out: false,
-                        output_truncated: None,
-                        ..Default::default()
-                    });
+                    self.metrics_tx.send(
+                        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                            .param_path_depth(crate::metrics::path_component_count(&param_path))
+                            .error_type(Some("invalid_params".to_string()))
+                            .error_subtype(Some("stale_context".to_string()))
+                            .session_id(sid.clone())
+                            .seq(Some(seq))
+                            .build(),
+                    );
                     return Ok(err_to_tool_result(ErrorData::new(
                         rmcp::model::ErrorCode::INVALID_PARAMS,
                         format!(
@@ -3397,26 +3141,15 @@ impl CodeAnalyzer {
                     )));
                 }
 
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    error_subtype: Some("ambiguous".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .error_subtype(Some("ambiguous".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
 
                 let line_numbers_csv = match_lines
                     .iter()
@@ -3445,25 +3178,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("invalid_params".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
                     "path is a directory".to_string(),
@@ -3478,25 +3200,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     "I/O error editing file; check file path and permissions".to_string(),
@@ -3522,25 +3233,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     e.to_string(),
@@ -3555,25 +3255,14 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "edit_replace",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(&param_path),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_truncated: None,
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     e.to_string(),
@@ -3618,25 +3307,14 @@ impl CodeAnalyzer {
             counts.remove(&(sid_str, canonical));
         }
 
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "edit_replace",
-            duration_ms: dur,
-            output_chars: text.len(),
-            param_path_depth: crate::metrics::path_component_count(&param_path),
-            max_depth: None,
-            result: "ok",
-            error_type: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: None,
-            cache_write_failure: None,
-            cache_tier: None,
-            exit_code: None,
-            timed_out: false,
-            output_truncated: None,
-            ..Default::default()
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("edit_replace", "ok", dur)
+                .output_chars(text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .build(),
+        );
         Ok(result)
     }
 
@@ -3817,27 +3495,17 @@ impl CodeAnalyzer {
             span.record("error", true);
             span.record("error.type", "invalid_params");
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "exec_command",
-                duration_ms: dur,
-                output_chars: 0,
-                param_path_depth: crate::metrics::path_component_count(
-                    param_path.as_deref().unwrap_or(""),
-                ),
-                max_depth: None,
-                result: "error",
-                error_type: Some("invalid_params".to_string()),
-                session_id: sid,
-                seq: Some(seq),
-                cache_hit: None,
-                cache_write_failure: None,
-                cache_tier: None,
-                exit_code: None,
-                timed_out: false,
-                output_truncated: Some(false),
-                ..Default::default()
-            });
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(
+                        param_path.as_deref().unwrap_or(""),
+                    ))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid)
+                    .seq(Some(seq))
+                    .output_truncated(Some(false))
+                    .build(),
+            );
             return Ok(err_to_tool_result(e));
         }
 
@@ -3891,27 +3559,18 @@ impl CodeAnalyzer {
                 "timeout_secs": params.timeout_secs,
             }));
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(crate::metrics::MetricEvent {
-                ts: crate::metrics::unix_ms(),
-                tool: "exec_command",
-                duration_ms: dur,
-                output_chars: 0,
-                param_path_depth: crate::metrics::path_component_count(
-                    param_path.as_deref().unwrap_or(""),
-                ),
-                max_depth: None,
-                result: "error",
-                error_type: Some("timeout".to_string()),
-                session_id: sid,
-                seq: Some(seq),
-                cache_hit: None,
-                cache_write_failure: None,
-                cache_tier: None,
-                exit_code: None,
-                timed_out: true,
-                output_truncated: Some(false),
-                ..Default::default()
-            });
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(
+                        param_path.as_deref().unwrap_or(""),
+                    ))
+                    .error_type(Some("timeout".to_string()))
+                    .session_id(sid)
+                    .seq(Some(seq))
+                    .timed_out(true)
+                    .output_truncated(Some(false))
+                    .build(),
+            );
             return Ok(result);
         }
 
@@ -3992,58 +3651,40 @@ impl CodeAnalyzer {
                 span.record("error", true);
                 span.record("error.type", "internal_error");
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(crate::metrics::MetricEvent {
-                    ts: crate::metrics::unix_ms(),
-                    tool: "exec_command",
-                    duration_ms: dur,
-                    output_chars: 0,
-                    param_path_depth: crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ),
-                    max_depth: None,
-                    result: "error",
-                    error_type: Some("internal_error".to_string()),
-                    session_id: sid.clone(),
-                    seq: Some(seq),
-                    cache_hit: None,
-                    cache_write_failure: None,
-                    cache_tier: None,
-                    exit_code,
-                    timed_out: output.timed_out,
-                    output_truncated: Some(output_truncated),
-                    ..Default::default()
-                });
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(
+                            param_path.as_deref().unwrap_or(""),
+                        ))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .exit_code(exit_code)
+                        .timed_out(output.timed_out)
+                        .output_truncated(Some(output_truncated))
+                        .build(),
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
 
         result.structured_content = Some(structured);
         let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(crate::metrics::MetricEvent {
-            ts: crate::metrics::unix_ms(),
-            tool: "exec_command",
-            duration_ms: dur,
-            output_chars: text.len(),
-            param_path_depth: crate::metrics::path_component_count(
-                param_path.as_deref().unwrap_or(""),
-            ),
-            max_depth: None,
-            result: "ok",
-            error_type: None,
-            error_subtype: None,
-            session_id: sid,
-            seq: Some(seq),
-            cache_hit: None,
-            cache_write_failure: None,
-            cache_tier: None,
-            exit_code,
-            timed_out: output.timed_out,
-            output_truncated: Some(output_truncated),
-            language: None,
-            chars_threshold_breach: text.len() > 30_000,
-            file_ext: None,
-            filter_applied: output.filter_applied.clone(),
-        });
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("exec_command", "ok", dur)
+                .output_chars(text.len())
+                .param_path_depth(crate::metrics::path_component_count(
+                    param_path.as_deref().unwrap_or(""),
+                ))
+                .session_id(sid)
+                .seq(Some(seq))
+                .exit_code(exit_code)
+                .timed_out(output.timed_out)
+                .output_truncated(Some(output_truncated))
+                .chars_threshold_breach(text.len() > 30_000)
+                .filter_applied(output.filter_applied.clone())
+                .build(),
+        );
         Ok(result)
     }
 }
