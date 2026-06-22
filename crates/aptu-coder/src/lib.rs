@@ -48,6 +48,10 @@ pub(crate) const EDIT_STALE_THRESHOLD: u8 = 5;
 /// missed trip per session per path after an eviction cycle.
 pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
 
+/// Default drain timeout for the no-timeout path: prevents indefinite hang when a login
+/// shell profile blocks (macOS).
+const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 30;
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecCommandParams {
@@ -4168,8 +4172,33 @@ async fn run_with_timeout(
             }
         }
         _ => {
-            drain_task.await.ok();
-            post_exit.await
+            // Default drain timeout to prevent indefinite hang when no timeout_secs
+            // is provided (macOS login shell profile sourcing).
+            let drain_result = tokio::time::timeout(
+                std::time::Duration::from_secs(DEFAULT_DRAIN_TIMEOUT_SECS),
+                drain_task,
+            )
+            .await;
+
+            if drain_result.is_err() {
+                // Drain timed out: child is holding pipes open (e.g. login shell
+                // profile on macOS). Kill the child and abort the drain task so
+                // the receiver loop in exec_command does not hang on rx.recv().
+                drop(post_exit);
+                child.start_kill().ok();
+                drain_abort.abort();
+                let _ = child.wait().await;
+                ExecutionResult {
+                    exit_code: None,
+                    output_truncated: false,
+                    output_collection_error: Some(
+                        "drain timeout: child process held stdout/stderr open".to_string(),
+                    ),
+                    timed_out: false,
+                }
+            } else {
+                post_exit.await
+            }
         }
     }
 }
