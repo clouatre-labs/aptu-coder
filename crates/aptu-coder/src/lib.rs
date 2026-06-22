@@ -562,8 +562,11 @@ impl CodeAnalyzer {
     /// Emit a "received" metric event for the given tool name.
     /// Increments the session call sequence, locks the session ID, and sends
     /// the metric event via the channel. Returns the (seq, sid) pair for use
-    /// by the caller in exit metrics, preserving strict seq monotonicity.
+    /// by the caller in exit metrics, preserving per-call seq uniqueness.
     async fn emit_received_metric(&self, tool: &'static str) -> (u32, Option<String>) {
+        // Relaxed: per-session monotonic counter; unique allocation is all that is
+        // needed. No cross-thread happens-before required. Contrast:
+        // GLOBAL_SESSION_COUNTER uses SeqCst for cross-session uniqueness.
         let seq = self
             .session_call_seq
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
