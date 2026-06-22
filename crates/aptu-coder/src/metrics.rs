@@ -1094,6 +1094,10 @@ mod tests {
 ///
 /// Instruments are initialized once via OnceLock to avoid rebuilding them on every call.
 fn record_otel_metrics(event: &MetricEvent) {
+    // Skip OTEL recording for "received" events (duration_ms=0 would pollute latency histograms)
+    if event.result == "received" {
+        return;
+    }
     use opentelemetry::metrics::{Counter, Histogram};
     use opentelemetry::{KeyValue, global};
     use std::sync::OnceLock;

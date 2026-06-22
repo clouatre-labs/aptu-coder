@@ -1478,6 +1478,19 @@ impl CodeAnalyzer {
         let mut params = params.0;
         // Apply max_depth default: 3. Pass 0 for unlimited depth.
         params.max_depth = params.max_depth.or(Some(3));
+        let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "analyze_directory",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -1504,7 +1517,6 @@ impl CodeAnalyzer {
             }
         };
         let ct = context.ct.clone();
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let max_depth_val = params.max_depth;
         let seq = self
@@ -1698,6 +1710,19 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "analyze_file",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -1723,7 +1748,6 @@ impl CodeAnalyzer {
                 return Ok(err_to_tool_result(e));
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
             .session_call_seq
@@ -1998,6 +2022,19 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "analyze_symbol",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2024,7 +2061,6 @@ impl CodeAnalyzer {
             }
         };
         let ct = context.ct.clone();
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let max_depth_val = params.follow_depth;
         let seq = self
@@ -2462,6 +2498,19 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "analyze_module",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2487,7 +2536,6 @@ impl CodeAnalyzer {
                 return Ok(err_to_tool_result(e));
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
             .session_call_seq
@@ -2806,6 +2854,19 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "edit_overwrite",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2850,7 +2911,6 @@ impl CodeAnalyzer {
                 }
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
             .session_call_seq
@@ -3118,6 +3178,19 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "edit_replace",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -3162,7 +3235,6 @@ impl CodeAnalyzer {
                 }
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let seq = self
             .session_call_seq
@@ -3655,6 +3727,18 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool: "exec_command",
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
         let params = params.0;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
