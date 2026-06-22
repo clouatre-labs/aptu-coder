@@ -51,7 +51,8 @@ pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
 /// Default drain timeout for the no-timeout path: prevents indefinite hang when a login
 /// shell profile blocks (macOS).
 // No longer used after wait/drain order inversion (500ms grace inlined).
-const _DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 0;
+/// Default drain timeout in milliseconds for post-exit pipe drain (500ms).
+const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -67,6 +68,14 @@ pub struct ExecCommandParams {
     /// A value of 0 or None means no timeout (unlimited execution).
     #[serde(default)]
     pub timeout_secs: Option<i64>,
+    /// Drain timeout in milliseconds after the child process exits. When the child
+    /// exits but a background subprocess holds pipes open, the drain collects
+    /// buffered output for this many milliseconds before returning
+    /// `output_truncated: true`. Default: 500ms when omitted or 0.
+    /// Positive values override the default. Negative values are rejected with
+    /// INVALID_PARAMS.
+    #[serde(default)]
+    pub drain_timeout_secs: Option<i64>,
 }
 
 impl ExecCommandParams {
@@ -3629,7 +3638,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB. Set working_dir to the target directory; write the command using relative paths only. Commands run inside working_dir; omit `cd`. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). Note: on macOS, login shell profile sourcing adds ~100-200ms latency per call. For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 2000 lines; stdout at 30 KB, stderr at 10 KB. Set working_dir to the target directory; write commands using relative paths only. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). Note: on macOS, login shell profile sourcing adds ~100-200ms latency per call. For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -3805,6 +3814,29 @@ impl CodeAnalyzer {
             return Ok(err_to_tool_result(e));
         }
 
+        // Validate drain_timeout_secs: negative values are invalid.
+        if let Some(n) = params.drain_timeout_secs
+            && n < 0
+        {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
+            return Ok(err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "drain_timeout_secs must be >= 0".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "use a non-negative value or omit it",
+                )),
+            )));
+        }
+
+        // Compute effective drain timeout
+        let drain_dur = match params.drain_timeout_secs {
+            Some(n) if n > 0 => std::time::Duration::from_millis(n as u64),
+            _ => std::time::Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
+        };
+
         // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
         let resolved_path_str = self.resolved_path.as_ref().as_deref();
         let output = run_exec_impl(
@@ -3815,6 +3847,7 @@ impl CodeAnalyzer {
             resolved_path_str,
             &self.filter_table,
             params.timeout_secs,
+            drain_dur,
         )
         .await;
 
@@ -4059,6 +4092,7 @@ async fn run_with_timeout(
     mut child: tokio::process::Child,
     tx: tokio::sync::mpsc::UnboundedSender<(bool, String)>,
     timeout_secs: Option<i64>,
+    drain_timeout: std::time::Duration,
 ) -> ExecutionResult {
     use tokio::io::AsyncBufReadExt as _;
     use tokio_stream::StreamExt as TokioStreamExt;
@@ -4120,13 +4154,12 @@ async fn run_with_timeout(
                 }
             };
 
-            // Drain remaining buffered output with 500ms grace (outside user timeout).
+            // Drain remaining buffered output with drain_timeout grace (outside user timeout).
             let drain_truncated = if timed_out {
                 drain_abort.abort();
                 false
             } else {
-                match tokio::time::timeout(std::time::Duration::from_millis(500), drain_task).await
-                {
+                match tokio::time::timeout(drain_timeout, drain_task).await {
                     Ok(_) => false,
                     Err(_) => {
                         drain_abort.abort();
@@ -4150,10 +4183,9 @@ async fn run_with_timeout(
         }
         _ => {
             // No user timeout: wait for child exit first, then drain buffered output
-            // with a short grace period (500ms) for background subprocesses.
+            // with a short grace period (drain_timeout) for background subprocesses.
             child.wait().await.ok();
-            let drain_result =
-                tokio::time::timeout(std::time::Duration::from_millis(500), drain_task).await;
+            let drain_result = tokio::time::timeout(drain_timeout, drain_task).await;
 
             let drain_truncated = drain_result.is_err();
             if drain_truncated {
@@ -4187,6 +4219,7 @@ async fn run_exec_impl(
     resolved_path: Option<&str>,
     filter_table: &Arc<Vec<CompiledRule>>,
     timeout_secs: Option<i64>,
+    drain_timeout: std::time::Duration,
 ) -> ShellOutput {
     // Inject --no-stat for git pull if not already present
     let command = maybe_inject_no_stat(&command);
@@ -4228,7 +4261,7 @@ async fn run_exec_impl(
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, String)>();
 
-    let exec_result = run_with_timeout(child, tx, timeout_secs).await;
+    let exec_result = run_with_timeout(child, tx, timeout_secs, drain_timeout).await;
     let exit_code = exec_result.exit_code;
     let mut output_truncated = exec_result.output_truncated;
     let output_collection_error = exec_result.output_collection_error;
