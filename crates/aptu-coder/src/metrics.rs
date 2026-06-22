@@ -68,6 +68,136 @@ pub struct MetricEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
 }
+/// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
+#[derive(Debug, Default)]
+pub(crate) struct MetricEventBuilder {
+    ts: u64,
+    tool: &'static str,
+    duration_ms: u64,
+    output_chars: usize,
+    param_path_depth: usize,
+    max_depth: Option<u32>,
+    result: &'static str,
+    error_type: Option<String>,
+    error_subtype: Option<String>,
+    session_id: Option<String>,
+    seq: Option<u32>,
+    cache_hit: Option<bool>,
+    cache_write_failure: Option<bool>,
+    cache_tier: Option<&'static str>,
+    exit_code: Option<i32>,
+    timed_out: bool,
+    output_truncated: Option<bool>,
+    chars_threshold_breach: bool,
+    file_ext: Option<&'static str>,
+    filter_applied: Option<String>,
+    language: Option<String>,
+}
+
+impl MetricEventBuilder {
+    pub fn new(tool: &'static str, result: &'static str, duration_ms: u64) -> Self {
+        Self {
+            ts: unix_ms(),
+            tool,
+            result,
+            duration_ms,
+            ..Self::default()
+        }
+    }
+    pub fn output_chars(mut self, v: usize) -> Self {
+        self.output_chars = v;
+        self
+    }
+    pub fn param_path_depth(mut self, v: usize) -> Self {
+        self.param_path_depth = v;
+        self
+    }
+    pub fn max_depth(mut self, v: Option<u32>) -> Self {
+        self.max_depth = v;
+        self
+    }
+    pub fn error_type(mut self, v: Option<String>) -> Self {
+        self.error_type = v;
+        self
+    }
+    pub fn error_subtype(mut self, v: Option<String>) -> Self {
+        self.error_subtype = v;
+        self
+    }
+    pub fn session_id(mut self, v: Option<String>) -> Self {
+        self.session_id = v;
+        self
+    }
+    pub fn seq(mut self, v: Option<u32>) -> Self {
+        self.seq = v;
+        self
+    }
+    pub fn cache_hit(mut self, v: Option<bool>) -> Self {
+        self.cache_hit = v;
+        self
+    }
+    pub fn cache_write_failure(mut self, v: Option<bool>) -> Self {
+        self.cache_write_failure = v;
+        self
+    }
+    pub fn cache_tier(mut self, v: Option<&'static str>) -> Self {
+        self.cache_tier = v;
+        self
+    }
+    pub fn exit_code(mut self, v: Option<i32>) -> Self {
+        self.exit_code = v;
+        self
+    }
+    pub fn timed_out(mut self, v: bool) -> Self {
+        self.timed_out = v;
+        self
+    }
+    pub fn output_truncated(mut self, v: Option<bool>) -> Self {
+        self.output_truncated = v;
+        self
+    }
+    pub fn chars_threshold_breach(mut self, v: bool) -> Self {
+        self.chars_threshold_breach = v;
+        self
+    }
+    pub fn file_ext(mut self, v: Option<&'static str>) -> Self {
+        self.file_ext = v;
+        self
+    }
+    pub fn filter_applied(mut self, v: Option<String>) -> Self {
+        self.filter_applied = v;
+        self
+    }
+    pub fn language(mut self, v: Option<String>) -> Self {
+        self.language = v;
+        self
+    }
+    pub fn build(self) -> MetricEvent {
+        MetricEvent {
+            ts: self.ts,
+            tool: self.tool,
+            duration_ms: self.duration_ms,
+            output_chars: self.output_chars,
+            param_path_depth: self.param_path_depth,
+            max_depth: self.max_depth,
+            result: self.result,
+            error_type: self.error_type,
+            error_subtype: self.error_subtype,
+            session_id: self.session_id,
+            seq: self.seq,
+            cache_hit: self.cache_hit,
+            cache_write_failure: self.cache_write_failure,
+            cache_tier: self.cache_tier,
+            exit_code: self.exit_code,
+            timed_out: self.timed_out,
+            output_truncated: self.output_truncated,
+            chars_threshold_breach: self.chars_threshold_breach,
+            file_ext: self.file_ext,
+            filter_applied: self.filter_applied,
+            language: self.language,
+        }
+    }
+}
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
 #[derive(Clone)]
