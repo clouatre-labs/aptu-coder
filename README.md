@@ -241,7 +241,7 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | Variable | Default | Description |
 |---|---|---|
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
-| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 on-disk call-graph cache used by `analyze_symbol`. |
+| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 on-disk call-graph cache used by `analyze_symbol`. Created automatically if it does not exist. |
 | `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 disk cache entirely. |
 | `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | LRU cache size for `exec_command` results. |
 | `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result cache. |
