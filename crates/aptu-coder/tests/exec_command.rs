@@ -1008,3 +1008,92 @@ async fn test_timeout_not_fires_for_immediate_command_without_timeout_secs() {
         .await
         .expect("test timed out (harness guard)");
 }
+
+#[tokio::test]
+async fn test_drain_timeout_negative_rejected() {
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo hello",
+            "drain_timeout_secs": -1
+        }))
+        .await;
+        assert!(
+            resp["result"]["isError"].as_bool().unwrap_or(false),
+            "expected isError: {resp}"
+        );
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out");
+}
+
+#[tokio::test]
+async fn test_drain_timeout_zero_uses_default() {
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo hello",
+            "drain_timeout_secs": 0
+        }))
+        .await;
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("Exit code: 0"),
+            "expected exit code 0: {resp}"
+        );
+        assert!(
+            resp["result"]["structuredContent"]["stdout"]
+                .as_str()
+                .unwrap_or("")
+                .contains("hello"),
+            "stdout should contain hello: {resp}"
+        );
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out");
+}
+
+#[tokio::test]
+async fn test_drain_timeout_positive_happy_path() {
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo hello",
+            "drain_timeout_secs": 100
+        }))
+        .await;
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(text.contains("Exit code: 0"), "exit code: {resp}");
+        let sc = &resp["result"]["structuredContent"];
+        assert!(
+            sc["stdout"].as_str().unwrap_or("").contains("hello"),
+            "stdout: {resp}"
+        );
+        assert_eq!(sc["output_truncated"], false, "truncated: {resp}");
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
+        .await
+        .expect("test timed out");
+}
+
+#[tokio::test]
+async fn test_drain_timeout_background_pipe_holder() {
+    let test_fut = async {
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": "echo main done; sleep 30 &",
+            "drain_timeout_secs": 1000
+        }))
+        .await;
+        let sc = &resp["result"]["structuredContent"];
+        assert!(
+            sc["output_truncated"].as_bool().unwrap_or(false),
+            "expected truncation: {resp}"
+        );
+        assert!(
+            sc["stdout"].as_str().unwrap_or("").contains("main done"),
+            "stdout: {resp}"
+        );
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(3), test_fut)
+        .await
+        .expect("test timed out");
+}
