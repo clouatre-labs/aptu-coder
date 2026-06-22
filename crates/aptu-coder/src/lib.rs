@@ -4184,14 +4184,14 @@ async fn run_with_timeout(
         _ => {
             // No user timeout: wait for child exit first, then drain buffered output
             // with a short grace period (drain_timeout) for background subprocesses.
-            child.wait().await.ok();
+            let exit_status = child.wait().await.ok();
             let drain_result = tokio::time::timeout(drain_timeout, drain_task).await;
 
             let drain_truncated = drain_result.is_err();
             if drain_truncated {
                 drain_abort.abort();
             }
-            let exit_code = child.wait().await.ok().and_then(|s| s.code());
+            let exit_code = exit_status.and_then(|s| s.code());
             let ocerr = if drain_truncated {
                 Some("post-exit drain timeout: background process held pipes".to_string())
             } else {

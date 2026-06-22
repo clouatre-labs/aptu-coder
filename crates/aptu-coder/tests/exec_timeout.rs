@@ -6,6 +6,25 @@ mod common;
 use common::call_tool_raw;
 use std::time::Duration;
 
+/// No-timeout branch: "exit 1" must return exit_code == 1.
+#[tokio::test]
+async fn test_exec_exit_1_no_timeout() {
+    let fut = async {
+        let resp = call_tool_raw("exec_command", serde_json::json!({"command": "exit 1"})).await;
+
+        let sc = &resp["result"]["structuredContent"];
+        assert_eq!(
+            sc["exit_code"].as_i64(),
+            Some(1),
+            "expected exit_code=1 for 'exit 1': {sc}"
+        );
+    };
+
+    tokio::time::timeout(Duration::from_secs(10), fut)
+        .await
+        .expect("exec exit 1 test did not complete within 10s");
+}
+
 /// Regression test: the user-timeout path (timeout_secs = 30) must
 /// not hang indefinitely when the child process holds stdout open (e.g. a
 /// macOS login shell profile that blocks).
