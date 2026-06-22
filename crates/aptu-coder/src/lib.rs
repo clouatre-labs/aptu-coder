@@ -50,7 +50,8 @@ pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
 
 /// Default drain timeout for the no-timeout path: prevents indefinite hang when a login
 /// shell profile blocks (macOS).
-const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 30;
+// No longer used after wait/drain order inversion (500ms grace inlined).
+const _DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 0;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -3994,32 +3995,19 @@ fn build_exec_command(
     stdin_present: bool,
     resolved_path: Option<&str>,
 ) -> tokio::process::Command {
-    // On macOS the login shell (-l) already sources the profile PATH; suppress the
-    // unused-variable lint that fires when the non-macOS injection block is cfg'd out.
-    #[cfg(target_os = "macos")]
-    let _ = resolved_path;
     let shell = resolve_shell();
     let mut cmd = tokio::process::Command::new(shell);
 
-    #[cfg(target_os = "macos")]
-    {
-        // On macOS, use login shell (-l) to source the user profile for PATH resolution.
-        cmd.args(["-l", "-c", command]);
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        cmd.arg("-c").arg(command);
-    }
+    // Unify command invocation: use -c on all platforms.
+    // On macOS, the resolved PATH from the startup-captured login shell profile
+    // is injected below, so -l is not needed per-command.
+    cmd.arg("-c").arg(command);
 
     if let Some(wd) = working_dir_path {
         cmd.current_dir(wd);
     }
 
-    // Inject resolved login shell PATH if available (non-macOS only).
-    // On macOS the login shell (-l) sources the profile which includes the live PATH,
-    // so we skip the stale snapshot injection to avoid overriding it.
-    #[cfg(not(target_os = "macos"))]
+    // Inject resolved login shell PATH snapshot on all platforms.
     if let Some(path) = resolved_path {
         cmd.env("PATH", path);
     }
@@ -4112,92 +4100,76 @@ async fn run_with_timeout(
 
     let drain_abort = drain_task.abort_handle();
 
-    // Common post-exit drain handling (500ms grace for background processes)
-    let post_exit = async {
-        let (status, drain_truncated) =
-            match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await {
-                Ok(Ok(s)) => (Some(s), false),
+    match timeout_secs {
+        Some(secs) if secs > 0 => {
+            // User timeout wraps only child.wait(); drain follows outside the timeout.
+            let timeout_secs_u64 = u64::try_from(secs).unwrap_or(u64::MAX);
+            let (exit_code, timed_out) = match tokio::time::timeout(
+                std::time::Duration::from_secs(timeout_secs_u64),
+                child.wait(),
+            )
+            .await
+            {
+                Ok(Ok(s)) => (s.code(), false),
                 Ok(Err(_)) => (None, false),
-                Err(_) => {
+                Err(_elapsed) => {
                     child.start_kill().ok();
+                    // Reap the zombie so the OS does not accumulate a defunct child.
                     let _ = child.wait().await;
                     (None, true)
                 }
             };
-        let exit_code = status.and_then(|s| s.code());
-        let ocerr = if drain_truncated {
-            Some("post-exit drain timeout: background process held pipes".to_string())
-        } else {
-            None
-        };
-        ExecutionResult {
-            exit_code,
-            output_truncated: drain_truncated,
-            output_collection_error: ocerr,
-            timed_out: false,
-        }
-    };
 
-    match timeout_secs {
-        Some(secs) if secs > 0 => {
-            // Wrap both drain and wait in the timeout
-            let exec_future = async {
-                drain_task.await.ok();
-                post_exit.await
-            };
-
-            let timeout_secs_u64 = u64::try_from(secs).unwrap_or(u64::MAX);
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs_u64),
-                exec_future,
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_elapsed) => {
-                    // Kill the child process. Ignore errors: the process may have already exited.
-                    child.start_kill().ok();
-                    // NOTE: abort is a no-op if the task already completed; tokio guarantees
-                    //       that calling abort on a completed JoinHandle is safe.
-                    drain_abort.abort();
-                    // Reap the zombie so the OS does not accumulate a defunct child.
-                    let _ = child.wait().await;
-                    ExecutionResult {
-                        exit_code: None,
-                        output_truncated: false,
-                        output_collection_error: None,
-                        timed_out: true,
+            // Drain remaining buffered output with 500ms grace (outside user timeout).
+            let drain_truncated = if timed_out {
+                drain_abort.abort();
+                false
+            } else {
+                match tokio::time::timeout(std::time::Duration::from_millis(500), drain_task).await
+                {
+                    Ok(_) => false,
+                    Err(_) => {
+                        drain_abort.abort();
+                        true
                     }
                 }
+            };
+
+            let ocerr = if drain_truncated {
+                Some("post-exit drain timeout: background process held pipes".to_string())
+            } else {
+                None
+            };
+
+            ExecutionResult {
+                exit_code,
+                output_truncated: drain_truncated,
+                output_collection_error: ocerr,
+                timed_out,
             }
         }
         _ => {
-            // Default drain timeout to prevent indefinite hang when no timeout_secs
-            // is provided (macOS login shell profile sourcing).
-            let drain_result = tokio::time::timeout(
-                std::time::Duration::from_secs(DEFAULT_DRAIN_TIMEOUT_SECS),
-                drain_task,
-            )
-            .await;
+            // No user timeout: wait for child exit first, then drain buffered output
+            // with a short grace period (500ms) for background subprocesses.
+            child.wait().await.ok();
+            let drain_result =
+                tokio::time::timeout(std::time::Duration::from_millis(500), drain_task).await;
 
-            if drain_result.is_err() {
-                // Drain timed out: child is holding pipes open (e.g. login shell
-                // profile on macOS). Kill the child and abort the drain task so
-                // the receiver loop in exec_command does not hang on rx.recv().
-                drop(post_exit);
-                child.start_kill().ok();
+            let drain_truncated = drain_result.is_err();
+            if drain_truncated {
                 drain_abort.abort();
-                let _ = child.wait().await;
-                ExecutionResult {
-                    exit_code: None,
-                    output_truncated: false,
-                    output_collection_error: Some(
-                        "drain timeout: child process held stdout/stderr open".to_string(),
-                    ),
-                    timed_out: false,
-                }
+            }
+            let exit_code = child.wait().await.ok().and_then(|s| s.code());
+            let ocerr = if drain_truncated {
+                Some("post-exit drain timeout: background process held pipes".to_string())
             } else {
-                post_exit.await
+                None
+            };
+            ExecutionResult {
+                exit_code,
+                output_truncated: drain_truncated,
+                output_collection_error: ocerr,
+                timed_out: false,
             }
         }
     }
@@ -4261,6 +4233,8 @@ async fn run_exec_impl(
     let mut output_truncated = exec_result.output_truncated;
     let output_collection_error = exec_result.output_collection_error;
     let timed_out = exec_result.timed_out;
+
+    rx.close();
 
     let mut lines: Vec<(bool, String)> = Vec::new();
     while let Some(item) = rx.recv().await {
@@ -5665,10 +5639,14 @@ mod tests {
         let resolved_path = Some("/usr/local/bin:/usr/bin:/bin");
         let cmd = build_exec_command("echo test", None, false, resolved_path);
 
-        // Act: verify the command was created without panic
-        // (We cannot directly inspect env vars on the Command object,
-        // but we verify no panic occurred and the command is valid)
+        // Act: verify the command was created without panic and inspect args
         let cmd_str = format!("{:?}", cmd);
+
+        // Assert: -l flag must NOT be present (platform unification)
+        assert!(
+            !cmd_str.contains("-l"),
+            "build_exec_command must not use -l on any platform"
+        );
 
         // Assert: command should be created successfully
         assert!(
@@ -5682,8 +5660,14 @@ mod tests {
         // Arrange: call build_exec_command with None resolved_path
         let cmd = build_exec_command("echo test", None, false, None);
 
-        // Act: verify the command was created without panic
+        // Act: verify the command was created without panic and inspect args
         let cmd_str = format!("{:?}", cmd);
+
+        // Assert: -l flag must NOT be present (platform unification)
+        assert!(
+            !cmd_str.contains("-l"),
+            "build_exec_command must not use -l on any platform"
+        );
 
         // Assert: command should be created successfully even with None
         assert!(
