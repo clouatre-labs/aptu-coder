@@ -31,27 +31,14 @@ Dependency freshness: new Cargo.lock entries must be >=7 days old; bypass with S
 
 ## Observability
 
-By default, the server operates with noop telemetry providers (zero overhead). Telemetry export is opt-in via environment variables:
+Two parallel telemetry channels; neither blocks tool execution.
 
-- `OTEL_EXPORTER_OTLP_ENDPOINT` -- Set to an OTLP HTTP endpoint URL (e.g., `http://localhost:4318`) to enable export of traces, logs, and metrics via OTLP/HTTP. When unset, the OpenTelemetry SDK is initialized with noop providers incurring no cost. Exports are asynchronous and do not block tool execution.
-
-- `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` -- Reserved per OpenTelemetry GenAI semantic conventions for opt-in capture of tool arguments and results. aptu-coder does not implement this: individual bounded parameters (path, symbol, depth) are recorded as span attributes instead of serializing the full tool call arguments or results, ensuring credentials and file content are never emitted.
-
-- `XDG_DATA_HOME` -- Base directory for the always-on JSONL metrics channel. The server writes daily-rotated metrics to `$XDG_DATA_HOME/aptu-coder/` and retains them for 30 days. Defaults to `~/.local/share` if unset.
-
-**Instrumentation:** Each tool invocation is wrapped in a span carrying OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`). W3C Trace Context is extracted from the MCP `_meta` field, allowing MCP clients to propagate their trace context so tool spans become children in a distributed trace.
-
-**Metrics:**
-- JSONL channel: always-on, fire-and-forget, zero latency cost. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the metric record schema and 30-day retention policy.
-- OpenTelemetry: optional, parallel to JSONL. Configured at server init; no runtime reconfiguration.
-
-For span attribute policy and the never-record list, see [OBSERVABILITY.md](OBSERVABILITY.md) at the repository root.
+- **JSONL (always-on):** daily-rotated files at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl`; 30-day retention. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for schema and span attribute policy.
+- **OpenTelemetry (opt-in):** set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable OTLP/HTTP export; noop providers when unset. W3C Trace Context extracted from MCP `_meta` so tool spans appear as children in the calling agent's distributed trace.
 
 ### JSONL Metrics Analysis
 
-Daily-rotated JSONL files live at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/share/aptu-coder/`). See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full field reference.
-
-Key schema fields: `ts` (u64), `tool` (string), `duration_ms` (u64), `output_chars` (usize), `result` (string), `error_type` (nullable), `session_id` (nullable), `seq` (nullable), `cache_hit` (nullable), `cache_tier` (nullable), `exit_code` (nullable), `timed_out` (bool), `language` (nullable string), `file_ext` (nullable string), `filter_applied` (nullable string), `output_truncated` (nullable bool).
+Files: `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/share/aptu-coder/`). Full schema in [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md).
 
 Five validated jq one-liners (run from `~/.local/share/aptu-coder/`). Always `cd` there first -- globs expand against CWD and silently match nothing from a different directory.
 
