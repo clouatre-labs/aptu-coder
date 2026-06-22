@@ -3793,6 +3793,9 @@ impl CodeAnalyzer {
         } else {
             (params.command.clone(), working_dir_path)
         };
+        // Inject --no-stat for git pull if not already present
+        let command = maybe_inject_no_stat(&command);
+        span.record("command", &command);
 
         let param_path = params.working_dir.clone();
 
@@ -3813,6 +3816,28 @@ impl CodeAnalyzer {
         if let Err(e) = validation::validate_heredocs(&command) {
             span.record("error", true);
             span.record("error.type", "invalid_params");
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            self.metrics_tx.send(crate::metrics::MetricEvent {
+                ts: crate::metrics::unix_ms(),
+                tool: "exec_command",
+                duration_ms: dur,
+                output_chars: 0,
+                param_path_depth: crate::metrics::path_component_count(
+                    param_path.as_deref().unwrap_or(""),
+                ),
+                max_depth: None,
+                result: "error",
+                error_type: Some("invalid_params".to_string()),
+                session_id: sid,
+                seq: Some(seq),
+                cache_hit: None,
+                cache_write_failure: None,
+                cache_tier: None,
+                exit_code: None,
+                timed_out: false,
+                output_truncated: Some(false),
+                ..Default::default()
+            });
             return Ok(err_to_tool_result(e));
         }
 
@@ -3911,10 +3936,10 @@ impl CodeAnalyzer {
             format!("Output:\n{}", output.interleaved)
         };
 
-        // Apply combined output size limit (SIZE_LIMIT = 50k chars). Per-stream caps
+        // Apply combined output size limit (SIZE_LIMIT = 5_000 bytes). Per-stream caps
         // (MAX_STDOUT_BYTES = 30k stdout, MAX_STDERR_BYTES = 10k stderr) already fired in
         // handle_output_persist; this is the safety net for the interleaved assembly which
-        // can still reach up to ~40k chars from per-stream content plus headers and formatting.
+        // can still reach up to ~40k bytes from per-stream content plus headers and formatting.
         let mut combined_truncated = false;
         let truncated_output_text = if output_text.len() > SIZE_LIMIT {
             combined_truncated = true;
@@ -4223,9 +4248,6 @@ async fn run_exec_impl(
     timeout_secs: Option<i64>,
     drain_timeout: std::time::Duration,
 ) -> ShellOutput {
-    // Inject --no-stat for git pull if not already present
-    let command = maybe_inject_no_stat(&command);
-
     let mut cmd = build_exec_command(
         &command,
         working_dir_path.as_ref(),
