@@ -287,8 +287,8 @@ pub(crate) fn load_filter_table(cwd: &Path) -> Vec<CompiledRule> {
 
 /// Inject --no-stat flag for git pull if not already present.
 pub(crate) fn maybe_inject_no_stat(command: &str) -> String {
-    if command.starts_with("git")
-        && command.contains("pull")
+    if command.starts_with("git ")
+        && command.split_whitespace().nth(1) == Some("pull")
         && !command.contains("--stat")
         && !command.contains("--no-stat")
         && !command.contains("--verbose")
