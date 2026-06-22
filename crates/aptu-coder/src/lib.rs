@@ -559,6 +559,29 @@ impl CodeAnalyzer {
         }
     }
 
+    /// Emit a "received" metric event for the given tool name.
+    /// Increments the session call sequence, locks the session ID, and sends
+    /// the metric event via the channel. Returns the (seq, sid) pair for use
+    /// by the caller in exit metrics, preserving per-call seq uniqueness.
+    async fn emit_received_metric(&self, tool: &'static str) -> (u32, Option<String>) {
+        // Relaxed: per-session monotonic counter; unique allocation is all that is
+        // needed. No cross-thread happens-before required. Contrast:
+        // GLOBAL_SESSION_COUNTER uses SeqCst for cross-session uniqueness.
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(crate::metrics::MetricEvent {
+            tool,
+            result: "received",
+            session_id: sid.clone(),
+            seq: Some(seq),
+            duration_ms: 0,
+            ..Default::default()
+        });
+        (seq, sid)
+    }
+
     /// Private helper: Extract analysis logic for overview mode (`analyze_directory`).
     /// Returns the complete analysis output and a cache_hit bool after spawning and monitoring progress.
     /// Cancels the blocking task when `ct` is triggered; returns an error on cancellation.
@@ -1478,6 +1501,8 @@ impl CodeAnalyzer {
         let mut params = params.0;
         // Apply max_depth default: 3. Pass 0 for unlimited depth.
         params.max_depth = params.max_depth.or(Some(3));
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("analyze_directory").await;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -1504,13 +1529,8 @@ impl CodeAnalyzer {
             }
         };
         let ct = context.ct.clone();
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let max_depth_val = params.max_depth;
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Call handler for analysis and progress tracking
         let progress_token = context.meta.get_progress_token();
@@ -1698,6 +1718,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("analyze_file").await;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -1723,12 +1745,7 @@ impl CodeAnalyzer {
                 return Ok(err_to_tool_result(e));
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Check if path is a directory (not allowed for analyze_file)
         if std::path::Path::new(&params.path).is_dir() {
@@ -1998,6 +2015,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("analyze_symbol").await;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2024,13 +2043,8 @@ impl CodeAnalyzer {
             }
         };
         let ct = context.ct.clone();
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
         let max_depth_val = params.follow_depth;
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Check if path is a file (not allowed for analyze_symbol)
         if std::path::Path::new(&params.path).is_file() {
@@ -2462,6 +2476,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("analyze_module").await;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2487,12 +2503,7 @@ impl CodeAnalyzer {
                 return Ok(err_to_tool_result(e));
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Issue 340: Guard against directory paths
         if std::fs::metadata(&params.path)
@@ -2806,6 +2817,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("edit_overwrite").await;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -2850,12 +2863,7 @@ impl CodeAnalyzer {
                 }
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Guard against directory paths
         if std::fs::metadata(&resolved_path)
@@ -3118,6 +3126,8 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("edit_replace").await;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
@@ -3162,12 +3172,7 @@ impl CodeAnalyzer {
                 }
             }
         };
-        let t_start = std::time::Instant::now();
         let param_path = params.path.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Guard against directory paths
         if std::fs::metadata(&resolved_path)
@@ -3655,6 +3660,7 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let t_start = std::time::Instant::now();
+        let (seq, sid) = self.emit_received_metric("exec_command").await;
         let params = params.0;
         // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
@@ -3789,10 +3795,6 @@ impl CodeAnalyzer {
         };
 
         let param_path = params.working_dir.clone();
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
 
         // Validate stdin size cap (1 MB)
         if let Some(ref stdin_content) = params.stdin
