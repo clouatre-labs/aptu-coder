@@ -51,7 +51,7 @@ For span attribute policy and the never-record list, see [OBSERVABILITY.md](OBSE
 
 Daily-rotated JSONL files live at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/share/aptu-coder/`). See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full field reference.
 
-Key schema fields: `ts` (u64), `tool` (string), `duration_ms` (u64), `output_chars` (usize), `result` (string), `error_type` (nullable), `session_id` (nullable), `seq` (nullable), `cache_hit` (nullable), `cache_tier` (nullable), `exit_code` (nullable), `timed_out` (bool).
+Key schema fields: `ts` (u64), `tool` (string), `duration_ms` (u64), `output_chars` (usize), `result` (string), `error_type` (nullable), `session_id` (nullable), `seq` (nullable), `cache_hit` (nullable), `cache_tier` (nullable), `exit_code` (nullable), `timed_out` (bool), `language` (nullable string), `file_ext` (nullable string), `filter_applied` (nullable string), `output_truncated` (nullable bool).
 
 Five validated jq one-liners (run from `~/.local/share/aptu-coder/`). Always `cd` there first -- globs expand against CWD and silently match nothing from a different directory.
 
@@ -92,12 +92,16 @@ Canonical parameter lists live in the `types` module (`crates/aptu-coder-core/sr
 
 - `summary=true` and `cursor` are mutually exclusive; passing both returns INVALID_PARAMS.
 - `impl_only=true` restricts `analyze_symbol` callers to `impl Trait for Type` blocks; returns INVALID_PARAMS for non-Rust directories.
-- `analyze_module` supports `path` only -- pagination, summary, force, and verbose are not supported.
+- `analyze_module` supports `path` only -- pagination and summary are not supported.
 - `import_lookup=true` on `analyze_symbol` requires a non-empty `symbol` (the module path to search for); returns INVALID_PARAMS if symbol is empty. Mutually exclusive with normal call-graph lookup.
 - `def_use=true` on `analyze_symbol` triggers def-use extraction; `def_use_sites` is populated in `structuredContent` only when paginating in DefUse cursor mode, not on the initial call (the handler clears it on the first response and bootstraps a cursor to page through def-use results).
 - `git_ref` is supported on both `analyze_directory` and `analyze_symbol` to restrict analysis to files changed relative to a git ref.
 - `working_dir` on `edit_overwrite` and `edit_replace` sets the base directory for path resolution (default: server CWD). The resolved target path must be within working_dir.
-- `APTU_CODER_PROFILE` (env var) or `io.clouatre-labs/profile` (MCP `_meta`) activates a tool subset: `edit` disables all analyze_* tools (3 tools); `analyze` disables edit_* tools (5 tools); absent/unknown enables all 7 tools. By default, all 7 tools are available.
+- `edit_replace` accepts empty `new_text` to delete the matched block. CRLF line endings in `old_text` are normalized to LF before matching. A stale-context circuit breaker fires after 5 consecutive `not_found` or `ambiguous` failures on the same (session_id, path) pair, returning a directive error; the map is capped at 1024 entries.
+- `exec_command` accepts an optional `timeout_secs` (integer >= 0; 0 or omitted means no limit). When the child process exceeds the limit it is killed; `timed_out: true` is set in the response and `exit_code` is null. Heredoc syntax with a missing closing delimiter is rejected before spawn.
+- `analyze_symbol` uses an L2 on-disk call-graph cache in addition to the L1 in-memory LRU. Configure with `APTU_CODER_DISK_CACHE_DIR` (default: `$XDG_DATA_HOME/aptu-coder/analysis-cache`); disable with `APTU_CODER_DISK_CACHE_DISABLED=1`.
+- `call_frequency` on `analyze_symbol` is filtered out when the `Functions` field is not in the projected fields set.
+- `APTU_CODER_PROFILE` (env var) or `io.clouatre-labs/profile` (MCP `_meta`) activates a tool subset: `edit` disables all analyze_* tools (4 tools: analyze_directory, analyze_file, analyze_module, analyze_symbol); `analyze` disables edit_* tools (5 tools: edit_overwrite, edit_replace, exec_command, and aliases); absent/unknown enables all 7 tools. By default, all 7 tools are available.
 
 Escalate to `analyze_symbol` when: (1) you need all callers of a function, (2) you need the full call chain for a symbol, (3) you need all files importing a module path (use `import_lookup=true`).
 

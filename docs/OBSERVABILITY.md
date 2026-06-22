@@ -42,7 +42,8 @@ Each line in the JSONL file is one JSON object:
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
 | `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
-| `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable |
+| `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable or if the process was killed due to timeout |
+| `timed_out` | `bool` | `true` when the child process was killed because it exceeded `timeout_secs`; `false` otherwise. Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`). |
 | `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap, per-stream byte cap, or combined cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
 | `filter_applied` | `string \| null` | Name of the filter rule that matched and transformed the output (e.g., `"git pull"`, `"cargo build"`); `null` when no filter fired or for non-`exec_command` tools. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
 | `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
@@ -62,8 +63,14 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `session_id` | early | `null` |
 | `seq` | early | `null` |
 | `output_truncated` | v0.14.2 | `null` (treat as unknown; does not mean truncation did not occur) |
-| `chars_threshold_breach` | current | `false` (omitted from JSONL when false; safe to query with `// false`) |
-| `filter_applied` | current | `null` (omitted from JSONL when null; only present for `exec_command` calls where a filter matched) |
+| `chars_threshold_breach` | v0.14.2 | `false` (omitted from JSONL when false; safe to query with `// false`) |
+| `filter_applied` | v0.14.2 | `null` (omitted from JSONL when null; only present for `exec_command` calls where a filter matched) |
+| `cache_tier` | v0.18.x | `null` (omitted when null; `l1_memory` or `l2_disk` on a cache hit) |
+| `cache_write_failure` | v0.18.x | `null` (omitted when null; `true` only when an L2 disk write failed) |
+| `error_subtype` | v0.18.x | `null` (omitted when null; e.g. `not_found`, `ambiguous` for `edit_replace` errors) |
+| `language` | v0.20.x | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
+| `file_ext` | v0.20.x | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
+| `timed_out` | v0.20.1 | `false` (omitted from JSONL when false; set when child process was killed by `timeout_secs`) |
 
 The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
 

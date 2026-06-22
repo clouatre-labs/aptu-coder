@@ -166,6 +166,39 @@ Four PRs shipped together to make `exec_command` output safe for large contexts:
 
 ---
 
+### [Complete] Language expansion: Markdown, HTML, CSS, YAML, Astro, JSON, TOML (#1063--#1073)
+
+Added six new languages with varying extraction depth:
+
+- **#1066**: Markdown language support (`lang-markdown` feature; extracts headings as functions, links/images as imports).
+- **#1063, #1073**: CSS and YAML tree-sitter grammar support (`lang-css`, `lang-yaml`; full selector/rule extraction for CSS, key extraction for YAML). Regex fallback applies when the feature flag is disabled.
+- **#1069**: Regex-based extraction for Astro (TypeScript frontmatter), CSS, YAML, JSON (first-level key extraction), and TOML (section header extraction). Astro, JSON, and TOML are always-on regardless of feature flags.
+- **#1067, #1068**: Graceful fallback for unsupported extensions in `analyze_file` and `analyze_module`: returns file extension as language label plus a structured `unsupported: true` marker instead of an error.
+- **#1077**: `INVALID_PARAMS` references updated; `analyze_file` no longer rejects unsupported extensions -- it falls back gracefully.
+- **#1084**: Language table and supported-extension audit completed; all entries verified.
+
+### [Complete] Observability and schema extensions (v0.17--v0.20)
+
+Several incremental improvements to the metrics schema and runtime behavior:
+
+- **#1127, #1128**: `unsupported: Option<bool>` field added to `FileAnalysisOutput` and `ModuleInfo` structs. Set to `true` when a file extension has no AST handler. Tool descriptions reordered for clarity.
+- **#1129, #1130**: `force`, `verbose`, and `ast_recursion_limit` parameters removed from `analyze_file` and `analyze_symbol`. These were vestigial no-ops; removing them reduces schema noise and prevents agents from passing dead options.
+- **#1131**: Missing `no_cache_meta` on `analyze_symbol` pagination error responses fixed.
+- **#1132**: Stale-context circuit breaker added to `edit_replace`. After 5 consecutive `not_found` or `ambiguous` failures on the same (session_id, canonical_path) pair, the handler returns a directive error instructing the agent to re-read the file. The failure counter map is capped at 1024 entries to prevent unbounded growth.
+- **#1136**: Path validation fix: replaced ancestor-walk with parent-dir validation in the `require_exists=false` branch of `validate_path`.
+- **#1137**: CRLF line endings in `old_text` are now normalized to LF before matching in `edit_replace`. Prevents spurious `not_found` errors when editing files with Windows line endings.
+- **#1147, #1148, #1149**: L2 on-disk call-graph cache added to `analyze_symbol`. Cache is keyed by canonical path + git HEAD SHA. Configurable via `APTU_CODER_DISK_CACHE_DIR` (default: `$XDG_DATA_HOME/aptu-coder/analysis-cache`) and `APTU_CODER_DISK_CACHE_DISABLED=1`. `cache_tier: l1_memory | l2_disk` added to `MetricEvent`; `cache_write_failure` field tracks disk write failures.
+- **#1150, #1154**: `language` field added to JSONL `MetricEvent` schema. Populated for `analyze_file` and `analyze_module` calls with the human-readable language name (e.g., `"rust"`, `"python"`). Omitted from JSONL when null for backward compatibility.
+- **#1153**: `exec_command` now rejects heredoc syntax (`<<MARKER`) where the closing delimiter is absent before spawning the child process, returning `INVALID_PARAMS` with a diagnostic message.
+- **#1155**: `timeout_secs` parameter re-added to `exec_command` (was removed in #1122). When set to a positive integer, the child process is killed after that many seconds; `timed_out: true` is set in `ShellOutput` and `MetricEvent`; `exit_code` is null. A value of 0 or omitted means no limit.
+- **#1156**: `call_frequency` on `analyze_symbol` output is now filtered out when the `Functions` field is not in the projected fields set, reducing response size for callers that only request caller/callee lists.
+- **#1124**: Raw path interpolation removed from model-visible error messages (security fix).
+- **#1125**: `edit_replace` accepts empty `new_text` to delete the matched block. `max_depth` defaults to 3 when omitted. Login shell PATH snapshot on macOS now uses `$SHELL` first for correct profile sourcing.
+- **#1102**: JSON Schema `uint`/`uint64` formats replaced with draft-07 compliant `integer`.
+- **#1085, #1133**: `exec_command` tool description updated to prefer `working_dir` over `cd` and to frame the `cd` prohibition as a mechanical fact rather than a policy.
+
+---
+
 ## Direction (Tentative)
 
 Unimplemented and pertinent:

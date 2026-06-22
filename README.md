@@ -35,7 +35,7 @@ AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.
 
 ## Overview
 
-aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports Rust, Python, Go, Java, Kotlin, TypeScript, TSX, Fortran, JavaScript, C/C++, and C#, and integrates with any MCP-compatible orchestrator.
+aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports Rust, Python, Go, Java, Kotlin, TypeScript, TSX, Fortran, JavaScript, C/C++, C#, Markdown, HTML, CSS, YAML, Astro, JSON, and TOML, and integrates with any MCP-compatible orchestrator.
 
 ## Supported Languages
 
@@ -167,8 +167,6 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `summary` | boolean | auto | Compact output; auto-triggers above 50K chars |
 | `cursor` | string | -- | Pagination cursor from a previous response's `next_cursor` |
 | `page_size` | integer | 100 | Items per page |
-| `force` | boolean | false | Bypass output size warning |
-| `verbose` | boolean | false | Full output with section headers and imports |
 
 | Tool | Purpose | Languages |
 |------|---------|-----------|
@@ -177,8 +175,8 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
-| `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, and exit code; supports progress notifications; output capped and filtered automatically | any |
+| `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches; pass empty `new_text` to delete the matched block; CRLF line endings in `old_text` are normalized to LF before matching | all |
+| `exec_command` | Run a shell command; returns stdout, stderr, and exit code; supports progress notifications; output capped and filtered automatically; optional `timeout_secs` kills the child on expiry (`timed_out: true` in response); heredoc syntax with a missing closing delimiter is rejected before spawn | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
@@ -243,11 +241,13 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | Variable | Default | Description |
 |---|---|---|
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
-| `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
+| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 on-disk call-graph cache used by `analyze_symbol`. |
+| `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 disk cache entirely. |
 | `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | LRU cache size for `exec_command` results. |
 | `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result cache. |
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
+| `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
 | `APTU_CODER_PROFILE` | unset | Tool subset: `edit` (edit tools + `exec_command` only), `analyze` (analyze tools + `exec_command` only). Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 
