@@ -32,6 +32,9 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     // process substitution, variable-expanded command names).  Obfuscated or
     // deeply nested constructs may not be caught.  For a stricter guarantee,
     // replace this phase with a full shell AST parser.
+    //
+    // TODO: migrate to a proper shell lexer/AST parser if parsing complexity
+    // grows beyond the patterns enumerated above.
     {
         let mut i = 0;
         let mut in_single_quote = false;
@@ -613,5 +616,39 @@ mod tests {
                 "file extension should be txt, path has trailing separator"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Unit tests for scan_backward_for_file_write edge cases.
+    // The inner helpers (token_before_pos, skip_ws_backward) are tested
+    // indirectly via scan_backward_for_file_write with targeted inputs.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scan_backward_empty_input_not_file_write() {
+        // here_pos == 0: nothing before <<, must not panic and must return false.
+        assert!(!scan_backward_for_file_write(b"", 0));
+    }
+
+    #[test]
+    fn scan_backward_only_whitespace_before_heredoc_not_file_write() {
+        // All whitespace before <<: "   <<"
+        // token_before_pos returns an empty slice, skip_ws_backward leaves pos==0.
+        let cmd = b"   <<";
+        assert!(!scan_backward_for_file_write(cmd, 3));
+    }
+
+    #[test]
+    fn scan_backward_leading_whitespace_file_token_then_redirect() {
+        // "  cat > file <<" -- whitespace at start of string, cat before redirect.
+        let cmd = b"  cat > file <<";
+        assert!(scan_backward_for_file_write(cmd, 13));
+    }
+
+    #[test]
+    fn scan_backward_file_token_only_no_redirect_no_tee_not_file_write() {
+        // "somecmd file <<" -- neither cat/tee nor a redirect; must return false.
+        let cmd = b"somecmd file <<";
+        assert!(!scan_backward_for_file_write(cmd, 13));
     }
 }
