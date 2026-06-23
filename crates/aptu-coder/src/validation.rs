@@ -256,6 +256,12 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
     /// group (including interior whitespace) until the matching `(` is found.
     /// If `(` is preceded by `$`, `>`, or `<`, the whole construct is consumed
     /// as part of the token.
+    ///
+    /// NOTE: escaped parentheses (`\(`, `\)`) are not handled.  The heredoc
+    /// security gate operates on raw shell command strings before any
+    /// evaluation, so escape sequences at this level are vanishingly rare in
+    /// practice.  If that assumption ever changes, this function will need a
+    /// backslash-lookahead before decrementing `depth`.
     fn paren_aware_token<'a>(bytes: &'a [u8], pos: &mut usize) -> &'a [u8] {
         let end = *pos;
         let mut depth: i32 = 0;
@@ -273,8 +279,9 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
                     if *pos > 0 && matches!(bytes[*pos - 1], b'$' | b'>' | b'<') {
                         *pos -= 1;
                     }
-                    // Continue scanning; the paren group plus any surrounding
-                    // characters are part of a single token-like unit.
+                    // Continue scanning backward after reaching depth==0 because
+                    // chained constructs like $(cmd), >(proc) may be followed by
+                    // more backward tokens within the same argument.
                     continue;
                 }
             } else if depth > 0 {
@@ -296,17 +303,49 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
         }
     }
 
-    /// Returns true if `cmd` is a known file-write command or a
-    /// variable-expanded command name (starts with `$`).
+    /// Returns true if `cmd` is a known stdin-consuming command that
+    /// accepts heredoc data and writes to a file specified by `>` or `>>`.
+    ///
+    /// Only commands that read from stdin are listed here because the
+    /// file-write heredoc guard rejects patterns like `cmd > file << EOF`
+    /// where `EOF` gets written to `file` instead of being passed to `cmd`.
+    /// Commands like `cp`, `mv`, and `install` read named file arguments,
+    /// not stdin, so they are excluded -- `cp > file << EOF` does not make
+    /// sense as a heredoc file-write pattern.
+    ///
+    /// Variable-expanded command names (starting with `$`) are included as
+    /// a catch-all for dynamic commands that may consume stdin.
     fn is_file_write_command(cmd: &[u8]) -> bool {
         cmd == b"cat"
             || cmd == b"tee"
             || cmd == b"printf"
             || cmd == b"dd"
-            || cmd == b"install"
-            || cmd == b"cp"
-            || cmd == b"mv"
             || cmd.first() == Some(&b'$')
+    }
+
+    /// Walks backward from `pos` through argument tokens, calling
+    /// `is_file_write_command` on each.  Returns true if a write command
+    /// is found before hitting a command separator, start of string, or
+    /// an empty token.  Used by both `>>` and `>` redirect branches to
+    /// avoid duplicating the scan logic.
+    fn scan_args_for_write_command(bytes: &[u8], pos: &mut usize) -> bool {
+        loop {
+            let tok = token_before_pos(bytes, pos);
+            if tok.is_empty() {
+                return false;
+            }
+            if is_file_write_command(tok) {
+                return true;
+            }
+            skip_ws_backward(bytes, pos);
+            if *pos == 0 {
+                return false;
+            }
+            let next = bytes[*pos - 1];
+            if next == b'|' || next == b';' || next == b'&' || next == b'(' {
+                return false;
+            }
+        }
     }
 
     // here_pos points to the first '<' of '<<'.  Walk backward looking for
@@ -343,22 +382,8 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
             return true;
         }
         // Walk backward through all arguments (same logic as > branch below).
-        loop {
-            let tok = token_before_pos(bytes, &mut pos);
-            if tok.is_empty() {
-                return false;
-            }
-            if is_file_write_command(tok) {
-                return true;
-            }
-            skip_ws_backward(bytes, &mut pos);
-            if pos == 0 {
-                return false;
-            }
-            let next = bytes[pos - 1];
-            if next == b'|' || next == b';' || next == b'&' || next == b'(' {
-                return false;
-            }
+        if scan_args_for_write_command(bytes, &mut pos) {
+            return true;
         }
     }
 
@@ -374,26 +399,8 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
         // separator or the start.  This handles patterns like:
         //   printf '%s\n' hello > file << EOF
         // where multiple arguments appear between the command and the redirect.
-        loop {
-            let tok = token_before_pos(bytes, &mut pos);
-            if tok.is_empty() {
-                return false;
-            }
-            if is_file_write_command(tok) {
-                return true;
-            }
-            // If this token looks like an argument (not a separator already
-            // consumed by token_before_pos), keep scanning backward.
-            skip_ws_backward(bytes, &mut pos);
-            if pos == 0 {
-                return false;
-            }
-            // Stop at command-separating characters that token_before_pos
-            // leaves in place: |, ;, &, (.
-            let next = bytes[pos - 1];
-            if next == b'|' || next == b';' || next == b'&' || next == b'(' {
-                return false;
-            }
+        if scan_args_for_write_command(bytes, &mut pos) {
+            return true;
         }
     }
 

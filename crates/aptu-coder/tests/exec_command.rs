@@ -1332,3 +1332,20 @@ async fn test_heredoc_quoted_subshell_delimiter_accepted() {
         "expected isError=false for quoted subshell-like delimiter: {resp}"
     );
 }
+
+#[tokio::test]
+async fn test_heredoc_escaped_paren_accepted() {
+    // Escaped parentheses (\)) in a non-file-write command must not be
+    // misinterpreted by paren_aware_token as an unmatched closing paren
+    // that opens a spurious depth-tracking context.  The FSM operates on
+    // raw bytes; '\' is not a paren-depth marker, so the depth counter
+    // stays at 0 and the command is correctly accepted.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo \"hello \\)\" << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for escaped paren in non-write command: {resp}"
+    );
+}
