@@ -36,17 +36,18 @@ mod validation;
 use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion, graph, traversal, types};
 use shell::resolve_shell;
-use validation::validate_path;
-#[cfg(test)]
-use validation::validate_path_in_dir;
+use validation::{validate_path, validate_path_in_dir};
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
 
-/// Default drain timeout for the no-timeout path: prevents indefinite hang when a login
-/// shell profile blocks (macOS).
-// No longer used after wait/drain order inversion (500ms grace inlined).
-/// Default drain timeout in milliseconds for post-exit pipe drain (500ms).
-const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
+/// Number of consecutive not_found or ambiguous edit_replace failures on the same
+/// (session_id, canonical_path) pair before returning a stale-context directive error.
+pub(crate) const EDIT_STALE_THRESHOLD: u8 = 5;
+/// Maximum number of (session_id, canonical_path) entries in the failure counter map.
+/// When the map reaches this size, it is cleared entirely to prevent unbounded growth.
+/// The circuit breaker is advisory, so a full clear is safe: the worst case is one
+/// missed trip per session per path after an eviction cycle.
+pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -158,7 +159,9 @@ use aptu_coder_core::types::{
     AnalyzeSymbolParams, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput,
     EditReplaceParams, SymbolMatchMode,
 };
-use filters::{CompiledRule, apply_filter, load_filter_table, maybe_inject_no_stat};
+use filters::{CompiledRule, load_filter_table};
+#[cfg(test)]
+use filters::{apply_filter, maybe_inject_no_stat};
 use logging::LogEvent;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
@@ -2682,19 +2685,210 @@ impl CodeAnalyzer {
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
-        tools::edit_overwrite::edit_overwrite(
-            params,
-            tools::EditHandlerContext {
-                sid,
-                seq,
-                cache: &self.cache,
-                metrics_tx: &self.metrics_tx,
-                edit_failure_counts: &self.edit_failure_counts,
-            },
-            &span,
-            t_start,
-        )
-        .await
+        span.record("gen_ai.tool.name", "edit_overwrite");
+        span.record("path", &params.path);
+        let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
+            match validate_path_in_dir(&params.path, false, std::path::Path::new(wd)) {
+                Ok(p) => p,
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    let mut result = CallToolResult::error(vec![Content::text(
+                        "working_dir is not valid; provide an existing directory path".to_string(),
+                    )])
+                    .with_meta(Some(no_cache_meta()));
+                    result.structured_content = Some(serde_json::json!({
+                        "workingDir": wd,
+                        "error": e.message,
+                    }));
+                    return Ok(result);
+                }
+            }
+        } else {
+            match validate_path(&params.path, false) {
+                Ok(p) => p,
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
+            }
+        };
+        let param_path = params.path.clone();
+
+        // Guard against directory paths
+        if std::fs::metadata(&resolved_path)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(&param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid.clone())
+                    .seq(Some(seq))
+                    .build(),
+            );
+            return Ok(err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "path is a directory; cannot write to a directory".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "provide a file path, not a directory",
+                )),
+            )));
+        }
+
+        let content = params.content.clone();
+        let handle = tokio::task::spawn_blocking(move || {
+            aptu_coder_core::edit_overwrite_content(&resolved_path, &content)
+        });
+
+        let output = match handle.await {
+            Ok(Ok(v)) => v,
+            Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "path is a directory".to_string(),
+                    Some(error_meta(
+                        "validation",
+                        false,
+                        "provide a file path, not a directory",
+                    )),
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::Io(io_err))) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    "I/O error writing file; check file path and permissions".to_string(),
+                    {
+                        let mut meta =
+                            error_meta("resource", false, "check file path and permissions");
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(param_path));
+                            obj.insert(
+                                "ioErrorKind".to_string(),
+                                serde_json::json!(format!("{:?}", io_err.kind())),
+                            );
+                            obj.insert(
+                                "ioErrorSource".to_string(),
+                                serde_json::json!(io_err.to_string()),
+                            );
+                        }
+                        Some(meta)
+                    },
+                )));
+            }
+            Ok(Err(e)) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    e.to_string(),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check file path and permissions",
+                    )),
+                )));
+            }
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    e.to_string(),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check file path and permissions",
+                    )),
+                )));
+            }
+        };
+
+        let text = format!("Wrote {} bytes to {}", output.bytes_written, output.path);
+        let mut result = CallToolResult::success(vec![Content::text(text.clone())])
+            .with_meta(Some(no_cache_meta()));
+        let structured = match serde_json::to_value(&output).map_err(|e| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INTERNAL_ERROR,
+                format!("serialization failed: {e}"),
+                Some(error_meta("internal", false, "report this as a bug")),
+            )
+        }) {
+            Ok(v) => v,
+            Err(e) => return Ok(err_to_tool_result(e)),
+        };
+        result.structured_content = Some(structured);
+        self.cache
+            .invalidate_file(&std::path::PathBuf::from(&param_path));
+        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+
+        // Reset circuit breaker on successful write
+        {
+            let sid_str = sid.clone().unwrap_or_default();
+            let canonical = output.path.clone();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            counts.remove(&(sid_str, canonical));
+        }
+
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("edit_overwrite", "ok", dur)
+                .output_chars(text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .build(),
+        );
+        Ok(result)
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
@@ -2734,19 +2928,391 @@ impl CodeAnalyzer {
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
-        tools::edit_replace::edit_replace(
-            params,
-            tools::EditHandlerContext {
-                sid,
-                seq,
-                cache: &self.cache,
-                metrics_tx: &self.metrics_tx,
-                edit_failure_counts: &self.edit_failure_counts,
-            },
-            &span,
-            t_start,
-        )
-        .await
+        span.record("gen_ai.tool.name", "edit_replace");
+        span.record("path", &params.path);
+        let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
+            match validate_path_in_dir(&params.path, true, std::path::Path::new(wd)) {
+                Ok(p) => p,
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    let mut result = CallToolResult::error(vec![Content::text(
+                        "working_dir is not valid; provide an existing directory path".to_string(),
+                    )])
+                    .with_meta(Some(no_cache_meta()));
+                    result.structured_content = Some(serde_json::json!({
+                        "workingDir": wd,
+                        "error": e.message,
+                    }));
+                    return Ok(result);
+                }
+            }
+        } else {
+            match validate_path(&params.path, true) {
+                Ok(p) => p,
+                Err(e) => {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    return Ok(err_to_tool_result(e));
+                }
+            }
+        };
+        let param_path = params.path.clone();
+
+        // Guard against directory paths
+        if std::fs::metadata(&resolved_path)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            self.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(&param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid.clone())
+                    .seq(Some(seq))
+                    .build(),
+            );
+            return Ok(err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "path is a directory; cannot edit a directory".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "provide a file path, not a directory",
+                )),
+            )));
+        }
+
+        let old_text = params.old_text.clone();
+        let new_text = params.new_text.clone();
+        let old_text_for_hint = old_text.clone();
+        let handle = tokio::task::spawn_blocking(move || {
+            aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
+        });
+
+        let increment_failure = |canonical: &str| -> bool {
+            let sid_str = sid.clone().unwrap_or_default();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            if counts.len() >= EDIT_FAILURE_MAP_CAP {
+                counts.clear();
+            }
+            let entry = counts.entry((sid_str, canonical.to_owned())).or_insert(0);
+            *entry = entry.saturating_add(1);
+            *entry >= EDIT_STALE_THRESHOLD
+        };
+
+        let output = match handle.await {
+            Ok(Ok(v)) => v,
+            Ok(Err(aptu_coder_core::EditError::NotFound {
+                path: notfound_path,
+                first_20_lines,
+            })) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                // Circuit breaker: track consecutive failures per (session_id, canonical_path)
+                let canonical = notfound_path.clone();
+                let tripped = increment_failure(&canonical);
+                if tripped {
+                    self.metrics_tx.send(
+                        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                            .param_path_depth(crate::metrics::path_component_count(&param_path))
+                            .error_type(Some("invalid_params".to_string()))
+                            .error_subtype(Some("stale_context".to_string()))
+                            .session_id(sid.clone())
+                            .seq(Some(seq))
+                            .build(),
+                    );
+                    return Ok(err_to_tool_result(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
+                            EDIT_STALE_THRESHOLD, param_path,
+                        ),
+                        Some(error_meta(
+                            "validation",
+                            false,
+                            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
+                        )),
+                    )));
+                }
+
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .error_subtype(Some("not_found".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+
+                let message = if first_20_lines.is_empty() {
+                    "old_text not found (0 matches). Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
+                        .to_string()
+                } else {
+                    let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
+                    let mut best_line_idx = 1usize;
+                    let mut best_line = "";
+                    let mut best_lcp = 0usize;
+
+                    for (i, file_line) in first_20_lines.lines().enumerate() {
+                        let lcp = file_line
+                            .chars()
+                            .zip(first_old_line.chars())
+                            .take_while(|(a, b)| a == b)
+                            .count();
+                        if lcp > best_lcp {
+                            best_lcp = lcp;
+                            best_line = file_line;
+                            best_line_idx = i + 1;
+                        }
+                    }
+
+                    let numbered_lines: String = first_20_lines
+                        .lines()
+                        .enumerate()
+                        .map(|(i, line)| format!("  Line {}: {}", i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    format!(
+                        "old_text not found (0 matches).\nThe file begins:\n{numbered_lines}\n\nNearest match: line {best_line_idx} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
+                    )
+                };
+
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    message,
+                    {
+                        let mut meta = error_meta(
+                            "validation",
+                            false,
+                            "re-read the file with analyze_file or analyze_module, then derive old_text from the live content",
+                        );
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(notfound_path));
+                        }
+                        Some(meta)
+                    },
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::Ambiguous {
+                count,
+                path: ambiguous_path,
+                match_lines,
+            })) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                // Circuit breaker: track consecutive failures per (session_id, canonical_path)
+                let canonical = ambiguous_path.clone();
+                let tripped = increment_failure(&canonical);
+                if tripped {
+                    self.metrics_tx.send(
+                        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                            .param_path_depth(crate::metrics::path_component_count(&param_path))
+                            .error_type(Some("invalid_params".to_string()))
+                            .error_subtype(Some("stale_context".to_string()))
+                            .session_id(sid.clone())
+                            .seq(Some(seq))
+                            .build(),
+                    );
+                    return Ok(err_to_tool_result(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
+                            EDIT_STALE_THRESHOLD, param_path,
+                        ),
+                        Some(error_meta(
+                            "validation",
+                            false,
+                            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
+                        )),
+                    )));
+                }
+
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .error_subtype(Some("ambiguous".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+
+                let line_numbers_csv = match_lines
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "old_text matched {count} locations.\nOccurrences at lines: {line_numbers_csv}\nExtend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
+                    ),
+                    {
+                        let mut meta = error_meta(
+                            "validation",
+                            false,
+                            "extend old_text with more surrounding context, or re-read with analyze_file to confirm the exact text",
+                        );
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(ambiguous_path));
+                        }
+                        Some(meta)
+                    },
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("invalid_params".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "path is a directory".to_string(),
+                    Some(error_meta(
+                        "validation",
+                        false,
+                        "provide a file path, not a directory",
+                    )),
+                )));
+            }
+            Ok(Err(aptu_coder_core::EditError::Io(io_err))) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    "I/O error editing file; check file path and permissions".to_string(),
+                    {
+                        let mut meta =
+                            error_meta("resource", false, "check file path and permissions");
+                        if let Some(obj) = meta.as_object_mut() {
+                            obj.insert("path".to_string(), serde_json::json!(param_path));
+                            obj.insert(
+                                "ioErrorKind".to_string(),
+                                serde_json::json!(format!("{:?}", io_err.kind())),
+                            );
+                            obj.insert(
+                                "ioErrorSource".to_string(),
+                                serde_json::json!(io_err.to_string()),
+                            );
+                        }
+                        Some(meta)
+                    },
+                )));
+            }
+            Ok(Err(e)) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    e.to_string(),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check file path and permissions",
+                    )),
+                )));
+            }
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "internal_error");
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                self.metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(&param_path))
+                        .error_type(Some("internal_error".to_string()))
+                        .session_id(sid.clone())
+                        .seq(Some(seq))
+                        .build(),
+                );
+                return Ok(err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    e.to_string(),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check file path and permissions",
+                    )),
+                )));
+            }
+        };
+
+        let text = format!(
+            "Edited {}: {} bytes -> {} bytes",
+            output.path, output.bytes_before, output.bytes_after
+        );
+        let mut result = CallToolResult::success(vec![Content::text(text.clone())])
+            .with_meta(Some(no_cache_meta()));
+        let structured = match serde_json::to_value(&output).map_err(|e| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INTERNAL_ERROR,
+                format!("serialization failed: {e}"),
+                Some(error_meta("internal", false, "report this as a bug")),
+            )
+        }) {
+            Ok(v) => v,
+            Err(e) => return Ok(err_to_tool_result(e)),
+        };
+        result.structured_content = Some(structured);
+        self.cache
+            .invalidate_file(&std::path::PathBuf::from(&param_path));
+        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+
+        // Reset circuit breaker on successful edit
+        {
+            let sid_str = sid.clone().unwrap_or_default();
+            let canonical = output.path.clone();
+            let mut counts = self
+                .edit_failure_counts
+                .lock()
+                .expect("edit_failure_counts poisoned");
+            counts.remove(&(sid_str, canonical));
+        }
+
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("edit_replace", "ok", dur)
+                .output_chars(text.len())
+                .param_path_depth(crate::metrics::path_component_count(&param_path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .build(),
+        );
+        Ok(result)
     }
 
     #[tool(
@@ -2771,755 +3337,23 @@ impl CodeAnalyzer {
         let t_start = std::time::Instant::now();
         let (seq, sid) = self.emit_received_metric("exec_command").await;
         let params = params.0;
-        // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
         let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
-        let span = tracing::Span::current();
-        span.record("gen_ai.system", "mcp");
-        span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "exec_command");
-        span.record("command", &params.command);
-
-        // Validate working_dir if provided -- existence + is_dir only, no CWD confinement.
-        // exec_command is a shell runner; CWD confinement applies only to edit_overwrite/edit_replace.
-        let working_dir_path = if let Some(ref wd) = params.working_dir {
-            match std::fs::canonicalize(wd) {
-                Ok(p) => {
-                    if !p.is_dir() {
-                        span.record("error", true);
-                        span.record("error.type", "invalid_params");
-                        let mut result = CallToolResult::error(vec![Content::text(
-                            "working_dir is not a directory; provide an existing directory path"
-                                .to_string(),
-                        )])
-                        .with_meta(Some(no_cache_meta()));
-                        result.structured_content = Some(serde_json::json!({
-                            "workingDir": wd,
-                        }));
-                        return Ok(result);
-                    }
-                    Some(p)
-                }
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    let mut result = CallToolResult::error(vec![Content::text(
-                        "working_dir is not valid; provide an existing directory path".to_string(),
-                    )])
-                    .with_meta(Some(no_cache_meta()));
-                    result.structured_content = Some(serde_json::json!({
-                        "workingDir": wd,
-                        "error": e.to_string(),
-                    }));
-                    return Ok(result);
-                }
-            }
-        } else {
-            None
-        };
-
-        // Strip leading "cd <path> &&" prefix from command only when provably redundant.
-        // - No working_dir: promote the cd path as working_dir (unambiguous).
-        // - working_dir already set: strip only if the cd path resolves to the same
-        //   directory; otherwise pass the command through unmodified (the cd is
-        //   load-bearing, e.g. a multi-step chain like "cd sub && build && cd ../other && build").
-        let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
-        let (command, working_dir_path) = if let Some(cd_path) = cd_extracted_path {
-            if working_dir_path.is_none() {
-                // Only promote when the path is a plain absolute literal -- no shell
-                // special characters (~, $, -). Relative paths and shell-expanded forms
-                // (cd ~, cd $VAR, cd -) must reach the shell unmodified; validate_path
-                // cannot resolve them correctly before execution.
-                let is_plain_absolute = cd_path.starts_with('/')
-                    && !cd_path.contains('$')
-                    && !cd_path.contains('~')
-                    && cd_path != "-";
-                if !is_plain_absolute {
-                    // Shell-special or relative -- pass through unmodified.
-                    (params.command.clone(), working_dir_path)
-                } else {
-                    // Promote the cd path as working_dir, run through validation
-                    match validate_path(cd_path, true) {
-                        Ok(p) if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) => {
-                            tracing::debug!(
-                                "exec_command: promoting cd prefix path as working_dir: {}",
-                                cd_path
-                            );
-                            (effective_command.to_owned(), Some(p))
-                        }
-                        Ok(_) => {
-                            span.record("error", true);
-                            span.record("error.type", "invalid_params");
-                            let mut result = CallToolResult::error(vec![Content::text(
-                                "cd prefix path is not a directory; set working_dir explicitly or use a valid directory path".to_string(),
-                            )])
-                            .with_meta(Some(no_cache_meta()));
-                            result.structured_content = Some(serde_json::json!({
-                                "cdPath": cd_path,
-                            }));
-                            return Ok(result);
-                        }
-                        Err(_) => {
-                            span.record("error", true);
-                            span.record("error.type", "invalid_params");
-                            let mut result = CallToolResult::error(vec![Content::text(
-                                "cd prefix path does not exist or is outside CWD; set working_dir explicitly".to_string(),
-                            )])
-                            .with_meta(Some(no_cache_meta()));
-                            result.structured_content = Some(serde_json::json!({
-                                "cdPath": cd_path,
-                            }));
-                            return Ok(result);
-                        }
-                    }
-                }
-            } else {
-                // working_dir is already set -- only strip if the cd path resolves to
-                // the same directory (redundant). Otherwise keep the full original command.
-                let cd_resolves_to_same = validate_path(cd_path, true)
-                    .ok()
-                    .map(|p| Some(&p) == working_dir_path.as_ref())
-                    .unwrap_or(false);
-                if cd_resolves_to_same {
-                    tracing::debug!(
-                        "exec_command: stripped redundant cd prefix; matches explicit working_dir"
-                    );
-                    (effective_command.to_owned(), working_dir_path)
-                } else {
-                    // cd path differs from working_dir -- the cd is load-bearing; pass through.
-                    (params.command.clone(), working_dir_path)
-                }
-            }
-        } else {
-            (params.command.clone(), working_dir_path)
-        };
-        // Inject --no-stat for git pull if not already present
-        let command = maybe_inject_no_stat(&command);
-        span.record("command", &command);
-
-        let param_path = params.working_dir.clone();
-
-        // Validate stdin size cap (1 MB)
-        if let Some(ref stdin_content) = params.stdin
-            && stdin_content.len() > STDIN_MAX_BYTES
-        {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "stdin exceeds 1 MB limit".to_string(),
-                Some(error_meta("validation", false, "reduce stdin content size")),
-            )));
-        }
-
-        // Validate heredocs before spawning any process
-        if let Err(e) = validation::validate_heredocs(&command) {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ))
-                    .error_type(Some("invalid_params".to_string()))
-                    .session_id(sid)
-                    .seq(Some(seq))
-                    .output_truncated(Some(false))
-                    .build(),
-            );
-            return Ok(err_to_tool_result(e));
-        }
-
-        // Validate drain_timeout_secs: negative values are invalid.
-        if let Some(n) = params.drain_timeout_secs
-            && n < 0
-        {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "drain_timeout_secs must be >= 0".to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use a non-negative value or omit it",
-                )),
-            )));
-        }
-
-        // Compute effective drain timeout
-        let drain_dur = match params.drain_timeout_secs {
-            Some(n) if n > 0 => std::time::Duration::from_millis(n as u64),
-            _ => std::time::Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
-        };
-
-        // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
-        let resolved_path_str = self.resolved_path.as_ref().as_deref();
-        let output = run_exec_impl(
-            command.clone(),
-            working_dir_path.clone(),
-            params.stdin.clone(),
+        let ctx = crate::tools::exec_command::ExecContext {
             seq,
-            resolved_path_str,
-            &self.filter_table,
-            params.timeout_secs,
-            drain_dur,
-        )
-        .await;
-
-        // Short-circuit on timeout: return INTERNAL_ERROR before any output processing.
-        if output.timed_out {
-            span.record("error", true);
-            span.record("error.type", "timeout");
-            let mut result = CallToolResult::error(vec![Content::text(
-                "Command execution timed out; the process was killed.".to_string(),
-            )])
-            .with_meta(Some(no_cache_meta()));
-            result.structured_content = Some(serde_json::json!({
-                "timed_out": true,
-                "timeout_secs": params.timeout_secs,
-            }));
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ))
-                    .error_type(Some("timeout".to_string()))
-                    .session_id(sid)
-                    .seq(Some(seq))
-                    .timed_out(true)
-                    .output_truncated(Some(false))
-                    .build(),
-            );
-            return Ok(result);
-        }
-
-        let exit_code = output.exit_code;
-        let mut output_truncated = output.output_truncated;
-
-        // Record execution results on span
-        if let Some(code) = exit_code {
-            span.record("exit_code", code);
-        }
-        span.record("output_truncated", output_truncated);
-
-        // Emit debug event for truncation
-        if output_truncated {
-            tracing::debug!(truncated = true, message = "output truncated");
-        }
-
-        // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
-        let output_text = if output.interleaved.is_empty() {
-            format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
-        } else {
-            format!("Output:\n{}", output.interleaved)
+            sid,
+            session_id,
+            client_name,
+            client_version,
+            resolved_path: self.resolved_path.as_ref().as_deref().map(str::to_owned),
+            filter_table: self.filter_table.clone(),
+            metrics_tx: self.metrics_tx.clone(),
+            t_start,
         };
-
-        // Apply combined output size limit (SIZE_LIMIT = 5_000 bytes). Per-stream caps
-        // (MAX_STDOUT_BYTES = 30k stdout, MAX_STDERR_BYTES = 10k stderr) already fired in
-        // handle_output_persist; this is the safety net for the interleaved assembly which
-        // can still reach up to ~40k bytes from per-stream content plus headers and formatting.
-        let mut combined_truncated = false;
-        let truncated_output_text = if output_text.len() > SIZE_LIMIT {
-            combined_truncated = true;
-            // Use char-boundary-safe tail truncation
-            let tail_start = output_text.len().saturating_sub(SIZE_LIMIT);
-            let safe_start = output_text[..tail_start].floor_char_boundary(tail_start);
-            output_text[safe_start..].to_string()
-        } else {
-            output_text
-        };
-
-        // Update output_truncated flag to include combined truncation
-        output_truncated = output_truncated || combined_truncated;
-
-        let text = format!(
-            "Command: {}\nExit code: {}\nOutput truncated: {}\n\n{}",
-            params.command,
-            exit_code
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "null".to_string()),
-            output_truncated,
-            truncated_output_text,
-        );
-
-        let content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
-
-        // Determine if command failed: non-zero exit code.
-        // exit_code is None when the post-exit drain times out (background child
-        // holding pipes -- command work was done, treat as success) or when the
-        // process is externally killed; both cases use unwrap_or(false) to avoid
-        // false negatives.
-        let command_failed = exit_code.map(|c| c != 0).unwrap_or(false);
-
-        let mut result = if command_failed {
-            CallToolResult::error(content_blocks)
-        } else {
-            CallToolResult::success(content_blocks)
-        }
-        .with_meta(Some(no_cache_meta()));
-
-        let structured = match serde_json::to_value(&output).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("serialization failed: {e}"),
-                Some(error_meta("internal", false, "report this as a bug")),
-            )
-        }) {
-            Ok(v) => v,
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(
-                            param_path.as_deref().unwrap_or(""),
-                        ))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .exit_code(exit_code)
-                        .timed_out(output.timed_out)
-                        .output_truncated(Some(output_truncated))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(e));
-            }
-        };
-
-        result.structured_content = Some(structured);
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("exec_command", "ok", dur)
-                .output_chars(text.len())
-                .param_path_depth(crate::metrics::path_component_count(
-                    param_path.as_deref().unwrap_or(""),
-                ))
-                .session_id(sid)
-                .seq(Some(seq))
-                .exit_code(exit_code)
-                .timed_out(output.timed_out)
-                .output_truncated(Some(output_truncated))
-                .chars_threshold_breach(text.len() > 30_000)
-                .filter_applied(output.filter_applied.clone())
-                .build(),
-        );
-        Ok(result)
+        crate::tools::exec_command::exec_command_impl(params, context, ctx).await
     }
 }
-
-/// Build and configure a tokio::process::Command with stdio, working directory, and resource limits.
-fn build_exec_command(
-    command: &str,
-    working_dir_path: Option<&std::path::PathBuf>,
-    stdin_present: bool,
-    resolved_path: Option<&str>,
-) -> tokio::process::Command {
-    let shell = resolve_shell();
-    let mut cmd = tokio::process::Command::new(shell);
-
-    // Unify command invocation: use -c on all platforms.
-    // On macOS, the resolved PATH from the startup-captured login shell profile
-    // is injected below, so -l is not needed per-command.
-    cmd.arg("-c").arg(command);
-
-    if let Some(wd) = working_dir_path {
-        cmd.current_dir(wd);
-    }
-
-    // Inject resolved login shell PATH snapshot on all platforms.
-    if let Some(path) = resolved_path {
-        cmd.env("PATH", path);
-    }
-
-    cmd.stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    if stdin_present {
-        cmd.stdin(std::process::Stdio::piped());
-    } else {
-        cmd.stdin(std::process::Stdio::null());
-    }
-
-    cmd
-}
-
-/// Strip a leading `cd <path> &&` prefix from a command string.
-///
-/// Returns `(stripped_command, Some(extracted_path))` when the command starts with
-/// `cd <path> &&`. Returns `(cmd, None)` when no `cd ... &&` prefix is found.
-///
-/// Uses only `str` methods (no regex). Leading whitespace is trimmed before matching.
-fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
-    let trimmed = cmd.trim_start();
-    let Some(rest) = trimmed.strip_prefix("cd ") else {
-        return (cmd, None);
-    };
-    // Find the && separator
-    let Some((path_part, rest_part)) = rest.split_once("&&") else {
-        return (cmd, None);
-    };
-    let path = path_part.trim();
-    let stripped = rest_part.trim();
-    (stripped, Some(path))
-}
-
-/// Result of a timed command execution.
-struct ExecutionResult {
-    exit_code: Option<i32>,
-    output_truncated: bool,
-    output_collection_error: Option<String>,
-    timed_out: bool,
-}
-
-/// Run a spawned child process with output draining.
-/// When `timeout_secs` is `Some(secs)` where `secs > 0`, the entire execution (drain +
-/// wait) is bounded by that many seconds. If the timeout fires the child is killed.
-async fn run_with_timeout(
-    mut child: tokio::process::Child,
-    tx: tokio::sync::mpsc::UnboundedSender<(bool, String)>,
-    timeout_secs: Option<i64>,
-    drain_timeout: std::time::Duration,
-) -> ExecutionResult {
-    use tokio::io::AsyncBufReadExt as _;
-    use tokio_stream::StreamExt as TokioStreamExt;
-    use tokio_stream::wrappers::LinesStream;
-
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
-
-    let drain_task = tokio::spawn(async move {
-        let so_stream = stdout_pipe.map(|p| {
-            LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (false, s)))
-        });
-        let se_stream = stderr_pipe.map(|p| {
-            LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (true, s)))
-        });
-
-        match (so_stream, se_stream) {
-            (Some(so), Some(se)) => {
-                let mut merged = so.merge(se);
-                while let Some(Ok((is_stderr, line))) = merged.next().await {
-                    let _ = tx.send((is_stderr, line));
-                }
-            }
-            (Some(so), None) => {
-                let mut stream = so;
-                while let Some(Ok((_, line))) = stream.next().await {
-                    let _ = tx.send((false, line));
-                }
-            }
-            (None, Some(se)) => {
-                let mut stream = se;
-                while let Some(Ok((_, line))) = stream.next().await {
-                    let _ = tx.send((true, line));
-                }
-            }
-            (None, None) => {}
-        }
-    });
-
-    let drain_abort = drain_task.abort_handle();
-
-    match timeout_secs {
-        Some(secs) if secs > 0 => {
-            // User timeout wraps only child.wait(); drain follows outside the timeout.
-            let timeout_secs_u64 = u64::try_from(secs).unwrap_or(u64::MAX);
-            let (exit_code, timed_out) = match tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs_u64),
-                child.wait(),
-            )
-            .await
-            {
-                Ok(Ok(s)) => (s.code(), false),
-                Ok(Err(_)) => (None, false),
-                Err(_elapsed) => {
-                    child.start_kill().ok();
-                    // Reap the zombie so the OS does not accumulate a defunct child.
-                    let _ = child.wait().await;
-                    (None, true)
-                }
-            };
-
-            // Drain remaining buffered output with drain_timeout grace (outside user timeout).
-            let drain_truncated = if timed_out {
-                drain_abort.abort();
-                false
-            } else {
-                match tokio::time::timeout(drain_timeout, drain_task).await {
-                    Ok(_) => false,
-                    Err(_) => {
-                        drain_abort.abort();
-                        true
-                    }
-                }
-            };
-
-            let ocerr = if drain_truncated {
-                Some("post-exit drain timeout: background process held pipes".to_string())
-            } else {
-                None
-            };
-
-            ExecutionResult {
-                exit_code,
-                output_truncated: drain_truncated,
-                output_collection_error: ocerr,
-                timed_out,
-            }
-        }
-        _ => {
-            // No user timeout: wait for child exit first, then drain buffered output
-            // with a short grace period (drain_timeout) for background subprocesses.
-            let exit_status = child.wait().await.ok();
-            let drain_result = tokio::time::timeout(drain_timeout, drain_task).await;
-
-            let drain_truncated = drain_result.is_err();
-            if drain_truncated {
-                drain_abort.abort();
-            }
-            let exit_code = exit_status.and_then(|s| s.code());
-            let ocerr = if drain_truncated {
-                Some("post-exit drain timeout: background process held pipes".to_string())
-            } else {
-                None
-            };
-            ExecutionResult {
-                exit_code,
-                output_truncated: drain_truncated,
-                output_collection_error: ocerr,
-                timed_out: false,
-            }
-        }
-    }
-}
-
-/// Executes a shell command and returns the output.
-/// This is a free async function (not a method) to allow use in moka::future::Cache::get_with().
-/// It spawns the command, collects output, and persists output to slot files.
-#[allow(clippy::too_many_arguments)]
-async fn run_exec_impl(
-    command: String,
-    working_dir_path: Option<std::path::PathBuf>,
-    stdin: Option<String>,
-    seq: u32,
-    resolved_path: Option<&str>,
-    filter_table: &Arc<Vec<CompiledRule>>,
-    timeout_secs: Option<i64>,
-    drain_timeout: std::time::Duration,
-) -> ShellOutput {
-    let mut cmd = build_exec_command(
-        &command,
-        working_dir_path.as_ref(),
-        stdin.is_some(),
-        resolved_path,
-    );
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return ShellOutput::new(
-                String::new(),
-                format!("failed to spawn command: {e}"),
-                format!("failed to spawn command: {e}"),
-                None,
-                false,
-            );
-        }
-    };
-
-    if let Some(stdin_content) = stdin
-        && let Some(mut stdin_handle) = child.stdin.take()
-    {
-        use tokio::io::AsyncWriteExt as _;
-        match stdin_handle.write_all(stdin_content.as_bytes()).await {
-            Ok(()) => {
-                drop(stdin_handle);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
-            Err(e) => {
-                warn!("failed to write stdin: {e}");
-            }
-        }
-    }
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, String)>();
-
-    let exec_result = run_with_timeout(child, tx, timeout_secs, drain_timeout).await;
-    let exit_code = exec_result.exit_code;
-    let mut output_truncated = exec_result.output_truncated;
-    let output_collection_error = exec_result.output_collection_error;
-    let timed_out = exec_result.timed_out;
-
-    rx.close();
-
-    let mut lines: Vec<(bool, String)> = Vec::new();
-    while let Some(item) = rx.recv().await {
-        lines.push(item);
-    }
-
-    // Split tagged lines into stdout, stderr, interleaved post-facto (no locks needed).
-    const MAX_BYTES: usize = 50 * 1024;
-    let mut stdout_str = String::new();
-    let mut stderr_str = String::new();
-    let mut interleaved_str = String::new();
-    let mut so_bytes = 0usize;
-    let mut se_bytes = 0usize;
-    let mut il_bytes = 0usize;
-    for (is_stderr, line) in &lines {
-        let entry = format!("{line}\n");
-        if il_bytes < 2 * MAX_BYTES {
-            il_bytes += entry.len();
-            interleaved_str.push_str(&entry);
-        }
-        if *is_stderr {
-            if se_bytes < MAX_BYTES {
-                se_bytes += entry.len();
-                stderr_str.push_str(&entry);
-            }
-        } else if so_bytes < MAX_BYTES {
-            so_bytes += entry.len();
-            stdout_str.push_str(&entry);
-        }
-    }
-
-    let slot = seq % 8;
-    let (stdout, stderr, stdout_path, stderr_path, byte_truncated) =
-        handle_output_persist(stdout_str, stderr_str, slot);
-    output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;
-
-    let mut output = ShellOutput::new(stdout, stderr, interleaved_str, exit_code, output_truncated);
-    output.output_collection_error = output_collection_error;
-    output.stdout_path = stdout_path;
-    output.stderr_path = stderr_path;
-    output.timed_out = timed_out;
-
-    // Apply filter if exit_code == 0
-    if exit_code == Some(0) {
-        for compiled_rule in filter_table.iter() {
-            if compiled_rule.pattern.is_match(&command) {
-                let filtered_stdout = apply_filter(compiled_rule, &output.stdout);
-                output.stdout = filtered_stdout;
-                // Also filter interleaved: the response handler prefers interleaved when
-                // non-empty (which it always is for commands that write to both streams),
-                // so filtering only stdout would leave the LLM-visible output unfiltered.
-                // apply_filter is called separately on each field; there is no double-filtering
-                // because stdout and interleaved are independent strings assembled from the
-                // same source lines -- updating one does not affect the other.
-                output.interleaved = apply_filter(compiled_rule, &output.interleaved);
-                output.filter_applied = compiled_rule
-                    .rule
-                    .description
-                    .clone()
-                    .or_else(|| Some(compiled_rule.rule.match_command.clone()));
-                break;
-            }
-        }
-    }
-
-    output
-}
-
-/// Handles output persistence by writing to slot files only when output overflows the line limit.
-/// Writes full stdout/stderr to:
-///   {temp_dir}/aptu-coder-overflow/slot-{slot}/{stdout,stderr}
-/// Returns (stdout_out, stderr_out, stdout_path, stderr_path).
-/// On overflow: truncates to last 50 lines and sets paths to Some.
-/// Under limit: returns output unchanged and paths as None (no I/O).
-fn handle_output_persist(
-    stdout: String,
-    stderr: String,
-    slot: u32,
-) -> (String, String, Option<String>, Option<String>, bool) {
-    const MAX_OUTPUT_LINES: usize = 2000;
-    // Sized at p99.3 of observed exec_command output_chars (27k calls): 99.27% of calls are
-    // under 20k chars; raising to 30k covers 99.67% while still capping pathological cases
-    // (git pull on large repos, cargo test on large workspaces) that exceed 100k chars.
-    const MAX_STDOUT_BYTES: usize = 30_000;
-    const MAX_STDERR_BYTES: usize = 10_000;
-    const OVERFLOW_PREVIEW_LINES: usize = 50;
-
-    let stdout_lines: Vec<&str> = stdout.lines().collect();
-    let stderr_lines: Vec<&str> = stderr.lines().collect();
-
-    let mut byte_truncated = false;
-
-    // Check for line overflow or byte overflow
-    let line_overflow =
-        stdout_lines.len() > MAX_OUTPUT_LINES || stderr_lines.len() > MAX_OUTPUT_LINES;
-    let stdout_byte_overflow = stdout.len() > MAX_STDOUT_BYTES;
-    let stderr_byte_overflow = stderr.len() > MAX_STDERR_BYTES;
-    let byte_overflow = stdout_byte_overflow || stderr_byte_overflow;
-
-    // No overflow: return as-is with no I/O.
-    if !line_overflow && !byte_overflow {
-        return (stdout, stderr, None, None, false);
-    }
-
-    // Overflow: write slot files and return last-N-lines preview.
-    let base = std::env::temp_dir()
-        .join("aptu-coder-overflow")
-        .join(format!("slot-{slot}"));
-    let _ = std::fs::create_dir_all(&base);
-
-    let stdout_path = base.join("stdout");
-    let stderr_path = base.join("stderr");
-
-    let _ = std::fs::write(&stdout_path, stdout.as_bytes());
-    let _ = std::fs::write(&stderr_path, stderr.as_bytes());
-
-    let stdout_path_str = stdout_path.display().to_string();
-    let stderr_path_str = stderr_path.display().to_string();
-
-    // Truncate stdout if it exceeds byte limit
-    let stdout_preview = if stdout_byte_overflow {
-        byte_truncated = true;
-        // Use char-boundary-safe tail truncation
-        let tail_start = stdout.len().saturating_sub(MAX_STDOUT_BYTES);
-        let safe_start = stdout[..tail_start].floor_char_boundary(tail_start);
-        stdout[safe_start..].to_string()
-    } else if stdout_lines.len() > MAX_OUTPUT_LINES {
-        stdout_lines[stdout_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
-    } else {
-        stdout
-    };
-
-    // Truncate stderr if it exceeds byte limit
-    let stderr_preview = if stderr_byte_overflow {
-        byte_truncated = true;
-        // Use char-boundary-safe tail truncation
-        let tail_start = stderr.len().saturating_sub(MAX_STDERR_BYTES);
-        let safe_start = stderr[..tail_start].floor_char_boundary(tail_start);
-        stderr[safe_start..].to_string()
-    } else if stderr_lines.len() > MAX_OUTPUT_LINES {
-        stderr_lines[stderr_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
-    } else {
-        stderr
-    };
-
-    (
-        stdout_preview,
-        stderr_preview,
-        Some(stdout_path_str),
-        Some(stderr_path_str),
-        byte_truncated,
-    )
-}
-
-/// Truncates output to a maximum number of lines and bytes.
-/// Returns (truncated_output, was_truncated).
 
 #[derive(Clone)]
 struct FocusedAnalysisParams {

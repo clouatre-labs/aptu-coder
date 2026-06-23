@@ -41,21 +41,4 @@
 //!     moved into this module. They are the framework glue that ties all
 //!     tools together and must live in the crate root.
 
-pub mod edit_overwrite;
-pub mod edit_replace;
-
-use aptu_coder_core::cache::AnalysisCache;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
-/// Shared handler context passed to extracted edit tool free functions.
-///
-/// Bundles the state extracted from `CodeAnalyzer` so the extracted functions
-/// stay within clippy's `too_many_arguments` limit while keeping parameters explicit.
-pub(crate) struct EditHandlerContext<'a> {
-    pub(crate) sid: Option<String>,
-    pub(crate) seq: u32,
-    pub(crate) cache: &'a AnalysisCache,
-    pub(crate) metrics_tx: &'a crate::metrics::MetricsSender,
-    pub(crate) edit_failure_counts: &'a Arc<Mutex<HashMap<(String, String), u8>>>,
-}
+pub mod exec_command;
