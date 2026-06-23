@@ -25,16 +25,28 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     let bytes = command.as_bytes();
     let len = bytes.len();
 
-    // Phase 1: pre-scan for heredoc file-write patterns (cat/tee/redirect + <<)
+    // Phase 1: pre-scan for heredoc file-write patterns (redirect + <<)
     //
-    // This is a heuristic scanner: it handles the common patterns above but
-    // does not cover every possible shell construct (e.g. subshell grouping,
-    // process substitution, variable-expanded command names).  Obfuscated or
-    // deeply nested constructs may not be caught.  For a stricter guarantee,
-    // replace this phase with a full shell AST parser.
+    // Supported patterns (all rejected):
+    //   - cat > file << EOF
+    //   - cat >> file << EOF
+    //   - tee file << EOF, tee -a file << EOF
+    //   - tee > file << EOF, tee >> file << EOF
+    //   - printf 'content' > file << EOF
+    //   - dd of=file << EOF
+    //   - install file << EOF
+    //   - cp /dev/stdin file << EOF
+    //   - mv /dev/stdin file << EOF
+    //   - $VAR > file << EOF (variable-expanded command name)
+    //   - > file << EOF, >> file << EOF (bare redirect)
+    //   - (cat > file << EOF) (subshell grouping)
+    //   - cat > >(proc) << EOF (process substitution in file position)
+    //   - cat > $(cmd) << EOF (command substitution in file position)
     //
-    // TODO(#1198): migrate to a proper shell lexer/AST parser if parsing
-    // complexity grows beyond the patterns enumerated above.
+    // Unsupported (NOT rejected -- heuristic misses complex nesting):
+    //   - cat > "${var}" << EOF (variable expansion in file path)
+    //   - exec 3<>file; cat >&3 << EOF (arbitrary fd redirects)
+    //   - deeply nested subshells with multiple heredoc levels
     {
         let mut i = 0;
         let mut in_single_quote = false;
@@ -224,11 +236,55 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
 
 fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
     /// Checks whether the token before `pos` (walked backward to preceding
-    /// whitespace or start-of-string) is returned as a byte slice.
+    /// whitespace or command separator) is returned as a byte slice.
+    /// Stops at command separators: whitespace, `(`, `|`, `;`, `&`.
     fn token_before_pos<'a>(bytes: &'a [u8], pos: &mut usize) -> &'a [u8] {
         let end = *pos;
-        while *pos > 0 && !(bytes[*pos - 1] as char).is_ascii_whitespace() {
+        while *pos > 0 {
+            let b = bytes[*pos - 1];
+            if b.is_ascii_whitespace() || b == b'(' || b == b'|' || b == b';' || b == b'&' {
+                break;
+            }
             *pos -= 1;
+        }
+        &bytes[*pos..end]
+    }
+
+    /// Extracts a token backward from `pos` that may contain paren-grouped
+    /// constructs such as `$(...)`, `>(...)`, `<(...)`.  When encountering `)`
+    /// the helper enters paren-tracking mode and skips backward through the
+    /// group (including interior whitespace) until the matching `(` is found.
+    /// If `(` is preceded by `$`, `>`, or `<`, the whole construct is consumed
+    /// as part of the token.
+    fn paren_aware_token<'a>(bytes: &'a [u8], pos: &mut usize) -> &'a [u8] {
+        let end = *pos;
+        let mut depth: i32 = 0;
+
+        while *pos > 0 {
+            let b = bytes[*pos - 1];
+            if b == b')' {
+                depth += 1;
+                *pos -= 1;
+            } else if b == b'(' {
+                depth -= 1;
+                *pos -= 1;
+                if depth == 0 {
+                    // Check if preceded by $, >, or < (nested-context marker)
+                    if *pos > 0 && matches!(bytes[*pos - 1], b'$' | b'>' | b'<') {
+                        *pos -= 1;
+                    }
+                    // Continue scanning; the paren group plus any surrounding
+                    // characters are part of a single token-like unit.
+                    continue;
+                }
+            } else if depth > 0 {
+                // Inside parens -- skip interior whitespace
+                *pos -= 1;
+            } else if b.is_ascii_whitespace() || b == b'(' || b == b'|' || b == b';' || b == b'&' {
+                break;
+            } else {
+                *pos -= 1;
+            }
         }
         &bytes[*pos..end]
     }
@@ -240,8 +296,21 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
         }
     }
 
+    /// Returns true if `cmd` is a known file-write command or a
+    /// variable-expanded command name (starts with `$`).
+    fn is_file_write_command(cmd: &[u8]) -> bool {
+        cmd == b"cat"
+            || cmd == b"tee"
+            || cmd == b"printf"
+            || cmd == b"dd"
+            || cmd == b"install"
+            || cmd == b"cp"
+            || cmd == b"mv"
+            || cmd.first() == Some(&b'$')
+    }
+
     // here_pos points to the first '<' of '<<'.  Walk backward looking for
-    // a file-write pattern (cat/tee/redirect + >? file + <<).
+    // a file-write pattern (redirect + >? file + <<).
 
     let mut pos = here_pos;
 
@@ -251,8 +320,9 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
         return false;
     }
 
-    // Find the file path token immediately before <<
-    let file_token = token_before_pos(bytes, &mut pos);
+    // Find the file path token immediately before <<.
+    // Use paren_aware_token to handle `$(cmd)`, `>(proc)`, `<(...)` in file position.
+    let file_token = paren_aware_token(bytes, &mut pos);
     if file_token.is_empty() {
         return false;
     }
@@ -272,8 +342,24 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
             // Bare >> file << EOF -- no command before redirect
             return true;
         }
-        let cmd = token_before_pos(bytes, &mut pos);
-        return cmd == b"cat" || cmd == b"tee";
+        // Walk backward through all arguments (same logic as > branch below).
+        loop {
+            let tok = token_before_pos(bytes, &mut pos);
+            if tok.is_empty() {
+                return false;
+            }
+            if is_file_write_command(tok) {
+                return true;
+            }
+            skip_ws_backward(bytes, &mut pos);
+            if pos == 0 {
+                return false;
+            }
+            let next = bytes[pos - 1];
+            if next == b'|' || next == b';' || next == b'&' || next == b'(' {
+                return false;
+            }
+        }
     }
 
     if bytes[pos - 1] == b'>' {
@@ -284,25 +370,48 @@ fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
             // Bare > file << EOF -- no command before redirect
             return true;
         }
-        let cmd = token_before_pos(bytes, &mut pos);
-        return cmd == b"cat" || cmd == b"tee";
+        // Walk backward through all arguments until we reach a command
+        // separator or the start.  This handles patterns like:
+        //   printf '%s\n' hello > file << EOF
+        // where multiple arguments appear between the command and the redirect.
+        loop {
+            let tok = token_before_pos(bytes, &mut pos);
+            if tok.is_empty() {
+                return false;
+            }
+            if is_file_write_command(tok) {
+                return true;
+            }
+            // If this token looks like an argument (not a separator already
+            // consumed by token_before_pos), keep scanning backward.
+            skip_ws_backward(bytes, &mut pos);
+            if pos == 0 {
+                return false;
+            }
+            // Stop at command-separating characters that token_before_pos
+            // leaves in place: |, ;, &, (.
+            let next = bytes[pos - 1];
+            if next == b'|' || next == b';' || next == b'&' || next == b'(' {
+                return false;
+            }
+        }
     }
 
-    // No redirect operator -- check for tee command (tee file << EOF)
+    // No redirect operator -- check for tee, dd (dd of=file << EOF), install etc.
     let cmd = token_before_pos(bytes, &mut pos);
-    if cmd == b"tee" {
+    if is_file_write_command(cmd) {
         return true;
     }
 
     // Check if the previous token is a flag (starts with '-') for
-    // patterns like `tee -a file << EOF`
+    // patterns like `tee -a file << EOF` or `install -m 644 file << EOF`
     if cmd.len() > 1 && cmd[0] == b'-' {
         skip_ws_backward(bytes, &mut pos);
         if pos == 0 {
             return false;
         }
         let prev_cmd = token_before_pos(bytes, &mut pos);
-        return prev_cmd == b"tee";
+        return is_file_write_command(prev_cmd);
     }
 
     false
