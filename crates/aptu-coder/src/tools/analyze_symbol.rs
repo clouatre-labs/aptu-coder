@@ -619,226 +619,145 @@ async fn handle_focused_mode(
     Ok((CacheTier::Miss, output))
 }
 
-/// Main handler for the `analyze_symbol` tool.
-///
-/// Called from the thin shim in `lib.rs` after the preamble (emit_received_metric,
-/// trace context, span recording, validate_path) has been completed.
-#[instrument(skip(ctx, params, call))]
-pub(crate) async fn analyze_symbol_handler(
+/// Handle the `import_lookup` mode: scan for files importing `params.symbol` as a module path.
+async fn handle_import_lookup(
     ctx: AnalyzeSymbolContext,
     params: AnalyzeSymbolParams,
     call: crate::tools::AnalyzeSymbolCall,
 ) -> Result<CallToolResult, ErrorData> {
     let sid = ctx.sid.clone();
     let seq = ctx.seq;
-    let ct = call.ct;
-    let progress_token = call.progress_token;
     let param_path = call.param_path;
     let max_depth_val = call.max_depth_val;
-    let span = &call.span;
     let t_start = call.t_start;
 
-    // Check if path is a file (not allowed for analyze_symbol)
-    if std::path::Path::new(&params.path).is_file() {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        return Ok(err_to_tool_result(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            format!(
-                "'{}' is a file; analyze_symbol requires a directory path",
-                params.path
-            ),
-            Some(error_meta(
-                "validation",
-                false,
-                "pass a directory path, not a file",
-            )),
-        )));
-    }
+    let path_owned = std::path::PathBuf::from(&params.path);
+    let symbol = params.symbol.clone();
+    let git_ref = params.git_ref.clone();
+    let max_depth = params.max_depth;
 
-    if summary_cursor_conflict(
-        params.output_control.summary,
-        params.pagination.cursor.as_deref(),
-    ) {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        return Ok(err_to_tool_result(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "summary=true is incompatible with a pagination cursor; use one or the other"
-                .to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "remove cursor or set summary=false",
-            )),
-        )));
-    }
-
-    // import_lookup=true is mutually exclusive with a non-empty symbol.
-    if let Err(e) = validate_import_lookup(params.import_lookup, &params.symbol) {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        return Ok(err_to_tool_result(e));
-    }
-
-    // import_lookup mode: scan for files importing `params.symbol` as a module path.
-    if params.import_lookup == Some(true) {
-        let path_owned = std::path::PathBuf::from(&params.path);
-        let symbol = params.symbol.clone();
-        let git_ref = params.git_ref.clone();
-        let max_depth = params.max_depth;
-
-        let handle = tokio::task::spawn_blocking(move || {
-            let path = path_owned.as_path();
-            let raw_entries = match walk_directory(path, max_depth) {
-                Ok(e) => e,
-                Err(e) => {
-                    return Err(ErrorData::new(
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        format!("Failed to walk directory: {e}"),
-                        Some(error_meta(
-                            "resource",
-                            false,
-                            "check path permissions and availability",
-                        )),
-                    ));
-                }
-            };
-            // Apply git_ref filter when requested (non-empty string only).
-            let entries = if let Some(ref git_ref_val) = git_ref
-                && !git_ref_val.is_empty()
-            {
-                let changed = match changed_files_from_git_ref(path, git_ref_val) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        return Err(ErrorData::new(
-                            rmcp::model::ErrorCode::INVALID_PARAMS,
-                            format!("git_ref filter failed: {e}"),
-                            Some(error_meta(
-                                "resource",
-                                false,
-                                "ensure git is installed and path is inside a git repository",
-                            )),
-                        ));
-                    }
-                };
-                filter_entries_by_git_ref(raw_entries, &changed, path)
-            } else {
-                raw_entries
-            };
-            let output = match analyze::analyze_import_lookup(path, &symbol, &entries, None) {
-                Ok(v) => v,
-                Err(e) => {
-                    return Err(ErrorData::new(
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        format!("import_lookup failed: {e}"),
-                        Some(error_meta(
-                            "resource",
-                            false,
-                            "check path and file permissions",
-                        )),
-                    ));
-                }
-            };
-            Ok(output)
-        });
-
-        let output = match handle.await {
-            Ok(Ok(v)) => v,
-            Ok(Err(e)) => return Ok(err_to_tool_result(e)),
+    let handle = tokio::task::spawn_blocking(move || {
+        let path = path_owned.as_path();
+        let raw_entries = match walk_directory(path, max_depth) {
+            Ok(e) => e,
             Err(e) => {
-                return Ok(err_to_tool_result(ErrorData::new(
+                return Err(ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("spawn_blocking failed: {e}"),
-                    Some(error_meta("resource", false, "internal error")),
-                )));
+                    format!("Failed to walk directory: {e}"),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check path permissions and availability",
+                    )),
+                ));
             }
         };
-
-        let final_text = output.formatted.clone();
-
-        // Record cache tier in span
-        tracing::Span::current().record("cache_tier", "Miss");
-
-        // Add content_hash to _meta
-        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-        let mut meta = no_cache_meta().0;
-        meta.insert(
-            "content_hash".to_string(),
-            serde_json::Value::String(content_hash),
-        );
-
-        let mut result = CallToolResult::success(vec![
-            Content::text(final_text.clone()).with_priority(0.9_f32),
-        ])
-        .with_meta(Some(Meta(meta)));
-        let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-        result.structured_content = Some(structured);
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        ctx.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
-                .output_chars(final_text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .max_depth(max_depth_val)
-                .session_id(sid)
-                .seq(Some(seq))
-                .cache_hit(Some(false))
-                .cache_tier(Some(CacheTier::Miss.as_str()))
-                .build(),
-        );
-        return Ok(result);
-    }
-
-    // Call handler for analysis and progress tracking
-    let (graph_cache_tier, mut output) =
-        match handle_focused_mode(&ctx, &params, ct, progress_token).await {
-            Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
+        // Apply git_ref filter when requested (non-empty string only).
+        let entries = if let Some(ref git_ref_val) = git_ref
+            && !git_ref_val.is_empty()
+        {
+            let changed = match changed_files_from_git_ref(path, git_ref_val) {
+                Ok(c) => c,
+                Err(e) => {
+                    return Err(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        format!("git_ref filter failed: {e}"),
+                        Some(error_meta(
+                            "resource",
+                            false,
+                            "ensure git is installed and path is inside a git repository",
+                        )),
+                    ));
+                }
+            };
+            filter_entries_by_git_ref(raw_entries, &changed, path)
+        } else {
+            raw_entries
         };
-
-    // Surface cache tier in structuredContent for observability and testing.
-    output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
-
-    // Decode pagination cursor if provided (analyze_symbol)
-    let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-    let offset = if let Some(ref cursor_str) = params.pagination.cursor {
-        let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                e.to_string(),
-                Some(error_meta("validation", false, "invalid cursor format")),
-            )
-        }) {
+        let output = match analyze::analyze_import_lookup(path, &symbol, &entries, None) {
             Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
+            Err(e) => {
+                return Err(ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    format!("import_lookup failed: {e}"),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "check path and file permissions",
+                    )),
+                ));
+            }
         };
-        cursor_data.offset
-    } else {
-        0
+        Ok(output)
+    });
+
+    let output = match handle.await {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => return Ok(err_to_tool_result(e)),
+        Err(e) => {
+            return Ok(err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INTERNAL_ERROR,
+                format!("spawn_blocking failed: {e}"),
+                Some(error_meta("resource", false, "internal error")),
+            )));
+        }
     };
 
-    // SymbolFocus pagination: decode cursor mode to determine callers vs callees
-    let cursor_mode = if let Some(ref cursor_str) = params.pagination.cursor {
-        decode_cursor(cursor_str)
-            .map(|c| c.mode)
-            .unwrap_or(PaginationMode::Callers)
-    } else {
-        PaginationMode::Callers
-    };
+    let final_text = output.formatted.clone();
 
-    let use_summary = params.output_control.summary == Some(true);
+    // Record cache tier in span
+    tracing::Span::current().record("cache_tier", "Miss");
 
-    let mut callee_cursor = match cursor_mode {
+    // Add content_hash to _meta
+    let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+    let mut meta = no_cache_meta().0;
+    meta.insert(
+        "content_hash".to_string(),
+        serde_json::Value::String(content_hash),
+    );
+
+    let mut result = CallToolResult::success(vec![
+        Content::text(final_text.clone()).with_priority(0.9_f32),
+    ])
+    .with_meta(Some(Meta(meta)));
+    let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
+    result.structured_content = Some(structured);
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    ctx.metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
+            .output_chars(final_text.len())
+            .param_path_depth(crate::metrics::path_component_count(&param_path))
+            .max_depth(max_depth_val)
+            .session_id(sid)
+            .seq(Some(seq))
+            .cache_hit(Some(false))
+            .cache_tier(Some(CacheTier::Miss.as_str()))
+            .build(),
+    );
+    Ok(result)
+}
+
+/// Apply call-graph pagination to `output` for the given `cursor_mode`.
+///
+/// Mutates `output.formatted` and `output.def_use_sites` in place and returns
+/// the raw next-cursor string (before bootstrap logic) or an early-exit error.
+fn apply_call_graph_pagination(
+    output: &mut analyze::FocusedAnalysisOutput,
+    params: &AnalyzeSymbolParams,
+    cursor_mode: PaginationMode,
+    offset: usize,
+    page_size: usize,
+    use_summary: bool,
+) -> Result<Option<String>, CallToolResult> {
+    match cursor_mode {
         PaginationMode::Callers => {
-            let (paginated_items, paginated_next) = match paginate_focus_chains(
+            let (paginated_items, paginated_next) = paginate_focus_chains(
                 &output.prod_chains,
                 PaginationMode::Callers,
                 offset,
                 page_size,
-            ) {
-                Ok(v) => v,
-                Err(e) => return Ok(err_to_tool_result(e)),
-            };
+            )
+            .map_err(err_to_tool_result)?;
 
             if !use_summary
                 && (paginated_next.is_some() || offset > 0 || !output.outgoing_chains.is_empty())
@@ -857,21 +776,19 @@ pub(crate) async fn analyze_symbol_handler(
                     Some(base_path),
                     false,
                 );
-                paginated_next
+                Ok(paginated_next)
             } else {
-                None
+                Ok(None)
             }
         }
         PaginationMode::Callees => {
-            let (paginated_items, paginated_next) = match paginate_focus_chains(
+            let (paginated_items, paginated_next) = paginate_focus_chains(
                 &output.outgoing_chains,
                 PaginationMode::Callees,
                 offset,
                 page_size,
-            ) {
-                Ok(v) => v,
-                Err(e) => return Ok(err_to_tool_result(e)),
-            };
+            )
+            .map_err(err_to_tool_result)?;
 
             if paginated_next.is_some() || offset > 0 {
                 let base_path = Path::new(&params.path);
@@ -888,36 +805,31 @@ pub(crate) async fn analyze_symbol_handler(
                     Some(base_path),
                     false,
                 );
-                paginated_next
+                Ok(paginated_next)
             } else {
-                None
+                Ok(None)
             }
         }
-        PaginationMode::Default => {
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "invalid cursor: unknown pagination mode".to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use a cursor returned by a previous analyze_symbol call",
-                )),
-            )));
-        }
+        PaginationMode::Default => Err(err_to_tool_result(ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "invalid cursor: unknown pagination mode".to_string(),
+            Some(error_meta(
+                "validation",
+                false,
+                "use a cursor returned by a previous analyze_symbol call",
+            )),
+        ))),
         PaginationMode::DefUse => {
             let total_sites = output.def_use_sites.len();
-            let (paginated_sites, paginated_next) = match paginate_slice(
+            let (paginated_sites, paginated_next) = paginate_slice(
                 &output.def_use_sites,
                 offset,
                 page_size,
                 PaginationMode::DefUse,
-            ) {
-                Ok(r) => (r.items, r.next_cursor),
-                Err(e) => return Ok(err_to_tool_result_from_pagination(e)),
-            };
+            )
+            .map(|r| (r.items, r.next_cursor))
+            .map_err(err_to_tool_result_from_pagination)?;
 
-            // Always regenerate formatted output for DefUse mode so the
-            // first page (offset=0) is not skipped.
             if !use_summary {
                 let base_path = Path::new(&params.path);
                 output.formatted = format_focused_paginated_defuse(
@@ -929,13 +841,93 @@ pub(crate) async fn analyze_symbol_handler(
                     false,
                 );
             }
-
-            // Slice output.def_use_sites to the current page window so
-            // structuredContent only contains the paginated subset.
             output.def_use_sites = paginated_sites;
-
-            paginated_next
+            Ok(paginated_next)
         }
+    }
+}
+
+/// Decode the pagination cursor from `params` and return `(offset, cursor_mode)`.
+///
+/// Returns `Err(CallToolResult)` on a malformed cursor so the caller can
+/// propagate the error immediately.
+fn decode_call_graph_cursor(
+    params: &AnalyzeSymbolParams,
+) -> Result<(usize, PaginationMode), CallToolResult> {
+    let cursor_mode = params
+        .pagination
+        .cursor
+        .as_deref()
+        .map(|s| {
+            decode_cursor(s)
+                .map(|c| c.mode)
+                .unwrap_or(PaginationMode::Callers)
+        })
+        .unwrap_or(PaginationMode::Callers);
+
+    let offset = if let Some(ref cursor_str) = params.pagination.cursor {
+        match decode_cursor(cursor_str).map_err(|e| {
+            err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                e.to_string(),
+                Some(error_meta("validation", false, "invalid cursor format")),
+            ))
+        }) {
+            Ok(v) => v.offset,
+            Err(e) => return Err(e),
+        }
+    } else {
+        0
+    };
+
+    Ok((offset, cursor_mode))
+}
+
+/// Handle the call-graph mode (default) including def_use pagination.
+///
+/// The `def_use` flag is a parameter within the pagination logic, not a
+/// separate top-level branch. It remains here inside the call-graph handler.
+async fn handle_call_graph(
+    ctx: AnalyzeSymbolContext,
+    params: AnalyzeSymbolParams,
+    call: crate::tools::AnalyzeSymbolCall,
+) -> Result<CallToolResult, ErrorData> {
+    let sid = ctx.sid.clone();
+    let seq = ctx.seq;
+    let ct = call.ct;
+    let progress_token = call.progress_token;
+    let param_path = call.param_path;
+    let max_depth_val = call.max_depth_val;
+    let t_start = call.t_start;
+
+    // Call handler for analysis and progress tracking
+    let (graph_cache_tier, mut output) =
+        match handle_focused_mode(&ctx, &params, ct, progress_token).await {
+            Ok(v) => v,
+            Err(e) => return Ok(err_to_tool_result(e)),
+        };
+
+    // Surface cache tier in structuredContent for observability and testing.
+    output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
+
+    let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
+    let (offset, cursor_mode) = match decode_call_graph_cursor(&params) {
+        Ok(v) => v,
+        Err(e) => return Ok(e),
+    };
+
+    let use_summary = params.output_control.summary == Some(true);
+
+    let mut callee_cursor = match apply_call_graph_pagination(
+        &mut output,
+        &params,
+        cursor_mode,
+        offset,
+        page_size,
+        use_summary,
+    ) {
+        Ok(v) => v,
+        Err(e) => return Ok(e),
     };
 
     // When callers are exhausted and callees exist, bootstrap callee pagination
@@ -1026,4 +1018,74 @@ pub(crate) async fn analyze_symbol_handler(
             .build(),
     );
     Ok(result)
+}
+
+/// Emit an INVALID_PARAMS error, recording it on the span, and return early.
+fn invalid_params(
+    span: &tracing::Span,
+    msg: impl Into<String>,
+    hint: &'static str,
+) -> Result<CallToolResult, ErrorData> {
+    span.record("error", true);
+    span.record("error.type", "invalid_params");
+    Ok(err_to_tool_result(ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        msg.into(),
+        Some(error_meta("validation", false, hint)),
+    )))
+}
+
+/// Main handler for the `analyze_symbol` tool.
+///
+/// Validates common preconditions, then dispatches to `handle_import_lookup`
+/// or `handle_call_graph` based on the `import_lookup` flag.
+#[instrument(skip(ctx, params, call))]
+pub(crate) async fn analyze_symbol_handler(
+    ctx: AnalyzeSymbolContext,
+    params: AnalyzeSymbolParams,
+    call: crate::tools::AnalyzeSymbolCall,
+) -> Result<CallToolResult, ErrorData> {
+    let span = &call.span;
+
+    if std::path::Path::new(&params.path).is_file() {
+        return invalid_params(
+            span,
+            format!(
+                "'{}' is a file; analyze_symbol requires a directory path",
+                params.path
+            ),
+            "pass a directory path, not a file",
+        );
+    }
+
+    if summary_cursor_conflict(
+        params.output_control.summary,
+        params.pagination.cursor.as_deref(),
+    ) {
+        return invalid_params(
+            span,
+            "summary=true is incompatible with a pagination cursor; use one or the other",
+            "remove cursor or set summary=false",
+        );
+    }
+
+    if params.import_lookup == Some(true) && params.def_use == Some(true) {
+        return invalid_params(
+            span,
+            "import_lookup=true and def_use=true are mutually exclusive; use one or the other",
+            "remove import_lookup or set def_use=false",
+        );
+    }
+
+    if let Err(e) = validate_import_lookup(params.import_lookup, &params.symbol) {
+        span.record("error", true);
+        span.record("error.type", "invalid_params");
+        return Ok(err_to_tool_result(e));
+    }
+
+    if params.import_lookup == Some(true) {
+        handle_import_lookup(ctx, params, call).await
+    } else {
+        handle_call_graph(ctx, params, call).await
+    }
 }
