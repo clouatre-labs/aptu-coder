@@ -1097,3 +1097,149 @@ async fn test_drain_timeout_background_pipe_holder() {
         .await
         .expect("test timed out");
 }
+
+// ---------------------------------------------------------------------------
+// Heredoc file-write rejection tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_heredoc_cat_redirect_write_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat > /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_cat_append_write_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat >> /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_tee_write_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "tee /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_tee_append_flag_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "tee -a /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_bare_redirect_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": ">> /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_bare_single_redirect_rejected() {
+    // Bare > file << EOF with no command before the redirect operator.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "> /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for bare > redirect: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_tee_append_redirect_rejected() {
+    // tee >> file << EOF -- tee with an explicit append redirect operator.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "tee >> /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for tee >> redirect: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_tee_single_redirect_rejected() {
+    // tee > file << EOF -- tee with an explicit write redirect operator.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "tee > /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for tee > redirect: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_cat_redirect_in_quotes_accepted() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo 'cat > file <<EOF'"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_cat_stdout_accepted() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_awk_bitshift_accepted() {
+    // The awk command should execute (exit code 2 from awk syntax),
+    // NOT be rejected by pre-spawn validation.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "awk '{print 1 << 2}'"
+    }))
+    .await;
+    // awk syntax error on macOS produces exit code 2, so isError=true,
+    // but the important thing is that the command *ran* at all (not
+    // rejected by pre-spawn heredoc validation).  Verify by checking
+    // the output contains the awk error message.
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("awk:"),
+        "expected awk to run (not be rejected by pre-scan): {resp}"
+    );
+}
