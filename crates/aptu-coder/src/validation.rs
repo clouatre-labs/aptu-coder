@@ -26,6 +26,12 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     let len = bytes.len();
 
     // Phase 1: pre-scan for heredoc file-write patterns (cat/tee/redirect + <<)
+    //
+    // This is a heuristic scanner: it handles the common patterns above but
+    // does not cover every possible shell construct (e.g. subshell grouping,
+    // process substitution, variable-expanded command names).  Obfuscated or
+    // deeply nested constructs may not be caught.  For a stricter guarantee,
+    // replace this phase with a full shell AST parser.
     {
         let mut i = 0;
         let mut in_single_quote = false;
