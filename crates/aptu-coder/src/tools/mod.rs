@@ -45,6 +45,7 @@ pub mod analyze_directory;
 pub mod analyze_file;
 pub mod analyze_module;
 pub mod analyze_symbol;
+pub mod common;
 pub mod edit_overwrite;
 pub mod edit_replace;
 pub mod exec_command;
