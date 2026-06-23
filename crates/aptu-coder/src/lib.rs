@@ -34,7 +34,7 @@ mod tools;
 mod validation;
 
 use aptu_coder_core::analyze;
-use aptu_coder_core::{cache, completion, graph, types};
+use aptu_coder_core::{cache, completion, types};
 use shell::resolve_shell;
 use validation::validate_path;
 
@@ -132,19 +132,12 @@ impl ShellOutput {
     }
 }
 
-use aptu_coder_core::cache::{AnalysisCache, CacheTier, CallGraphCache, CallGraphCacheKey};
-use aptu_coder_core::formatter::{format_focused_paginated, format_module_info};
-use aptu_coder_core::formatter_defuse::format_focused_paginated_defuse;
-use aptu_coder_core::pagination::{
-    CursorData, DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor, encode_cursor, paginate_slice,
-};
-use aptu_coder_core::traversal::{
-    WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
-};
+#[cfg(test)]
+use aptu_coder_core::cache::CacheTier;
+use aptu_coder_core::cache::{AnalysisCache, CallGraphCache};
 use aptu_coder_core::types::{
     AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, AnalyzeSymbolParams,
     EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
-    SymbolMatchMode,
 };
 use filters::{CompiledRule, load_filter_table};
 #[cfg(test)]
@@ -152,19 +145,21 @@ use filters::{apply_filter, maybe_inject_no_stat};
 use logging::LogEvent;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
+#[cfg(test)]
+use rmcp::model::ProgressToken;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
     CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
-    LoggingLevel, LoggingMessageNotificationParam, Meta, Notification, ProgressNotificationParam,
-    ProgressToken, ServerCapabilities, ServerNotification, SetLevelRequestParams,
+    LoggingLevel, LoggingMessageNotificationParam, Meta, Notification, ServerCapabilities,
+    ServerNotification, SetLevelRequestParams,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
-use serde_json::Value;
+
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc, watch};
+use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc};
 use tracing::{instrument, warn};
 use tracing_subscriber::filter::LevelFilter;
 
@@ -313,54 +308,6 @@ pub(crate) fn no_cache_meta() -> Meta {
         serde_json::Value::String("no-cache".to_string()),
     );
     Meta(m)
-}
-
-/// Helper function for paginating focus chains (callers or callees).
-/// Returns (items, re-encoded_cursor_option).
-fn paginate_focus_chains(
-    chains: &[graph::InternalCallChain],
-    mode: PaginationMode,
-    offset: usize,
-    page_size: usize,
-) -> Result<(Vec<graph::InternalCallChain>, Option<String>), ErrorData> {
-    let paginated = paginate_slice(chains, offset, page_size, mode).map_err(|e| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            e.to_string(),
-            Some(error_meta("transient", true, "retry the request")),
-        )
-    })?;
-
-    if paginated.next_cursor.is_none() && offset == 0 {
-        return Ok((paginated.items, None));
-    }
-
-    let next = if let Some(raw_cursor) = paginated.next_cursor {
-        let decoded = decode_cursor(&raw_cursor).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                e.to_string(),
-                Some(error_meta("validation", false, "invalid cursor format")),
-            )
-        })?;
-        Some(
-            encode_cursor(&CursorData {
-                mode,
-                offset: decoded.offset,
-            })
-            .map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    e.to_string(),
-                    Some(error_meta("validation", false, "invalid cursor format")),
-                )
-            })?,
-        )
-    } else {
-        None
-    };
-
-    Ok((paginated.items, next))
 }
 
 /// MCP server handler that wires the four analysis tools to the rmcp transport.
@@ -519,30 +466,6 @@ impl CodeAnalyzer {
         }
     }
 
-    #[instrument(skip(self))]
-    async fn emit_progress(
-        &self,
-        peer: Option<Peer<RoleServer>>,
-        token: &ProgressToken,
-        progress: f64,
-        total: f64,
-        message: String,
-    ) {
-        if let Some(peer) = peer {
-            let notification = ServerNotification::ProgressNotification(Notification::new(
-                ProgressNotificationParam {
-                    progress_token: token.clone(),
-                    progress,
-                    total: Some(total),
-                    message: Some(message),
-                },
-            ));
-            if let Err(e) = peer.send_notification(notification).await {
-                warn!("Failed to send progress notification: {}", e);
-            }
-        }
-    }
-
     /// Emit a "received" metric event for the given tool name.
     /// Increments the session call sequence, locks the session ID, and sends
     /// the metric event via the channel. Returns the (seq, sid) pair for use
@@ -601,481 +524,35 @@ impl CodeAnalyzer {
         tools::analyze_file::handle_file_details_mode(&ctx, params).await
     }
 
-    // Validate impl_only: only valid for directories that contain Rust source files.
-    fn validate_impl_only(entries: &[WalkEntry]) -> Result<(), ErrorData> {
-        let has_rust = entries.iter().any(|e| {
-            !e.is_dir
-                && e.path
-                    .extension()
-                    .and_then(|x: &std::ffi::OsStr| x.to_str())
-                    == Some("rs")
-        });
-
-        if !has_rust {
-            return Err(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "impl_only=true requires Rust source files. No .rs files found in the given path. Use analyze_symbol without impl_only for cross-language analysis.".to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "remove impl_only or point to a directory containing .rs files",
-                )),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Validate that `import_lookup=true` is accompanied by a non-empty symbol (the module path).
-    fn validate_import_lookup(import_lookup: Option<bool>, symbol: &str) -> Result<(), ErrorData> {
-        if import_lookup == Some(true) && symbol.is_empty() {
-            return Err(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "import_lookup=true requires symbol to contain the module path to search for"
-                    .to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "set symbol to the module path when using import_lookup=true",
-                )),
-            ));
-        }
-        Ok(())
-    }
-
-    // Poll progress until analysis task completes.
-    #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)] // progress percentage display; precision loss acceptable for usize counts
-    async fn poll_progress_until_done(
+    /// Forwarding shim for tests that call `analyzer.emit_progress(...)` directly.
+    #[cfg(test)]
+    pub(crate) async fn emit_progress(
         &self,
-        analysis_params: &FocusedAnalysisParams,
-        counter: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        ct: tokio_util::sync::CancellationToken,
-        entries: std::sync::Arc<Vec<WalkEntry>>,
-        total_files: usize,
-        symbol_display: &str,
-        progress_token: Option<ProgressToken>,
-    ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
-        let counter_clone = counter.clone();
-        let ct_clone = ct.clone();
-        let entries_clone = std::sync::Arc::clone(&entries);
-        let path_owned = analysis_params.path.clone();
-        let symbol_owned = analysis_params.symbol.clone();
-        let match_mode_owned = analysis_params.match_mode.clone();
-        let follow_depth = analysis_params.follow_depth;
-        let max_depth = analysis_params.max_depth;
-        let use_summary = analysis_params.use_summary;
-        let impl_only = analysis_params.impl_only;
-        let def_use = analysis_params.def_use;
-        let parse_timeout_micros = analysis_params.parse_timeout_micros;
-        let handle = tokio::task::spawn_blocking(move || {
-            let params = analyze::FocusedAnalysisConfig {
-                focus: symbol_owned,
-                match_mode: match_mode_owned,
-                follow_depth,
-                max_depth,
-                ast_recursion_limit: None,
-                use_summary,
-                impl_only,
-                def_use,
-                parse_timeout_micros,
-            };
-            analyze::analyze_focused_with_progress_with_entries(
-                &path_owned,
-                &params,
-                &counter_clone,
-                &ct_clone,
-                &entries_clone,
-            )
-        });
-
-        // Gate progress on client-supplied token; skip all machinery when absent.
-        if let Some(ref token) = progress_token {
-            let (tx, mut rx) = watch::channel(0usize);
-            let peer = self.peer.lock().await.clone();
-            let mut last_progress = 0usize;
-            let mut cancelled = false;
-
-            // Spawn a notifier that watches the counter and sends on the watch channel.
-            let counter_notify = counter.clone();
-            let tx_notify = tx.clone();
-            let ct_notify = ct.clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    if ct_notify.is_cancelled() {
-                        break;
-                    }
-                    let current = counter_notify.load(std::sync::atomic::Ordering::Relaxed);
-                    if tx_notify.send(current).is_err() {
-                        break; // receiver dropped
-                    }
-                }
-            });
-
-            loop {
-                tokio::select! {
-                    _ = ct.cancelled() => {
-                        cancelled = true;
-                        break;
-                    }
-                    changed = rx.changed() => {
-                        match changed {
-                            Ok(()) => {
-                                let current = *rx.borrow();
-                                if current != last_progress && total_files > 0 {
-                                    self.emit_progress(
-                                        peer.clone(),
-                                        token,
-                                        current as f64,
-                                        total_files as f64,
-                                        format!(
-                                            "Analyzing {current}/{total_files} files for symbol '{symbol_display}'"
-                                        ),
-                                    )
-                                    .await;
-                                    last_progress = current;
-                                }
-                            }
-                            Err(_) => {
-                                // Sender dropped: analysis complete or notifier exited.
-                                break;
-                            }
-                        }
-                    }
-                }
-                if handle.is_finished() {
-                    break;
-                }
-            }
-
-            if !cancelled && total_files > 0 {
-                self.emit_progress(
-                    peer.clone(),
-                    token,
-                    total_files as f64,
-                    total_files as f64,
-                    format!(
-                        "Completed analyzing {total_files} files for symbol '{symbol_display}'"
-                    ),
-                )
-                .await;
-            }
-        }
-
-        match handle.await {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(analyze::AnalyzeError::Cancelled)) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                "Analysis cancelled".to_string(),
-                Some(error_meta("transient", true, "analysis was cancelled")),
-            )),
-            Ok(Err(e)) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Error analyzing symbol: {e}"),
-                Some(error_meta("resource", false, "check symbol name and file")),
-            )),
-            Err(e) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Task join error: {e}"),
-                Some(error_meta("transient", true, "retry the request")),
-            )),
-        }
+        peer: Option<rmcp::Peer<rmcp::RoleServer>>,
+        token: &rmcp::model::ProgressToken,
+        progress: f64,
+        total: f64,
+        message: String,
+    ) {
+        tools::analyze_symbol::emit_progress_notification_pub(peer, token, progress, total, message)
+            .await
     }
 
-    // Run focused analysis with auto-summary retry on SIZE_LIMIT overflow.
-    #[allow(clippy::too_many_arguments)]
-    async fn run_focused_with_auto_summary(
-        &self,
-        params: &AnalyzeSymbolParams,
-        analysis_params: &FocusedAnalysisParams,
-        counter: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        ct: tokio_util::sync::CancellationToken,
-        entries: std::sync::Arc<Vec<WalkEntry>>,
-        total_files: usize,
-        progress_token: Option<ProgressToken>,
-    ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
-        let use_summary_for_task = params.output_control.summary == Some(true);
-
-        let analysis_params_initial = FocusedAnalysisParams {
-            use_summary: use_summary_for_task,
-            ..analysis_params.clone()
-        };
-
-        let mut output = self
-            .poll_progress_until_done(
-                &analysis_params_initial,
-                counter.clone(),
-                ct.clone(),
-                entries.clone(),
-                total_files,
-                &params.symbol,
-                progress_token.clone(),
-            )
-            .await?;
-
-        if params.output_control.summary.is_none() && output.formatted.len() > SIZE_LIMIT {
-            tracing::debug!(
-                auto_summary = true,
-                message = "output exceeded size limit, retrying with summary"
-            );
-            let counter2 = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let analysis_params_retry = FocusedAnalysisParams {
-                use_summary: true,
-                ..analysis_params.clone()
-            };
-            let summary_result = self
-                .poll_progress_until_done(
-                    &analysis_params_retry,
-                    counter2,
-                    ct,
-                    entries,
-                    total_files,
-                    &params.symbol,
-                    progress_token,
-                )
-                .await;
-
-            if let Ok(summary_output) = summary_result {
-                output.formatted = summary_output.formatted;
-            } else {
-                let estimated_tokens = output.formatted.len() / 4;
-                let message = format!(
-                    "Output exceeds 50K chars ({} chars, ~{} tokens). Use summary=true or narrow your scope.",
-                    output.formatted.len(),
-                    estimated_tokens
-                );
-                return Err(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    message,
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "use summary=true or narrow scope",
-                    )),
-                ));
-            }
-        } else if output.formatted.len() > SIZE_LIMIT
-            && params.output_control.summary == Some(false)
-        {
-            let estimated_tokens = output.formatted.len() / 4;
-            let message = format!(
-                "Output exceeds 50K chars ({} chars, ~{} tokens). Use one of:\n\
-                 - summary=true to get compact summary\n\
-                 - Narrow your scope (smaller directory, specific file)",
-                output.formatted.len(),
-                estimated_tokens
-            );
-            return Err(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                message,
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use summary=true or narrow scope",
-                )),
-            ));
-        }
-
-        Ok(output)
+    /// Forwarding shim for tests that call `CodeAnalyzer::validate_impl_only` directly.
+    #[cfg(test)]
+    pub(crate) fn validate_impl_only(
+        entries: &[aptu_coder_core::traversal::WalkEntry],
+    ) -> Result<(), rmcp::model::ErrorData> {
+        tools::analyze_symbol::validate_impl_only(entries)
     }
 
-    /// Private helper: Extract analysis logic for focused mode (`analyze_symbol`).
-    /// Returns `(CacheTier, FocusedAnalysisOutput)` -- tier is `L1Memory` on cache hit,
-    /// `Miss` on cache miss. Cancels the blocking task when `ct` is triggered.
-    #[instrument(skip(self, params, ct))]
-    async fn handle_focused_mode(
-        &self,
-        params: &AnalyzeSymbolParams,
-        ct: tokio_util::sync::CancellationToken,
-        progress_token: Option<ProgressToken>,
-    ) -> Result<(CacheTier, analyze::FocusedAnalysisOutput), ErrorData> {
-        let path = Path::new(&params.path);
-        let raw_entries = match walk_directory(path, params.max_depth) {
-            Ok(e) => e,
-            Err(e) => {
-                return Err(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("Failed to walk directory: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check path permissions and availability",
-                    )),
-                ));
-            }
-        };
-        // Apply git_ref filter when requested (non-empty string only).
-        let filtered_entries = if let Some(ref git_ref) = params.git_ref
-            && !git_ref.is_empty()
-        {
-            let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    format!("git_ref filter failed: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "ensure git is installed and path is inside a git repository",
-                    )),
-                )
-            })?;
-            filter_entries_by_git_ref(raw_entries, &changed, path)
-        } else {
-            raw_entries
-        };
-        let entries = std::sync::Arc::new(filtered_entries);
-
-        if params.impl_only == Some(true) {
-            Self::validate_impl_only(&entries)?;
-        }
-
-        // Build cache key for this call-graph request.
-        let cache_key = CallGraphCacheKey::from_entries(
-            path,
-            &entries,
-            params.git_ref.as_deref(),
-            params.follow_depth.unwrap_or(1),
-            &params.match_mode.clone().unwrap_or_default(),
-            params.impl_only.unwrap_or(false),
-            None,
-        );
-
-        // Check L1 cache first.
-        if let Some(cached) = self.call_graph_cache.get(&cache_key) {
-            return Ok((CacheTier::L1Memory, (*cached).clone()));
-        }
-
-        // Compute L2 disk cache key by streaming CallGraphCacheKey fields through blake3.
-        // Same pattern as analyze_directory (lib.rs:591-617): root_path + git_ref +
-        // follow_depth + match_mode + impl_only + per-file mtimes.
-        let disk_key = {
-            let mut hasher = blake3::Hasher::new();
-            hasher.update(path.as_os_str().to_string_lossy().as_bytes());
-            if let Some(ref git_ref) = params.git_ref {
-                hasher.update(git_ref.as_bytes());
-            }
-            hasher.update(&params.follow_depth.unwrap_or(1).to_le_bytes());
-            let match_mode_str =
-                match serde_json::to_string(&params.match_mode.clone().unwrap_or_default()) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        // Serialization of a unit-like enum should never fail; if it does,
-                        // an empty string would produce a non-unique cache key, so warn loudly.
-                        tracing::warn!(
-                            error = %e,
-                            "analyze_symbol: failed to serialize match_mode for disk cache key; \
-                             falling back to empty string (cache key may collide)"
-                        );
-                        String::new()
-                    }
-                };
-            hasher.update(match_mode_str.as_bytes());
-            hasher.update(&[u8::from(params.impl_only.unwrap_or(false))]);
-            // Stream sorted per-file (path, mtime_nanos) pairs for freshness.
-            let mut sorted_entries: Vec<_> = entries.iter().filter(|e| !e.is_dir).collect();
-            sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
-            for entry in &sorted_entries {
-                // `path` is always a canonical absolute path (validated upstream by
-                // validate_path before handle_focused_mode is called), so strip_prefix
-                // succeeds for every entry under it. The unwrap_or fallback retains the
-                // full absolute path, which is still unique and safe for hashing.
-                let rel = entry.path.strip_prefix(path).unwrap_or(&entry.path);
-                hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
-                let mtime_nanos = entry
-                    .mtime
-                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(0);
-                hasher.update(&mtime_nanos.to_le_bytes());
-            }
-            hasher.finalize()
-        };
-
-        // Check L2 disk cache.
-        if let Some(cached) = self
-            .disk_cache
-            .get::<analyze::FocusedAnalysisOutput>("analyze_symbol", &disk_key)
-        {
-            let arc = std::sync::Arc::new(cached.clone());
-            self.call_graph_cache.put(cache_key, arc);
-            return Ok((CacheTier::L2Disk, cached));
-        }
-
-        let total_files = entries.iter().filter(|e| !e.is_dir).count();
-        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-        let analysis_params = FocusedAnalysisParams {
-            path: path.to_path_buf(),
-            symbol: params.symbol.clone(),
-            match_mode: params.match_mode.clone().unwrap_or_default(),
-            follow_depth: params.follow_depth.unwrap_or(1),
-            max_depth: params.max_depth,
-            use_summary: false,
-            impl_only: params.impl_only,
-            def_use: params.def_use.unwrap_or(false),
-            parse_timeout_micros: None,
-        };
-
-        let mut output = self
-            .run_focused_with_auto_summary(
-                params,
-                &analysis_params,
-                counter,
-                ct,
-                entries,
-                total_files,
-                progress_token,
-            )
-            .await?;
-
-        if params.impl_only == Some(true) {
-            let filter_line = format!(
-                "FILTER: impl_only=true ({} of {} callers shown)\n",
-                output.impl_trait_caller_count, output.unfiltered_caller_count
-            );
-            output.formatted = format!("{}{}", filter_line, output.formatted);
-
-            if output.impl_trait_caller_count == 0 {
-                output.formatted.push_str(
-                    "\nNOTE: No impl-trait callers found. The symbol may be a plain function or struct, not a trait method. Remove impl_only to see all callers.\n"
-                );
-            }
-        }
-
-        // Store in L1 cache for subsequent calls.
-        self.call_graph_cache
-            .put(cache_key, std::sync::Arc::new(output.clone()));
-
-        // Spawn L2 write-behind; drain failure counter after write completes.
-        {
-            let dc = self.disk_cache.clone();
-            let k = disk_key;
-            let v = output.clone();
-            let handle = tokio::task::spawn_blocking(move || {
-                dc.put("analyze_symbol", &k, &v);
-                dc.drain_write_failures()
-            });
-            let metrics_tx = self.metrics_tx.clone();
-            let sid = self.session_id.lock().await.clone();
-            tokio::spawn(async move {
-                if let Ok(failures) = handle.await
-                    && failures > 0
-                {
-                    tracing::warn!(
-                        tool = "analyze_symbol",
-                        failures,
-                        "L2 disk cache write failed"
-                    );
-                    metrics_tx.send(
-                        crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", 0)
-                            .session_id(sid)
-                            .cache_write_failure(Some(true))
-                            .build(),
-                    );
-                }
-            });
-        }
-
-        Ok((CacheTier::Miss, output))
+    /// Forwarding shim for tests that call `CodeAnalyzer::validate_import_lookup` directly.
+    #[cfg(test)]
+    pub(crate) fn validate_import_lookup(
+        import_lookup: Option<bool>,
+        symbol: &str,
+    ) -> Result<(), rmcp::model::ErrorData> {
+        tools::analyze_symbol::validate_import_lookup(import_lookup, symbol)
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -1234,7 +711,6 @@ impl CodeAnalyzer {
         let params = params.0;
         let t_start = std::time::Instant::now();
         let (seq, sid) = self.emit_received_metric("analyze_symbol").await;
-        // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
         let client_version = self.client_version.lock().await.clone();
@@ -1262,399 +738,24 @@ impl CodeAnalyzer {
         let ct = context.ct.clone();
         let param_path = params.path.clone();
         let max_depth_val = params.follow_depth;
-
-        // Check if path is a file (not allowed for analyze_symbol)
-        if std::path::Path::new(&params.path).is_file() {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!(
-                    "'{}' is a file; analyze_symbol requires a directory path",
-                    params.path
-                ),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "pass a directory path, not a file",
-                )),
-            )));
-        }
-
-        // summary=true and cursor are mutually exclusive
-        if summary_cursor_conflict(
-            params.output_control.summary,
-            params.pagination.cursor.as_deref(),
-        ) {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "summary=true is incompatible with a pagination cursor; use one or the other"
-                    .to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "remove cursor or set summary=false",
-                )),
-            )));
-        }
-
-        // import_lookup=true is mutually exclusive with a non-empty symbol.
-        if let Err(e) = Self::validate_import_lookup(params.import_lookup, &params.symbol) {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(e));
-        }
-
-        // import_lookup mode: scan for files importing `params.symbol` as a module path.
-        if params.import_lookup == Some(true) {
-            let path_owned = PathBuf::from(&params.path);
-            let symbol = params.symbol.clone();
-            let git_ref = params.git_ref.clone();
-            let max_depth = params.max_depth;
-
-            let handle = tokio::task::spawn_blocking(move || {
-                let path = path_owned.as_path();
-                let raw_entries = match walk_directory(path, max_depth) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        return Err(ErrorData::new(
-                            rmcp::model::ErrorCode::INTERNAL_ERROR,
-                            format!("Failed to walk directory: {e}"),
-                            Some(error_meta(
-                                "resource",
-                                false,
-                                "check path permissions and availability",
-                            )),
-                        ));
-                    }
-                };
-                // Apply git_ref filter when requested (non-empty string only).
-                let entries = if let Some(ref git_ref_val) = git_ref
-                    && !git_ref_val.is_empty()
-                {
-                    let changed = match changed_files_from_git_ref(path, git_ref_val) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            return Err(ErrorData::new(
-                                rmcp::model::ErrorCode::INVALID_PARAMS,
-                                format!("git_ref filter failed: {e}"),
-                                Some(error_meta(
-                                    "resource",
-                                    false,
-                                    "ensure git is installed and path is inside a git repository",
-                                )),
-                            ));
-                        }
-                    };
-                    filter_entries_by_git_ref(raw_entries, &changed, path)
-                } else {
-                    raw_entries
-                };
-                let output = match analyze::analyze_import_lookup(path, &symbol, &entries, None) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return Err(ErrorData::new(
-                            rmcp::model::ErrorCode::INTERNAL_ERROR,
-                            format!("import_lookup failed: {e}"),
-                            Some(error_meta(
-                                "resource",
-                                false,
-                                "check path and file permissions",
-                            )),
-                        ));
-                    }
-                };
-                Ok(output)
-            });
-
-            let output = match handle.await {
-                Ok(Ok(v)) => v,
-                Ok(Err(e)) => return Ok(err_to_tool_result(e)),
-                Err(e) => {
-                    return Ok(err_to_tool_result(ErrorData::new(
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        format!("spawn_blocking failed: {e}"),
-                        Some(error_meta("resource", false, "internal error")),
-                    )));
-                }
-            };
-
-            let final_text = output.formatted.clone();
-
-            // Record cache tier in span
-            tracing::Span::current().record("cache_tier", "Miss");
-
-            // Add content_hash to _meta
-            let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-            let mut meta = no_cache_meta().0;
-            meta.insert(
-                "content_hash".to_string(),
-                serde_json::Value::String(content_hash),
-            );
-
-            let mut result = CallToolResult::success(vec![
-                Content::text(final_text.clone()).with_priority(0.9_f32),
-            ])
-            .with_meta(Some(Meta(meta)));
-            let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-            result.structured_content = Some(structured);
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
-                    .output_chars(final_text.len())
-                    .param_path_depth(crate::metrics::path_component_count(&param_path))
-                    .max_depth(max_depth_val)
-                    .session_id(sid)
-                    .seq(Some(seq))
-                    .cache_hit(Some(false))
-                    .cache_tier(Some(CacheTier::Miss.as_str()))
-                    .build(),
-            );
-            return Ok(result);
-        }
-
-        // Call handler for analysis and progress tracking
+        let ctx = tools::AnalyzeSymbolContext {
+            metrics_tx: self.metrics_tx.clone(),
+            peer: self.peer.clone(),
+            call_graph_cache: self.call_graph_cache.clone(),
+            disk_cache: self.disk_cache.clone(),
+            sid: sid.clone(),
+            seq,
+        };
         let progress_token = context.meta.get_progress_token();
-        let (graph_cache_tier, mut output) =
-            match self.handle_focused_mode(&params, ct, progress_token).await {
-                Ok(v) => v,
-                Err(e) => return Ok(err_to_tool_result(e)),
-            };
-
-        // Surface cache tier in structuredContent for observability and testing.
-        output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
-
-        // Decode pagination cursor if provided (analyze_symbol)
-        let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-        let offset = if let Some(ref cursor_str) = params.pagination.cursor {
-            let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    e.to_string(),
-                    Some(error_meta("validation", false, "invalid cursor format")),
-                )
-            }) {
-                Ok(v) => v,
-                Err(e) => return Ok(err_to_tool_result(e)),
-            };
-            cursor_data.offset
-        } else {
-            0
+        let call = tools::AnalyzeSymbolCall {
+            ct,
+            progress_token,
+            param_path,
+            max_depth_val,
+            span,
+            t_start,
         };
-
-        // SymbolFocus pagination: decode cursor mode to determine callers vs callees
-        let cursor_mode = if let Some(ref cursor_str) = params.pagination.cursor {
-            decode_cursor(cursor_str)
-                .map(|c| c.mode)
-                .unwrap_or(PaginationMode::Callers)
-        } else {
-            PaginationMode::Callers
-        };
-
-        let use_summary = params.output_control.summary == Some(true);
-
-        let mut callee_cursor = match cursor_mode {
-            PaginationMode::Callers => {
-                let (paginated_items, paginated_next) = match paginate_focus_chains(
-                    &output.prod_chains,
-                    PaginationMode::Callers,
-                    offset,
-                    page_size,
-                ) {
-                    Ok(v) => v,
-                    Err(e) => return Ok(err_to_tool_result(e)),
-                };
-
-                if !use_summary
-                    && (paginated_next.is_some()
-                        || offset > 0
-                        || !output.outgoing_chains.is_empty())
-                {
-                    let base_path = Path::new(&params.path);
-                    output.formatted = format_focused_paginated(
-                        &paginated_items,
-                        output.prod_chains.len(),
-                        PaginationMode::Callers,
-                        &params.symbol,
-                        &output.prod_chains,
-                        &output.test_chains,
-                        &output.outgoing_chains,
-                        output.def_count,
-                        offset,
-                        Some(base_path),
-                        false,
-                    );
-                    paginated_next
-                } else {
-                    None
-                }
-            }
-            PaginationMode::Callees => {
-                let (paginated_items, paginated_next) = match paginate_focus_chains(
-                    &output.outgoing_chains,
-                    PaginationMode::Callees,
-                    offset,
-                    page_size,
-                ) {
-                    Ok(v) => v,
-                    Err(e) => return Ok(err_to_tool_result(e)),
-                };
-
-                if paginated_next.is_some() || offset > 0 {
-                    let base_path = Path::new(&params.path);
-                    output.formatted = format_focused_paginated(
-                        &paginated_items,
-                        output.outgoing_chains.len(),
-                        PaginationMode::Callees,
-                        &params.symbol,
-                        &output.prod_chains,
-                        &output.test_chains,
-                        &output.outgoing_chains,
-                        output.def_count,
-                        offset,
-                        Some(base_path),
-                        false,
-                    );
-                    paginated_next
-                } else {
-                    None
-                }
-            }
-            PaginationMode::Default => {
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    "invalid cursor: unknown pagination mode".to_string(),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "use a cursor returned by a previous analyze_symbol call",
-                    )),
-                )));
-            }
-            PaginationMode::DefUse => {
-                let total_sites = output.def_use_sites.len();
-                let (paginated_sites, paginated_next) = match paginate_slice(
-                    &output.def_use_sites,
-                    offset,
-                    page_size,
-                    PaginationMode::DefUse,
-                ) {
-                    Ok(r) => (r.items, r.next_cursor),
-                    Err(e) => return Ok(err_to_tool_result_from_pagination(e)),
-                };
-
-                // Always regenerate formatted output for DefUse mode so the
-                // first page (offset=0) is not skipped.
-                if !use_summary {
-                    let base_path = Path::new(&params.path);
-                    output.formatted = format_focused_paginated_defuse(
-                        &paginated_sites,
-                        total_sites,
-                        &params.symbol,
-                        offset,
-                        Some(base_path),
-                        false,
-                    );
-                }
-
-                // Slice output.def_use_sites to the current page window so
-                // structuredContent only contains the paginated subset.
-                output.def_use_sites = paginated_sites;
-
-                paginated_next
-            }
-        };
-
-        // When callers are exhausted and callees exist, bootstrap callee pagination
-        // by emitting a {mode:callees, offset:0} cursor. This makes PaginationMode::Callees
-        // reachable; without it the branch was dead code. Suppressed in summary mode
-        // because summary and pagination are mutually exclusive.
-        if callee_cursor.is_none()
-            && cursor_mode == PaginationMode::Callers
-            && !output.outgoing_chains.is_empty()
-            && !use_summary
-            && let Ok(cursor) = encode_cursor(&CursorData {
-                mode: PaginationMode::Callees,
-                offset: 0,
-            })
-        {
-            callee_cursor = Some(cursor);
-        }
-
-        // When callees are exhausted and def_use_sites exist, bootstrap defuse cursor
-        // by emitting a {mode:defuse, offset:0} cursor. This makes PaginationMode::DefUse
-        // reachable. Suppressed in summary mode because summary and pagination are mutually exclusive.
-        // Also bootstrap directly from Callers mode when there are no outgoing chains
-        // (e.g. SymbolNotFound path or symbols with no callees) so def-use pagination
-        // is reachable even without a Callees phase.
-        if callee_cursor.is_none()
-            && matches!(
-                cursor_mode,
-                PaginationMode::Callees | PaginationMode::Callers
-            )
-            && !output.def_use_sites.is_empty()
-            && !use_summary
-            && let Ok(cursor) = encode_cursor(&CursorData {
-                mode: PaginationMode::DefUse,
-                offset: 0,
-            })
-        {
-            // Only bootstrap from Callers when callees are empty (otherwise
-            // the Callees bootstrap above takes priority).
-            if cursor_mode == PaginationMode::Callees || output.outgoing_chains.is_empty() {
-                callee_cursor = Some(cursor);
-            }
-        }
-
-        // Update next_cursor in output
-        output.next_cursor.clone_from(&callee_cursor);
-
-        // Build final text output with pagination cursor if present
-        let mut final_text = output.formatted.clone();
-        if let Some(cursor) = callee_cursor {
-            final_text.push('\n');
-            final_text.push_str("NEXT_CURSOR: ");
-            final_text.push_str(&cursor);
-        }
-
-        // Record cache tier in span
-        tracing::Span::current().record("cache_tier", graph_cache_tier.as_str());
-
-        // Add content_hash to _meta
-        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-        let mut meta = no_cache_meta().0;
-        meta.insert(
-            "content_hash".to_string(),
-            serde_json::Value::String(content_hash),
-        );
-
-        let mut result = CallToolResult::success(vec![
-            Content::text(final_text.clone()).with_priority(0.9_f32),
-        ])
-        .with_meta(Some(Meta(meta)));
-        // Only include def_use_sites in structuredContent when in DefUse mode.
-        // In Callers/Callees modes, clearing the vec prevents large def-use
-        // payloads from leaking into paginated non-def-use responses.
-        if cursor_mode != PaginationMode::DefUse {
-            output.def_use_sites = Vec::new();
-        }
-        let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-        result.structured_content = Some(structured);
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
-                .output_chars(final_text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .max_depth(max_depth_val)
-                .session_id(sid)
-                .seq(Some(seq))
-                .cache_hit(Some(graph_cache_tier != CacheTier::Miss))
-                .cache_tier(Some(graph_cache_tier.as_str()))
-                .build(),
-        );
-        Ok(result)
+        tools::analyze_symbol::analyze_symbol_handler(ctx, params, call).await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -1679,7 +780,6 @@ impl CodeAnalyzer {
         let params = params.0;
         let t_start = std::time::Instant::now();
         let (seq, sid) = self.emit_received_metric("analyze_module").await;
-        // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
         let client_version = self.client_version.lock().await.clone();
@@ -1705,230 +805,13 @@ impl CodeAnalyzer {
             }
         };
         let param_path = params.path.clone();
-
-        // Issue 340: Guard against directory paths
-        if std::fs::metadata(&params.path)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-        {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(&param_path))
-                    .error_type(Some("invalid_params".to_string()))
-                    .session_id(sid.clone())
-                    .seq(Some(seq))
-                    .build(),
-            );
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "path is a directory; use analyze_directory for directories, or pass a file path to analyze_module",
-                {
-                    let mut meta =
-                        error_meta("validation", false, "use analyze_directory for directories");
-                    if let Some(obj) = meta.as_object_mut() {
-                        obj.insert("path".to_string(), serde_json::json!(params.path));
-                    }
-                    Some(meta)
-                },
-            )));
-        }
-
-        // Module-only cache path: L2 (content hash) -> analyze_module_file fast path.
-        // Uses AnalysisMode::ModuleOnly disk key so entries are distinct from analyze_file.
-        // L1 in-memory cache is not used here: the existing L1 stores Arc<FileAnalysisOutput>
-        // and adding a new typed slot is out of scope; L2 avoids the parse cost across restarts.
-        let file_bytes = match tokio::fs::read(&params.path).await {
-            Ok(b) => b,
-            Err(_e) => {
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .file_ext(crate::metrics::path_file_ext(&param_path))
-                        .language(crate::metrics::path_language(&param_path))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    "failed to read file; check file path and permissions",
-                    {
-                        let mut meta =
-                            error_meta("resource", false, "check file path and permissions");
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.insert("path".to_string(), serde_json::json!(params.path));
-                        }
-                        Some(meta)
-                    },
-                )));
-            }
+        let ctx = tools::AnalyzeModuleContext {
+            disk_cache: self.disk_cache.clone(),
+            metrics_tx: self.metrics_tx.clone(),
+            sid: sid.clone(),
+            seq,
         };
-        let disk_key = blake3::hash(&file_bytes);
-
-        let (module_info, module_tier) = if let Some(cached) = self
-            .disk_cache
-            .get::<types::ModuleInfo>("analyze_module", &disk_key)
-        {
-            (cached, CacheTier::L2Disk)
-        } else {
-            // Cache miss: run the lightweight fast path
-            let mi = match analyze::analyze_module_file(&params.path) {
-                Ok(mi) => mi,
-                Err(e) => {
-                    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                    // Graceful fallback for unsupported extensions: return empty ModuleInfo
-                    // with a note instead of INVALID_PARAMS.
-                    if matches!(
-                        &e,
-                        analyze::AnalyzeError::Parser(
-                            aptu_coder_core::parser::ParserError::UnsupportedLanguage(_)
-                        )
-                    ) {
-                        let source = String::from_utf8_lossy(&file_bytes).into_owned();
-                        let line_count = source.lines().count();
-                        let name = std::path::Path::new(&params.path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let ext = std::path::Path::new(&params.path)
-                            .extension()
-                            .and_then(|x| x.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        self.metrics_tx.send(
-                            crate::metrics::MetricEventBuilder::new("analyze_module", "ok", dur)
-                                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                                .session_id(sid.clone())
-                                .seq(Some(seq))
-                                .file_ext(crate::metrics::path_file_ext(&param_path))
-                                .language(crate::metrics::path_language(&param_path))
-                                .build(),
-                        );
-                        return {
-                            let mut mi =
-                                types::ModuleInfo::new(name, line_count, ext, vec![], vec![]);
-                            mi.unsupported = Some(true);
-                            let text = format_module_info(&mi);
-                            let content_hash = format!("{}", blake3::hash(text.as_bytes()));
-                            let mut meta = no_cache_meta().0;
-                            meta.insert(
-                                "content_hash".to_string(),
-                                serde_json::Value::String(content_hash),
-                            );
-                            let mut result = CallToolResult::success(vec![Content::text(text)])
-                                .with_meta(Some(Meta(meta)));
-                            match serde_json::to_value(&mi) {
-                                Ok(v) => {
-                                    result.structured_content = Some(v);
-                                    Ok(result)
-                                }
-                                Err(se) => Ok(err_to_tool_result(ErrorData::new(
-                                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                                    format!("serialization failed: {se}"),
-                                    Some(error_meta("internal", false, "report this as a bug")),
-                                ))),
-                            }
-                        };
-                    }
-                    let (error_type, error_data) = (
-                        Some("internal_error".to_string()),
-                        ErrorData::new(
-                            rmcp::model::ErrorCode::INTERNAL_ERROR,
-                            format!("Failed to analyze module: {e}"),
-                            Some(error_meta("internal", false, "report this as a bug")),
-                        ),
-                    );
-                    self.metrics_tx.send(
-                        crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
-                            .param_path_depth(crate::metrics::path_component_count(&param_path))
-                            .error_type(error_type)
-                            .session_id(sid.clone())
-                            .seq(Some(seq))
-                            .file_ext(crate::metrics::path_file_ext(&param_path))
-                            .language(crate::metrics::path_language(&param_path))
-                            .build(),
-                    );
-                    return Ok(err_to_tool_result(error_data));
-                }
-            };
-            // Write-behind: store ModuleInfo in L2 disk cache
-            {
-                let dc = self.disk_cache.clone();
-                let k = disk_key;
-                let mi_clone = mi.clone();
-                let metrics_tx2 = self.metrics_tx.clone();
-                let sid2 = sid.clone();
-                tokio::spawn(async move {
-                    let handle = tokio::task::spawn_blocking(move || {
-                        dc.put("analyze_module", &k, &mi_clone);
-                        dc.drain_write_failures()
-                    });
-                    if let Ok(failures) = handle.await
-                        && failures > 0
-                    {
-                        tracing::warn!(
-                            tool = "analyze_module",
-                            failures,
-                            "L2 disk cache write failed"
-                        );
-                        metrics_tx2.send(
-                            crate::metrics::MetricEventBuilder::new("analyze_module", "ok", 0)
-                                .session_id(sid2)
-                                .cache_write_failure(Some(true))
-                                .build(),
-                        );
-                    }
-                });
-            }
-            (mi, CacheTier::Miss)
-        };
-
-        let text = format_module_info(&module_info);
-
-        // Record cache tier in span
-        tracing::Span::current().record("cache_tier", module_tier.as_str());
-
-        // Add content_hash to _meta
-        let content_hash = format!("{}", blake3::hash(text.as_bytes()));
-        let mut meta = no_cache_meta().0;
-        meta.insert(
-            "content_hash".to_string(),
-            serde_json::Value::String(content_hash),
-        );
-
-        let mut result =
-            CallToolResult::success(vec![Content::text(text.clone())]).with_meta(Some(Meta(meta)));
-        let structured = match serde_json::to_value(&module_info).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("serialization failed: {e}"),
-                Some(error_meta("internal", false, "report this as a bug")),
-            )
-        }) {
-            Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
-        };
-        result.structured_content = Some(structured);
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("analyze_module", "ok", dur)
-                .output_chars(text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .session_id(sid)
-                .seq(Some(seq))
-                .cache_hit(Some(module_tier != CacheTier::Miss))
-                .cache_tier(Some(module_tier.as_str()))
-                .file_ext(crate::metrics::path_file_ext(&param_path))
-                .language(crate::metrics::path_language(&param_path))
-                .build(),
-        );
-        Ok(result)
+        tools::analyze_module::analyze_module_handler(ctx, params, param_path, &span, t_start).await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
@@ -2073,19 +956,6 @@ impl CodeAnalyzer {
         };
         crate::tools::exec_command::exec_command_impl(params, context, ctx).await
     }
-}
-
-#[derive(Clone)]
-struct FocusedAnalysisParams {
-    path: std::path::PathBuf,
-    symbol: String,
-    match_mode: SymbolMatchMode,
-    follow_depth: u32,
-    max_depth: Option<u32>,
-    use_summary: bool,
-    impl_only: Option<bool>,
-    def_use: bool,
-    parse_timeout_micros: Option<u64>,
 }
 
 fn disable_routes(router: &mut ToolRouter<CodeAnalyzer>, tools: &[&'static str]) {
