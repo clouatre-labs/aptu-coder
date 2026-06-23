@@ -1163,6 +1163,45 @@ async fn test_heredoc_bare_redirect_rejected() {
 }
 
 #[tokio::test]
+async fn test_heredoc_bare_single_redirect_rejected() {
+    // Bare > file << EOF with no command before the redirect operator.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "> /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for bare > redirect: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_tee_append_redirect_rejected() {
+    // tee >> file << EOF -- tee with an explicit append redirect operator.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "tee >> /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for tee >> redirect: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_tee_single_redirect_rejected() {
+    // tee > file << EOF -- tee with an explicit write redirect operator.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "tee > /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for tee > redirect: {resp}"
+    );
+}
+
+#[tokio::test]
 async fn test_heredoc_cat_redirect_in_quotes_accepted() {
     let resp = call_exec_command_raw(serde_json::json!({
         "command": "echo 'cat > file <<EOF'"
