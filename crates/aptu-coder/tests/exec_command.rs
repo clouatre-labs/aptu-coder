@@ -1243,3 +1243,109 @@ async fn test_heredoc_awk_bitshift_accepted() {
         "expected awk to run (not be rejected by pre-scan): {resp}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Extended heredoc file-write rejection tests (subshells, process/command
+// substitution, variable commands, additional file-write tools)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_heredoc_subshell_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "(cat > /tmp/file << EOF\ncontent\nEOF)"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for subshell heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_process_substitution_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat > >(tee /tmp/file) << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for process substitution heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_command_substitution_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat > $(echo /tmp/file) << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for command substitution heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_variable_command_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "$cmd > /tmp/file << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for variable command heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_printf_write_rejected() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "printf '%s\\n' hello > /tmp/file << EOF\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for printf heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_pipeline_accepted() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF | grep pattern\nhello pattern world\nEOF"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for pipeline heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_quoted_subshell_delimiter_accepted() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << '$(EOF)'\ncontent\n$(EOF)"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for quoted subshell-like delimiter: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_escaped_paren_accepted() {
+    // Escaped parentheses (\)) in a non-file-write command must not be
+    // misinterpreted by paren_aware_token as an unmatched closing paren
+    // that opens a spurious depth-tracking context.  The FSM operates on
+    // raw bytes; '\' is not a paren-depth marker, so the depth counter
+    // stays at 0 and the command is correctly accepted.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo \"hello \\)\" << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for escaped paren in non-write command: {resp}"
+    );
+}
