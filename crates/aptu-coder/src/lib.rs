@@ -30,6 +30,7 @@ pub mod logging;
 pub mod metrics;
 pub mod otel;
 mod shell;
+mod tools;
 mod validation;
 
 use aptu_coder_core::analyze;
