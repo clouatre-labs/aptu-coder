@@ -6,23 +6,66 @@ use rmcp::model::ErrorData;
 
 use crate::error_meta;
 
-/// Scans a shell command string for unclosed heredocs before any process is spawned.
+/// Scans a shell command string for unclosed heredocs and file-write heredoc
+/// patterns before any process is spawned.
 ///
-/// Walks `command` char-by-char, tracking single-quoted and double-quoted regions
-/// (skip `<<` inside either to avoid false positives from awk bitshift, echo
-/// strings, etc.).  For each `<<` or `<<-` token found outside any quoted region,
-/// extracts the delimiter word (strips surrounding single-quotes, double-quotes, or
-/// backslashes to get the bare word) and searches the remainder of the string for
-/// its matching closer on its own line.  For `<<-`, leading tabs are stripped from
-/// each line when searching.
+/// Phase 1 pre-scan: walks the command byte-by-byte with quote tracking.  When a
+/// `<<` token is found outside any quoted region, it scans backward to check for
+/// file-write patterns (cat/tee/redirect + `<<`) and returns an error immediately
+/// if one is detected.
 ///
-/// Returns `Ok(())` if all heredocs are properly closed, or `Err(ErrorData)` with
-/// `INVALID_PARAMS` if any heredoc is missing its closing delimiter.
+/// Phase 2 main scan: continues the existing matching-closer scan (unchanged logic)
+/// with quote state reset to initial values between phases.
+///
+/// Returns `Ok(())` if no file-write patterns or unclosed heredocs are found,
+/// or `Err(ErrorData)` with `INVALID_PARAMS` otherwise.
 ///
 /// This function does NOT spawn any process; it is a pure string scan.
 pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     let bytes = command.as_bytes();
     let len = bytes.len();
+
+    // Phase 1: pre-scan for heredoc file-write patterns (cat/tee/redirect + <<)
+    {
+        let mut i = 0;
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+
+        while i < len {
+            let ch = bytes[i] as char;
+
+            if ch == '\'' && !in_double_quote {
+                in_single_quote = !in_single_quote;
+                i += 1;
+                continue;
+            }
+            if ch == '"' && !in_single_quote {
+                in_double_quote = !in_double_quote;
+                i += 1;
+                continue;
+            }
+            if in_single_quote || in_double_quote {
+                i += 1;
+                continue;
+            }
+
+            // Found `<<` outside quotes -- check for file-write pattern via
+            // backward scan from the first `<`.
+            if ch == '<' && i + 1 < len && bytes[i + 1] == b'<' {
+                if scan_backward_for_file_write(bytes, i) {
+                    return Err(file_write_heredoc_error());
+                }
+                // Skip past `<<` to avoid re-scanning the same token.
+                // Use a simple increment; the main scan loop below handles
+                // the full delimiter parsing.
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    // Phase 2: original heredoc delimiter scan (quote state is fresh)
     let mut i = 0;
     let mut in_single_quote = false;
     let mut in_double_quote = false;
@@ -168,6 +211,100 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     }
 
     Ok(())
+}
+
+fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> bool {
+    /// Checks whether the token before `pos` (walked backward to preceding
+    /// whitespace or start-of-string) is returned as a byte slice.
+    fn token_before_pos<'a>(bytes: &'a [u8], pos: &mut usize) -> &'a [u8] {
+        let end = *pos;
+        while *pos > 0 && !(bytes[*pos - 1] as char).is_ascii_whitespace() {
+            *pos -= 1;
+        }
+        &bytes[*pos..end]
+    }
+
+    /// Skips whitespace scanning backward from `pos`.
+    fn skip_ws_backward(bytes: &[u8], pos: &mut usize) {
+        while *pos > 0 && (bytes[*pos - 1] as char).is_ascii_whitespace() {
+            *pos -= 1;
+        }
+    }
+
+    // here_pos points to the first '<' of '<<'.  Walk backward looking for
+    // a file-write pattern (cat/tee/redirect + >? file + <<).
+
+    let mut pos = here_pos;
+
+    // Skip whitespace between << and the preceding word
+    skip_ws_backward(bytes, &mut pos);
+    if pos == 0 {
+        return false;
+    }
+
+    // Find the file path token immediately before <<
+    let file_token = token_before_pos(bytes, &mut pos);
+    if file_token.is_empty() {
+        return false;
+    }
+
+    // Skip whitespace before the file token
+    skip_ws_backward(bytes, &mut pos);
+    if pos == 0 {
+        return false;
+    }
+
+    // Check for >> or > redirect operator before the file token
+    if pos >= 2 && bytes[pos - 1] == b'>' && bytes[pos - 2] == b'>' {
+        // >> append-redirect operator
+        pos -= 2;
+        skip_ws_backward(bytes, &mut pos);
+        if pos == 0 {
+            // Bare >> file << EOF -- no command before redirect
+            return true;
+        }
+        let cmd = token_before_pos(bytes, &mut pos);
+        return cmd == b"cat" || cmd == b"tee";
+    }
+
+    if bytes[pos - 1] == b'>' {
+        // > write-redirect operator
+        pos -= 1;
+        skip_ws_backward(bytes, &mut pos);
+        if pos == 0 {
+            // Bare > file << EOF -- no command before redirect
+            return true;
+        }
+        let cmd = token_before_pos(bytes, &mut pos);
+        return cmd == b"cat" || cmd == b"tee";
+    }
+
+    // No redirect operator -- check for tee command (tee file << EOF)
+    let cmd = token_before_pos(bytes, &mut pos);
+    if cmd == b"tee" {
+        return true;
+    }
+
+    // Check if the previous token is a flag (starts with '-') for
+    // patterns like `tee -a file << EOF`
+    if cmd.len() > 1 && cmd[0] == b'-' {
+        skip_ws_backward(bytes, &mut pos);
+        if pos == 0 {
+            return false;
+        }
+        let prev_cmd = token_before_pos(bytes, &mut pos);
+        return prev_cmd == b"tee";
+    }
+
+    false
+}
+
+fn file_write_heredoc_error() -> ErrorData {
+    ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        "heredoc file-write pattern detected (cat/tee/redirect + <<) -- use edit_overwrite to write files instead of shell heredocs".to_string(),
+        Some(error_meta("validation", false, "use edit_overwrite to write files")),
+    )
 }
 
 fn missing_heredoc_error() -> ErrorData {
