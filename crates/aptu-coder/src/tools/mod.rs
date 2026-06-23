@@ -43,9 +43,14 @@
 
 pub mod analyze_directory;
 pub mod analyze_file;
+pub mod analyze_module;
+pub mod analyze_symbol;
 pub mod edit_overwrite;
 pub mod edit_replace;
 pub mod exec_command;
+
+pub(crate) use analyze_module::AnalyzeModuleContext;
+pub(crate) use analyze_symbol::AnalyzeSymbolContext;
 
 use aptu_coder_core::cache::AnalysisCache;
 use std::collections::HashMap;
@@ -98,4 +103,17 @@ pub(crate) struct AnalyzeFileContext {
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
     pub(crate) sid: Option<String>,
+}
+
+/// Per-call metadata passed to `analyze_symbol_handler`.
+///
+/// Bundles the call-site values so the handler stays within
+/// `clippy::too_many_arguments` (7 args max).
+pub(crate) struct AnalyzeSymbolCall {
+    pub(crate) ct: tokio_util::sync::CancellationToken,
+    pub(crate) progress_token: Option<rmcp::model::ProgressToken>,
+    pub(crate) param_path: String,
+    pub(crate) max_depth_val: Option<u32>,
+    pub(crate) span: tracing::Span,
+    pub(crate) t_start: std::time::Instant,
 }
