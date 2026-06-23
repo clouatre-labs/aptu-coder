@@ -33,8 +33,8 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
     // deeply nested constructs may not be caught.  For a stricter guarantee,
     // replace this phase with a full shell AST parser.
     //
-    // TODO: migrate to a proper shell lexer/AST parser if parsing complexity
-    // grows beyond the patterns enumerated above.
+    // TODO(#1198): migrate to a proper shell lexer/AST parser if parsing
+    // complexity grows beyond the patterns enumerated above.
     {
         let mut i = 0;
         let mut in_single_quote = false;
