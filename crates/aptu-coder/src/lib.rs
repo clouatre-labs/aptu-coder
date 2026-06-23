@@ -3321,7 +3321,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 2000 lines and 50 KB per stream; stdout capped at 30 KB, stderr at 10 KB. Set working_dir to the target directory; write the command using relative paths only. Commands run inside working_dir; omit `cd`. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits, prefer the edit_* tools. Example queries: Run the test suite and capture output.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Returns stdout, stderr, interleaved, exit_code, output_truncated. Output capped at 30 KB stdout / 10 KB stderr / 2000 lines. Set working_dir to the target directory and write commands using relative paths only; omit `cd`. Fails if working_dir does not exist or is not a directory. Pass stdin to pipe UTF-8 content into the process (max 1 MB). For file creation and edits use edit_overwrite or edit_replace; heredoc writes are rejected. Prefer machine-readable JSON output flags for build, lint, and test commands to reduce output tokens. Example queries: Run the test suite and capture output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
