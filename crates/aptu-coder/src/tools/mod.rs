@@ -41,4 +41,61 @@
 //!     moved into this module. They are the framework glue that ties all
 //!     tools together and must live in the crate root.
 
+pub mod analyze_directory;
+pub mod analyze_file;
+pub mod edit_overwrite;
+pub mod edit_replace;
 pub mod exec_command;
+
+use aptu_coder_core::cache::AnalysisCache;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+/// Shared handler context passed to extracted edit tool free functions.
+///
+/// Bundles the state extracted from `CodeAnalyzer` so the extracted functions
+/// stay within clippy's `too_many_arguments` limit while keeping parameters explicit.
+pub(crate) struct EditHandlerContext<'a> {
+    pub(crate) sid: Option<String>,
+    pub(crate) seq: u32,
+    pub(crate) cache: &'a AnalysisCache,
+    pub(crate) metrics_tx: &'a crate::metrics::MetricsSender,
+    pub(crate) edit_failure_counts: &'a Arc<Mutex<HashMap<(String, String), u8>>>,
+}
+
+/// Shared handler context passed to extracted `analyze_directory` free functions.
+///
+/// Bundles the `CodeAnalyzer` fields needed by `handle_overview_mode` and
+/// `analyze_directory_handler`, keeping them explicit without coupling to `&self`.
+pub(crate) struct AnalyzeDirectoryContext {
+    pub(crate) cache: AnalysisCache,
+    pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
+    pub(crate) metrics_tx: crate::metrics::MetricsSender,
+    pub(crate) peer: Arc<tokio::sync::Mutex<Option<rmcp::Peer<rmcp::RoleServer>>>>,
+    pub(crate) sid: Option<String>,
+}
+
+/// Per-call metadata passed to `analyze_directory_handler`.
+///
+/// Bundles the call-site values (timing, identity, request context) so the
+/// handler stays within `clippy::too_many_arguments` (7 args max).
+pub(crate) struct DirectoryHandlerCall {
+    pub(crate) seq: u32,
+    pub(crate) sid: Option<String>,
+    pub(crate) t_start: std::time::Instant,
+    pub(crate) param_path: String,
+    pub(crate) max_depth_val: Option<u32>,
+    pub(crate) ct: tokio_util::sync::CancellationToken,
+    pub(crate) progress_token: Option<rmcp::model::ProgressToken>,
+}
+
+/// Shared handler context passed to extracted `analyze_file` free functions.
+///
+/// Bundles the `CodeAnalyzer` fields needed by `handle_file_details_mode` and
+/// `analyze_file_handler`, keeping them explicit without coupling to `&self`.
+pub(crate) struct AnalyzeFileContext {
+    pub(crate) cache: AnalysisCache,
+    pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
+    pub(crate) metrics_tx: crate::metrics::MetricsSender,
+    pub(crate) sid: Option<String>,
+}

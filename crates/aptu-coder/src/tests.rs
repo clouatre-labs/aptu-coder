@@ -1,6 +1,8 @@
 #[cfg(test)]
 use super::*;
 use crate::tools::exec_command::{build_exec_command, handle_output_persist, strip_cd_prefix};
+use crate::validation::validate_path_in_dir;
+use aptu_coder_core::traversal;
 use regex::Regex;
 use rmcp::model::NumberOrString;
 

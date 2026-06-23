@@ -34,20 +34,11 @@ mod tools;
 mod validation;
 
 use aptu_coder_core::analyze;
-use aptu_coder_core::{cache, completion, graph, traversal, types};
+use aptu_coder_core::{cache, completion, graph, types};
 use shell::resolve_shell;
-use validation::{validate_path, validate_path_in_dir};
+use validation::validate_path;
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
-
-/// Number of consecutive not_found or ambiguous edit_replace failures on the same
-/// (session_id, canonical_path) pair before returning a stale-context directive error.
-pub(crate) const EDIT_STALE_THRESHOLD: u8 = 5;
-/// Maximum number of (session_id, canonical_path) entries in the failure counter map.
-/// When the map reaches this size, it is cleared entirely to prevent unbounded growth.
-/// The circuit breaker is advisory, so a full clear is safe: the worst case is one
-/// missed trip per session per path after an eviction cycle.
-pub(crate) const EDIT_FAILURE_MAP_CAP: usize = 1024;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -142,22 +133,18 @@ impl ShellOutput {
 }
 
 use aptu_coder_core::cache::{AnalysisCache, CacheTier, CallGraphCache, CallGraphCacheKey};
-use aptu_coder_core::formatter::{
-    format_file_details_paginated, format_file_details_summary, format_focused_paginated,
-    format_module_info, format_structure_paginated, format_summary,
-};
+use aptu_coder_core::formatter::{format_focused_paginated, format_module_info};
 use aptu_coder_core::formatter_defuse::format_focused_paginated_defuse;
 use aptu_coder_core::pagination::{
     CursorData, DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor, encode_cursor, paginate_slice,
 };
-use aptu_coder_core::parser::ParserError;
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
 use aptu_coder_core::types::{
-    AnalysisMode, AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams,
-    AnalyzeSymbolParams, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput,
-    EditReplaceParams, SymbolMatchMode,
+    AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, AnalyzeSymbolParams,
+    EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
+    SymbolMatchMode,
 };
 use filters::{CompiledRule, load_filter_table};
 #[cfg(test)]
@@ -187,7 +174,7 @@ static GLOBAL_SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic:
 // Empirical data (684 calls, Jun 2026): max observed output was 4,882 chars; the old
 // 50_000 threshold never triggered once. At 5_000, auto-summary engages for repos that
 // would otherwise produce an overwhelming flat response.
-const SIZE_LIMIT: usize = 5_000;
+pub(crate) const SIZE_LIMIT: usize = 5_000;
 
 /// Returns `true` when `summary=true` and a `cursor` are both provided, which is an invalid
 /// combination since summary mode and pagination are mutually exclusive.
@@ -289,7 +276,7 @@ struct ErrorMeta {
 }
 
 #[must_use]
-fn error_meta(
+pub(crate) fn error_meta(
     category: &'static str,
     is_retryable: bool,
     suggested_action: &'static str,
@@ -303,7 +290,7 @@ fn error_meta(
 }
 
 #[must_use]
-fn err_to_tool_result(e: ErrorData) -> CallToolResult {
+pub(crate) fn err_to_tool_result(e: ErrorData) -> CallToolResult {
     let mut result =
         CallToolResult::error(vec![Content::text(e.message)]).with_meta(Some(no_cache_meta()));
     if let Some(data) = e.data {
@@ -312,14 +299,14 @@ fn err_to_tool_result(e: ErrorData) -> CallToolResult {
     result
 }
 
-fn err_to_tool_result_from_pagination(
+pub(crate) fn err_to_tool_result_from_pagination(
     e: aptu_coder_core::pagination::PaginationError,
 ) -> CallToolResult {
     let msg = format!("Pagination error: {}", e);
     CallToolResult::error(vec![Content::text(msg)]).with_meta(Some(no_cache_meta()))
 }
 
-fn no_cache_meta() -> Meta {
+pub(crate) fn no_cache_meta() -> Meta {
     let mut m = serde_json::Map::new();
     m.insert(
         "cache_hint".to_string(),
@@ -579,389 +566,39 @@ impl CodeAnalyzer {
         (seq, sid)
     }
 
-    /// Private helper: Extract analysis logic for overview mode (`analyze_directory`).
-    /// Returns the complete analysis output and a cache_hit bool after spawning and monitoring progress.
-    /// Cancels the blocking task when `ct` is triggered; returns an error on cancellation.
-    #[allow(clippy::too_many_lines)] // long but cohesive analysis loop; extracting sub-functions would obscure the control flow
-    #[allow(clippy::cast_precision_loss)] // progress percentage display; precision loss acceptable for usize counts
-    #[instrument(skip(self, params, ct))]
-    async fn handle_overview_mode(
+    /// Delegates to [`tools::analyze_directory::handle_overview_mode`].
+    /// Kept for test access; production path goes through `analyze_directory` shim.
+    #[cfg(test)]
+    pub(crate) async fn handle_overview_mode(
         &self,
         params: &AnalyzeDirectoryParams,
         ct: tokio_util::sync::CancellationToken,
         progress_token: Option<ProgressToken>,
     ) -> Result<(std::sync::Arc<analyze::AnalysisOutput>, CacheTier), ErrorData> {
-        let path = Path::new(&params.path);
-        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counter_clone = counter.clone();
-        let path_owned = path.to_path_buf();
-        let max_depth = params.max_depth;
-        let ct_clone = ct.clone();
-
-        // Bounded walk: pass max_depth directly so the walker stops at the right depth.
-        let all_entries = walk_directory(path, params.max_depth).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Failed to walk directory: {e}"),
-                Some(error_meta(
-                    "resource",
-                    false,
-                    "check path permissions and availability",
-                )),
-            )
-        })?;
-
-        // Canonicalize max_depth: Some(0) is semantically identical to None (unlimited).
-        let canonical_max_depth = max_depth.and_then(|d| if d == 0 { None } else { Some(d) });
-
-        // Build cache key from all_entries (before depth filtering).
-        // git_ref is included in the key so filtered and unfiltered results have distinct entries.
-        let git_ref_val = params.git_ref.as_deref().filter(|s| !s.is_empty());
-        let cache_key = cache::DirectoryCacheKey::from_entries(
-            &all_entries,
-            canonical_max_depth,
-            AnalysisMode::Overview,
-            git_ref_val,
-        );
-
-        // Check L1 cache
-        if let Some(cached) = self.cache.get_directory(&cache_key) {
-            tracing::debug!(cache_hit = true, message = "returning cached result");
-            return Ok((cached, CacheTier::L1Memory));
-        }
-
-        // Compute disk cache key from canonical relative paths + mtime + params
-        let root = std::path::Path::new(&params.path);
-        let disk_key = {
-            let mut hasher = blake3::Hasher::new();
-            let mut sorted_entries: Vec<_> = all_entries.iter().collect();
-            sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
-            for entry in &sorted_entries {
-                let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path);
-                hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
-                let mtime_secs = entry
-                    .mtime
-                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                hasher.update(&mtime_secs.to_le_bytes());
-            }
-            if let Some(depth) = canonical_max_depth {
-                hasher.update(depth.to_string().as_bytes());
-            }
-            if let Some(ref git_ref) = params.git_ref {
-                hasher.update(git_ref.as_bytes());
-            }
-            hasher.finalize()
+        let ctx = tools::AnalyzeDirectoryContext {
+            cache: self.cache.clone(),
+            disk_cache: self.disk_cache.clone(),
+            metrics_tx: self.metrics_tx.clone(),
+            peer: self.peer.clone(),
+            sid: self.session_id.lock().await.clone(),
         };
-
-        // Check L2 cache
-        if let Some(cached) = self
-            .disk_cache
-            .get::<analyze::AnalysisOutput>("analyze_directory", &disk_key)
-        {
-            let arc = std::sync::Arc::new(cached);
-            self.cache.put_directory(cache_key.clone(), arc.clone());
-            return Ok((arc, CacheTier::L2Disk));
-        }
-
-        // Apply git_ref filter when requested (non-empty string only).
-        let all_entries = if let Some(ref git_ref) = params.git_ref
-            && !git_ref.is_empty()
-        {
-            let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    format!("git_ref filter failed: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "ensure git is installed and path is inside a git repository",
-                    )),
-                )
-            })?;
-            filter_entries_by_git_ref(all_entries, &changed, path)
-        } else {
-            all_entries
-        };
-
-        // Compute subtree counts from the full entry set before filtering.
-        let subtree_counts = if max_depth.is_some_and(|d| d > 0) {
-            Some(traversal::subtree_counts_from_entries(path, &all_entries))
-        } else {
-            None
-        };
-
-        // Filter to depth-bounded subset for analysis.
-        let entries: Vec<traversal::WalkEntry> = if let Some(depth) = max_depth
-            && depth > 0
-        {
-            all_entries
-                .into_iter()
-                .filter(|e| e.depth <= depth as usize)
-                .collect()
-        } else {
-            all_entries
-        };
-
-        // Get total file count for progress reporting
-        let total_files = entries.iter().filter(|e| !e.is_dir).count();
-
-        // Spawn blocking analysis with progress tracking
-        let handle = tokio::task::spawn_blocking(move || {
-            analyze::analyze_directory_with_progress(&path_owned, entries, counter_clone, ct_clone)
-        });
-
-        // Gate progress on client-supplied token; skip all machinery when absent.
-        if let Some(ref token) = progress_token {
-            let (tx, mut rx) = watch::channel(0usize);
-            let peer = self.peer.lock().await.clone();
-            let mut last_progress = 0usize;
-            let mut cancelled = false;
-
-            // Spawn a notifier that watches the counter and sends on the watch channel.
-            let counter_notify = counter.clone();
-            let tx_notify = tx.clone();
-            let ct_notify = ct.clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    if ct_notify.is_cancelled() {
-                        break;
-                    }
-                    let current = counter_notify.load(std::sync::atomic::Ordering::Relaxed);
-                    if tx_notify.send(current).is_err() {
-                        break; // receiver dropped
-                    }
-                }
-            });
-
-            loop {
-                tokio::select! {
-                    _ = ct.cancelled() => {
-                        cancelled = true;
-                        break;
-                    }
-                    changed = rx.changed() => {
-                        match changed {
-                            Ok(()) => {
-                                let current = *rx.borrow();
-                                if current != last_progress && total_files > 0 {
-                                    self.emit_progress(
-                                        peer.clone(),
-                                        token,
-                                        current as f64,
-                                        total_files as f64,
-                                        format!("Analyzing {current}/{total_files} files"),
-                                    )
-                                    .await;
-                                    last_progress = current;
-                                }
-                            }
-                            Err(_) => {
-                                // Sender dropped: analysis complete or notifier exited.
-                                break;
-                            }
-                        }
-                    }
-                }
-                if handle.is_finished() {
-                    break;
-                }
-            }
-
-            // Emit final 100% progress only if not cancelled
-            if !cancelled && total_files > 0 {
-                self.emit_progress(
-                    peer.clone(),
-                    token,
-                    total_files as f64,
-                    total_files as f64,
-                    format!("Completed analyzing {total_files} files"),
-                )
-                .await;
-            }
-        }
-
-        match handle.await {
-            Ok(Ok(mut output)) => {
-                output.subtree_counts = subtree_counts;
-                let arc_output = std::sync::Arc::new(output);
-                self.cache.put_directory(cache_key, arc_output.clone());
-                // Spawn L2 write-behind; drain failure counter after write completes.
-                {
-                    let dc = self.disk_cache.clone();
-                    let k = disk_key;
-                    let v = arc_output.as_ref().clone();
-                    let handle = tokio::task::spawn_blocking(move || {
-                        dc.put("analyze_directory", &k, &v);
-                        dc.drain_write_failures()
-                    });
-                    let metrics_tx = self.metrics_tx.clone();
-                    let sid = self.session_id.lock().await.clone();
-                    tokio::spawn(async move {
-                        if let Ok(failures) = handle.await
-                            && failures > 0
-                        {
-                            tracing::warn!(
-                                tool = "analyze_directory",
-                                failures,
-                                "L2 disk cache write failed"
-                            );
-                            metrics_tx.send(
-                                crate::metrics::MetricEventBuilder::new(
-                                    "analyze_directory",
-                                    "ok",
-                                    0,
-                                )
-                                .session_id(sid)
-                                .cache_write_failure(Some(true))
-                                .build(),
-                            );
-                        }
-                    });
-                }
-                Ok((arc_output, CacheTier::Miss))
-            }
-            Ok(Err(analyze::AnalyzeError::Cancelled)) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                "Analysis cancelled".to_string(),
-                Some(error_meta("transient", true, "analysis was cancelled")),
-            )),
-            Ok(Err(e)) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Error analyzing directory: {e}"),
-                Some(error_meta(
-                    "resource",
-                    false,
-                    "check path and file permissions",
-                )),
-            )),
-            Err(e) => Err(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("Task join error: {e}"),
-                Some(error_meta("transient", true, "retry the request")),
-            )),
-        }
+        tools::analyze_directory::handle_overview_mode(&ctx, params, ct, progress_token).await
     }
 
-    /// Private helper: Extract analysis logic for file details mode (`analyze_file`).
-    /// Returns the cached or newly analyzed file output along with a CacheTier.
-    #[instrument(skip(self, params))]
-    async fn handle_file_details_mode(
+    /// Delegates to [`tools::analyze_file::handle_file_details_mode`].
+    /// Kept for test access; production path goes through `analyze_file` shim.
+    #[cfg(test)]
+    pub(crate) async fn handle_file_details_mode(
         &self,
-        params: &AnalyzeFileParams,
+        params: &aptu_coder_core::types::AnalyzeFileParams,
     ) -> Result<(std::sync::Arc<analyze::FileAnalysisOutput>, CacheTier), ErrorData> {
-        // Build cache key from file metadata
-        let cache_key = std::fs::metadata(&params.path).ok().and_then(|meta| {
-            meta.modified().ok().map(|mtime| cache::CacheKey {
-                path: std::path::PathBuf::from(&params.path),
-                modified: mtime,
-                mode: AnalysisMode::FileDetails,
-            })
-        });
-
-        // Check L1 cache first
-        if let Some(ref key) = cache_key
-            && let Some(cached) = self.cache.get(key)
-        {
-            tracing::debug!(cache_hit = true, message = "returning cached result");
-            return Ok((cached, CacheTier::L1Memory));
-        }
-
-        // Compute disk cache key from file content
-        let file_bytes = std::fs::read(&params.path).unwrap_or_default();
-        let disk_key = blake3::hash(&file_bytes);
-
-        // Check L2 cache
-        if let Some(cached) = self
-            .disk_cache
-            .get::<analyze::FileAnalysisOutput>("analyze_file", &disk_key)
-        {
-            let arc = std::sync::Arc::new(cached);
-            if let Some(ref key) = cache_key {
-                self.cache.put(key.clone(), arc.clone());
-            }
-            return Ok((arc, CacheTier::L2Disk));
-        }
-
-        // Cache miss or no cache key, analyze and optionally store
-        match analyze::analyze_file(&params.path, None) {
-            Ok(output) => {
-                let arc_output = std::sync::Arc::new(output);
-                if let Some(key) = cache_key {
-                    self.cache.put(key, arc_output.clone());
-                }
-                // Spawn L2 write-behind; drain failure counter after write completes.
-                {
-                    let dc = self.disk_cache.clone();
-                    let k = disk_key;
-                    let v = arc_output.as_ref().clone();
-                    let handle = tokio::task::spawn_blocking(move || {
-                        dc.put("analyze_file", &k, &v);
-                        dc.drain_write_failures()
-                    });
-                    let metrics_tx = self.metrics_tx.clone();
-                    let sid = self.session_id.lock().await.clone();
-                    tokio::spawn(async move {
-                        if let Ok(failures) = handle.await
-                            && failures > 0
-                        {
-                            tracing::warn!(
-                                tool = "analyze_file",
-                                failures,
-                                "L2 disk cache write failed"
-                            );
-                            metrics_tx.send(
-                                crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 0)
-                                    .session_id(sid)
-                                    .cache_write_failure(Some(true))
-                                    .build(),
-                            );
-                        }
-                    });
-                }
-                Ok((arc_output, CacheTier::Miss))
-            }
-            Err(e) => match &e {
-                analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(_)) => {
-                    // Graceful fallback: reuse the file_bytes already read above for the
-                    // cache key rather than re-reading the file (avoids a second I/O and
-                    // the silent-empty-string risk of unwrap_or_default on a second read).
-                    let source = String::from_utf8_lossy(&file_bytes);
-                    let line_count = source.lines().count();
-                    let ext = std::path::Path::new(&params.path)
-                        .extension()
-                        .and_then(|x| x.to_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let preview = source.lines().take(50).collect::<Vec<_>>().join("\n");
-                    let formatted = format!(
-                        "File: {path}\n[Unsupported extension: semantic analysis not available]\n\n{preview}",
-                        path = params.path,
-                    );
-                    let output = analyze::FileAnalysisOutput::new(
-                        formatted,
-                        aptu_coder_core::types::SemanticAnalysis::default(),
-                        line_count,
-                        None,
-                    );
-                    let _ = ext;
-                    let mut output = output;
-                    output.unsupported = Some(true);
-                    Ok((std::sync::Arc::new(output), CacheTier::Miss))
-                }
-                _ => Err(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("Error analyzing file: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check file path and permissions",
-                    )),
-                )),
-            },
-        }
+        let ctx = tools::AnalyzeFileContext {
+            cache: self.cache.clone(),
+            disk_cache: self.disk_cache.clone(),
+            metrics_tx: self.metrics_tx.clone(),
+            sid: self.session_id.lock().await.clone(),
+        };
+        tools::analyze_file::handle_file_details_mode(&ctx, params).await
     }
 
     // Validate impl_only: only valid for directories that contain Rust source files.
@@ -1461,11 +1098,9 @@ impl CodeAnalyzer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let mut params = params.0;
-        // Apply max_depth default: 3. Pass 0 for unlimited depth.
         params.max_depth = params.max_depth.or(Some(3));
         let t_start = std::time::Instant::now();
         let (seq, sid) = self.emit_received_metric("analyze_directory").await;
-        // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
         let client_version = self.client_version.lock().await.clone();
@@ -1493,163 +1128,29 @@ impl CodeAnalyzer {
         let ct = context.ct.clone();
         let param_path = params.path.clone();
         let max_depth_val = params.max_depth;
-
-        // Call handler for analysis and progress tracking
         let progress_token = context.meta.get_progress_token();
-        let (arc_output, dir_cache_hit) =
-            match self.handle_overview_mode(&params, ct, progress_token).await {
-                Ok(v) => v,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "internal_error");
-                    return Ok(err_to_tool_result(e));
-                }
-            };
-        // Extract the value from Arc for modification. On a cache hit the Arc is shared,
-        // so try_unwrap may fail; fall back to cloning the underlying value in that case.
-        let mut output = match std::sync::Arc::try_unwrap(arc_output) {
-            Ok(owned) => owned,
-            Err(arc) => (*arc).clone(),
+        let ctx = tools::AnalyzeDirectoryContext {
+            cache: self.cache.clone(),
+            disk_cache: self.disk_cache.clone(),
+            metrics_tx: self.metrics_tx.clone(),
+            peer: self.peer.clone(),
+            sid: sid.clone(),
         };
-
-        // summary=true (explicit) and cursor are mutually exclusive.
-        // Auto-summarization (summary=None + large output) must NOT block cursor pagination.
-        if summary_cursor_conflict(
-            params.output_control.summary,
-            params.pagination.cursor.as_deref(),
-        ) {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "summary=true is incompatible with a pagination cursor; use one or the other"
-                    .to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "remove cursor or set summary=false",
-                )),
-            )));
-        }
-
-        // Determine output mode:
-        //   summary=true  -> compact summary (format_summary)
-        //   summary=false -> explicit paginated flat list (format_structure_paginated)
-        //   summary=None, small output (<=SIZE_LIMIT) -> tree as-is (format_structure)
-        //   summary=None, large output (>SIZE_LIMIT)  -> compact summary (format_summary)
-        let use_summary = if params.output_control.summary == Some(true) {
-            true
-        } else if params.output_control.summary == Some(false) {
-            false
-        } else {
-            output.formatted.len() > SIZE_LIMIT
-        };
-
-        // summary=false is the only path that uses format_structure_paginated
-        let use_paginated = params.output_control.summary == Some(false);
-
-        if use_summary {
-            output.formatted = format_summary(
-                &output.entries,
-                &output.files,
-                params.max_depth,
-                output.subtree_counts.as_deref(),
-            );
-        }
-
-        // Decode pagination cursor if provided (only relevant for paginated mode)
-        let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-        let offset = if let Some(ref cursor_str) = params.pagination.cursor {
-            let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    e.to_string(),
-                    Some(error_meta("validation", false, "invalid cursor format")),
-                )
-            }) {
-                Ok(v) => v,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
-                }
-            };
-            cursor_data.offset
-        } else {
-            0
-        };
-
-        // Apply pagination to files (used only in paginated mode)
-        let paginated =
-            match paginate_slice(&output.files, offset, page_size, PaginationMode::Default) {
-                Ok(v) => v,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "internal_error");
-                    return Ok(err_to_tool_result(ErrorData::new(
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        e.to_string(),
-                        Some(error_meta("transient", true, "retry the request")),
-                    )));
-                }
-            };
-
-        if use_paginated {
-            output.formatted = format_structure_paginated(
-                &paginated.items,
-                paginated.total,
-                params.max_depth,
-                Some(Path::new(&params.path)),
-                false,
-            );
-        }
-
-        // Update next_cursor in output after pagination (only in paginated mode)
-        if use_paginated {
-            output.next_cursor.clone_from(&paginated.next_cursor);
-        } else {
-            output.next_cursor = None;
-        }
-
-        // Build final text output with pagination cursor if present (only in paginated mode)
-        let mut final_text = output.formatted.clone();
-        if use_paginated && let Some(cursor) = paginated.next_cursor {
-            final_text.push('\n');
-            final_text.push_str("NEXT_CURSOR: ");
-            final_text.push_str(&cursor);
-        }
-
-        // Record cache tier in span
-        tracing::Span::current().record("cache_tier", dir_cache_hit.as_str());
-
-        // Add content_hash to _meta
-        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-        let mut meta = no_cache_meta().0;
-        meta.insert(
-            "content_hash".to_string(),
-            serde_json::Value::String(content_hash),
-        );
-        let meta = rmcp::model::Meta(meta);
-
-        let mut result = CallToolResult::success(vec![
-            Content::text(final_text.clone()).with_priority(0.9_f32),
-        ])
-        .with_meta(Some(meta));
-        let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-        result.structured_content = Some(structured);
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("analyze_directory", "ok", dur)
-                .output_chars(final_text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .max_depth(max_depth_val)
-                .session_id(sid)
-                .seq(Some(seq))
-                .cache_hit(Some(dir_cache_hit != CacheTier::Miss))
-                .cache_tier(Some(dir_cache_hit.as_str()))
-                .build(),
-        );
-        Ok(result)
+        tools::analyze_directory::analyze_directory_handler(
+            &ctx,
+            params,
+            tools::DirectoryHandlerCall {
+                seq,
+                sid,
+                t_start,
+                param_path,
+                max_depth_val,
+                ct,
+                progress_token,
+            },
+            &span,
+        )
+        .await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -1674,7 +1175,6 @@ impl CodeAnalyzer {
         let params = params.0;
         let t_start = std::time::Instant::now();
         let (seq, sid) = self.emit_received_metric("analyze_file").await;
-        // Extract W3C Trace Context from request _meta if present
         let session_id = self.session_id.lock().await.clone();
         let client_name = self.client_name.lock().await.clone();
         let client_version = self.client_version.lock().await.clone();
@@ -1700,233 +1200,16 @@ impl CodeAnalyzer {
             }
         };
         let param_path = params.path.clone();
-
-        // Check if path is a directory (not allowed for analyze_file)
-        if std::path::Path::new(&params.path).is_dir() {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "path is a directory; use analyze_directory instead",
-                {
-                    let mut meta =
-                        error_meta("validation", false, "pass a file path, not a directory");
-                    if let Some(obj) = meta.as_object_mut() {
-                        obj.insert("path".to_string(), serde_json::json!(params.path));
-                    }
-                    Some(meta)
-                },
-            )));
-        }
-
-        // summary=true and cursor are mutually exclusive
-        if summary_cursor_conflict(
-            params.output_control.summary,
-            params.pagination.cursor.as_deref(),
-        ) {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "summary=true is incompatible with a pagination cursor; use one or the other"
-                    .to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "remove cursor or set summary=false",
-                )),
-            )));
-        }
-
-        // Call handler for analysis and caching
-        let (arc_output, file_cache_hit) = match self.handle_file_details_mode(&params).await {
-            Ok(v) => v,
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                let error_type = match e.code {
-                    rmcp::model::ErrorCode::INVALID_PARAMS => Some("invalid_params".to_string()),
-                    rmcp::model::ErrorCode::INTERNAL_ERROR => Some("internal_error".to_string()),
-                    _ => None,
-                };
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("analyze_file", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(error_type)
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .file_ext(crate::metrics::path_file_ext(&param_path))
-                        .language(crate::metrics::path_language(&param_path))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(e));
-            }
+        let ctx = tools::AnalyzeFileContext {
+            cache: self.cache.clone(),
+            disk_cache: self.disk_cache.clone(),
+            metrics_tx: self.metrics_tx.clone(),
+            sid: sid.clone(),
         };
-
-        // Clone only the two fields that may be mutated per-request (formatted and
-        // next_cursor). The heavy SemanticAnalysis data is shared via Arc and never
-        // modified, so we borrow it directly from the cached pointer.
-        let mut formatted = arc_output.formatted.clone();
-        let line_count = arc_output.line_count;
-
-        // Apply summary/output size limiting logic
-        let use_summary = if params.output_control.summary == Some(true) {
-            true
-        } else if params.output_control.summary == Some(false) {
-            false
-        } else {
-            formatted.len() > SIZE_LIMIT
-        };
-
-        if use_summary {
-            formatted = format_file_details_summary(&arc_output.semantic, &params.path, line_count);
-        } else if formatted.len() > SIZE_LIMIT {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            let estimated_tokens = formatted.len() / 4;
-            let message = format!(
-                "Output exceeds 50K chars ({} chars, ~{} tokens). Use one of:\n\
-                 - Use summary=true for a compact overview\n\
-                 - Use fields to limit output to specific sections (functions, classes, or imports)",
-                formatted.len(),
-                estimated_tokens
-            );
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                message,
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use force=true, fields, or summary=true",
-                )),
-            )));
-        }
-
-        // Decode pagination cursor if provided (analyze_file)
-        let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-        let offset = if let Some(ref cursor_str) = params.pagination.cursor {
-            let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    e.to_string(),
-                    Some(error_meta("validation", false, "invalid cursor format")),
-                )
-            }) {
-                Ok(v) => v,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
-                }
-            };
-            cursor_data.offset
-        } else {
-            0
-        };
-
-        // Filter to top-level functions only (exclude methods) before pagination
-        let top_level_fns: Vec<crate::types::FunctionInfo> = arc_output
-            .semantic
-            .functions
-            .iter()
-            .filter(|func| {
-                !arc_output
-                    .semantic
-                    .classes
-                    .iter()
-                    .any(|class| func.line >= class.line && func.end_line <= class.end_line)
-            })
-            .cloned()
-            .collect();
-
-        // Paginate top-level functions only
-        let paginated =
-            match paginate_slice(&top_level_fns, offset, page_size, PaginationMode::Default) {
-                Ok(v) => v,
-                Err(e) => {
-                    return Ok(err_to_tool_result(ErrorData::new(
-                        rmcp::model::ErrorCode::INTERNAL_ERROR,
-                        e.to_string(),
-                        Some(error_meta("transient", true, "retry the request")),
-                    )));
-                }
-            };
-
-        // Regenerate formatted output using the paginated formatter (handles verbose and pagination correctly)
-        // Skip regeneration when the output is an unsupported-extension fallback (sentinel in formatted).
-        let is_unsupported_fallback = arc_output
-            .formatted
-            .contains("[Unsupported extension: semantic analysis not available]");
-        if !use_summary && !is_unsupported_fallback {
-            // fields: serde rejects unknown enum variants at deserialization; no runtime validation required
-            formatted = format_file_details_paginated(
-                &paginated.items,
-                paginated.total,
-                &arc_output.semantic,
-                &params.path,
-                line_count,
-                offset,
-                false,
-                params.fields.as_deref(),
-            );
-        }
-
-        // Capture next_cursor from pagination result (unless using summary mode)
-        let next_cursor = if use_summary {
-            None
-        } else {
-            paginated.next_cursor.clone()
-        };
-
-        // Build final text output with pagination cursor if present (unless using summary mode)
-        let mut final_text = formatted.clone();
-        if !use_summary && let Some(ref cursor) = next_cursor {
-            final_text.push('\n');
-            final_text.push_str("NEXT_CURSOR: ");
-            final_text.push_str(cursor);
-        }
-
-        // Build the response output, projecting SemanticAnalysis to only the requested sections.
-        let response_output = analyze::FileAnalysisOutput::new(
-            formatted,
-            arc_output.semantic.project(params.fields.as_deref()),
-            line_count,
-            next_cursor,
-        );
-
-        // Record cache tier in span
-        tracing::Span::current().record("cache_tier", file_cache_hit.as_str());
-
-        // Add content_hash to _meta
-        let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-        let mut meta = no_cache_meta().0;
-        meta.insert(
-            "content_hash".to_string(),
-            serde_json::Value::String(content_hash),
-        );
-        let meta = rmcp::model::Meta(meta);
-
-        let mut result = CallToolResult::success(vec![
-            Content::text(final_text.clone()).with_priority(0.9_f32),
-        ])
-        .with_meta(Some(meta));
-        let structured = serde_json::to_value(&response_output).unwrap_or(Value::Null);
-        result.structured_content = Some(structured);
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("analyze_file", "ok", dur)
-                .output_chars(final_text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .session_id(sid)
-                .seq(Some(seq))
-                .cache_hit(Some(file_cache_hit != CacheTier::Miss))
-                .cache_tier(Some(file_cache_hit.as_str()))
-                .file_ext(crate::metrics::path_file_ext(&param_path))
-                .language(crate::metrics::path_language(&param_path))
-                .build(),
-        );
-        Ok(result)
+        tools::analyze_file::analyze_file_handler(
+            &ctx, params, seq, sid, t_start, param_path, &span,
+        )
+        .await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, symbol = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -2685,210 +1968,19 @@ impl CodeAnalyzer {
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "edit_overwrite");
-        span.record("path", &params.path);
-        let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
-            match validate_path_in_dir(&params.path, false, std::path::Path::new(wd)) {
-                Ok(p) => p,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    let mut result = CallToolResult::error(vec![Content::text(
-                        "working_dir is not valid; provide an existing directory path".to_string(),
-                    )])
-                    .with_meta(Some(no_cache_meta()));
-                    result.structured_content = Some(serde_json::json!({
-                        "workingDir": wd,
-                        "error": e.message,
-                    }));
-                    return Ok(result);
-                }
-            }
-        } else {
-            match validate_path(&params.path, false) {
-                Ok(p) => p,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
-                }
-            }
-        };
-        let param_path = params.path.clone();
-
-        // Guard against directory paths
-        if std::fs::metadata(&resolved_path)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-        {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(&param_path))
-                    .error_type(Some("invalid_params".to_string()))
-                    .session_id(sid.clone())
-                    .seq(Some(seq))
-                    .build(),
-            );
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "path is a directory; cannot write to a directory".to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "provide a file path, not a directory",
-                )),
-            )));
-        }
-
-        let content = params.content.clone();
-        let handle = tokio::task::spawn_blocking(move || {
-            aptu_coder_core::edit_overwrite_content(&resolved_path, &content)
-        });
-
-        let output = match handle.await {
-            Ok(Ok(v)) => v,
-            Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("invalid_params".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    "path is a directory".to_string(),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "provide a file path, not a directory",
-                    )),
-                )));
-            }
-            Ok(Err(aptu_coder_core::EditError::Io(io_err))) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    "I/O error writing file; check file path and permissions".to_string(),
-                    {
-                        let mut meta =
-                            error_meta("resource", false, "check file path and permissions");
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.insert("path".to_string(), serde_json::json!(param_path));
-                            obj.insert(
-                                "ioErrorKind".to_string(),
-                                serde_json::json!(format!("{:?}", io_err.kind())),
-                            );
-                            obj.insert(
-                                "ioErrorSource".to_string(),
-                                serde_json::json!(io_err.to_string()),
-                            );
-                        }
-                        Some(meta)
-                    },
-                )));
-            }
-            Ok(Err(e)) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    e.to_string(),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check file path and permissions",
-                    )),
-                )));
-            }
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    e.to_string(),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check file path and permissions",
-                    )),
-                )));
-            }
-        };
-
-        let text = format!("Wrote {} bytes to {}", output.bytes_written, output.path);
-        let mut result = CallToolResult::success(vec![Content::text(text.clone())])
-            .with_meta(Some(no_cache_meta()));
-        let structured = match serde_json::to_value(&output).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("serialization failed: {e}"),
-                Some(error_meta("internal", false, "report this as a bug")),
-            )
-        }) {
-            Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
-        };
-        result.structured_content = Some(structured);
-        self.cache
-            .invalidate_file(&std::path::PathBuf::from(&param_path));
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-
-        // Reset circuit breaker on successful write
-        {
-            let sid_str = sid.clone().unwrap_or_default();
-            let canonical = output.path.clone();
-            let mut counts = self
-                .edit_failure_counts
-                .lock()
-                .expect("edit_failure_counts poisoned");
-            counts.remove(&(sid_str, canonical));
-        }
-
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("edit_overwrite", "ok", dur)
-                .output_chars(text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .session_id(sid)
-                .seq(Some(seq))
-                .build(),
-        );
-        Ok(result)
+        tools::edit_overwrite::edit_overwrite(
+            params,
+            tools::EditHandlerContext {
+                sid,
+                seq,
+                cache: &self.cache,
+                metrics_tx: &self.metrics_tx,
+                edit_failure_counts: &self.edit_failure_counts,
+            },
+            &span,
+            t_start,
+        )
+        .await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
@@ -2928,391 +2020,19 @@ impl CodeAnalyzer {
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "edit_replace");
-        span.record("path", &params.path);
-        let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
-            match validate_path_in_dir(&params.path, true, std::path::Path::new(wd)) {
-                Ok(p) => p,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    let mut result = CallToolResult::error(vec![Content::text(
-                        "working_dir is not valid; provide an existing directory path".to_string(),
-                    )])
-                    .with_meta(Some(no_cache_meta()));
-                    result.structured_content = Some(serde_json::json!({
-                        "workingDir": wd,
-                        "error": e.message,
-                    }));
-                    return Ok(result);
-                }
-            }
-        } else {
-            match validate_path(&params.path, true) {
-                Ok(p) => p,
-                Err(e) => {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    return Ok(err_to_tool_result(e));
-                }
-            }
-        };
-        let param_path = params.path.clone();
-
-        // Guard against directory paths
-        if std::fs::metadata(&resolved_path)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-        {
-            span.record("error", true);
-            span.record("error.type", "invalid_params");
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            self.metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(&param_path))
-                    .error_type(Some("invalid_params".to_string()))
-                    .session_id(sid.clone())
-                    .seq(Some(seq))
-                    .build(),
-            );
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "path is a directory; cannot edit a directory".to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "provide a file path, not a directory",
-                )),
-            )));
-        }
-
-        let old_text = params.old_text.clone();
-        let new_text = params.new_text.clone();
-        let old_text_for_hint = old_text.clone();
-        let handle = tokio::task::spawn_blocking(move || {
-            aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
-        });
-
-        let increment_failure = |canonical: &str| -> bool {
-            let sid_str = sid.clone().unwrap_or_default();
-            let mut counts = self
-                .edit_failure_counts
-                .lock()
-                .expect("edit_failure_counts poisoned");
-            if counts.len() >= EDIT_FAILURE_MAP_CAP {
-                counts.clear();
-            }
-            let entry = counts.entry((sid_str, canonical.to_owned())).or_insert(0);
-            *entry = entry.saturating_add(1);
-            *entry >= EDIT_STALE_THRESHOLD
-        };
-
-        let output = match handle.await {
-            Ok(Ok(v)) => v,
-            Ok(Err(aptu_coder_core::EditError::NotFound {
-                path: notfound_path,
-                first_20_lines,
-            })) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                // Circuit breaker: track consecutive failures per (session_id, canonical_path)
-                let canonical = notfound_path.clone();
-                let tripped = increment_failure(&canonical);
-                if tripped {
-                    self.metrics_tx.send(
-                        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                            .param_path_depth(crate::metrics::path_component_count(&param_path))
-                            .error_type(Some("invalid_params".to_string()))
-                            .error_subtype(Some("stale_context".to_string()))
-                            .session_id(sid.clone())
-                            .seq(Some(seq))
-                            .build(),
-                    );
-                    return Ok(err_to_tool_result(ErrorData::new(
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        format!(
-                            "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
-                            EDIT_STALE_THRESHOLD, param_path,
-                        ),
-                        Some(error_meta(
-                            "validation",
-                            false,
-                            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
-                        )),
-                    )));
-                }
-
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("invalid_params".to_string()))
-                        .error_subtype(Some("not_found".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-
-                let message = if first_20_lines.is_empty() {
-                    "old_text not found (0 matches). Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
-                        .to_string()
-                } else {
-                    let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
-                    let mut best_line_idx = 1usize;
-                    let mut best_line = "";
-                    let mut best_lcp = 0usize;
-
-                    for (i, file_line) in first_20_lines.lines().enumerate() {
-                        let lcp = file_line
-                            .chars()
-                            .zip(first_old_line.chars())
-                            .take_while(|(a, b)| a == b)
-                            .count();
-                        if lcp > best_lcp {
-                            best_lcp = lcp;
-                            best_line = file_line;
-                            best_line_idx = i + 1;
-                        }
-                    }
-
-                    let numbered_lines: String = first_20_lines
-                        .lines()
-                        .enumerate()
-                        .map(|(i, line)| format!("  Line {}: {}", i + 1, line))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-
-                    format!(
-                        "old_text not found (0 matches).\nThe file begins:\n{numbered_lines}\n\nNearest match: line {best_line_idx} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
-                    )
-                };
-
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    message,
-                    {
-                        let mut meta = error_meta(
-                            "validation",
-                            false,
-                            "re-read the file with analyze_file or analyze_module, then derive old_text from the live content",
-                        );
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.insert("path".to_string(), serde_json::json!(notfound_path));
-                        }
-                        Some(meta)
-                    },
-                )));
-            }
-            Ok(Err(aptu_coder_core::EditError::Ambiguous {
-                count,
-                path: ambiguous_path,
-                match_lines,
-            })) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                // Circuit breaker: track consecutive failures per (session_id, canonical_path)
-                let canonical = ambiguous_path.clone();
-                let tripped = increment_failure(&canonical);
-                if tripped {
-                    self.metrics_tx.send(
-                        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                            .param_path_depth(crate::metrics::path_component_count(&param_path))
-                            .error_type(Some("invalid_params".to_string()))
-                            .error_subtype(Some("stale_context".to_string()))
-                            .session_id(sid.clone())
-                            .seq(Some(seq))
-                            .build(),
-                    );
-                    return Ok(err_to_tool_result(ErrorData::new(
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        format!(
-                            "EDIT_STALE_CONTEXT: {} consecutive not_found/ambiguous failures on '{}' in this session. The file content has drifted from your context. Call analyze_file or analyze_module on this path first, then retry edit_replace with old_text taken verbatim from that response. Do not retry edit_replace on this path without re-reading first.",
-                            EDIT_STALE_THRESHOLD, param_path,
-                        ),
-                        Some(error_meta(
-                            "validation",
-                            false,
-                            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
-                        )),
-                    )));
-                }
-
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("invalid_params".to_string()))
-                        .error_subtype(Some("ambiguous".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-
-                let line_numbers_csv = match_lines
-                    .iter()
-                    .map(usize::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    format!(
-                        "old_text matched {count} locations.\nOccurrences at lines: {line_numbers_csv}\nExtend old_text with more surrounding context to make it unique, or re-read with analyze_file to confirm the exact text."
-                    ),
-                    {
-                        let mut meta = error_meta(
-                            "validation",
-                            false,
-                            "extend old_text with more surrounding context, or re-read with analyze_file to confirm the exact text",
-                        );
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.insert("path".to_string(), serde_json::json!(ambiguous_path));
-                        }
-                        Some(meta)
-                    },
-                )));
-            }
-            Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("invalid_params".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    "path is a directory".to_string(),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "provide a file path, not a directory",
-                    )),
-                )));
-            }
-            Ok(Err(aptu_coder_core::EditError::Io(io_err))) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    "I/O error editing file; check file path and permissions".to_string(),
-                    {
-                        let mut meta =
-                            error_meta("resource", false, "check file path and permissions");
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.insert("path".to_string(), serde_json::json!(param_path));
-                            obj.insert(
-                                "ioErrorKind".to_string(),
-                                serde_json::json!(format!("{:?}", io_err.kind())),
-                            );
-                            obj.insert(
-                                "ioErrorSource".to_string(),
-                                serde_json::json!(io_err.to_string()),
-                            );
-                        }
-                        Some(meta)
-                    },
-                )));
-            }
-            Ok(Err(e)) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    e.to_string(),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check file path and permissions",
-                    )),
-                )));
-            }
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                self.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(&param_path))
-                        .error_type(Some("internal_error".to_string()))
-                        .session_id(sid.clone())
-                        .seq(Some(seq))
-                        .build(),
-                );
-                return Ok(err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    e.to_string(),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check file path and permissions",
-                    )),
-                )));
-            }
-        };
-
-        let text = format!(
-            "Edited {}: {} bytes -> {} bytes",
-            output.path, output.bytes_before, output.bytes_after
-        );
-        let mut result = CallToolResult::success(vec![Content::text(text.clone())])
-            .with_meta(Some(no_cache_meta()));
-        let structured = match serde_json::to_value(&output).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                format!("serialization failed: {e}"),
-                Some(error_meta("internal", false, "report this as a bug")),
-            )
-        }) {
-            Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
-        };
-        result.structured_content = Some(structured);
-        self.cache
-            .invalidate_file(&std::path::PathBuf::from(&param_path));
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-
-        // Reset circuit breaker on successful edit
-        {
-            let sid_str = sid.clone().unwrap_or_default();
-            let canonical = output.path.clone();
-            let mut counts = self
-                .edit_failure_counts
-                .lock()
-                .expect("edit_failure_counts poisoned");
-            counts.remove(&(sid_str, canonical));
-        }
-
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("edit_replace", "ok", dur)
-                .output_chars(text.len())
-                .param_path_depth(crate::metrics::path_component_count(&param_path))
-                .session_id(sid)
-                .seq(Some(seq))
-                .build(),
-        );
-        Ok(result)
+        tools::edit_replace::edit_replace(
+            params,
+            tools::EditHandlerContext {
+                sid,
+                seq,
+                cache: &self.cache,
+                metrics_tx: &self.metrics_tx,
+                edit_failure_counts: &self.edit_failure_counts,
+            },
+            &span,
+            t_start,
+        )
+        .await
     }
 
     #[tool(
