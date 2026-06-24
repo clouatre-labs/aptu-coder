@@ -10,14 +10,12 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing::warn;
 
 /// Session and client metadata recorded as span attributes on every tool call.
-#[allow(dead_code)]
 pub struct ClientMetadata {
     pub session_id: Option<String>,
     pub client_name: Option<String>,
     pub client_version: Option<String>,
 }
 
-#[allow(dead_code)]
 /// Extract W3C Trace Context from MCP request _meta field and set as parent span context.
 ///
 /// Attempts to extract traceparent and tracestate from the request's _meta field.
@@ -83,7 +81,6 @@ pub fn extract_and_set_trace_context(
 }
 
 /// Helper struct for W3C Trace Context extraction from HashMap
-#[allow(dead_code)]
 struct ExtractMap<'a>(&'a std::collections::HashMap<String, String>);
 
 impl<'a> opentelemetry::propagation::Extractor for ExtractMap<'a> {
