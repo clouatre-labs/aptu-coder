@@ -38,3 +38,4 @@ jobs:
           fallback-model: 'inception/mercury-2'
           instructions-file: .github/instructions/pr-review.md
           repo-path: ${{ github.workspace }}
+          max-prompt-chars: 200000
