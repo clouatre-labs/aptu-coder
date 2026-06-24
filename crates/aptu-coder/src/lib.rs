@@ -35,7 +35,6 @@ mod validation;
 
 use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion, types};
-use shell::resolve_shell;
 use validation::validate_path;
 
 use crate::otel::{ClientMetadata, extract_and_set_trace_context};
@@ -142,7 +141,7 @@ use aptu_coder_core::types::{
     AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, AnalyzeSymbolParams,
     EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
 };
-use filters::{CompiledRule, load_filter_table};
+use filters::CompiledRule;
 #[cfg(test)]
 use filters::{apply_filter, maybe_inject_no_stat};
 use logging::LogEvent;
@@ -153,8 +152,7 @@ use rmcp::model::ProgressToken;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
     CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
-    LoggingLevel, LoggingMessageNotificationParam, Meta, Notification, ServerCapabilities,
-    ServerNotification, SetLevelRequestParams,
+    LoggingLevel, Meta, ServerCapabilities, SetLevelRequestParams,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -163,7 +161,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc};
-use tracing::{instrument, warn};
+use tracing::instrument;
 use tracing_subscriber::filter::LevelFilter;
 
 static GLOBAL_SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -236,105 +234,7 @@ impl CodeAnalyzer {
         event_rx: mpsc::UnboundedReceiver<LogEvent>,
         metrics_tx: crate::metrics::MetricsSender,
     ) -> Self {
-        let file_cap: usize = std::env::var("APTU_CODER_FILE_CACHE_CAPACITY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(100);
-
-        // Initialize disk cache
-        let xdg_data_home = if let Ok(xdg_data_home) = std::env::var("XDG_DATA_HOME")
-            && !xdg_data_home.is_empty()
-        {
-            std::path::PathBuf::from(xdg_data_home)
-        } else if let Ok(home) = std::env::var("HOME") {
-            std::path::PathBuf::from(home).join(".local").join("share")
-        } else {
-            std::path::PathBuf::from(".")
-        };
-        let disk_cache_disabled = std::env::var("APTU_CODER_DISK_CACHE_DISABLED")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        let disk_cache_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| xdg_data_home.join("aptu-coder").join("analysis-cache"));
-        let disk_cache =
-            std::sync::Arc::new(cache::DiskCache::new(disk_cache_dir, disk_cache_disabled));
-
-        // Snapshot login shell PATH once at startup: invoke the user's login shell with
-        // -l -c 'echo $PATH' so their full profile (nvm, Homebrew, etc.) is captured.
-        // Shell resolution priority for the snapshot:
-        //   1. $SHELL env var (user's actual login shell; sources the right profile)
-        //   2. resolve_shell() (APTU_SHELL override or bash from PATH)
-        //   3. /bin/sh (guaranteed to exist on all POSIX systems)
-        // Falls back to the current process PATH when the snapshot fails or returns empty,
-        // so exec_command always has a usable PATH in both stdio and HTTP transport modes.
-        let resolved_path = {
-            let snapshot_shell = std::env::var("SHELL")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    let s = resolve_shell();
-                    if s.is_empty() {
-                        "/bin/sh".to_string()
-                    } else {
-                        s
-                    }
-                });
-            let login_path = match std::process::Command::new(&snapshot_shell)
-                .args(["-l", "-c", "echo $PATH"])
-                .output()
-            {
-                Ok(output) => {
-                    let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if path_str.is_empty() {
-                        tracing::warn!(
-                            shell = %snapshot_shell,
-                            "login shell PATH snapshot returned empty string"
-                        );
-                        None
-                    } else {
-                        Some(path_str)
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        shell = %snapshot_shell,
-                        error = %e,
-                        "failed to snapshot login shell PATH"
-                    );
-                    None
-                }
-            };
-            // Fall back to the current process PATH when the login shell snapshot fails.
-            let path = login_path.or_else(|| std::env::var("PATH").ok());
-            Arc::new(path)
-        };
-
-        let filter_table = Arc::new(load_filter_table(Path::new(".")));
-
-        CodeAnalyzer {
-            tool_router: Arc::new(RwLock::new(Self::tool_router())),
-            cache: AnalysisCache::new(file_cap),
-            disk_cache,
-            peer,
-            log_level_filter,
-            event_rx: Arc::new(TokioMutex::new(Some(event_rx))),
-            metrics_tx,
-            session_call_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            session_id: Arc::new(TokioMutex::new(None)),
-            session_profile: Arc::new(std::sync::OnceLock::new()),
-            client_name: Arc::new(TokioMutex::new(None)),
-            client_version: Arc::new(TokioMutex::new(None)),
-            resolved_path,
-            filter_table,
-            call_graph_cache: {
-                CallGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
-                    "APTU_CODER_SYMBOL_CACHE_CAPACITY",
-                    32,
-                ))
-            },
-            edit_failure_counts: Arc::new(Mutex::new(HashMap::new())),
-        }
+        crate::tools::server::build_analyzer(peer, log_level_filter, event_rx, metrics_tx)
     }
 
     /// Emit a "received" metric event for the given tool name.
@@ -342,25 +242,16 @@ impl CodeAnalyzer {
     /// the metric event via the channel. Returns the (seq, sid) pair for use
     /// by the caller in exit metrics, preserving per-call seq uniqueness.
     async fn emit_received_metric(&self, tool: &'static str) -> (u32, Option<String>) {
-        // Relaxed: per-session monotonic counter; unique allocation is all that is
-        // needed. No cross-thread happens-before required. Contrast:
-        // GLOBAL_SESSION_COUNTER uses SeqCst for cross-session uniqueness.
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
-        self.metrics_tx.send(crate::metrics::MetricEvent {
+        crate::tools::server::emit_received_metric(
+            &self.metrics_tx,
+            &self.session_id,
+            &self.session_call_seq,
             tool,
-            result: "received",
-            session_id: sid.clone(),
-            seq: Some(seq),
-            duration_ms: 0,
-            ..Default::default()
-        });
-        (seq, sid)
+        )
+        .await
     }
 
-    /// Delegates to [`tools::analyze_directory::handle_overview_mode`].
+    /// Delegates to [`tools::server::handle_overview_mode`].
     /// Kept for test access; production path goes through `analyze_directory` shim.
     #[cfg(test)]
     pub(crate) async fn handle_overview_mode(
@@ -369,30 +260,31 @@ impl CodeAnalyzer {
         ct: tokio_util::sync::CancellationToken,
         progress_token: Option<ProgressToken>,
     ) -> Result<(std::sync::Arc<analyze::AnalysisOutput>, CacheTier), ErrorData> {
-        let ctx = tools::AnalyzeDirectoryContext {
+        let ctx = crate::tools::AnalyzeDirectoryContext {
             cache: self.cache.clone(),
             disk_cache: self.disk_cache.clone(),
             metrics_tx: self.metrics_tx.clone(),
             peer: self.peer.clone(),
             sid: self.session_id.lock().await.clone(),
         };
-        tools::analyze_directory::handle_overview_mode(&ctx, params, ct, progress_token).await
+        crate::tools::server::handle_overview_mode(&ctx, params, ct, progress_token).await
     }
 
-    /// Delegates to [`tools::analyze_file::handle_file_details_mode`].
+    /// Delegates to [`tools::server::handle_file_details_mode`].
     /// Kept for test access; production path goes through `analyze_file` shim.
     #[cfg(test)]
     pub(crate) async fn handle_file_details_mode(
         &self,
         params: &aptu_coder_core::types::AnalyzeFileParams,
     ) -> Result<(std::sync::Arc<analyze::FileAnalysisOutput>, CacheTier), ErrorData> {
-        let ctx = tools::AnalyzeFileContext {
-            cache: self.cache.clone(),
-            disk_cache: self.disk_cache.clone(),
-            metrics_tx: self.metrics_tx.clone(),
-            sid: self.session_id.lock().await.clone(),
-        };
-        tools::analyze_file::handle_file_details_mode(&ctx, params).await
+        crate::tools::server::handle_file_details_mode(
+            self.cache.clone(),
+            self.disk_cache.clone(),
+            self.metrics_tx.clone(),
+            self.session_id.lock().await.clone(),
+            params,
+        )
+        .await
     }
 
     /// Forwarding shim for tests that call `analyzer.emit_progress(...)` directly.
@@ -405,8 +297,7 @@ impl CodeAnalyzer {
         total: f64,
         message: String,
     ) {
-        tools::analyze_symbol::emit_progress_notification_pub(peer, token, progress, total, message)
-            .await
+        crate::tools::server::emit_progress(peer, token, progress, total, message).await
     }
 
     /// Forwarding shim for tests that call `CodeAnalyzer::validate_impl_only` directly.
@@ -414,7 +305,7 @@ impl CodeAnalyzer {
     pub(crate) fn validate_impl_only(
         entries: &[aptu_coder_core::traversal::WalkEntry],
     ) -> Result<(), rmcp::model::ErrorData> {
-        tools::analyze_symbol::validate_impl_only(entries)
+        crate::tools::server::validate_impl_only(entries)
     }
 
     /// Forwarding shim for tests that call `CodeAnalyzer::validate_import_lookup` directly.
@@ -423,7 +314,7 @@ impl CodeAnalyzer {
         import_lookup: Option<bool>,
         symbol: &str,
     ) -> Result<(), rmcp::model::ErrorData> {
-        tools::analyze_symbol::validate_import_lookup(import_lookup, symbol)
+        crate::tools::server::validate_import_lookup(import_lookup, symbol)
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -829,12 +720,6 @@ impl CodeAnalyzer {
     }
 }
 
-fn disable_routes(router: &mut ToolRouter<CodeAnalyzer>, tools: &[&'static str]) {
-    for tool in tools {
-        router.disable_route(*tool);
-    }
-}
-
 #[tool_handler]
 impl ServerHandler for CodeAnalyzer {
     #[instrument(skip(self, context), fields(service.name = tracing::field::Empty, service.version = tracing::field::Empty))]
@@ -918,118 +803,16 @@ impl ServerHandler for CodeAnalyzer {
     }
 
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
-        let mut peer_lock = self.peer.lock().await;
-        *peer_lock = Some(context.peer.clone());
-        drop(peer_lock);
-
-        // Generate session_id in MILLIS-N format
-        let millis = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(u64::MAX);
-        let counter = GLOBAL_SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let sid = format!("{millis}-{counter}");
-        {
-            let mut session_id_lock = self.session_id.lock().await;
-            *session_id_lock = Some(sid);
-        }
-        self.session_call_seq
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-
-        // NON-STANDARD VENDOR EXTENSION: profile-based tool filtering.
-        // The MCP 2025-11-25 spec has no profile or tool-subset concept; tools/list returns
-        // all tools with no filtering parameters. This mechanism is retained solely for
-        // controlled benchmarking (wave10/11). Do not promote or document it as a product
-        // feature. The spec-compliant way to restrict tools is for the orchestrator to pass
-        // a filtered `tools` array in the API call, or for clients to use tool annotations
-        // (readOnlyHint/destructiveHint) to apply their own policy.
-        // Two profiles: "edit" (3 tools), "analyze" (5 tools); absent/unknown = all 7 tools.
-        // _meta key "io.clouatre-labs/profile" takes precedence over APTU_CODER_PROFILE env var.
-
-        // Resolve the active profile: session_profile (set in initialize from _meta) wins;
-        // fall back to env var.
-        let active_profile = self
-            .session_profile
-            .get()
-            .cloned()
-            .or_else(|| std::env::var("APTU_CODER_PROFILE").ok());
-
-        {
-            let mut router = self.tool_router.write().await;
-
-            // Default: all 7 tools enabled unless profile explicitly disables them.
-            // Two profiles: "edit" (3 tools), "analyze" (5 tools); absent/unknown = all 7 tools.
-
-            if let Some(ref profile) = active_profile {
-                match profile.as_str() {
-                    "edit" => {
-                        // Enable only: edit_replace, edit_overwrite, exec_command
-                        disable_routes(
-                            &mut router,
-                            &[
-                                "analyze_directory",
-                                "analyze_file",
-                                "analyze_module",
-                                "analyze_symbol",
-                            ],
-                        );
-                    }
-                    "analyze" => {
-                        // Enable only: analyze_directory, analyze_file, analyze_module, analyze_symbol, exec_command
-                        disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
-                    }
-                    _ => {
-                        // Unknown profile: all 7 tools enabled (lenient fallback)
-                    }
-                }
-            }
-
-            // Bind peer notifier after disabling tools to send tools/list_changed notification
-            router.bind_peer_notifier(&context.peer);
-        }
-
-        // Spawn consumer task to drain log events from channel with batching.
-        let peer = self.peer.clone();
-        let event_rx = self.event_rx.clone();
-
-        tokio::spawn(async move {
-            let rx = {
-                let mut rx_lock = event_rx.lock().await;
-                rx_lock.take()
-            };
-
-            if let Some(mut receiver) = rx {
-                let mut buffer = Vec::with_capacity(64);
-                loop {
-                    // Drain up to 64 events from channel
-                    receiver.recv_many(&mut buffer, 64).await;
-
-                    if buffer.is_empty() {
-                        // Channel closed, exit consumer task
-                        break;
-                    }
-
-                    // Acquire peer lock once per batch
-                    let peer_lock = peer.lock().await;
-                    if let Some(peer) = peer_lock.as_ref() {
-                        for log_event in buffer.drain(..) {
-                            let notification = ServerNotification::LoggingMessageNotification(
-                                Notification::new(LoggingMessageNotificationParam {
-                                    level: log_event.level,
-                                    logger: Some(log_event.logger),
-                                    data: log_event.data,
-                                }),
-                            );
-                            if let Err(e) = peer.send_notification(notification).await {
-                                warn!("Failed to send logging notification: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        crate::tools::server::on_initialized_impl(
+            self.peer.clone(),
+            self.event_rx.clone(),
+            self.session_id.clone(),
+            self.session_call_seq.clone(),
+            self.session_profile.clone(),
+            self.tool_router.clone(),
+            &context.peer,
+        )
+        .await;
     }
 
     #[instrument(skip(self, _context))]

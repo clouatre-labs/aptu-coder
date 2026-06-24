@@ -49,6 +49,7 @@ pub mod common;
 pub mod edit_overwrite;
 pub mod edit_replace;
 pub mod exec_command;
+pub mod server;
 
 pub(crate) use analyze_module::AnalyzeModuleContext;
 pub(crate) use analyze_symbol::AnalyzeSymbolContext;
