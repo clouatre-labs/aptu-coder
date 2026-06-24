@@ -6,25 +6,15 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as TokioMutex;
 use tracing_subscriber::filter::LevelFilter;
 
+mod common;
+use common::make_test_analyzer;
+
 /// Serializes tests that mutate process-global env vars to prevent parallel pollution.
 /// Returns a `tokio::sync::MutexGuard` that can be held across `.await` points.
 async fn env_var_lock() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
     let m = LOCK.get_or_init(|| TokioMutex::new(()));
     m.lock().await
-}
-
-fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
-    let peer = Arc::new(TokioMutex::new(None));
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<aptu_coder::logging::LogEvent>();
-    let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    aptu_coder::CodeAnalyzer::new(
-        peer,
-        log_level_filter,
-        rx,
-        aptu_coder::metrics::MetricsSender(metrics_tx),
-    )
 }
 
 async fn call_tools_list_with_profile(profile: Option<&str>) -> serde_json::Value {

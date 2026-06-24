@@ -5,26 +5,6 @@ use crate::tools::exec_command::{build_exec_command, handle_output_persist, stri
 use crate::validation::validate_path_in_dir;
 use aptu_coder_core::traversal;
 use regex::Regex;
-use rmcp::model::NumberOrString;
-
-#[tokio::test]
-async fn test_emit_progress_none_peer_is_noop() {
-    let peer = Arc::new(TokioMutex::new(None));
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    let analyzer = CodeAnalyzer::new(
-        peer,
-        log_level_filter,
-        rx,
-        crate::metrics::MetricsSender(metrics_tx),
-    );
-    let token = ProgressToken(NumberOrString::String("test".into()));
-    // Should complete without panic
-    analyzer
-        .emit_progress(None, &token, 0.0, 10.0, "test".to_string())
-        .await;
-}
 
 fn make_analyzer() -> CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
@@ -59,7 +39,7 @@ async fn test_validate_impl_only_non_rust_returns_invalid_params() {
     // We use handle_focused_mode which calls validate_impl_only internally.
     let entries: Vec<traversal::WalkEntry> =
         traversal::walk_directory(dir.path(), None).unwrap_or_default();
-    let result = CodeAnalyzer::validate_impl_only(&entries);
+    let result = crate::tools::analyze_symbol::validate_impl_only(&entries);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
@@ -68,7 +48,7 @@ async fn test_validate_impl_only_non_rust_returns_invalid_params() {
 
 #[tokio::test]
 async fn test_no_cache_meta_on_analyze_directory_result() {
-    use aptu_coder_core::types::{AnalyzeDirectoryParams, OutputControlParams, PaginationParams};
+    use aptu_coder_core::types::AnalyzeDirectoryParams;
     use tempfile::TempDir;
 
     let dir = TempDir::new().unwrap();
@@ -80,10 +60,7 @@ async fn test_no_cache_meta_on_analyze_directory_result() {
     }))
     .unwrap();
     let ct = tokio_util::sync::CancellationToken::new();
-    let (arc_output, _cache_hit) = analyzer
-        .handle_overview_mode(&params, ct, None)
-        .await
-        .unwrap();
+    let (arc_output, _cache_hit) = analyzer.handle_overview_mode(&params, ct).await.unwrap();
     // Verify the no_cache_meta shape by constructing it directly and checking the shape
     let meta = no_cache_meta();
     assert_eq!(
@@ -133,10 +110,7 @@ async fn test_handle_overview_mode_no_summary_block() {
     .unwrap();
 
     let ct = tokio_util::sync::CancellationToken::new();
-    let (output, _cache_hit) = analyzer
-        .handle_overview_mode(&params, ct, None)
-        .await
-        .unwrap();
+    let (output, _cache_hit) = analyzer.handle_overview_mode(&params, ct).await.unwrap();
 
     // summary=None with small output: handler uses format_structure (tree), which is
     // already stored in output.formatted from build_analysis_output.
@@ -190,10 +164,7 @@ async fn test_analyze_directory_summary_false_forces_pagination() {
 
     // Act: call the full handler via handle_overview_mode + replicate handler path
     let ct = tokio_util::sync::CancellationToken::new();
-    let (output, _cache_hit) = analyzer
-        .handle_overview_mode(&params, ct, None)
-        .await
-        .unwrap();
+    let (output, _cache_hit) = analyzer.handle_overview_mode(&params, ct).await.unwrap();
 
     // Assert: output is small (confirms SIZE_LIMIT would not trigger auto-summary)
     assert!(
@@ -225,7 +196,7 @@ async fn test_analyze_directory_summary_false_forces_pagination() {
 
 #[tokio::test]
 async fn test_analyze_directory_cache_hit_metrics() {
-    use aptu_coder_core::types::{AnalyzeDirectoryParams, OutputControlParams, PaginationParams};
+    use aptu_coder_core::types::AnalyzeDirectoryParams;
     use tempfile::TempDir;
 
     // Arrange: a temp dir with one file
@@ -239,17 +210,11 @@ async fn test_analyze_directory_cache_hit_metrics() {
 
     // Act: first call (cache miss)
     let ct1 = tokio_util::sync::CancellationToken::new();
-    let (_out1, hit1) = analyzer
-        .handle_overview_mode(&params, ct1, None)
-        .await
-        .unwrap();
+    let (_out1, hit1) = analyzer.handle_overview_mode(&params, ct1).await.unwrap();
 
     // Act: second call (cache hit)
     let ct2 = tokio_util::sync::CancellationToken::new();
-    let (_out2, hit2) = analyzer
-        .handle_overview_mode(&params, ct2, None)
-        .await
-        .unwrap();
+    let (_out2, hit2) = analyzer.handle_overview_mode(&params, ct2).await.unwrap();
 
     // Assert
     assert_eq!(hit1, CacheTier::Miss, "first call must be a cache miss");
@@ -293,7 +258,7 @@ fn test_analyze_symbol_import_lookup_invalid_params() {
     // Arrange: empty symbol with import_lookup=true (violates the guard:
     // symbol must hold the module path when import_lookup=true).
     // Act: call the validate helper directly (same pattern as validate_impl_only).
-    let result = CodeAnalyzer::validate_import_lookup(Some(true), "");
+    let result = crate::tools::analyze_symbol::validate_import_lookup(Some(true), "");
 
     // Assert: INVALID_PARAMS is returned.
     assert!(
@@ -427,7 +392,7 @@ async fn test_analyze_directory_git_ref_filters_changed_files() {
 
 #[tokio::test]
 async fn test_handle_overview_mode_git_ref_filters_via_handler() {
-    use aptu_coder_core::types::{AnalyzeDirectoryParams, OutputControlParams, PaginationParams};
+    use aptu_coder_core::types::AnalyzeDirectoryParams;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -506,7 +471,7 @@ async fn test_handle_overview_mode_git_ref_filters_via_handler() {
     .unwrap();
     let ct = tokio_util::sync::CancellationToken::new();
     let (arc_output, _cache_hit) = analyzer
-        .handle_overview_mode(&params, ct, None)
+        .handle_overview_mode(&params, ct)
         .await
         .expect("handle_overview_mode with git_ref must succeed");
 
@@ -1906,32 +1871,6 @@ fn test_metric_chars_threshold_breach_no_fire() {
     assert!(
         !event.chars_threshold_breach,
         "chars_threshold_breach should be false for output_chars=5000"
-    );
-}
-
-// ── Progress token gating and watch channel tests ──
-
-/// When no progressToken is present, handle_overview_mode skips all progress
-/// machinery (no peer lock acquisition for progress, no watch channel, no
-/// emit_progress calls) and returns the analysis result directly.
-#[tokio::test]
-async fn test_progress_bypassed_when_no_token() {
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
-    let analyzer = make_analyzer();
-    let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
-        "path": dir.path().to_str().unwrap(),
-    }))
-    .unwrap();
-    let ct = tokio_util::sync::CancellationToken::new();
-
-    // Act: call with None progress_token -- must complete without error.
-    let result = analyzer.handle_overview_mode(&params, ct, None).await;
-    assert!(
-        result.is_ok(),
-        "handle_overview_mode with None token must succeed"
     );
 }
 
