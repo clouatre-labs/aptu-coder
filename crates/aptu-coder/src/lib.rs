@@ -147,8 +147,6 @@ use filters::{apply_filter, maybe_inject_no_stat};
 use logging::LogEvent;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
-#[cfg(test)]
-use rmcp::model::ProgressToken;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
     CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
@@ -258,7 +256,6 @@ impl CodeAnalyzer {
         &self,
         params: &AnalyzeDirectoryParams,
         ct: tokio_util::sync::CancellationToken,
-        progress_token: Option<ProgressToken>,
     ) -> Result<(std::sync::Arc<analyze::AnalysisOutput>, CacheTier), ErrorData> {
         let ctx = crate::tools::AnalyzeDirectoryContext {
             cache: self.cache.clone(),
@@ -267,7 +264,7 @@ impl CodeAnalyzer {
             peer: self.peer.clone(),
             sid: self.session_id.lock().await.clone(),
         };
-        crate::tools::server::handle_overview_mode(&ctx, params, ct, progress_token).await
+        crate::tools::server::handle_overview_mode(&ctx, params, ct).await
     }
 
     /// Delegates to [`tools::server::handle_file_details_mode`].
@@ -285,36 +282,6 @@ impl CodeAnalyzer {
             params,
         )
         .await
-    }
-
-    /// Forwarding shim for tests that call `analyzer.emit_progress(...)` directly.
-    #[cfg(test)]
-    pub(crate) async fn emit_progress(
-        &self,
-        peer: Option<rmcp::Peer<rmcp::RoleServer>>,
-        token: &rmcp::model::ProgressToken,
-        progress: f64,
-        total: f64,
-        message: String,
-    ) {
-        crate::tools::server::emit_progress(peer, token, progress, total, message).await
-    }
-
-    /// Forwarding shim for tests that call `CodeAnalyzer::validate_impl_only` directly.
-    #[cfg(test)]
-    pub(crate) fn validate_impl_only(
-        entries: &[aptu_coder_core::traversal::WalkEntry],
-    ) -> Result<(), rmcp::model::ErrorData> {
-        crate::tools::server::validate_impl_only(entries)
-    }
-
-    /// Forwarding shim for tests that call `CodeAnalyzer::validate_import_lookup` directly.
-    #[cfg(test)]
-    pub(crate) fn validate_import_lookup(
-        import_lookup: Option<bool>,
-        symbol: &str,
-    ) -> Result<(), rmcp::model::ErrorData> {
-        crate::tools::server::validate_import_lookup(import_lookup, symbol)
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -367,7 +334,6 @@ impl CodeAnalyzer {
         let ct = context.ct.clone();
         let param_path = params.path.clone();
         let max_depth_val = params.max_depth;
-        let progress_token = context.meta.get_progress_token();
         let ctx = tools::AnalyzeDirectoryContext {
             cache: self.cache.clone(),
             disk_cache: self.disk_cache.clone(),
@@ -385,7 +351,6 @@ impl CodeAnalyzer {
                 param_path,
                 max_depth_val,
                 ct,
-                progress_token,
             },
             &span,
         )
@@ -508,10 +473,8 @@ impl CodeAnalyzer {
             sid: sid.clone(),
             seq,
         };
-        let progress_token = context.meta.get_progress_token();
         let call = tools::AnalyzeSymbolCall {
             ct,
-            progress_token,
             param_path,
             max_depth_val,
             span,

@@ -52,7 +52,7 @@ For richer analysis, use `python scripts/mcp-metrics.py --help`.
 
 ## API verification (critical)
 
-Do not rely on training data for `rmcp`, `schemars`, or `thiserror` APIs. **Read `crates/aptu-coder/src/lib.rs` before adding or modifying any tool** -- it is the authoritative reference for tool handler patterns. Path validation logic lives in `src/validation.rs`; shell detection in `src/shell.rs`; exec output filtering (built-in rules, project-local `.aptu/filters.toml`, `schema_version` enforcement) in `src/filters.rs`. Read the relevant module before touching those subsystems.
+Do not rely on training data for `rmcp`, `schemars`, or `thiserror` APIs. **Post-M17, `crates/aptu-coder/src/lib.rs` is shim-only** (MCP wiring, `#[tool(...)]` decorators, thin forwarding calls). Tool handler logic lives in `crates/aptu-coder/src/tools/<tool>.rs` -- read the relevant handler file before adding or modifying any tool. Path validation logic lives in `src/validation.rs`; shell detection in `src/shell.rs`; exec output filtering (built-in rules, project-local `.aptu/filters.toml`, `schema_version` enforcement) in `src/filters.rs`. Read the relevant module before touching those subsystems.
 
 ## Integration tests
 

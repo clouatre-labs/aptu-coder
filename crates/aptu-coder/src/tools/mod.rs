@@ -78,6 +78,8 @@ pub(crate) struct AnalyzeDirectoryContext {
     pub(crate) cache: AnalysisCache,
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
+    // Retained for log-level notification infrastructure (separate active feature).
+    #[allow(dead_code)]
     pub(crate) peer: Arc<tokio::sync::Mutex<Option<rmcp::Peer<rmcp::RoleServer>>>>,
     pub(crate) sid: Option<String>,
 }
@@ -93,7 +95,6 @@ pub(crate) struct DirectoryHandlerCall {
     pub(crate) param_path: String,
     pub(crate) max_depth_val: Option<u32>,
     pub(crate) ct: tokio_util::sync::CancellationToken,
-    pub(crate) progress_token: Option<rmcp::model::ProgressToken>,
 }
 
 /// Shared handler context passed to extracted `analyze_file` free functions.
@@ -113,7 +114,6 @@ pub(crate) struct AnalyzeFileContext {
 /// `clippy::too_many_arguments` (7 args max).
 pub(crate) struct AnalyzeSymbolCall {
     pub(crate) ct: tokio_util::sync::CancellationToken,
-    pub(crate) progress_token: Option<rmcp::model::ProgressToken>,
     pub(crate) param_path: String,
     pub(crate) max_depth_val: Option<u32>,
     pub(crate) span: tracing::Span,

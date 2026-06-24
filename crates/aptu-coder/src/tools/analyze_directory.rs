@@ -13,12 +13,10 @@ use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
 use aptu_coder_core::types::{AnalysisMode, AnalyzeDirectoryParams};
-use rmcp::model::{CallToolResult, Content, ErrorData, ProgressToken};
-use rmcp::{Peer, RoleServer};
+use rmcp::model::{CallToolResult, Content, ErrorData};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::watch;
 use tracing::instrument;
 
 use crate::SIZE_LIMIT;
@@ -26,29 +24,6 @@ use crate::tools::common::{
     err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
 };
 use crate::tools::{AnalyzeDirectoryContext, DirectoryHandlerCall};
-
-/// Emit a progress notification to the MCP client peer.
-async fn emit_progress_notification(
-    peer: Option<Peer<RoleServer>>,
-    token: &ProgressToken,
-    progress: f64,
-    total: f64,
-    message: String,
-) {
-    if let Some(peer) = peer {
-        let notification = rmcp::model::ServerNotification::ProgressNotification(
-            rmcp::model::Notification::new(rmcp::model::ProgressNotificationParam {
-                progress_token: token.clone(),
-                progress,
-                total: Some(total),
-                message: Some(message),
-            }),
-        );
-        if let Err(e) = peer.send_notification(notification).await {
-            tracing::warn!("Failed to send progress notification: {}", e);
-        }
-    }
-}
 
 /// Core analysis logic for the `analyze_directory` tool (overview mode).
 ///
@@ -59,7 +34,6 @@ pub(crate) async fn handle_overview_mode(
     ctx: &AnalyzeDirectoryContext,
     params: &AnalyzeDirectoryParams,
     ct: tokio_util::sync::CancellationToken,
-    progress_token: Option<ProgressToken>,
 ) -> Result<(Arc<analyze::AnalysisOutput>, CacheTier), ErrorData> {
     let path = Path::new(&params.path);
     let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -163,7 +137,6 @@ pub(crate) async fn handle_overview_mode(
         all_entries
     };
 
-    let total_files = entries.iter().filter(|e| !e.is_dir).count();
     let path_owned = std::path::PathBuf::from(&params.path);
     let counter_clone = counter.clone();
     let ct_clone = ct.clone();
@@ -171,72 +144,6 @@ pub(crate) async fn handle_overview_mode(
     let handle = tokio::task::spawn_blocking(move || {
         analyze::analyze_directory_with_progress(&path_owned, entries, counter_clone, ct_clone)
     });
-
-    // Drive progress notifications while the blocking task runs.
-    if let Some(ref token) = progress_token {
-        let (tx, mut rx) = watch::channel(0usize);
-        let peer = ctx.peer.lock().await.clone();
-        let mut last_progress = 0usize;
-        let mut cancelled = false;
-
-        let counter_notify = counter.clone();
-        let tx_notify = tx.clone();
-        let ct_notify = ct.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                if ct_notify.is_cancelled() {
-                    break;
-                }
-                let current = counter_notify.load(std::sync::atomic::Ordering::Relaxed);
-                if tx_notify.send(current).is_err() {
-                    break;
-                }
-            }
-        });
-
-        loop {
-            tokio::select! {
-                _ = ct.cancelled() => {
-                    cancelled = true;
-                    break;
-                }
-                changed = rx.changed() => {
-                    match changed {
-                        Ok(()) => {
-                            let current = *rx.borrow();
-                            if current != last_progress && total_files > 0 {
-                                emit_progress_notification(
-                                    peer.clone(),
-                                    token,
-                                    current as f64,
-                                    total_files as f64,
-                                    format!("Analyzing {current}/{total_files} files"),
-                                )
-                                .await;
-                                last_progress = current;
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-            if handle.is_finished() {
-                break;
-            }
-        }
-
-        if !cancelled && total_files > 0 {
-            emit_progress_notification(
-                peer,
-                token,
-                total_files as f64,
-                total_files as f64,
-                format!("Completed analyzing {total_files} files"),
-            )
-            .await;
-        }
-    }
 
     match handle.await {
         Ok(Ok(mut output)) => {
@@ -313,17 +220,15 @@ pub(crate) async fn analyze_directory_handler(
         param_path,
         max_depth_val,
         ct,
-        progress_token,
     } = call;
-    let (arc_output, dir_cache_hit) =
-        match handle_overview_mode(ctx, &params, ct, progress_token).await {
-            Ok(v) => v,
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "internal_error");
-                return Ok(err_to_tool_result(e));
-            }
-        };
+    let (arc_output, dir_cache_hit) = match handle_overview_mode(ctx, &params, ct).await {
+        Ok(v) => v,
+        Err(e) => {
+            span.record("error", true);
+            span.record("error.type", "internal_error");
+            return Ok(err_to_tool_result(e));
+        }
+    };
 
     let mut output = match Arc::try_unwrap(arc_output) {
         Ok(owned) => owned,

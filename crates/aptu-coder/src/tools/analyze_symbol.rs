@@ -16,11 +16,10 @@ use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
 use aptu_coder_core::types::{AnalyzeSymbolParams, SymbolMatchMode};
-use rmcp::model::{CallToolResult, Content, ErrorData, Meta, ProgressToken};
+use rmcp::model::{CallToolResult, Content, ErrorData, Meta};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::watch;
 use tracing::instrument;
 
 use crate::tools::common::{
@@ -34,6 +33,8 @@ use crate::{SIZE_LIMIT, err_to_tool_result_from_pagination};
 /// explicit without coupling to `&self`.
 pub(crate) struct AnalyzeSymbolContext {
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
+    // Retained for log-level notification infrastructure (separate active feature).
+    #[allow(dead_code)]
     pub(crate) peer: Arc<tokio::sync::Mutex<Option<rmcp::Peer<rmcp::RoleServer>>>>,
     pub(crate) call_graph_cache: CallGraphCache,
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
@@ -49,7 +50,6 @@ struct FocusedAnalysisParams {
     match_mode: SymbolMatchMode,
     follow_depth: u32,
     max_depth: Option<u32>,
-    use_summary: bool,
     impl_only: Option<bool>,
     def_use: bool,
     parse_timeout_micros: Option<u64>,
@@ -153,208 +153,56 @@ fn paginate_focus_chains(
     Ok((paginated.items, next))
 }
 
-/// Public test wrapper for `emit_progress_notification`.
-#[cfg(test)]
-pub(crate) async fn emit_progress_notification_pub(
-    peer: Option<rmcp::Peer<rmcp::RoleServer>>,
-    token: &ProgressToken,
-    progress: f64,
-    total: f64,
-    message: String,
-) {
-    emit_progress_notification(peer, token, progress, total, message).await;
-}
-
-/// Emit a progress notification to the MCP client peer.
-async fn emit_progress_notification(
-    peer: Option<rmcp::Peer<rmcp::RoleServer>>,
-    token: &ProgressToken,
-    progress: f64,
-    total: f64,
-    message: String,
-) {
-    if let Some(peer) = peer {
-        let notification = rmcp::model::ServerNotification::ProgressNotification(
-            rmcp::model::Notification::new(rmcp::model::ProgressNotificationParam {
-                progress_token: token.clone(),
-                progress,
-                total: Some(total),
-                message: Some(message),
-            }),
-        );
-        if let Err(e) = peer.send_notification(notification).await {
-            tracing::warn!("Failed to send progress notification: {}", e);
-        }
-    }
-}
-
-/// Poll progress until the analysis task completes.
-#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
-async fn poll_progress_until_done(
-    ctx: &AnalyzeSymbolContext,
-    analysis_params: &FocusedAnalysisParams,
-    counter: Arc<std::sync::atomic::AtomicUsize>,
-    ct: tokio_util::sync::CancellationToken,
-    entries: Arc<Vec<WalkEntry>>,
-    total_files: usize,
-    symbol_display: &str,
-    progress_token: Option<ProgressToken>,
-) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
-    let counter_clone = counter.clone();
-    let ct_clone = ct.clone();
-    let entries_clone = Arc::clone(&entries);
-    let path_owned = analysis_params.path.clone();
-    let symbol_owned = analysis_params.symbol.clone();
-    let match_mode_owned = analysis_params.match_mode.clone();
-    let follow_depth = analysis_params.follow_depth;
-    let max_depth = analysis_params.max_depth;
-    let use_summary = analysis_params.use_summary;
-    let impl_only = analysis_params.impl_only;
-    let def_use = analysis_params.def_use;
-    let parse_timeout_micros = analysis_params.parse_timeout_micros;
-    let handle = tokio::task::spawn_blocking(move || {
-        let params = analyze::FocusedAnalysisConfig {
-            focus: symbol_owned,
-            match_mode: match_mode_owned,
-            follow_depth,
-            max_depth,
-            ast_recursion_limit: None,
-            use_summary,
-            impl_only,
-            def_use,
-            parse_timeout_micros,
-        };
-        analyze::analyze_focused_with_progress_with_entries(
-            &path_owned,
-            &params,
-            &counter_clone,
-            &ct_clone,
-            &entries_clone,
-        )
-    });
-
-    // Gate progress on client-supplied token; skip all machinery when absent.
-    if let Some(ref token) = progress_token {
-        let (tx, mut rx) = watch::channel(0usize);
-        let peer = ctx.peer.lock().await.clone();
-        let mut last_progress = 0usize;
-        let mut cancelled = false;
-
-        // Spawn a notifier that watches the counter and sends on the watch channel.
-        let counter_notify = counter.clone();
-        let tx_notify = tx.clone();
-        let ct_notify = ct.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                if ct_notify.is_cancelled() {
-                    break;
-                }
-                let current = counter_notify.load(std::sync::atomic::Ordering::Relaxed);
-                if tx_notify.send(current).is_err() {
-                    break; // receiver dropped
-                }
-            }
-        });
-
-        loop {
-            tokio::select! {
-                _ = ct.cancelled() => {
-                    cancelled = true;
-                    break;
-                }
-                changed = rx.changed() => {
-                    match changed {
-                        Ok(()) => {
-                            let current = *rx.borrow();
-                            if current != last_progress && total_files > 0 {
-                                emit_progress_notification(
-                                    peer.clone(),
-                                    token,
-                                    current as f64,
-                                    total_files as f64,
-                                    format!(
-                                        "Analyzing {current}/{total_files} files for symbol '{symbol_display}'"
-                                    ),
-                                )
-                                .await;
-                                last_progress = current;
-                            }
-                        }
-                        Err(_) => {
-                            // Sender dropped: analysis complete or notifier exited.
-                            break;
-                        }
-                    }
-                }
-            }
-            if handle.is_finished() {
-                break;
-            }
-        }
-
-        if !cancelled && total_files > 0 {
-            emit_progress_notification(
-                peer.clone(),
-                token,
-                total_files as f64,
-                total_files as f64,
-                format!("Completed analyzing {total_files} files for symbol '{symbol_display}'"),
-            )
-            .await;
-        }
-    }
-
-    match handle.await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(analyze::AnalyzeError::Cancelled)) => Err(ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            "Analysis cancelled".to_string(),
-            Some(error_meta("transient", true, "analysis was cancelled")),
-        )),
-        Ok(Err(e)) => Err(ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            format!("Error analyzing symbol: {e}"),
-            Some(error_meta("resource", false, "check symbol name and file")),
-        )),
-        Err(e) => Err(ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            format!("Task join error: {e}"),
-            Some(error_meta("transient", true, "retry the request")),
-        )),
-    }
-}
-
 /// Run focused analysis with auto-summary retry on SIZE_LIMIT overflow.
-#[allow(clippy::too_many_arguments)]
 async fn run_focused_with_auto_summary(
-    ctx: &AnalyzeSymbolContext,
+    _ctx: &AnalyzeSymbolContext,
     params: &AnalyzeSymbolParams,
     analysis_params: &FocusedAnalysisParams,
     counter: Arc<std::sync::atomic::AtomicUsize>,
     ct: tokio_util::sync::CancellationToken,
     entries: Arc<Vec<WalkEntry>>,
-    total_files: usize,
-    progress_token: Option<ProgressToken>,
 ) -> Result<analyze::FocusedAnalysisOutput, ErrorData> {
     let use_summary_for_task = params.output_control.summary == Some(true);
 
-    let analysis_params_initial = FocusedAnalysisParams {
+    let config_initial = analyze::FocusedAnalysisConfig {
+        focus: analysis_params.symbol.clone(),
+        match_mode: analysis_params.match_mode.clone(),
+        follow_depth: analysis_params.follow_depth,
+        max_depth: analysis_params.max_depth,
+        ast_recursion_limit: None,
         use_summary: use_summary_for_task,
-        ..analysis_params.clone()
+        impl_only: analysis_params.impl_only,
+        def_use: analysis_params.def_use,
+        parse_timeout_micros: analysis_params.parse_timeout_micros,
     };
 
-    let mut output = poll_progress_until_done(
-        ctx,
-        &analysis_params_initial,
-        counter.clone(),
-        ct.clone(),
-        entries.clone(),
-        total_files,
-        &params.symbol,
-        progress_token.clone(),
-    )
-    .await?;
+    let mut output = tokio::task::spawn_blocking({
+        let path = analysis_params.path.clone();
+        let entries = entries.clone();
+        let counter = counter.clone();
+        let ct = ct.clone();
+        let config = config_initial.clone();
+        move || {
+            analyze::analyze_focused_with_progress_with_entries(
+                &path, &config, &counter, &ct, &entries,
+            )
+        }
+    })
+    .await
+    .map_err(|e| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INTERNAL_ERROR,
+            format!("analysis task panicked: {e}"),
+            None,
+        )
+    })?
+    .map_err(|e| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INTERNAL_ERROR,
+            format!("analysis failed: {e}"),
+            None,
+        )
+    })?;
 
     if params.output_control.summary.is_none() && output.formatted.len() > SIZE_LIMIT {
         tracing::debug!(
@@ -362,23 +210,28 @@ async fn run_focused_with_auto_summary(
             message = "output exceeded size limit, retrying with summary"
         );
         let counter2 = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let analysis_params_retry = FocusedAnalysisParams {
+        let config_retry = analyze::FocusedAnalysisConfig {
             use_summary: true,
-            ..analysis_params.clone()
+            ..config_initial
         };
-        let summary_result = poll_progress_until_done(
-            ctx,
-            &analysis_params_retry,
-            counter2,
-            ct,
-            entries,
-            total_files,
-            &params.symbol,
-            progress_token,
-        )
-        .await;
+        let summary_result = tokio::task::spawn_blocking({
+            let path = analysis_params.path.clone();
+            let entries = entries.clone();
+            move || {
+                analyze::analyze_focused_with_progress_with_entries(
+                    &path,
+                    &config_retry,
+                    &counter2,
+                    &ct,
+                    &entries,
+                )
+            }
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok());
 
-        if let Ok(summary_output) = summary_result {
+        if let Some(summary_output) = summary_result {
             output.formatted = summary_output.formatted;
         } else {
             let estimated_tokens = output.formatted.len() / 4;
@@ -427,7 +280,6 @@ async fn handle_focused_mode(
     ctx: &AnalyzeSymbolContext,
     params: &AnalyzeSymbolParams,
     ct: tokio_util::sync::CancellationToken,
-    progress_token: Option<ProgressToken>,
 ) -> Result<(CacheTier, analyze::FocusedAnalysisOutput), ErrorData> {
     let path = Path::new(&params.path);
     let raw_entries = match walk_directory(path, params.max_depth) {
@@ -541,7 +393,6 @@ async fn handle_focused_mode(
         return Ok((CacheTier::L2Disk, cached));
     }
 
-    let total_files = entries.iter().filter(|e| !e.is_dir).count();
     let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let analysis_params = FocusedAnalysisParams {
@@ -550,23 +401,13 @@ async fn handle_focused_mode(
         match_mode: params.match_mode.clone().unwrap_or_default(),
         follow_depth: params.follow_depth.unwrap_or(1),
         max_depth: params.max_depth,
-        use_summary: false,
         impl_only: params.impl_only,
         def_use: params.def_use.unwrap_or(false),
         parse_timeout_micros: None,
     };
 
-    let mut output = run_focused_with_auto_summary(
-        ctx,
-        params,
-        &analysis_params,
-        counter,
-        ct,
-        entries,
-        total_files,
-        progress_token,
-    )
-    .await?;
+    let mut output =
+        run_focused_with_auto_summary(ctx, params, &analysis_params, counter, ct, entries).await?;
 
     if params.impl_only == Some(true) {
         let filter_line = format!(
@@ -895,17 +736,15 @@ async fn handle_call_graph(
     let sid = ctx.sid.clone();
     let seq = ctx.seq;
     let ct = call.ct;
-    let progress_token = call.progress_token;
     let param_path = call.param_path;
     let max_depth_val = call.max_depth_val;
     let t_start = call.t_start;
 
     // Call handler for analysis and progress tracking
-    let (graph_cache_tier, mut output) =
-        match handle_focused_mode(&ctx, &params, ct, progress_token).await {
-            Ok(v) => v,
-            Err(e) => return Ok(err_to_tool_result(e)),
-        };
+    let (graph_cache_tier, mut output) = match handle_focused_mode(&ctx, &params, ct).await {
+        Ok(v) => v,
+        Err(e) => return Ok(err_to_tool_result(e)),
+    };
 
     // Surface cache tier in structuredContent for observability and testing.
     output.cache_tier = Some(graph_cache_tier.as_str().to_owned());

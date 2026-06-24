@@ -9,6 +9,22 @@ async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
 }
 
+fn truncate_output(output: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
+    let lines: Vec<&str> = output.lines().collect();
+
+    let output_to_use = if lines.len() > max_lines {
+        lines[..max_lines].join("\n")
+    } else {
+        output.to_string()
+    };
+
+    if output_to_use.len() > max_bytes {
+        (output_to_use[..max_bytes].to_string(), true)
+    } else {
+        (output_to_use, lines.len() > max_lines)
+    }
+}
+
 #[tokio::test]
 async fn exec_command_happy_path() {
     // Arrange: prepare a simple echo command
@@ -170,23 +186,6 @@ async fn exec_command_output_truncation() {
 
 #[test]
 fn test_truncate_output_by_lines() {
-    // Helper function to test truncation logic
-    fn truncate_output(output: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
-        let lines: Vec<&str> = output.lines().collect();
-
-        let output_to_use = if lines.len() > max_lines {
-            lines[..max_lines].join("\n")
-        } else {
-            output.to_string()
-        };
-
-        if output_to_use.len() > max_bytes {
-            (output_to_use[..max_bytes].to_string(), true)
-        } else {
-            (output_to_use, lines.len() > max_lines)
-        }
-    }
-
     // Arrange: create output with 2500 lines
     let output = (1..=2500)
         .map(|i| i.to_string())
@@ -204,23 +203,6 @@ fn test_truncate_output_by_lines() {
 
 #[test]
 fn test_truncate_output_by_bytes() {
-    // Helper function to test truncation logic
-    fn truncate_output(output: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
-        let lines: Vec<&str> = output.lines().collect();
-
-        let output_to_use = if lines.len() > max_lines {
-            lines[..max_lines].join("\n")
-        } else {
-            output.to_string()
-        };
-
-        if output_to_use.len() > max_bytes {
-            (output_to_use[..max_bytes].to_string(), true)
-        } else {
-            (output_to_use, lines.len() > max_lines)
-        }
-    }
-
     // Arrange: create output that exceeds byte limit
     let output = "x".repeat(100 * 1024); // 100KB
 

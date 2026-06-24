@@ -272,7 +272,6 @@ pub(crate) async fn handle_overview_mode(
     ctx: &crate::tools::AnalyzeDirectoryContext,
     params: &aptu_coder_core::types::AnalyzeDirectoryParams,
     ct: tokio_util::sync::CancellationToken,
-    progress_token: Option<rmcp::model::ProgressToken>,
 ) -> Result<
     (
         std::sync::Arc<aptu_coder_core::analyze::AnalysisOutput>,
@@ -280,7 +279,7 @@ pub(crate) async fn handle_overview_mode(
     ),
     rmcp::model::ErrorData,
 > {
-    crate::tools::analyze_directory::handle_overview_mode(ctx, params, ct, progress_token).await
+    crate::tools::analyze_directory::handle_overview_mode(ctx, params, ct).await
 }
 
 /// Delegates to [`crate::tools::analyze_file::handle_file_details_mode`].
@@ -305,45 +304,4 @@ pub(crate) async fn handle_file_details_mode(
         sid,
     };
     crate::tools::analyze_file::handle_file_details_mode(&ctx, params).await
-}
-
-/// Forwarding shim for tests that call `analyzer.emit_progress(...)` directly.
-#[cfg(test)]
-pub(crate) async fn emit_progress(
-    peer: Option<rmcp::Peer<rmcp::RoleServer>>,
-    token: &rmcp::model::ProgressToken,
-    progress: f64,
-    total: f64,
-    message: String,
-) {
-    if let Some(peer) = peer {
-        let notification = rmcp::model::ServerNotification::ProgressNotification(
-            rmcp::model::Notification::new(rmcp::model::ProgressNotificationParam {
-                progress_token: token.clone(),
-                progress,
-                total: Some(total),
-                message: Some(message),
-            }),
-        );
-        if let Err(e) = peer.send_notification(notification).await {
-            tracing::warn!("Failed to send progress notification: {}", e);
-        }
-    }
-}
-
-/// Forwarding shim for tests that call `validate_impl_only` directly.
-#[cfg(test)]
-pub(crate) fn validate_impl_only(
-    entries: &[aptu_coder_core::traversal::WalkEntry],
-) -> Result<(), rmcp::model::ErrorData> {
-    crate::tools::analyze_symbol::validate_impl_only(entries)
-}
-
-/// Forwarding shim for tests that call `validate_import_lookup` directly.
-#[cfg(test)]
-pub(crate) fn validate_import_lookup(
-    import_lookup: Option<bool>,
-    symbol: &str,
-) -> Result<(), rmcp::model::ErrorData> {
-    crate::tools::analyze_symbol::validate_import_lookup(import_lookup, symbol)
 }

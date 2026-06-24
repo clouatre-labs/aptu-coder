@@ -22,7 +22,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 |--------|------|-----------------|
 | **`aptu-coder`** | | |
 | `filters` | `crates/aptu-coder/src/filters.rs` | `exec_command` output filtering: `build_builtin_filter_rules`, `load_filter_table` (built-in + project-local `.aptu/filters.toml`), `apply_filter`, `maybe_inject_no_stat`; `FilterTableConfig` validates `schema_version` on deserialization and falls back to built-in rules on mismatch or parse error |
-| `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP tool handlers for `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command`; exec plumbing (`build_exec_command`, `run_exec_impl`, `handle_output_persist`) |
+| `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP wiring and thin shims (`#[tool(...)]` decorators, forwarding calls). Post-M17 all tool handler logic lives in `crates/aptu-coder/src/tools/<tool>.rs`. Exec plumbing (`build_exec_command`, `run_exec_impl`, `handle_output_persist`) remains in `lib.rs`. |
 | `logging` | `crates/aptu-coder/src/logging.rs` | MCP logging integration via tracing; McpLoggingLayer bridges events to MCP clients via `notifications/message` |
 | `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed |
 | `metrics` | `crates/aptu-coder/src/metrics.rs` | Always-on JSONL metrics: daily-rotating files, `MetricEvent`, `MetricsSender`, `MetricsWriter`; includes `migrate_legacy_metrics_dir` for the `code-analyze-mcp` → `aptu-coder` XDG path migration |
@@ -155,7 +155,7 @@ Two independent telemetry channels run in parallel; neither blocks tool executio
 
 ### W3C Trace Context propagation
 
-The server extracts `traceparent` and `tracestate` from `MCP params._meta` on every tool call and sets them as the span parent context. Tool spans appear as children of the calling agent's distributed trace (goose session, Claude turn). This requires no changes to tool handlers -- context extraction is done at the handler dispatch layer in `lib.rs`.
+The server extracts `traceparent` and `tracestate` from `MCP params._meta` on every tool call and sets them as the span parent context. Tool spans appear as children of the calling agent's distributed trace (goose session, Claude turn). This requires no changes to tool handlers -- context extraction is done at the handler dispatch layer in the `lib.rs` shims before delegating to `tools/<tool>.rs`.
 
 ### Child spans for sub-operations
 
