@@ -161,7 +161,7 @@ KeyValue::new("tier", tier.to_string())
 
 **File:** `crates/aptu-coder-core/src/graph.rs` -- **1,176 lines**
 
-`build_from_results` and `find_chains_bfs` clone `String` keys multiple times per edge: once for the HashMap entry key, once for the neighbor name, and once for the secondary index. Switching symbol names from `String` to `Arc<str>` in `CallGraph` and the lowercase index reduces clone cost during BFS to a reference-count increment. For large codebases with deeply connected call graphs this is a 15-30% reduction in allocator pressure during graph construction.
+`build_from_results` and `find_chains_bfs` clone `String` keys multiple times per edge: once for the HashMap entry key, once for the neighbor name, and once for the secondary index. Switching symbol names from `String` to `Arc<str>` in `CallGraph` and the lowercase index reduces clone cost during BFS to a reference-count increment. For large codebases with deeply connected call graphs this is an estimated 15-30% reduction in allocator pressure during graph construction (not benchmarked).
 
 ---
 
@@ -191,11 +191,11 @@ The `disk_cache` field on `AnalyzeSymbolContext` is annotated `#[allow(dead_code
 
 ---
 
-### F11 -- Missing `#[must_use]` on 15+ pure functions [LOW]
+### F11 -- Missing `#[must_use]` on multiple pure functions [LOW]
 
 **Files:** `validation.rs`, `cache.rs`, `formatter.rs`, several others
 
-Pure functions returning `Result` or computed values without `#[must_use]` allow callers to silently discard results. Confirmed candidates:
+Pure functions returning `Result` or computed values without `#[must_use]` allow callers to silently discard results. Examples:
 
 - All cache constructor functions (`DiskCache::new`, `CallGraphCache::new`)
 - `validate_path`, `resolve_path`, `is_safe_path` in `validation.rs`
@@ -261,7 +261,7 @@ Languages `astro`, `json`, and `toml` appear unconditionally in `language_for_ex
 | F8 | MEDIUM | `graph.rs` | `String` clone amplification in BFS | `Arc<str>` for symbol names |
 | F9 | MEDIUM | `cache.rs` | 4 `unsafe NonZeroUsize::new_unchecked` | Replace with `.new(x).unwrap()` |
 | F10 | MEDIUM | `tools/analyze_symbol.rs` | Dead `disk_cache` field with `#[allow(dead_code)]` | Remove field |
-| F11 | LOW | Multiple | 15+ pure functions missing `#[must_use]` | Add annotation |
+| F11 | LOW | Multiple | Multiple pure functions missing `#[must_use]` | Add annotation |
 | F12 | LOW | `Cargo.toml` | Only 2 workspace clippy lints | Add 5 lints |
 | F13 | LOW | `lang.rs` | Feature flag asymmetry across languages | Unify policy |
 | F14 | LOW | `aptu-coder/src/lib.rs` | `pub mod` for internal telemetry modules | `pub(crate)` |
@@ -281,9 +281,9 @@ Languages `astro`, `json`, and `toml` appear unconditionally in `language_for_ex
 ## Estimated impact
 
 - **LOC removed by dead code cleanup (F3, F10):** ~50 lines
-- **Compile time reduction:** Removing 3 `JsonSchema` derives (F3) reduces macro expansion; not measured but non-zero
+- **Compile time reduction:** Removing 3 `JsonSchema` derives (F3) reduces macro expansion
 - **Runtime allocation savings (F7):** 3 heap allocations eliminated per tool call on OTEL path (~180-240 ns total, compounding under load)
-- **Graph memory savings (F8):** 15-30% reduction in allocator pressure during BFS on large codebases
+- **Graph memory savings (F8):** estimated 15-30% reduction in allocator pressure during BFS on large codebases (not benchmarked)
 - **Unsafe surface reduction (F9):** 4 `unsafe` blocks eliminated, no safety annotations required
 - **Maintainability (F1, F2, F5):** Largest file (2,886L) and largest function (378L) both split; average file size drops by ~40% for the formatter module
 
