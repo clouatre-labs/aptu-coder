@@ -22,7 +22,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-aptu-coder-core = { path = "../aptu-coder-core", version = "0.20", features = ["schemars", "lang-rust", "lang-go", "lang-java", "lang-python", "lang-typescript", "lang-tsx", "lang-fortran", "lang-javascript", "lang-cpp", "lang-csharp"] }
+aptu-coder-core = { path = "../aptu-coder-core", version = "0.21", features = ["schemars", "lang-rust", "lang-go", "lang-java", "lang-python", "lang-typescript", "lang-tsx", "lang-fortran", "lang-javascript", "lang-cpp", "lang-csharp"] }
 rmcp = { workspace = true }
 rustls = { workspace = true }
 tokio = { workspace = true }
