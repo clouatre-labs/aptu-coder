@@ -16,8 +16,11 @@ use serde_json::Value;
 use std::sync::Arc;
 use tracing::instrument;
 
+use crate::SIZE_LIMIT;
 use crate::tools::AnalyzeFileContext;
-use crate::{SIZE_LIMIT, err_to_tool_result, error_meta, no_cache_meta};
+use crate::tools::common::{
+    err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
+};
 
 /// Core analysis logic for the `analyze_file` tool (file details mode).
 ///
@@ -160,7 +163,7 @@ pub(crate) async fn analyze_file_handler(
         )));
     }
 
-    if crate::summary_cursor_conflict(
+    if summary_cursor_conflict(
         params.output_control.summary,
         params.pagination.cursor.as_deref(),
     ) {

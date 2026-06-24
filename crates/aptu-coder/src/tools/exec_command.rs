@@ -15,11 +15,11 @@ use tracing::instrument;
 
 use crate::filters::{CompiledRule, apply_filter, maybe_inject_no_stat};
 use crate::metrics::MetricsSender;
+use crate::otel::{ClientMetadata, extract_and_set_trace_context};
 use crate::shell::resolve_shell;
+use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 use crate::{
-    ClientMetadata, ExecCommandParams, SIZE_LIMIT, STDIN_MAX_BYTES, ShellOutput,
-    err_to_tool_result, error_meta, extract_and_set_trace_context, no_cache_meta, validate_path,
-    validation,
+    ExecCommandParams, SIZE_LIMIT, STDIN_MAX_BYTES, ShellOutput, validate_path, validation,
 };
 
 /// Default drain timeout in milliseconds for post-exit pipe drain (500ms).

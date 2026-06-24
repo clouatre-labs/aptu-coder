@@ -33,15 +33,13 @@ mod shell;
 mod tools;
 mod validation;
 
-pub use tools::common::{
-    ClientMetadata, err_to_tool_result, error_meta, extract_and_set_trace_context, no_cache_meta,
-    summary_cursor_conflict,
-};
-
 use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion, types};
 use shell::resolve_shell;
 use validation::validate_path;
+
+use crate::otel::{ClientMetadata, extract_and_set_trace_context};
+use crate::tools::common::{err_to_tool_result, no_cache_meta};
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
 

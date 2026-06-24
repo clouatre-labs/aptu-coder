@@ -4,7 +4,7 @@
 
 use rmcp::model::ErrorData;
 
-use crate::error_meta;
+use crate::tools::common::error_meta;
 
 /// Scans a shell command string for unclosed heredocs and file-write heredoc
 /// patterns before any process is spawned.

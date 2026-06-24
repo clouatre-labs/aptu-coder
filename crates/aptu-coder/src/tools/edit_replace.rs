@@ -11,11 +11,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::instrument;
 
-use crate::{
-    err_to_tool_result, error_meta, no_cache_meta,
-    tools::EditHandlerContext,
-    validation::{validate_path, validate_path_in_dir},
-};
+use crate::tools::EditHandlerContext;
+use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
+use crate::validation::{validate_path, validate_path_in_dir};
 
 /// Number of consecutive not_found or ambiguous edit_replace failures on the same
 /// (session_id, canonical_path) pair before returning a stale-context directive error.
