@@ -13,7 +13,7 @@ use rmcp::model::{CallToolResult, Content, ErrorData, Meta};
 use std::sync::Arc;
 use tracing::instrument;
 
-use crate::{err_to_tool_result, error_meta, no_cache_meta};
+use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 
 /// Shared handler context passed to extracted `analyze_module` free functions.
 ///

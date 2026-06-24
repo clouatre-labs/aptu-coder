@@ -8,11 +8,9 @@ use aptu_coder_core::types::{EditOverwriteOutput, EditOverwriteParams};
 use rmcp::model::{CallToolResult, Content, ErrorData};
 use tracing::instrument;
 
-use crate::{
-    err_to_tool_result, error_meta, no_cache_meta,
-    tools::EditHandlerContext,
-    validation::{validate_path, validate_path_in_dir},
-};
+use crate::tools::EditHandlerContext;
+use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
+use crate::validation::{validate_path, validate_path_in_dir};
 
 #[instrument(skip(params, ctx, span, t_start), fields(path = %params.path))]
 pub(crate) async fn edit_overwrite(

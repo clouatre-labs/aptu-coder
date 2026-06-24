@@ -4,6 +4,8 @@
 use serial_test::serial;
 use std::env;
 
+use aptu_coder::otel::{ClientMetadata, extract_and_set_trace_context};
+
 #[test]
 #[serial]
 fn test_init_otel_no_env_var_returns_none() {
@@ -106,9 +108,9 @@ fn test_traceparent_malformed_no_panic() {
     let meta = rmcp::model::Meta(meta_map);
 
     // Act: call the real extraction function -- must not panic regardless of input
-    aptu_coder::extract_and_set_trace_context(
+    extract_and_set_trace_context(
         Some(&meta),
-        aptu_coder::ClientMetadata {
+        ClientMetadata {
             session_id: None,
             client_name: None,
             client_version: None,
@@ -120,9 +122,9 @@ fn test_traceparent_malformed_no_panic() {
 #[serial]
 fn test_traceparent_missing_meta_no_panic() {
     // Act: None meta must be handled silently
-    aptu_coder::extract_and_set_trace_context(
+    extract_and_set_trace_context(
         None,
-        aptu_coder::ClientMetadata {
+        ClientMetadata {
             session_id: None,
             client_name: None,
             client_version: None,

@@ -21,8 +21,11 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::instrument;
 
+use crate::SIZE_LIMIT;
+use crate::tools::common::{
+    err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
+};
 use crate::tools::{AnalyzeDirectoryContext, DirectoryHandlerCall};
-use crate::{SIZE_LIMIT, err_to_tool_result, error_meta, no_cache_meta};
 
 /// Emit a progress notification to the MCP client peer.
 async fn emit_progress_notification(
@@ -327,7 +330,7 @@ pub(crate) async fn analyze_directory_handler(
         Err(arc) => (*arc).clone(),
     };
 
-    if crate::summary_cursor_conflict(
+    if summary_cursor_conflict(
         params.output_control.summary,
         params.pagination.cursor.as_deref(),
     ) {

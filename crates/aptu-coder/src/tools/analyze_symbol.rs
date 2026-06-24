@@ -23,10 +23,10 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::instrument;
 
-use crate::{
-    SIZE_LIMIT, err_to_tool_result, err_to_tool_result_from_pagination, error_meta, no_cache_meta,
-    summary_cursor_conflict,
+use crate::tools::common::{
+    err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
 };
+use crate::{SIZE_LIMIT, err_to_tool_result_from_pagination};
 
 /// Shared handler context passed to extracted `analyze_symbol` free functions.
 ///
