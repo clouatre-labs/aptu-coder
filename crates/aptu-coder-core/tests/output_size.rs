@@ -19,7 +19,7 @@ fn test_overview_output_size() {
 #[test]
 fn test_file_details_output_size() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let file_path = format!("{}/src/formatter.rs", manifest_dir);
+    let file_path = format!("{}/src/formatter/summary.rs", manifest_dir);
     let output = analyze::analyze_file(&file_path, None).unwrap();
     let char_count = output.formatted.len();
 
