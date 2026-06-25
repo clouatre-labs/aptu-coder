@@ -52,6 +52,7 @@ pub const DEFUSE_QUERY: &str = r"
 
 /// Extract the function name from a C/C++ `function_definition` node by
 /// walking the declarator chain: declarator -> function_declarator -> declarator -> identifier.
+#[must_use]
 pub fn extract_function_name(node: &Node, source: &str, _lang: &str) -> Option<String> {
     node.child_by_field_name("declarator")
         .and_then(|decl| extract_declarator_name(decl, source))

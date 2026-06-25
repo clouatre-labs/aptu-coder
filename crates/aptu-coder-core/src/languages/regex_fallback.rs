@@ -130,6 +130,7 @@ pub fn extract_toml(source: &str) -> SemanticAnalysis {
 /// and second delimiter, then delegates to [`SemanticExtractor::extract`] with
 /// `language = "typescript"`. Returns [`Default::default`] when no frontmatter
 /// is found or extraction fails.
+#[must_use]
 pub fn extract_astro(source: &str) -> SemanticAnalysis {
     let block = extract_frontmatter(source);
     let Some(frontmatter) = block else {

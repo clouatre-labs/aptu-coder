@@ -4,7 +4,9 @@
 use serial_test::serial;
 use std::env;
 
-use aptu_coder::otel::{ClientMetadata, extract_and_set_trace_context};
+use aptu_coder::{
+    ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,
+};
 
 #[test]
 #[serial]
@@ -15,7 +17,7 @@ fn test_init_otel_no_env_var_returns_none() {
     }
 
     // Act: call init_otel with no env var
-    let result = aptu_coder::otel::init_otel();
+    let result = init_otel();
 
     // Assert: should return None (graceful noop when env var unset)
     assert!(
@@ -36,7 +38,7 @@ fn test_init_otel_invalid_url_returns_none() {
     }
 
     // Act: call init_otel with invalid endpoint
-    let result = aptu_coder::otel::init_otel();
+    let result = init_otel();
 
     // Assert: opentelemetry-otlp 0.32+ uses lazy connection, so init_otel returns Some(provider)
     // even with an invalid URL. The actual connection failure occurs at export time, not init time.
@@ -61,7 +63,7 @@ fn test_noop_layer_composition_no_panic() {
     }
 
     // Act: call init_otel (returns None) and verify no panic on layer composition
-    let otel_provider = aptu_coder::otel::init_otel();
+    let otel_provider = init_otel();
     assert!(
         otel_provider.is_none(),
         "init_otel should return None when env var unset"
@@ -87,7 +89,7 @@ fn test_log_appender_no_env_var_returns_none() {
     }
 
     // Act: call init_log_appender with no env var
-    let result = aptu_coder::otel::init_log_appender();
+    let result = init_log_appender();
 
     // Assert: should return None (graceful noop when env var unset)
     assert!(
@@ -141,7 +143,7 @@ fn test_metrics_histogram_no_env_var() {
     }
 
     // Act: call init_meter with no env var
-    let result = aptu_coder::otel::init_meter();
+    let result = init_meter();
 
     // Assert: should return None (graceful noop when env var unset)
     assert!(

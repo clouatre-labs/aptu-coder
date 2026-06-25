@@ -9,6 +9,7 @@ use crate::formatter::{snippet_one_line, strip_base_path};
 
 /// Format a page of def-use sites for pagination.
 /// Renders a DEF-USE SITES section with WRITES and READS sub-sections.
+#[must_use]
 pub fn format_focused_paginated_defuse(
     paginated_sites: &[crate::types::DefUseSite],
     total: usize,

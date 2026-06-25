@@ -41,15 +41,15 @@
 //!     moved into this module. They are the framework glue that ties all
 //!     tools together and must live in the crate root.
 
-pub mod analyze_directory;
-pub mod analyze_file;
-pub mod analyze_module;
-pub mod analyze_symbol;
-pub mod common;
-pub mod edit_overwrite;
-pub mod edit_replace;
-pub mod exec_command;
-pub mod server;
+pub(crate) mod analyze_directory;
+pub(crate) mod analyze_file;
+pub(crate) mod analyze_module;
+pub(crate) mod analyze_symbol;
+pub(crate) mod common;
+pub(crate) mod edit_overwrite;
+pub(crate) mod edit_replace;
+pub(crate) mod exec_command;
+pub(crate) mod server;
 
 pub(crate) use analyze_module::AnalyzeModuleContext;
 pub(crate) use analyze_symbol::AnalyzeSymbolContext;

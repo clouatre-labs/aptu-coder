@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-use aptu_coder::logging::{LogEvent, McpLoggingLayer};
+use aptu_coder::{LogEvent, McpLoggingLayer};
 use rmcp::model::LoggingLevel;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;

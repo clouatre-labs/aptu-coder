@@ -35,6 +35,7 @@ pub enum CacheTier {
 /// the fallback to at least 1.
 ///
 /// This helper centralises all three LRU init sites so the `.max(1)` guard lives in one place.
+#[must_use]
 pub fn parse_cache_capacity(env_key: &str, default: usize) -> usize {
     std::env::var(env_key)
         .ok()
@@ -44,6 +45,7 @@ pub fn parse_cache_capacity(env_key: &str, default: usize) -> usize {
 }
 
 impl CacheTier {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             CacheTier::L1Memory => "l1_memory",
@@ -202,6 +204,7 @@ impl CallGraphCache {
     }
 
     /// Look up a cached result by key. Returns `None` on miss or mutex poison.
+    #[must_use]
     pub fn get(&self, key: &CallGraphCacheKey) -> Option<CallGraphCacheValue> {
         lock_or_recover(&self.cache, self.capacity, |guard| guard.get(key).cloned())
     }
@@ -326,6 +329,7 @@ impl AnalysisCache {
     /// Returns the configured file-cache capacity.
     /// Exposed for testing across crate boundaries; not part of the stable API.
     #[doc(hidden)]
+    #[must_use]
     pub fn file_capacity(&self) -> usize {
         self.file_capacity
     }
