@@ -30,6 +30,8 @@ pub(crate) mod logging;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod shell;
+/// Heredoc and shell file-write pattern detection (pre-spawn guard for exec_command).
+pub(crate) mod shell_write;
 pub(crate) mod tools;
 pub(crate) mod validation;
 

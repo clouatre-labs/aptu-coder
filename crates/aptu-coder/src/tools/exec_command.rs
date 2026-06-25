@@ -17,10 +17,9 @@ use crate::filters::{CompiledRule, apply_filter, maybe_inject_no_stat};
 use crate::metrics::MetricsSender;
 use crate::otel::{ClientMetadata, extract_and_set_trace_context};
 use crate::shell::resolve_shell;
+use crate::shell_write;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::{
-    ExecCommandParams, SIZE_LIMIT, STDIN_MAX_BYTES, ShellOutput, validate_path, validation,
-};
+use crate::{ExecCommandParams, SIZE_LIMIT, STDIN_MAX_BYTES, ShellOutput, validate_path};
 
 /// Default drain timeout in milliseconds for post-exit pipe drain (500ms).
 const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
@@ -44,6 +43,287 @@ pub(crate) struct ExecutionResult {
     output_truncated: bool,
     output_collection_error: Option<String>,
     timed_out: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Phase helpers extracted from exec_command_impl
+// ---------------------------------------------------------------------------
+
+/// Phase 1: Resolve working directory and promote cd-prefix.
+///
+/// Canonicalizes the `working_dir` parameter, validates it is a directory, and
+/// promotes a `cd <path> &&` prefix into the working directory when no explicit
+/// `working_dir` was provided. Returns `(effective_command, resolved_working_dir_path)`.
+#[allow(clippy::result_large_err)]
+fn validate_working_dir_phase(
+    params: &ExecCommandParams,
+    span: &tracing::Span,
+) -> Result<(String, Option<std::path::PathBuf>), CallToolResult> {
+    // Validate working_dir if provided -- existence + is_dir only, no CWD confinement.
+    // exec_command is a shell runner; CWD confinement applies only to edit_overwrite/edit_replace.
+    let working_dir_path = if let Some(ref wd) = params.working_dir {
+        match std::fs::canonicalize(wd) {
+            Ok(p) => {
+                if !p.is_dir() {
+                    span.record("error", true);
+                    span.record("error.type", "invalid_params");
+                    let mut result = CallToolResult::error(vec![Content::text(
+                        "working_dir is not a directory; provide an existing directory path"
+                            .to_string(),
+                    )])
+                    .with_meta(Some(no_cache_meta()));
+                    result.structured_content = Some(serde_json::json!({
+                        "workingDir": wd,
+                    }));
+                    return Err(result);
+                }
+                Some(p)
+            }
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                let mut result = CallToolResult::error(vec![Content::text(
+                    "working_dir is not valid; provide an existing directory path".to_string(),
+                )])
+                .with_meta(Some(no_cache_meta()));
+                result.structured_content = Some(serde_json::json!({
+                    "workingDir": wd,
+                    "error": e.to_string(),
+                }));
+                return Err(result);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Strip leading "cd <path> &&" prefix from command only when provably redundant.
+    // - No working_dir: promote the cd path as working_dir (unambiguous).
+    // - working_dir already set: strip only if the cd path resolves to the same
+    //   directory; otherwise pass the command through unmodified (the cd is
+    //   load-bearing, e.g. a multi-step chain like "cd sub && build && cd ../other && build").
+    let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
+    let (command, working_dir_path) = if let Some(cd_path) = cd_extracted_path {
+        if working_dir_path.is_none() {
+            // Only promote when the path is a plain absolute literal -- no shell
+            // special characters (~, $, -). Relative paths and shell-expanded forms
+            // (cd ~, cd $VAR, cd -) must reach the shell unmodified; validate_path
+            // cannot resolve them correctly before execution.
+            let is_plain_absolute = cd_path.starts_with('/')
+                && !cd_path.contains('$')
+                && !cd_path.contains('~')
+                && cd_path != "-";
+            if !is_plain_absolute {
+                // Shell-special or relative -- pass through unmodified.
+                (params.command.clone(), working_dir_path)
+            } else {
+                // Promote the cd path as working_dir, run through validation
+                match validate_path(cd_path, true) {
+                    Ok(p) if p.is_dir() => {
+                        tracing::debug!(
+                            "exec_command: promoting cd prefix path as working_dir: {}",
+                            p.display()
+                        );
+                        (effective_command.to_owned(), Some(p))
+                    }
+                    Ok(_) => {
+                        span.record("error", true);
+                        span.record("error.type", "invalid_params");
+                        let mut result = CallToolResult::error(vec![Content::text(
+                            "cd prefix path is not a directory; set working_dir explicitly or use a valid directory path".to_string(),
+                        )])
+                        .with_meta(Some(no_cache_meta()));
+                        result.structured_content = Some(serde_json::json!({
+                            "cdPath": cd_path,
+                        }));
+                        return Err(result);
+                    }
+                    Err(_) => {
+                        span.record("error", true);
+                        span.record("error.type", "invalid_params");
+                        let mut result = CallToolResult::error(vec![Content::text(
+                            "cd prefix path does not exist or is outside CWD; set working_dir explicitly".to_string(),
+                        )])
+                        .with_meta(Some(no_cache_meta()));
+                        result.structured_content = Some(serde_json::json!({
+                            "cdPath": cd_path,
+                        }));
+                        return Err(result);
+                    }
+                }
+            }
+        } else {
+            // working_dir is already set -- only strip if the cd path resolves to
+            // the same directory (redundant). Otherwise keep the full original command.
+            let cd_resolves_to_same = validate_path(cd_path, true)
+                .ok()
+                .map(|p| Some(&p) == working_dir_path.as_ref())
+                .unwrap_or(false);
+            if cd_resolves_to_same {
+                tracing::debug!(
+                    "exec_command: stripped redundant cd prefix; matches explicit working_dir"
+                );
+                (effective_command.to_owned(), working_dir_path)
+            } else {
+                // cd path differs from working_dir -- the cd is load-bearing; pass through.
+                (params.command.clone(), working_dir_path)
+            }
+        }
+    } else {
+        (params.command.clone(), working_dir_path)
+    };
+
+    // Inject --no-stat for git pull if not already present
+    let command = maybe_inject_no_stat(&command);
+
+    Ok((command, working_dir_path))
+}
+
+/// Phase 2: Validate pre-spawn requirements (stdin size, heredocs, drain timeout).
+#[allow(clippy::result_large_err)]
+fn validate_pre_spawn_phase(
+    params: &ExecCommandParams,
+    command: &str,
+    span: &tracing::Span,
+) -> Result<std::time::Duration, CallToolResult> {
+    // Validate stdin size cap (1 MB)
+    if let Some(ref stdin_content) = params.stdin
+        && stdin_content.len() > STDIN_MAX_BYTES
+    {
+        span.record("error", true);
+        span.record("error.type", "invalid_params");
+        let result = CallToolResult::error(vec![Content::text(
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "stdin exceeds 1 MB limit".to_string(),
+                Some(error_meta("validation", false, "reduce stdin content size")),
+            )
+            .message,
+        )])
+        .with_meta(Some(no_cache_meta()));
+        return Err(result);
+    }
+
+    // Validate heredocs before spawning any process
+    if let Err(e) = shell_write::validate_heredocs(command) {
+        span.record("error", true);
+        span.record("error.type", "invalid_params");
+        return Err(err_to_tool_result(e));
+    }
+
+    // Validate drain_timeout_secs: negative values are invalid.
+    if let Some(n) = params.drain_timeout_secs
+        && n < 0
+    {
+        span.record("error", true);
+        span.record("error.type", "invalid_params");
+        let result = CallToolResult::error(vec![Content::text(
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "drain_timeout_secs must be >= 0".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "use a non-negative value or omit it",
+                )),
+            )
+            .message,
+        )])
+        .with_meta(Some(no_cache_meta()));
+        return Err(result);
+    }
+
+    // Compute effective drain timeout
+    let drain_dur = match params.drain_timeout_secs {
+        Some(n) if n > 0 => std::time::Duration::from_millis(n as u64),
+        _ => std::time::Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
+    };
+
+    Ok(drain_dur)
+}
+
+/// Phase 3: Spawn and collect output.
+///
+/// Executes the command, handles timeout, and returns the raw output.
+#[allow(clippy::too_many_arguments)]
+async fn spawn_and_collect_phase(
+    command: String,
+    working_dir_path: Option<std::path::PathBuf>,
+    params: &ExecCommandParams,
+    seq: u32,
+    resolved_path_str: Option<&str>,
+    filter_table: &Arc<Vec<CompiledRule>>,
+    drain_dur: std::time::Duration,
+    span: &tracing::Span,
+) -> Result<ShellOutput, CallToolResult> {
+    let output = run_exec_impl(
+        command,
+        working_dir_path,
+        params.stdin.clone(),
+        seq,
+        resolved_path_str,
+        filter_table,
+        params.timeout_secs,
+        drain_dur,
+    )
+    .await;
+
+    // Short-circuit on timeout: return error before any output processing.
+    if output.timed_out {
+        span.record("error", true);
+        span.record("error.type", "timeout");
+        let mut result = CallToolResult::error(vec![Content::text(
+            "Command execution timed out; the process was killed.".to_string(),
+        )])
+        .with_meta(Some(no_cache_meta()));
+        result.structured_content = Some(serde_json::json!({
+            "timed_out": true,
+            "timeout_secs": params.timeout_secs,
+        }));
+        return Err(result);
+    }
+
+    Ok(output)
+}
+
+/// Phase 4: Format output text and apply truncation limits.
+///
+/// Returns (formatted_text, combined_truncated).
+fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -> (String, bool) {
+    // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
+    let output_text = if output.interleaved.is_empty() {
+        format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
+    } else {
+        format!("Output:\n{}", output.interleaved)
+    };
+
+    // Apply combined output size limit (SIZE_LIMIT = 5_000 bytes). Per-stream caps
+    // (MAX_STDOUT_BYTES = 30k stdout, MAX_STDERR_BYTES = 10k stderr) already fired in
+    // handle_output_persist; this is the safety net for the interleaved assembly which
+    // can still reach up to ~40k bytes from per-stream content plus headers and formatting.
+    let mut combined_truncated = false;
+    let truncated_output_text = if output_text.len() > SIZE_LIMIT {
+        combined_truncated = true;
+        // Use char-boundary-safe tail truncation
+        let tail_start = output_text.len().saturating_sub(SIZE_LIMIT);
+        let safe_start = output_text[..tail_start].floor_char_boundary(tail_start);
+        output_text[safe_start..].to_string()
+    } else {
+        output_text
+    };
+
+    let text = format!(
+        "Command: {}\nExit code: {}\nOutput truncated: {}\n\n{}",
+        params.command,
+        output
+            .exit_code
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "null".to_string()),
+        output.output_truncated || combined_truncated,
+        truncated_output_text,
+    );
+
+    (text, combined_truncated)
 }
 
 /// Free-function implementation of the `exec_command` tool handler.
@@ -99,221 +379,83 @@ pub(crate) async fn exec_command_impl(
     span.record("gen_ai.tool.name", "exec_command");
     span.record("command", &params.command);
 
-    // Validate working_dir if provided -- existence + is_dir only, no CWD confinement.
-    // exec_command is a shell runner; CWD confinement applies only to edit_overwrite/edit_replace.
-    let working_dir_path = if let Some(ref wd) = params.working_dir {
-        match std::fs::canonicalize(wd) {
-            Ok(p) => {
-                if !p.is_dir() {
-                    span.record("error", true);
-                    span.record("error.type", "invalid_params");
-                    let mut result = CallToolResult::error(vec![Content::text(
-                        "working_dir is not a directory; provide an existing directory path"
-                            .to_string(),
-                    )])
-                    .with_meta(Some(no_cache_meta()));
-                    result.structured_content = Some(serde_json::json!({
-                        "workingDir": wd,
-                    }));
-                    return Ok(result);
-                }
-                Some(p)
-            }
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                let mut result = CallToolResult::error(vec![Content::text(
-                    "working_dir is not valid; provide an existing directory path".to_string(),
-                )])
-                .with_meta(Some(no_cache_meta()));
-                result.structured_content = Some(serde_json::json!({
-                    "workingDir": wd,
-                    "error": e.to_string(),
-                }));
-                return Ok(result);
-            }
-        }
-    } else {
-        None
-    };
-
-    // Strip leading "cd <path> &&" prefix from command only when provably redundant.
-    // - No working_dir: promote the cd path as working_dir (unambiguous).
-    // - working_dir already set: strip only if the cd path resolves to the same
-    //   directory; otherwise pass the command through unmodified (the cd is
-    //   load-bearing, e.g. a multi-step chain like "cd sub && build && cd ../other && build").
-    let (effective_command, cd_extracted_path) = strip_cd_prefix(&params.command);
-    let (command, working_dir_path) = if let Some(cd_path) = cd_extracted_path {
-        if working_dir_path.is_none() {
-            // Only promote when the path is a plain absolute literal -- no shell
-            // special characters (~, $, -). Relative paths and shell-expanded forms
-            // (cd ~, cd $VAR, cd -) must reach the shell unmodified; validate_path
-            // cannot resolve them correctly before execution.
-            let is_plain_absolute = cd_path.starts_with('/')
-                && !cd_path.contains('$')
-                && !cd_path.contains('~')
-                && cd_path != "-";
-            if !is_plain_absolute {
-                // Shell-special or relative -- pass through unmodified.
-                (params.command.clone(), working_dir_path)
-            } else {
-                // Promote the cd path as working_dir, run through validation
-                match validate_path(cd_path, true) {
-                    Ok(p) if p.is_dir() => {
-                        tracing::debug!(
-                            "exec_command: promoting cd prefix path as working_dir: {}",
-                            p.display()
-                        );
-                        (effective_command.to_owned(), Some(p))
-                    }
-                    Ok(_) => {
-                        span.record("error", true);
-                        span.record("error.type", "invalid_params");
-                        let mut result = CallToolResult::error(vec![Content::text(
-                            "cd prefix path is not a directory; set working_dir explicitly or use a valid directory path".to_string(),
-                        )])
-                        .with_meta(Some(no_cache_meta()));
-                        result.structured_content = Some(serde_json::json!({
-                            "cdPath": cd_path,
-                        }));
-                        return Ok(result);
-                    }
-                    Err(_) => {
-                        span.record("error", true);
-                        span.record("error.type", "invalid_params");
-                        let mut result = CallToolResult::error(vec![Content::text(
-                            "cd prefix path does not exist or is outside CWD; set working_dir explicitly".to_string(),
-                        )])
-                        .with_meta(Some(no_cache_meta()));
-                        result.structured_content = Some(serde_json::json!({
-                            "cdPath": cd_path,
-                        }));
-                        return Ok(result);
-                    }
-                }
-            }
-        } else {
-            // working_dir is already set -- only strip if the cd path resolves to
-            // the same directory (redundant). Otherwise keep the full original command.
-            let cd_resolves_to_same = validate_path(cd_path, true)
-                .ok()
-                .map(|p| Some(&p) == working_dir_path.as_ref())
-                .unwrap_or(false);
-            if cd_resolves_to_same {
-                tracing::debug!(
-                    "exec_command: stripped redundant cd prefix; matches explicit working_dir"
-                );
-                (effective_command.to_owned(), working_dir_path)
-            } else {
-                // cd path differs from working_dir -- the cd is load-bearing; pass through.
-                (params.command.clone(), working_dir_path)
-            }
-        }
-    } else {
-        (params.command.clone(), working_dir_path)
-    };
-    // Inject --no-stat for git pull if not already present
-    let command = maybe_inject_no_stat(&command);
-    span.record("command", &command);
-
     let param_path = params.working_dir.clone();
 
-    // Validate stdin size cap (1 MB)
-    if let Some(ref stdin_content) = params.stdin
-        && stdin_content.len() > STDIN_MAX_BYTES
-    {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        return Ok(err_to_tool_result(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "stdin exceeds 1 MB limit".to_string(),
-            Some(error_meta("validation", false, "reduce stdin content size")),
-        )));
-    }
-
-    // Validate heredocs before spawning any process
-    if let Err(e) = validation::validate_heredocs(&command) {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                .param_path_depth(crate::metrics::path_component_count(
-                    param_path.as_deref().unwrap_or(""),
-                ))
-                .error_type(Some("invalid_params".to_string()))
-                .session_id(sid)
-                .seq(Some(seq))
-                .output_truncated(Some(false))
-                .build(),
-        );
-        return Ok(err_to_tool_result(e));
-    }
-
-    // Validate drain_timeout_secs: negative values are invalid.
-    if let Some(n) = params.drain_timeout_secs
-        && n < 0
-    {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        return Ok(err_to_tool_result(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "drain_timeout_secs must be >= 0".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "use a non-negative value or omit it",
-            )),
-        )));
-    }
-
-    // Compute effective drain timeout
-    let drain_dur = match params.drain_timeout_secs {
-        Some(n) if n > 0 => std::time::Duration::from_millis(n as u64),
-        _ => std::time::Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
+    // Phase 1: Validate working_dir and resolve cd-prefix
+    let (command, working_dir_path) = match validate_working_dir_phase(&params, &span) {
+        Ok((cmd, wd)) => {
+            span.record("command", &cmd);
+            (cmd, wd)
+        }
+        Err(result) => {
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(
+                        param_path.as_deref().unwrap_or(""),
+                    ))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid)
+                    .seq(Some(seq))
+                    .output_truncated(Some(false))
+                    .build(),
+            );
+            return Ok(result);
+        }
     };
 
-    // Execute command (non-cacheable; exec_command is side-effecting and non-idempotent)
+    // Phase 2: Validate pre-spawn requirements
+    let drain_dur = match validate_pre_spawn_phase(&params, &command, &span) {
+        Ok(dur) => dur,
+        Err(result) => {
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(
+                        param_path.as_deref().unwrap_or(""),
+                    ))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(sid)
+                    .seq(Some(seq))
+                    .output_truncated(Some(false))
+                    .build(),
+            );
+            return Ok(result);
+        }
+    };
+
+    // Phase 3: Spawn and collect
     let resolved_path_str = resolved_path.as_deref();
-    let output = run_exec_impl(
+    let output = match spawn_and_collect_phase(
         command.clone(),
         working_dir_path.clone(),
-        params.stdin.clone(),
+        &params,
         seq,
         resolved_path_str,
         &filter_table,
-        params.timeout_secs,
         drain_dur,
+        &span,
     )
-    .await;
-
-    // Short-circuit on timeout: return INTERNAL_ERROR before any output processing.
-    if output.timed_out {
-        span.record("error", true);
-        span.record("error.type", "timeout");
-        let mut result = CallToolResult::error(vec![Content::text(
-            "Command execution timed out; the process was killed.".to_string(),
-        )])
-        .with_meta(Some(no_cache_meta()));
-        result.structured_content = Some(serde_json::json!({
-            "timed_out": true,
-            "timeout_secs": params.timeout_secs,
-        }));
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                .param_path_depth(crate::metrics::path_component_count(
-                    param_path.as_deref().unwrap_or(""),
-                ))
-                .error_type(Some("timeout".to_string()))
-                .session_id(sid)
-                .seq(Some(seq))
-                .timed_out(true)
-                .output_truncated(Some(false))
-                .build(),
-        );
-        return Ok(result);
-    }
+    .await
+    {
+        Ok(o) => o,
+        Err(result) => {
+            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(
+                        param_path.as_deref().unwrap_or(""),
+                    ))
+                    .error_type(Some("timeout".to_string()))
+                    .session_id(sid)
+                    .seq(Some(seq))
+                    .timed_out(true)
+                    .output_truncated(Some(false))
+                    .build(),
+            );
+            return Ok(result);
+        }
+    };
 
     let exit_code = output.exit_code;
     let mut output_truncated = output.output_truncated;
@@ -322,47 +464,19 @@ pub(crate) async fn exec_command_impl(
     if let Some(code) = exit_code {
         span.record("exit_code", code);
     }
+
+    // Phase 4: Format output
+    let (text, combined_truncated) = format_shell_output_phase(&output, &params);
+
+    // Update output_truncated flag to include combined truncation
+    output_truncated = output_truncated || combined_truncated;
+
     span.record("output_truncated", output_truncated);
 
     // Emit debug event for truncation
     if output_truncated {
         tracing::debug!(truncated = true, message = "output truncated");
     }
-
-    // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
-    let output_text = if output.interleaved.is_empty() {
-        format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
-    } else {
-        format!("Output:\n{}", output.interleaved)
-    };
-
-    // Apply combined output size limit (SIZE_LIMIT = 5_000 bytes). Per-stream caps
-    // (MAX_STDOUT_BYTES = 30k stdout, MAX_STDERR_BYTES = 10k stderr) already fired in
-    // handle_output_persist; this is the safety net for the interleaved assembly which
-    // can still reach up to ~40k bytes from per-stream content plus headers and formatting.
-    let mut combined_truncated = false;
-    let truncated_output_text = if output_text.len() > SIZE_LIMIT {
-        combined_truncated = true;
-        // Use char-boundary-safe tail truncation
-        let tail_start = output_text.len().saturating_sub(SIZE_LIMIT);
-        let safe_start = output_text[..tail_start].floor_char_boundary(tail_start);
-        output_text[safe_start..].to_string()
-    } else {
-        output_text
-    };
-
-    // Update output_truncated flag to include combined truncation
-    output_truncated = output_truncated || combined_truncated;
-
-    let text = format!(
-        "Command: {}\nExit code: {}\nOutput truncated: {}\n\n{}",
-        params.command,
-        exit_code
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "null".to_string()),
-        output_truncated,
-        truncated_output_text,
-    );
 
     let content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
 
