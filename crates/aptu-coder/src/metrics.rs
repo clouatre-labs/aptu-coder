@@ -1290,7 +1290,7 @@ fn record_otel_metrics(event: &MetricEvent) {
 
     let error_type = event.error_type.as_deref().unwrap_or("success");
     let attributes = [
-        KeyValue::new("gen_ai.tool.name", event.tool.to_string()),
+        KeyValue::new("gen_ai.tool.name", event.tool),
         KeyValue::new("error.type", error_type.to_string()),
         KeyValue::new("mcp.method.name", "tools/call"),
         KeyValue::new("mcp.protocol.version", "2025-11-25"),
@@ -1305,16 +1305,13 @@ fn record_otel_metrics(event: &MetricEvent) {
         cache_hits_counter.add(
             1,
             &[
-                KeyValue::new("gen_ai.tool.name", event.tool.to_string()),
-                KeyValue::new("cache_tier", tier.to_string()),
+                KeyValue::new("gen_ai.tool.name", event.tool),
+                KeyValue::new("cache_tier", tier),
             ],
         );
     }
 
     if event.cache_write_failure == Some(true) {
-        cache_write_failures_counter.add(
-            1,
-            &[KeyValue::new("gen_ai.tool.name", event.tool.to_string())],
-        );
+        cache_write_failures_counter.add(1, &[KeyValue::new("gen_ai.tool.name", event.tool)]);
     }
 }
