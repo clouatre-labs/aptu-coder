@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 use aptu_coder::{
-    CodeAnalyzer,
-    logging::McpLoggingLayer,
-    metrics::{MetricEvent, MetricsSender, MetricsWriter},
+    CodeAnalyzer, McpLoggingLayer, MetricEvent, MetricsSender, MetricsWriter, init_log_appender,
+    init_meter, init_otel,
 };
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -20,8 +19,6 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-
-use aptu_coder::otel;
 
 /// Authentication middleware that validates Bearer tokens using constant-time comparison.
 ///
@@ -169,13 +166,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize OpenTelemetry (returns None if OTEL_EXPORTER_OTLP_ENDPOINT is unset)
-    let otel_provider = otel::init_otel();
-    let log_provider = otel::init_log_appender();
-    let meter_provider = otel::init_meter();
+    let otel_provider = init_otel();
+    let log_provider = init_log_appender();
+    let meter_provider = init_meter();
 
     // Create shared peer Arc for logging layer
     // Migrate legacy metrics directory if needed
-    if let Err(e) = aptu_coder::metrics::migrate_legacy_metrics_dir() {
+    if let Err(e) = aptu_coder::migrate_legacy_metrics_dir() {
         tracing::warn!("Failed to migrate legacy metrics directory: {e}");
     }
     let peer = Arc::new(TokioMutex::new(None));

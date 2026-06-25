@@ -26,18 +26,23 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 mod filters;
-pub mod logging;
-pub mod metrics;
-pub mod otel;
-mod shell;
-mod tools;
-mod validation;
+pub(crate) mod logging;
+pub(crate) mod metrics;
+pub(crate) mod otel;
+pub(crate) mod shell;
+pub(crate) mod tools;
+pub(crate) mod validation;
+
+pub use logging::{LogEvent, McpLoggingLayer};
+pub use metrics::{MetricEvent, MetricsSender, MetricsWriter, migrate_legacy_metrics_dir};
+pub use otel::{
+    ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,
+};
 
 use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion, types};
 use validation::validate_path;
 
-use crate::otel::{ClientMetadata, extract_and_set_trace_context};
 use crate::tools::common::{err_to_tool_result, no_cache_meta};
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
@@ -68,6 +73,7 @@ pub struct ExecCommandParams {
 
 impl ExecCommandParams {
     /// Creates a new ExecCommandParams with the given command.
+    #[must_use]
     pub fn new(command: String, working_dir: Option<String>) -> Self {
         Self {
             command,
@@ -112,6 +118,7 @@ pub struct ShellOutput {
 
 impl ShellOutput {
     /// Creates a new ShellOutput with the given parameters.
+    #[must_use]
     pub fn new(
         stdout: String,
         stderr: String,
@@ -144,7 +151,7 @@ use aptu_coder_core::types::{
 use filters::CompiledRule;
 #[cfg(test)]
 use filters::{apply_filter, maybe_inject_no_stat};
-use logging::LogEvent;
+
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{

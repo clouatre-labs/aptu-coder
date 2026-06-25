@@ -10,13 +10,13 @@ use tracing_subscriber::filter::LevelFilter;
 pub fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
     let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<aptu_coder::logging::LogEvent>();
+    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<aptu_coder::LogEvent>();
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
     aptu_coder::CodeAnalyzer::new(
         peer,
         log_level_filter,
         rx,
-        aptu_coder::metrics::MetricsSender(metrics_tx),
+        aptu_coder::MetricsSender(metrics_tx),
     )
 }
 

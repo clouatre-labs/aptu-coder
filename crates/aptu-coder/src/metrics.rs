@@ -95,7 +95,8 @@ pub(crate) struct MetricEventBuilder {
 }
 
 impl MetricEventBuilder {
-    pub fn new(tool: &'static str, result: &'static str, duration_ms: u64) -> Self {
+    #[must_use]
+    pub(crate) fn new(tool: &'static str, result: &'static str, duration_ms: u64) -> Self {
         Self {
             ts: unix_ms(),
             tool,
@@ -104,75 +105,93 @@ impl MetricEventBuilder {
             ..Self::default()
         }
     }
-    pub fn output_chars(mut self, v: usize) -> Self {
+    #[must_use]
+    pub(crate) fn output_chars(mut self, v: usize) -> Self {
         self.output_chars = v;
         self
     }
-    pub fn param_path_depth(mut self, v: usize) -> Self {
+    #[must_use]
+    pub(crate) fn param_path_depth(mut self, v: usize) -> Self {
         self.param_path_depth = v;
         self
     }
-    pub fn max_depth(mut self, v: Option<u32>) -> Self {
+    #[must_use]
+    pub(crate) fn max_depth(mut self, v: Option<u32>) -> Self {
         self.max_depth = v;
         self
     }
-    pub fn error_type(mut self, v: Option<String>) -> Self {
+    #[must_use]
+    pub(crate) fn error_type(mut self, v: Option<String>) -> Self {
         self.error_type = v;
         self
     }
-    pub fn error_subtype(mut self, v: Option<String>) -> Self {
+    #[must_use]
+    pub(crate) fn error_subtype(mut self, v: Option<String>) -> Self {
         self.error_subtype = v;
         self
     }
-    pub fn session_id(mut self, v: Option<String>) -> Self {
+    #[must_use]
+    pub(crate) fn session_id(mut self, v: Option<String>) -> Self {
         self.session_id = v;
         self
     }
-    pub fn seq(mut self, v: Option<u32>) -> Self {
+    #[must_use]
+    pub(crate) fn seq(mut self, v: Option<u32>) -> Self {
         self.seq = v;
         self
     }
-    pub fn cache_hit(mut self, v: Option<bool>) -> Self {
+    #[must_use]
+    pub(crate) fn cache_hit(mut self, v: Option<bool>) -> Self {
         self.cache_hit = v;
         self
     }
-    pub fn cache_write_failure(mut self, v: Option<bool>) -> Self {
+    #[must_use]
+    pub(crate) fn cache_write_failure(mut self, v: Option<bool>) -> Self {
         self.cache_write_failure = v;
         self
     }
-    pub fn cache_tier(mut self, v: Option<&'static str>) -> Self {
+    #[must_use]
+    pub(crate) fn cache_tier(mut self, v: Option<&'static str>) -> Self {
         self.cache_tier = v;
         self
     }
-    pub fn exit_code(mut self, v: Option<i32>) -> Self {
+    #[must_use]
+    pub(crate) fn exit_code(mut self, v: Option<i32>) -> Self {
         self.exit_code = v;
         self
     }
-    pub fn timed_out(mut self, v: bool) -> Self {
+    #[must_use]
+    pub(crate) fn timed_out(mut self, v: bool) -> Self {
         self.timed_out = v;
         self
     }
-    pub fn output_truncated(mut self, v: Option<bool>) -> Self {
+    #[must_use]
+    pub(crate) fn output_truncated(mut self, v: Option<bool>) -> Self {
         self.output_truncated = v;
         self
     }
-    pub fn chars_threshold_breach(mut self, v: bool) -> Self {
+    #[must_use]
+    pub(crate) fn chars_threshold_breach(mut self, v: bool) -> Self {
         self.chars_threshold_breach = v;
         self
     }
-    pub fn file_ext(mut self, v: Option<&'static str>) -> Self {
+    #[must_use]
+    pub(crate) fn file_ext(mut self, v: Option<&'static str>) -> Self {
         self.file_ext = v;
         self
     }
-    pub fn filter_applied(mut self, v: Option<String>) -> Self {
+    #[must_use]
+    pub(crate) fn filter_applied(mut self, v: Option<String>) -> Self {
         self.filter_applied = v;
         self
     }
-    pub fn language(mut self, v: Option<String>) -> Self {
+    #[must_use]
+    pub(crate) fn language(mut self, v: Option<String>) -> Self {
         self.language = v;
         self
     }
-    pub fn build(self) -> MetricEvent {
+    #[must_use]
+    pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
             tool: self.tool,
@@ -425,7 +444,7 @@ impl MetricsWriter {
 
 /// Returns the current UNIX timestamp in milliseconds.
 #[must_use]
-pub fn unix_ms() -> u64 {
+pub(crate) fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -436,7 +455,7 @@ pub fn unix_ms() -> u64 {
 
 /// Counts the number of path segments in a file path.
 #[must_use]
-pub fn path_component_count(path: &str) -> usize {
+pub(crate) fn path_component_count(path: &str) -> usize {
     Path::new(path).components().count()
 }
 
@@ -446,7 +465,7 @@ pub fn path_component_count(path: &str) -> usize {
 /// - Returns `Some("other")` for paths that have an extension but it is not in the known set.
 /// - Returns `None` for paths with no extension or an empty extension.
 #[must_use]
-pub fn path_file_ext(path: &str) -> Option<&'static str> {
+pub(crate) fn path_file_ext(path: &str) -> Option<&'static str> {
     let ext_os = Path::new(path).extension()?;
     let ext_str = ext_os.to_str()?;
     if ext_str.is_empty() {
@@ -468,7 +487,7 @@ pub fn path_file_ext(path: &str) -> Option<&'static str> {
 /// - Returns `Some("Rust")` for paths with a recognized extension.
 /// - Returns `None` for paths with no extension or an unrecognized extension.
 #[must_use]
-pub fn path_language(path: &str) -> Option<String> {
+pub(crate) fn path_language(path: &str) -> Option<String> {
     let ext_os = Path::new(path).extension()?;
     let ext_str = ext_os.to_str()?;
     if ext_str.is_empty() {
@@ -566,7 +585,7 @@ fn date_to_days_since_epoch(y: u32, m: u32, d: u32) -> u32 {
 
 /// Returns the current UTC date as a string in YYYY-MM-DD format.
 #[must_use]
-pub fn current_date_str() -> String {
+pub(crate) fn current_date_str() -> String {
     let days = u32::try_from(unix_ms() / 86_400_000).unwrap_or(u32::MAX);
     let z = days + 719_468;
     let era = z / 146_097;

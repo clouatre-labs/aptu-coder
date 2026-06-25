@@ -3,7 +3,7 @@
 
 mod common;
 
-use aptu_coder::logging::LogEvent;
+use aptu_coder::LogEvent;
 use common::call_tool_raw;
 use rmcp::model::{CallToolResult, Content, LoggingLevel, Meta};
 
