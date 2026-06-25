@@ -143,8 +143,12 @@ pub fn format_file_details_summary(
                 .collect();
             let _ = writeln!(output, "  {}", class_strs.join("; "));
         } else {
-            for c in &semantic.classes {
-                let _ = writeln!(output, "  {}:{}-{}", c.name, c.line, c.end_line);
+            let _ = writeln!(output, "  {} classes total", semantic.classes.len());
+            for class in semantic.classes.iter().take(5) {
+                let _ = writeln!(output, "    {}", class.name);
+            }
+            if semantic.classes.len() > 5 {
+                let _ = writeln!(output, "    ... and {} more", semantic.classes.len() - 5);
             }
         }
         output.push('\n');

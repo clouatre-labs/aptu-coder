@@ -23,30 +23,33 @@ pub(crate) fn format_chains_as_tree(
 
     let mut output = String::new();
 
+    // Group chains by depth-1 symbol, counting duplicate children
     let mut groups: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
     for (parent, child) in chains {
-        let children = groups.entry(parent.to_string()).or_default();
-        *children.entry(child.to_string()).or_insert(0) += 1;
+        // Only count non-empty children
+        if child.is_empty() {
+            // Ensure parent is in groups even if no children
+            groups.entry(parent.to_string()).or_default();
+        } else {
+            *groups
+                .entry(parent.to_string())
+                .or_default()
+                .entry(child.to_string())
+                .or_insert(0) += 1;
+        }
     }
 
-    for (parent, children) in &groups {
-        if children.is_empty() {
-            let _ = writeln!(output, "  {focus_symbol} {arrow} {parent}");
-        } else {
-            let child_count: usize = children.values().sum();
-            let _ = writeln!(output, "  {focus_symbol} {arrow} {parent} [{child_count}]");
-
-            let mut sorted_children: Vec<_> = children.iter().collect();
-            sorted_children.sort_unstable_by_key(|(name, _)| *name);
-            for (child, count) in &sorted_children {
-                if child.is_empty() {
-                    continue;
-                }
-                if **count > 1 {
-                    let _ = writeln!(output, "    {arrow} {child} [{count}]");
-                } else {
-                    let _ = writeln!(output, "    {arrow} {child}");
-                }
+    // Render grouped tree
+    for (parent, children) in groups {
+        let _ = writeln!(output, "  {focus_symbol} {arrow} {parent}");
+        // Sort children by count descending, then alphabetically
+        let mut sorted: Vec<_> = children.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        for (child, count) in sorted {
+            if count > 1 {
+                let _ = writeln!(output, "    {arrow} {child} (x{count})");
+            } else {
+                let _ = writeln!(output, "    {arrow} {child}");
             }
         }
     }
