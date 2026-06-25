@@ -22,7 +22,7 @@ pub const IMPORT_QUERY: &str = r"
 /// Tree-sitter call query for CSS (empty -- no call sites in CSS).
 pub const CALL_QUERY: &str = "";
 
-#[cfg(all(test, feature = "lang-css"))]
+#[cfg(test)]
 mod tests {
     use tree_sitter::{Parser, StreamingIterator};
 

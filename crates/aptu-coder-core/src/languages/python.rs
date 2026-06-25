@@ -67,7 +67,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
     inherits
 }
 
-#[cfg(all(test, feature = "lang-python"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::DefUseKind;

@@ -1615,7 +1615,6 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    #[cfg(feature = "lang-rust")]
     #[test]
     fn analyze_str_rust_happy_path() {
         let source = "fn hello() -> i32 { 42 }";
@@ -1623,7 +1622,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "lang-python")]
     #[test]
     fn analyze_str_python_happy_path() {
         let source = "def greet(name):\n    return f'Hello {name}'";
@@ -1631,7 +1629,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "lang-rust")]
     #[test]
     fn analyze_str_rust_by_language_name() {
         let source = "fn hello() -> i32 { 42 }";
@@ -1639,7 +1636,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "lang-python")]
     #[test]
     fn analyze_str_python_by_language_name() {
         let source = "def greet(name):\n    return f'Hello {name}'";
@@ -1647,7 +1643,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "lang-rust")]
     #[test]
     fn analyze_str_rust_mixed_case() {
         let source = "fn hello() -> i32 { 42 }";
@@ -1655,7 +1650,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "lang-python")]
     #[test]
     fn analyze_str_python_mixed_case() {
         let source = "def greet(name):\n    return f'Hello {name}'";
@@ -1671,7 +1665,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "lang-rust")]
     #[test]
     fn test_symbol_focus_callers_pagination_first_page() {
         let temp_dir = TempDir::new().unwrap();
@@ -2002,7 +1995,6 @@ fn caller_c() { target(); }
         );
     }
 
-    #[cfg(feature = "lang-rust")]
     #[test]
     fn test_def_use_focused_analysis() {
         let temp_dir = TempDir::new().unwrap();

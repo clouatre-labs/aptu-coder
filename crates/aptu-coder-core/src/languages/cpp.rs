@@ -155,7 +155,7 @@ fn extract_declarator_name(node: Node, source: &str) -> Option<String> {
     }
 }
 
-#[cfg(all(test, feature = "lang-cpp"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::DefUseKind;

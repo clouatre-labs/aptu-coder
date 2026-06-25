@@ -146,7 +146,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
     inherits
 }
 
-#[cfg(all(test, feature = "lang-javascript"))]
+#[cfg(test)]
 mod tests {
     use crate::DefUseKind;
     use crate::parser::SemanticExtractor;

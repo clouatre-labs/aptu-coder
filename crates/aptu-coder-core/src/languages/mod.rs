@@ -7,34 +7,20 @@
 //! available language handlers are enabled): Astro, C/C++, C#, CSS, Fortran, Go,
 //! HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.
 
-#[cfg(feature = "lang-cpp")]
 pub mod cpp;
-#[cfg(feature = "lang-csharp")]
 pub mod csharp;
-#[cfg(feature = "lang-css")]
 pub mod css;
-#[cfg(feature = "lang-fortran")]
 pub mod fortran;
-#[cfg(feature = "lang-go")]
 pub mod go;
-#[cfg(feature = "lang-html")]
 pub mod html;
-#[cfg(feature = "lang-java")]
 pub mod java;
-#[cfg(feature = "lang-javascript")]
 pub mod javascript;
-#[cfg(feature = "lang-kotlin")]
 pub mod kotlin;
-#[cfg(feature = "lang-markdown")]
 pub mod markdown;
-#[cfg(feature = "lang-python")]
 pub mod python;
 pub mod regex_fallback;
-#[cfg(feature = "lang-rust")]
 pub mod rust;
-#[cfg(any(feature = "lang-typescript", feature = "lang-tsx"))]
 pub mod typescript;
-#[cfg(feature = "lang-yaml")]
 pub mod yaml;
 
 use tree_sitter::{Language, Node};
@@ -85,7 +71,6 @@ pub struct LanguageInfo {
 #[allow(clippy::too_many_lines)] // exhaustive match over all supported languages; splitting harms readability
 pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
     match lang_name {
-        #[cfg(feature = "lang-rust")]
         "rust" => Some(LanguageInfo {
             name: "rust",
             language: tree_sitter_rust::LANGUAGE.into(),
@@ -101,7 +86,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(rust::find_receiver_type),
             extract_inheritance: Some(rust::extract_inheritance),
         }),
-        #[cfg(feature = "lang-python")]
         "python" => Some(LanguageInfo {
             name: "python",
             language: tree_sitter_python::LANGUAGE.into(),
@@ -117,7 +101,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: Some(python::extract_inheritance),
         }),
-        #[cfg(feature = "lang-typescript")]
         "typescript" => Some(LanguageInfo {
             name: "typescript",
             language: tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
@@ -133,7 +116,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: Some(typescript::extract_inheritance),
         }),
-        #[cfg(feature = "lang-tsx")]
         "tsx" => Some(LanguageInfo {
             name: "tsx",
             language: tree_sitter_typescript::LANGUAGE_TSX.into(),
@@ -149,7 +131,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: Some(typescript::extract_inheritance),
         }),
-        #[cfg(feature = "lang-go")]
         "go" => Some(LanguageInfo {
             name: "go",
             language: tree_sitter_go::LANGUAGE.into(),
@@ -165,7 +146,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(go::find_receiver_type),
             extract_inheritance: Some(go::extract_inheritance),
         }),
-        #[cfg(feature = "lang-cpp")]
         "c" | "cpp" => Some(LanguageInfo {
             name: if lang_name == "c" { "c" } else { "cpp" },
             language: tree_sitter_cpp::LANGUAGE.into(),
@@ -181,7 +161,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: Some(cpp::extract_inheritance),
         }),
-        #[cfg(feature = "lang-java")]
         "java" => Some(LanguageInfo {
             name: "java",
             language: tree_sitter_java::LANGUAGE.into(),
@@ -197,7 +176,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(java::find_receiver_type),
             extract_inheritance: Some(java::extract_inheritance),
         }),
-        #[cfg(feature = "lang-kotlin")]
         "kotlin" => Some(LanguageInfo {
             name: "kotlin",
             language: tree_sitter_kotlin_ng::LANGUAGE.into(),
@@ -213,7 +191,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(kotlin::find_receiver_type),
             extract_inheritance: Some(kotlin::extract_inheritance),
         }),
-        #[cfg(feature = "lang-fortran")]
         "fortran" => Some(LanguageInfo {
             name: "fortran",
             language: tree_sitter_fortran::LANGUAGE.into(),
@@ -229,7 +206,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(fortran::find_receiver_type),
             extract_inheritance: Some(fortran::extract_inheritance),
         }),
-        #[cfg(feature = "lang-csharp")]
         "csharp" => Some(LanguageInfo {
             name: "csharp",
             language: tree_sitter_c_sharp::LANGUAGE.into(),
@@ -245,7 +221,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(csharp::find_receiver_type),
             extract_inheritance: Some(csharp::extract_inheritance),
         }),
-        #[cfg(feature = "lang-javascript")]
         "javascript" => Some(LanguageInfo {
             name: "javascript",
             language: tree_sitter_javascript::LANGUAGE.into(),
@@ -270,9 +245,7 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
         // skipping the file.
         // TODO: implement once tree-sitter-html ^0.25 ships.
         //       Track releases: https://github.com/tree-sitter/tree-sitter-html/releases
-        #[cfg(feature = "lang-html")]
         "html" => None,
-        #[cfg(feature = "lang-markdown")]
         "markdown" => Some(LanguageInfo {
             name: "markdown",
             language: tree_sitter_md::LANGUAGE.into(),
@@ -288,7 +261,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: None,
         }),
-        #[cfg(feature = "lang-css")]
         "css" => Some(LanguageInfo {
             name: "css",
             language: tree_sitter_css::LANGUAGE.into(),
@@ -304,7 +276,6 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: None,
         }),
-        #[cfg(feature = "lang-yaml")]
         "yaml" => Some(LanguageInfo {
             name: "yaml",
             language: tree_sitter_yaml::LANGUAGE.into(),
@@ -330,31 +301,18 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
 #[must_use]
 pub fn get_ts_language(lang_name: &str) -> Option<Language> {
     match lang_name {
-        #[cfg(feature = "lang-rust")]
         "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
-        #[cfg(feature = "lang-python")]
         "python" => Some(tree_sitter_python::LANGUAGE.into()),
-        #[cfg(feature = "lang-typescript")]
         "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-        #[cfg(feature = "lang-tsx")]
         "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
-        #[cfg(feature = "lang-go")]
         "go" => Some(tree_sitter_go::LANGUAGE.into()),
-        #[cfg(feature = "lang-cpp")]
         "c" | "cpp" => Some(tree_sitter_cpp::LANGUAGE.into()),
-        #[cfg(feature = "lang-java")]
         "java" => Some(tree_sitter_java::LANGUAGE.into()),
-        #[cfg(feature = "lang-kotlin")]
         "kotlin" => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
-        #[cfg(feature = "lang-fortran")]
         "fortran" => Some(tree_sitter_fortran::LANGUAGE.into()),
-        #[cfg(feature = "lang-csharp")]
         "csharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
-        #[cfg(feature = "lang-javascript")]
         "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
-        #[cfg(feature = "lang-css")]
         "css" => Some(tree_sitter_css::LANGUAGE.into()),
-        #[cfg(feature = "lang-yaml")]
         "yaml" => Some(tree_sitter_yaml::LANGUAGE.into()),
         _ => None,
     }
@@ -367,9 +325,7 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
 #[must_use]
 pub fn try_regex_fallback(source: &str, language: &str) -> Option<crate::types::SemanticAnalysis> {
     match language {
-        #[cfg(not(feature = "lang-css"))]
         "css" => Some(regex_fallback::extract_css(source)),
-        #[cfg(not(feature = "lang-yaml"))]
         "yaml" => Some(regex_fallback::extract_yaml(source)),
         "json" => Some(regex_fallback::extract_json(source)),
         "toml" => Some(regex_fallback::extract_toml(source)),

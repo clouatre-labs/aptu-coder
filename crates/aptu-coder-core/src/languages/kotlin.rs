@@ -163,7 +163,7 @@ pub fn find_method_for_receiver(
         .and_then(|n| get_node_text(&n, source))
 }
 
-#[cfg(all(test, feature = "lang-kotlin"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use tree_sitter::{Parser, StreamingIterator};

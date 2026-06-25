@@ -96,7 +96,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
     inherits
 }
 
-#[cfg(all(test, any(feature = "lang-typescript", feature = "lang-tsx")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::DefUseKind;
@@ -111,7 +111,6 @@ mod tests {
         parser.parse(src, None).expect("Failed to parse TypeScript")
     }
 
-    #[cfg(feature = "lang-tsx")]
     fn parse_tsx(src: &str) -> tree_sitter::Tree {
         let mut parser = Parser::new();
         parser
@@ -216,7 +215,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "lang-tsx")]
     #[test]
     fn test_tsx_element_query_with_jsx() {
         // Arrange -- a TSX functional component parsed with the TSX grammar
