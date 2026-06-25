@@ -253,28 +253,6 @@ pub struct AnalyzeSymbolParams {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct AnalysisResult {
-    pub path: String,
-    pub mode: AnalysisMode,
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::integer_schema")
-    )]
-    pub import_count: usize,
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::option_integer_schema")
-    )]
-    pub main_line: Option<usize>,
-    pub files: Vec<FileInfo>,
-    pub functions: Vec<FunctionInfo>,
-    pub classes: Vec<ClassInfo>,
-    pub references: Vec<ReferenceInfo>,
-}
-
-#[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct FileInfo {
@@ -447,28 +425,6 @@ pub enum AnalysisMode {
     SymbolFocus,
     /// Fast function and import index for a single file (analyze_module fast path).
     ModuleOnly,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct CallChain {
-    pub chain: Vec<CallInfo>,
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::integer_schema")
-    )]
-    pub depth: u32,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct FocusedAnalysisData {
-    pub symbol: String,
-    pub definition: Option<FunctionInfo>,
-    pub call_chains: Vec<CallChain>,
-    pub references: Vec<ReferenceInfo>,
 }
 
 #[non_exhaustive]
