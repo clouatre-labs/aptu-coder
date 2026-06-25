@@ -33,9 +33,6 @@ use crate::{SIZE_LIMIT, err_to_tool_result_from_pagination};
 /// explicit without coupling to `&self`.
 pub(crate) struct AnalyzeSymbolContext {
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
-    // Retained for log-level notification infrastructure (separate active feature).
-    #[allow(dead_code)]
-    pub(crate) peer: Arc<tokio::sync::Mutex<Option<rmcp::Peer<rmcp::RoleServer>>>>,
     pub(crate) call_graph_cache: CallGraphCache,
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
     pub(crate) sid: Option<String>,

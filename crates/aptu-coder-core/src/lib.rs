@@ -73,12 +73,12 @@ pub use pagination::{CursorData, PaginationError};
 pub use parser::ParserError;
 pub use traversal::{TraversalError, WalkEntry};
 pub use types::{
-    AnalysisMode, AnalysisResult, AnalyzeDirectoryParams, AnalyzeFileField, AnalyzeFileParams,
-    AnalyzeModuleParams, AnalyzeSymbolParams, CallChain, CallEdge, CallInfo, ClassInfo, DefUseKind,
-    DefUseSite, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
-    FileInfo, FilterRule, FocusedAnalysisData, FunctionInfo, ImplTraitInfo, ImportInfo,
-    ModuleFunctionInfo, ModuleImportInfo, ModuleInfo, OutputControlParams, PaginationParams,
-    ReferenceInfo, ReferenceType, SemanticAnalysis, SymbolMatchMode,
+    AnalysisMode, AnalyzeDirectoryParams, AnalyzeFileField, AnalyzeFileParams, AnalyzeModuleParams,
+    AnalyzeSymbolParams, CallEdge, CallInfo, ClassInfo, DefUseKind, DefUseSite,
+    EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams, FileInfo,
+    FilterRule, FunctionInfo, ImplTraitInfo, ImportInfo, ModuleFunctionInfo, ModuleImportInfo,
+    ModuleInfo, OutputControlParams, PaginationParams, ReferenceInfo, ReferenceType,
+    SemanticAnalysis, SymbolMatchMode,
 };
 
 /// Captures from a custom tree-sitter query.

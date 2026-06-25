@@ -467,7 +467,6 @@ impl CodeAnalyzer {
         let max_depth_val = params.follow_depth;
         let ctx = tools::AnalyzeSymbolContext {
             metrics_tx: self.metrics_tx.clone(),
-            peer: self.peer.clone(),
             call_graph_cache: self.call_graph_cache.clone(),
             disk_cache: self.disk_cache.clone(),
             sid: sid.clone(),
