@@ -122,7 +122,7 @@ pub fn extract_inheritance(_node: &Node, _source: &str) -> Vec<String> {
     Vec::new()
 }
 
-#[cfg(all(test, feature = "lang-rust"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::parser::SemanticExtractor;

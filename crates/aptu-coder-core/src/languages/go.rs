@@ -176,7 +176,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
     inherits
 }
 
-#[cfg(all(test, feature = "lang-go"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::DefUseKind;

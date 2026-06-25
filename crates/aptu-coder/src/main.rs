@@ -121,32 +121,27 @@ fn parse_port(s: &str) -> Result<u16, String> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    aws_lc_rs::default_provider()
-        .install_default()
-        .expect("failed to install rustls CryptoProvider");
-
+/// Parse CLI arguments and resolve the optional HTTP port.
+///
+/// Returns `Ok(None)` when the server should run in stdio mode (no `--port`),
+/// `Ok(Some(port))` when an HTTP port was specified, or `Err(msg)` on invalid
+/// input.  Prints the package version and returns `Ok(None)` when `--version`
+/// is passed; the caller is responsible for exiting after printing.
+fn parse_cli_args() -> Result<Option<u16>, String> {
     let mut port: Option<u16> = None;
     let mut args = std::env::args();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--version" => {
                 println!("{}", env!("CARGO_PKG_VERSION"));
-                return Ok(());
+                return Ok(None);
             }
             "--port" => match args.next() {
                 Some(val) => match parse_port(&val) {
                     Ok(p) => port = Some(p),
-                    Err(msg) => {
-                        eprintln!("error: --port {msg}");
-                        std::process::exit(1);
-                    }
+                    Err(msg) => return Err(format!("--port {msg}")),
                 },
-                None => {
-                    eprintln!("error: --port requires a value");
-                    std::process::exit(1);
-                }
+                None => return Err("--port requires a value".to_string()),
             },
             _ => {}
         }
@@ -158,37 +153,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         match parse_port(&val) {
             Ok(p) => port = Some(p),
-            Err(msg) => {
-                eprintln!("error: APTU_CODER_PORT {msg}");
-                std::process::exit(1);
-            }
+            Err(msg) => return Err(format!("APTU_CODER_PORT {msg}")),
         }
     }
 
-    // Initialize OpenTelemetry (returns None if OTEL_EXPORTER_OTLP_ENDPOINT is unset)
-    let otel_provider = init_otel();
-    let log_provider = init_log_appender();
-    let meter_provider = init_meter();
+    Ok(port)
+}
 
-    // Create shared peer Arc for logging layer
-    // Migrate legacy metrics directory if needed
-    if let Err(e) = aptu_coder::migrate_legacy_metrics_dir() {
-        tracing::warn!("Failed to migrate legacy metrics directory: {e}");
-    }
-    let peer = Arc::new(TokioMutex::new(None));
-
-    // Create shared level filter for dynamic control (std::sync::Mutex for Copy type)
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::WARN));
-
-    // Create unbounded channel for log events
-    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-
-    // Create MCP logging layer with event sender
-    let mcp_logging_layer = McpLoggingLayer::new(event_tx, log_level_filter.clone());
-
-    // Build layered subscriber: fmt + MCP logging + optional OTel tracing + optional log bridge.
-    // tracing_subscriber accepts Option<impl Layer>; None is a no-op, so all combinations
-    // collapse to a single linear chain without branching.
+/// Install the global tracing subscriber with optional OpenTelemetry layers.
+///
+/// Builds a layered subscriber: stderr fmt layer + MCP logging layer + optional
+/// OTel tracing layer + optional OTel log bridge.  OTel layers are no-ops when
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` is unset.  Callers retain the original
+/// providers so they can be shut down after the service exits.
+fn setup_tracing(
+    mcp_logging_layer: McpLoggingLayer,
+    otel_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+    log_provider: Option<opentelemetry_sdk::logs::SdkLoggerProvider>,
+) {
     use opentelemetry::trace::TracerProvider as _;
 
     let otel_trace_layer = otel_provider
@@ -205,6 +187,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(otel_trace_layer)
         .with(otel_log_layer)
         .init();
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install rustls CryptoProvider");
+
+    let port = match parse_cli_args() {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            std::process::exit(1);
+        }
+    };
+
+    // Initialize OpenTelemetry (returns None if OTEL_EXPORTER_OTLP_ENDPOINT is unset)
+    let otel_provider = init_otel();
+    let log_provider = init_log_appender();
+    let meter_provider = init_meter();
+
+    // Migrate legacy metrics directory if needed
+    if let Err(e) = aptu_coder::migrate_legacy_metrics_dir() {
+        tracing::warn!("Failed to migrate legacy metrics directory: {e}");
+    }
+
+    // Create shared peer Arc for logging layer
+    let peer = Arc::new(TokioMutex::new(None));
+
+    // Create shared level filter for dynamic control (std::sync::Mutex for Copy type)
+    let log_level_filter = Arc::new(Mutex::new(LevelFilter::WARN));
+
+    // Create unbounded channel for log events
+    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    // Create MCP logging layer with event sender
+    let mcp_logging_layer = McpLoggingLayer::new(event_tx, log_level_filter.clone());
+
+    // Install global tracing subscriber with optional OTel layers
+    setup_tracing(
+        mcp_logging_layer,
+        otel_provider.clone(),
+        log_provider.clone(),
+    );
 
     // Create metrics channel and spawn writer
     let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
@@ -230,7 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(log_prov) = log_provider
         && let Err(e) = log_prov.shutdown()
     {
-        tracing::warn!("Failed to shutdown OpenTelemetry log provider: {e}");
+        tracing::warn!("Failed to shutdown OpenTelemetry meter provider: {e}");
     }
 
     if let Some(meter_prov) = meter_provider

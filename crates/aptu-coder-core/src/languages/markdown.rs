@@ -18,7 +18,7 @@ pub const ELEMENT_QUERY: &str = r"
 /// Tree-sitter call query for Markdown (empty -- no call sites in Markdown).
 pub const CALL_QUERY: &str = "";
 
-#[cfg(all(test, feature = "lang-markdown"))]
+#[cfg(test)]
 mod tests {
     use tree_sitter::{Parser, StreamingIterator};
 

@@ -1578,11 +1578,10 @@ pub(crate) fn execute_query_impl(
     Ok(captures)
 }
 
-// Language-feature-gated tests (require lang-rust); see also tests_unsupported below
-#[cfg(all(test, feature = "lang-rust"))]
+#[cfg(test)]
+// Tests for parser functionality
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn test_ast_recursion_limit_zero_is_unlimited() {
@@ -1802,8 +1801,8 @@ fn main() {
     }
 }
 
-// Language-feature-gated tests for Python
-#[cfg(all(test, feature = "lang-python"))]
+#[cfg(test)]
+// Tests for Python language parsing
 mod tests_python {
     use super::*;
 

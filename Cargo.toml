@@ -55,9 +55,18 @@ tracing-opentelemetry = "0.33"
 rustls = "0.23"
 axum = { version = "0.8", features = ["http1", "tokio"], default-features = false }
 
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
 unwrap_used = "deny"
+# Lints below are "warn" until all violations are cleared; promote each to "deny"
+# once zero warnings are confirmed in CI (tracked in issue #1225).
+must_use_candidate = "warn"
+redundant_clone = "warn"
+needless_pass_by_value = "warn"
+large_enum_variant = "warn"
 
 [profile.release]
 opt-level = "z"

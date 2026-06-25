@@ -220,7 +220,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "lang-typescript")]
     #[test]
     fn test_regex_fallback_astro_basic() {
         // Arrange: Astro file with TypeScript frontmatter

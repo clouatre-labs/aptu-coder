@@ -436,7 +436,6 @@ fn test_semantic_analysis_empty_file() {
     assert!(!output.formatted.contains("R:"));
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_parse_and_extract() {
     let temp_dir = TempDir::new().unwrap();
@@ -469,7 +468,6 @@ class MyClass:
     assert_eq!(output.semantic.classes[0].name, "MyClass");
 }
 
-#[cfg(feature = "lang-javascript")]
 #[test]
 fn test_javascript_parse_and_extract() {
     let temp_dir = TempDir::new().unwrap();
@@ -499,7 +497,6 @@ import {x} from 'module';
     assert!(output.semantic.imports.len() >= 1);
 }
 
-#[cfg(feature = "lang-javascript")]
 #[test]
 fn test_javascript_commonjs_require() {
     let temp_dir = TempDir::new().unwrap();
@@ -534,7 +531,6 @@ const path = require('path');
     );
 }
 
-#[cfg(feature = "lang-typescript")]
 #[test]
 fn test_typescript_parse_and_extract() {
     let temp_dir = TempDir::new().unwrap();
@@ -591,7 +587,6 @@ class MyClass {
     assert!(class_names.contains(&"MyClass"));
 }
 
-#[cfg(feature = "lang-go")]
 #[test]
 fn test_go_parse_and_extract() {
     let temp_dir = TempDir::new().unwrap();
@@ -632,7 +627,6 @@ type MyInterface interface {
     assert!(class_names.contains(&"MyInterface"));
 }
 
-#[cfg(feature = "lang-java")]
 #[test]
 fn test_java_parse_and_extract() {
     let temp_dir = TempDir::new().unwrap();
@@ -1413,7 +1407,6 @@ fn test_format_summary_sibling_dir_prefix() {
 
 // Reference extraction tests for Python, Java, and TypeScript
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_reference_extraction_happy_path() {
     let temp_dir = TempDir::new().unwrap();
@@ -1465,7 +1458,6 @@ def process(items: list[User]) -> None:
     }
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_reference_extraction_edge_case() {
     let temp_dir = TempDir::new().unwrap();
@@ -1517,6 +1509,7 @@ def handle(data: list[dict[Result, Data]]) -> None:
 
 // Import extraction tests
 
+#[allow(dead_code)]
 struct ImportTestCase {
     lang: &'static str,
     ext: &'static str,
@@ -1524,12 +1517,6 @@ struct ImportTestCase {
     expected_modules: Vec<&'static str>,
 }
 
-#[cfg(any(
-    feature = "lang-python",
-    feature = "lang-go",
-    feature = "lang-java",
-    feature = "lang-typescript"
-))]
 #[test]
 fn test_import_extraction_happy_path() {
     let test_cases = vec![
@@ -1630,12 +1617,6 @@ export function hello(): void {
     }
 }
 
-#[cfg(any(
-    feature = "lang-python",
-    feature = "lang-go",
-    feature = "lang-java",
-    feature = "lang-typescript"
-))]
 #[test]
 fn test_import_extraction_no_imports() {
     let test_cases = vec![
@@ -1892,7 +1873,6 @@ fn test_single_page_no_cursor() {
 
 // Inheritance extraction tests
 
-#[cfg(feature = "lang-java")]
 #[test]
 fn test_java_inheritance_extraction() {
     let temp_dir = TempDir::new().unwrap();
@@ -1945,7 +1925,6 @@ public class Dog extends Animal implements Comparable {
     );
 }
 
-#[cfg(feature = "lang-typescript")]
 #[test]
 fn test_typescript_inheritance_extraction() {
     let temp_dir = TempDir::new().unwrap();
@@ -1997,7 +1976,6 @@ class Dog extends Animal implements Movable {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_inheritance_extraction() {
     let temp_dir = TempDir::new().unwrap();
@@ -2033,7 +2011,6 @@ class Dog(Animal):
     );
 }
 
-#[cfg(feature = "lang-go")]
 #[test]
 fn test_go_inheritance_extraction() {
     let temp_dir = TempDir::new().unwrap();
@@ -3343,7 +3320,6 @@ fn test_overview_force_true_with_cursor_no_guard() {
 
 // Python wildcard import resolution tests
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_wildcard_import_parser_clean_module_field() {
     let temp_dir = TempDir::new().unwrap();
@@ -3367,7 +3343,6 @@ fn test_python_wildcard_import_parser_clean_module_field() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_wildcard_import_relative_resolution() {
     let temp_dir = TempDir::new().unwrap();
@@ -3406,7 +3381,6 @@ fn test_python_wildcard_import_relative_resolution() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_wildcard_import_with_all() {
     let temp_dir = TempDir::new().unwrap();
@@ -3455,7 +3429,6 @@ fn test_python_wildcard_import_with_all() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_wildcard_import_target_not_found() {
     let temp_dir = TempDir::new().unwrap();
@@ -3483,7 +3456,6 @@ fn test_python_wildcard_import_target_not_found() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_named_import_from_statement() {
     let temp_dir = TempDir::new().unwrap();
@@ -3548,7 +3520,6 @@ fn test_analyze_module_dir_guard_rejects_symlink_to_directory() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_aliased_import_from_statement() {
     let temp_dir = TempDir::new().unwrap();
@@ -3605,7 +3576,6 @@ fn test_analyze_directory_verbose_no_summary() {
     );
 }
 
-#[cfg(feature = "lang-fortran")]
 #[test]
 fn test_fortran_parse_and_extract() {
     let temp_dir = TempDir::new().unwrap();
@@ -3656,7 +3626,6 @@ END MODULE math_utils
     );
 }
 
-#[cfg(feature = "lang-fortran")]
 #[test]
 fn test_fortran_edge_case_fixed_form() {
     // Fixed-form layout with columns 1-5 blank, statement starting col 7.
@@ -3786,7 +3755,6 @@ fn test_format_summary_max_depth_zero_unchanged() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_analyze_symbol_python_callees() {
     let dir = TempDir::new().unwrap();
@@ -3805,7 +3773,6 @@ fn test_analyze_symbol_python_callees() {
     );
 }
 
-#[cfg(feature = "lang-go")]
 #[test]
 fn test_analyze_symbol_go_callees() {
     let dir = TempDir::new().unwrap();
@@ -3823,7 +3790,6 @@ fn test_analyze_symbol_go_callees() {
     );
 }
 
-#[cfg(feature = "lang-typescript")]
 #[test]
 fn test_analyze_symbol_typescript_callees() {
     let dir = TempDir::new().unwrap();
@@ -3841,7 +3807,6 @@ fn test_analyze_symbol_typescript_callees() {
     );
 }
 
-#[cfg(feature = "lang-fortran")]
 #[test]
 fn test_analyze_symbol_fortran_callees() {
     let dir = TempDir::new().unwrap();
@@ -3876,7 +3841,6 @@ fn test_analyze_symbol_rust_method_item_callees() {
     );
 }
 
-#[cfg(feature = "lang-java")]
 #[test]
 fn test_analyze_symbol_java_callees() {
     let dir = TempDir::new().unwrap();
@@ -3953,7 +3917,6 @@ fn test_analyze_symbol_no_callees_no_transition_cursor() {
     );
 }
 
-#[cfg(feature = "lang-rust")]
 #[test]
 fn test_execute_query_valid_rust() {
     // Arrange: source with a function
@@ -4000,7 +3963,6 @@ fn test_execute_query_malformed_query() {
     );
 }
 
-#[cfg(feature = "lang-csharp")]
 #[test]
 fn test_csharp_parse_and_extract() {
     // Arrange
@@ -4033,7 +3995,6 @@ namespace Demo {
     assert_eq!(fa.function_count, 3);
 }
 
-#[cfg(feature = "lang-csharp")]
 #[test]
 fn test_csharp_inheritance_extraction() {
     // Arrange
@@ -4076,7 +4037,6 @@ class Dog : Base, IRun {
     );
 }
 
-#[cfg(feature = "lang-csharp")]
 #[test]
 fn test_csharp_struct_and_enum_extraction() {
     // Arrange
@@ -4108,7 +4068,6 @@ public enum Direction { North, South, East, West }
     );
 }
 
-#[cfg(feature = "lang-csharp")]
 #[test]
 fn test_analyze_symbol_csharp_callees() {
     // Arrange
@@ -4131,7 +4090,6 @@ fn test_analyze_symbol_csharp_callees() {
     );
 }
 
-#[cfg(feature = "lang-tsx")]
 #[test]
 fn test_integration_tsx_analyze_file() {
     // Arrange
@@ -4187,7 +4145,6 @@ export default Button;
 }
 
 // C files share the lang-cpp feature flag; C and C++ use the same tree-sitter grammar
-#[cfg(feature = "lang-cpp")]
 #[test]
 fn test_integration_c_analyze_file() {
     // Arrange
@@ -4239,7 +4196,6 @@ int add(int a, int b) {
     );
 }
 
-#[cfg(feature = "lang-cpp")]
 #[test]
 fn test_integration_cpp_analyze_file() {
     // Arrange
@@ -4416,7 +4372,6 @@ fn test_symlink_file_skipped_in_analyze_directory() {
 fn test_large_file_skipped_no_panic() {
     use aptu_coder_core::analyze::{MAX_FILE_SIZE_BYTES, analyze_directory};
     use std::fs::File;
-    use std::io::Write;
 
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
@@ -4427,7 +4382,7 @@ fn test_large_file_skipped_no_panic() {
 
     // Create a sparse file exceeding MAX_FILE_SIZE_BYTES without writing data
     let large_file = root.join("large.rs");
-    let mut file = File::create(&large_file).unwrap();
+    let file = File::create(&large_file).unwrap();
     file.set_len(MAX_FILE_SIZE_BYTES + 1).unwrap();
     drop(file);
 
@@ -4449,7 +4404,6 @@ fn test_large_file_skipped_no_panic() {
 
 // Test additions for attribute/decorator line reporting
 
-#[cfg(feature = "lang-rust")]
 #[test]
 fn test_rust_function_attribute_line_reported() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4469,7 +4423,6 @@ fn test_rust_function_attribute_line_reported() {
     );
 }
 
-#[cfg(feature = "lang-rust")]
 #[test]
 fn test_rust_function_no_attribute_unchanged() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4486,7 +4439,6 @@ fn test_rust_function_no_attribute_unchanged() {
     );
 }
 
-#[cfg(feature = "lang-rust")]
 #[test]
 fn test_rust_function_multiple_stacked_attributes() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4503,7 +4455,6 @@ fn test_rust_function_multiple_stacked_attributes() {
     );
 }
 
-#[cfg(feature = "lang-rust")]
 #[test]
 fn test_rust_impl_method_attribute_line_reported() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4523,7 +4474,6 @@ fn test_rust_impl_method_attribute_line_reported() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_decorated_function_reports_decorator_line() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4540,7 +4490,6 @@ fn test_python_decorated_function_reports_decorator_line() {
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_plain_function_reports_def_line() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4594,7 +4543,6 @@ use std::io;
     assert_eq!(result.language, "rust");
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_extract_module_info_python() {
     use aptu_coder_core::parser::SemanticExtractor;
@@ -4627,7 +4575,6 @@ def farewell():
     assert_eq!(result.language, "python");
 }
 
-#[cfg(feature = "lang-typescript")]
 #[test]
 fn test_extract_module_info_typescript() {
     use aptu_coder_core::parser::SemanticExtractor;

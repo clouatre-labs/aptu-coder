@@ -15,7 +15,7 @@ pub const ELEMENT_QUERY: &str = r"
 /// Tree-sitter call query for YAML (empty -- no call sites in YAML).
 pub const CALL_QUERY: &str = "";
 
-#[cfg(all(test, feature = "lang-yaml"))]
+#[cfg(test)]
 mod tests {
     use tree_sitter::{Parser, StreamingIterator};
 
