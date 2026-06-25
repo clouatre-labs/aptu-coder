@@ -8,6 +8,7 @@
 use crate::types::{CallEdge, ImplTraitInfo, SemanticAnalysis, SymbolMatchMode};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, instrument};
 
@@ -415,9 +416,9 @@ impl CallGraph {
 
         let mut chains = Vec::new();
         let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back((symbol.to_string(), 0));
-        visited.insert(symbol.to_string());
+        let mut queue: VecDeque<(Arc<str>, u32)> = VecDeque::new();
+        queue.push_back((Arc::from(symbol), 0));
+        visited.insert(Arc::from(symbol));
 
         while let Some((current, depth)) = queue.pop_front() {
             if depth > follow_depth {
@@ -427,7 +428,7 @@ impl CallGraph {
             // Child span for graph traversal at this depth level
             let _traverse_span = tracing::info_span!("graph.traverse", depth = depth).entered();
 
-            if let Some(neighbors) = graph_map.get(&current) {
+            if let Some(neighbors) = graph_map.get(current.as_ref()) {
                 for edge in neighbors {
                     let path = &edge.path;
                     let line = edge.line;
@@ -442,7 +443,7 @@ impl CallGraph {
                     // For outgoing chains the order is already focus-first.
                     let mut chain = {
                         let mut v = Vec::with_capacity(follow_depth as usize + 2);
-                        v.push((current.clone(), path.clone(), line));
+                        v.push((current.to_string(), path.clone(), line));
                         v
                     };
                     let mut chain_node = neighbor.clone();
@@ -486,9 +487,9 @@ impl CallGraph {
 
                     chains.push(InternalCallChain { chain });
 
-                    if !visited.contains(neighbor) && depth < follow_depth {
-                        visited.insert(neighbor.clone());
-                        queue.push_back((neighbor.clone(), depth + 1));
+                    if !visited.contains(neighbor.as_str()) && depth < follow_depth {
+                        visited.insert(Arc::from(neighbor.as_str()));
+                        queue.push_back((Arc::from(neighbor.as_str()), depth + 1));
                     }
                 }
             }

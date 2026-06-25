@@ -115,7 +115,7 @@ where
         Err(poisoned) => {
             // SAFETY: 100 is a non-zero literal
             let cache_size = NonZeroUsize::new(capacity)
-                .unwrap_or_else(|| unsafe { NonZeroUsize::new_unchecked(100) });
+                .unwrap_or_else(|| NonZeroUsize::new(100).expect("100 is non-zero"));
             let new_cache = LruCache::new(cache_size);
             let mut guard = poisoned.into_inner();
             *guard = new_cache;
@@ -195,8 +195,7 @@ impl CallGraphCache {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
-        // SAFETY: capacity is >= 1 due to .max(1) applied above
-        let cache_size = unsafe { NonZeroUsize::new_unchecked(capacity) };
+        let cache_size = NonZeroUsize::new(capacity).expect("capacity is non-zero after .max(1)");
         Self {
             capacity,
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
@@ -242,10 +241,10 @@ impl AnalysisCache {
     pub fn new(capacity: usize) -> Self {
         let file_capacity = capacity.max(1);
         let dir_capacity = parse_cache_capacity("APTU_CODER_DIR_CACHE_CAPACITY", 20);
-        // SAFETY: file_capacity is >= 1 due to .max(1) applied above
-        let cache_size = unsafe { NonZeroUsize::new_unchecked(file_capacity) };
-        // SAFETY: dir_capacity is >= 1 due to parse_cache_capacity's .max(1) guarantee
-        let dir_cache_size = unsafe { NonZeroUsize::new_unchecked(dir_capacity) };
+        let cache_size =
+            NonZeroUsize::new(file_capacity).expect("file_capacity is non-zero after .max(1)");
+        let dir_cache_size =
+            NonZeroUsize::new(dir_capacity).expect("dir_capacity is non-zero after .max(1)");
         Self {
             file_capacity,
             dir_capacity,
