@@ -35,7 +35,7 @@ async fn test_analyze_directory_is_idempotent() {
 
 #[tokio::test]
 async fn test_analyze_file_is_idempotent() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/formatter.rs");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/formatter/mod.rs");
     let path_str = path.to_str().unwrap();
 
     let result1 = analyze_file(path_str, None).unwrap();
@@ -75,7 +75,7 @@ async fn test_analyze_file_is_idempotent() {
 
 #[tokio::test]
 async fn test_analyze_module_is_idempotent() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/formatter.rs");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/formatter/mod.rs");
     let path_str = path.to_str().unwrap();
 
     let result1 = analyze_module_file(path_str).unwrap();
