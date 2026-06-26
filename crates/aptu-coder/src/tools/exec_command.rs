@@ -205,7 +205,7 @@ fn validate_pre_spawn_phase(
     }
 
     // Validate heredocs before spawning any process
-    if let Err(e) = shell_write::validate_heredocs(command) {
+    if let Err(e) = shell_write::validate_heredocs(command, params.stdin.is_some()) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
         return Err(err_to_tool_result(e));

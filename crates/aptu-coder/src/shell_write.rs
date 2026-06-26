@@ -25,7 +25,7 @@ use crate::tools::common::error_meta;
 /// or `Err(ErrorData)` with `INVALID_PARAMS` otherwise.
 ///
 /// This function does NOT spawn any process; it is a pure string scan.
-pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
+pub(crate) fn validate_heredocs(command: &str, has_stdin: bool) -> Result<(), ErrorData> {
     let bytes = command.as_bytes();
     let len = bytes.len();
 
@@ -59,6 +59,14 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
         while i < len {
             let ch = bytes[i] as char;
 
+            // Backslash escapes: outside single-quote regions, a backslash escapes
+            // the next character so an escaped quote does not toggle quote state.
+            // Inside single quotes, backslash has no special meaning in POSIX sh.
+            if ch == '\\' && !in_single_quote {
+                i += 2; // skip the escaped character
+                continue;
+            }
+
             // Single-quote regions: no escaping inside; toggle on every `'`.
             if ch == '\'' && !in_double_quote {
                 in_single_quote = !in_single_quote;
@@ -84,6 +92,12 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
                 // Scan backward from i to check for file-write pattern.
                 if scan_backward_for_file_write(bytes, i) {
                     return Err(file_write_heredoc_error());
+                }
+                if scan_backward_for_stdin_flag(bytes, i) {
+                    return Err(stdin_flag_heredoc_error());
+                }
+                if has_stdin {
+                    return Err(stdin_param_heredoc_error());
                 }
                 i += 2;
                 continue;
@@ -440,6 +454,111 @@ pub(crate) fn scan_backward_for_file_write(bytes: &[u8], here_pos: usize) -> boo
     false
 }
 
+/// Returns the byte slice of the token that ends at position `end` in `bytes`.
+///
+/// Walks backward from `end`, tracking paren depth, and stops at unquoted
+/// whitespace, `(`, `|`, `;`, or `&`.  Used by both
+/// `scan_backward_for_file_write` (via `token_before_pos`) and
+/// `scan_backward_for_stdin_flag` to avoid duplicating the scan loop.
+fn prev_token(bytes: &[u8], end: usize) -> &[u8] {
+    let mut pos = end;
+    let mut depth = 0i32;
+    loop {
+        if pos == 0 {
+            break;
+        }
+        let b = bytes[pos - 1];
+        if b == b')' {
+            depth -= 1;
+            pos = pos.saturating_sub(1);
+            continue;
+        }
+        if depth < 0 {
+            pos -= 1;
+            break;
+        }
+        if depth > 0 {
+            pos -= 1;
+        } else if b.is_ascii_whitespace() || b == b'(' || b == b'|' || b == b';' || b == b'&' {
+            break;
+        } else {
+            pos -= 1;
+        }
+    }
+    &bytes[pos..end]
+}
+
+/// Returns true if `tok` is a known flag that consumes stdin from its `-` value.
+fn is_stdin_consuming_flag(tok: &[u8]) -> bool {
+    tok == b"--body-file"
+        || tok == b"--data"
+        || tok == b"--data-raw"
+        || tok == b"--data-binary"
+        || tok == b"--data-urlencode"
+        || tok == b"-d"
+        || tok == b"-F"
+        || tok == b"--stdin"
+}
+
+/// Scans backward from `here_pos` (the first `<` of `<<`) looking for
+/// stdin-consuming flags that would conflict with the heredoc.
+///
+/// Patterns detected:
+///   - `--flag -` where flag is --data, --data-raw, --data-binary,
+///     --data-urlencode, --body-file, -d, -F
+///   - `--stdin` standalone flag
+///   - `cat -` (cat with stdin argument)
+fn scan_backward_for_stdin_flag(bytes: &[u8], here_pos: usize) -> bool {
+    let mut pos = here_pos;
+
+    // Skip whitespace backward
+    while pos > 0 && (bytes[pos - 1] as char).is_ascii_whitespace() {
+        pos -= 1;
+    }
+    if pos == 0 {
+        return false;
+    }
+
+    let tok = prev_token(bytes, pos);
+    pos -= tok.len();
+
+    // Case 1: token is `-` (the stdin value for a preceding flag)
+    if tok == b"-" {
+        // Skip whitespace before `-`
+        while pos > 0 && (bytes[pos - 1] as char).is_ascii_whitespace() {
+            pos -= 1;
+        }
+        if pos == 0 {
+            return false;
+        }
+        // Find the flag before `-`
+        let flag = prev_token(bytes, pos);
+        if is_stdin_consuming_flag(flag) {
+            return true;
+        }
+        // cat - << EOF
+        if flag == b"cat" {
+            return true;
+        }
+        return false;
+    }
+
+    // Case 2: standalone flag like --stdin (no trailing `-` value)
+    if is_stdin_consuming_flag(tok) {
+        return true;
+    }
+
+    false
+}
+
+pub(crate) fn stdin_flag_heredoc_error() -> ErrorData {
+    ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        "stdin-consuming flag with heredoc detected (--body-file -, --data -, etc.) -- pass content via the `stdin` parameter instead, or write to a file first with edit_overwrite".to_string(),
+        Some(error_meta("validation", false, "use the stdin parameter instead of heredoc + stdin-consuming flags")),
+    )
+}
+
 pub(crate) fn file_write_heredoc_error() -> ErrorData {
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -453,5 +572,13 @@ pub(crate) fn missing_heredoc_error() -> ErrorData {
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "heredoc closing delimiter not found -- likely a quoting or escaping issue; use edit_overwrite to write files instead of shell heredocs".to_string(),
         Some(error_meta("validation", false, "use edit_overwrite to write files")),
+    )
+}
+
+pub(crate) fn stdin_param_heredoc_error() -> ErrorData {
+    ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        "stdin parameter and heredoc cannot be used together -- pass content via the `stdin` parameter instead".to_string(),
+        Some(error_meta("validation", false, "use the stdin parameter instead of a heredoc")),
     )
 }
