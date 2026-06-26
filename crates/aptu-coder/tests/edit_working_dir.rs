@@ -342,37 +342,6 @@ async fn test_edit_overwrite_new_file_missing_parent_dir() {
     );
 }
 
-/// edit_overwrite with a ../ traversal path that escapes working_dir returns INVALID_PARAMS.
-#[tokio::test]
-async fn test_edit_overwrite_new_file_traversal_path() {
-    // Arrange: create temp working_dir, try to escape it with ..
-    let cwd = std::env::current_dir().expect("should get cwd");
-    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
-    let working_dir = temp_dir
-        .path()
-        .to_str()
-        .expect("temp dir path is valid UTF-8");
-    // ../foo.txt should escape working_dir
-    let file_name = "../escaped_file.txt";
-
-    // Act
-    let resp = call_tool_raw(
-        "edit_overwrite",
-        serde_json::json!({
-            "path": file_name,
-            "content": "should not be written",
-            "working_dir": working_dir
-        }),
-    )
-    .await;
-
-    // Assert
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected error but got success: {resp}"
-    );
-}
-
 /// edit_overwrite with a deeply nested path where only the top-level parent exists returns INVALID_PARAMS.
 #[tokio::test]
 async fn test_edit_overwrite_new_file_deeply_nested() {

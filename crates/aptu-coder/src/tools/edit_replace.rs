@@ -13,7 +13,7 @@ use tracing::instrument;
 
 use crate::tools::EditHandlerContext;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::validation::{validate_path, validate_path_in_dir};
+use crate::validation::{validate_path, validate_path_relative_to};
 
 /// Number of consecutive not_found or ambiguous edit_replace failures on the same
 /// (session_id, canonical_path) pair before returning a stale-context directive error.
@@ -81,7 +81,7 @@ fn resolve_edit_path(
     span: &tracing::Span,
 ) -> Result<PathBuf, CallToolResult> {
     let resolved = if let Some(wd) = working_dir {
-        match validate_path_in_dir(path, true, std::path::Path::new(wd)) {
+        match validate_path_relative_to(path, true, std::path::Path::new(wd)) {
             Ok(p) => p,
             Err(e) => {
                 span.record("error", true);

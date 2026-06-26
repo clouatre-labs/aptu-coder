@@ -2,7 +2,7 @@
 use super::*;
 use crate::tools::common::summary_cursor_conflict;
 use crate::tools::exec_command::{build_exec_command, handle_output_persist, strip_cd_prefix};
-use crate::validation::validate_path_in_dir;
+use crate::validation::validate_path_relative_to;
 use aptu_coder_core::traversal;
 use regex::Regex;
 
@@ -547,13 +547,13 @@ fn test_edit_overwrite_with_working_dir() {
     let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
     let temp_path = temp_dir.path();
 
-    // Act: call validate_path_in_dir with a relative path
-    let result = validate_path_in_dir("test_file.txt", false, temp_path);
+    // Act: call validate_path_relative_to with a relative path
+    let result = validate_path_relative_to("test_file.txt", false, temp_path);
 
     // Assert: path should be resolved relative to working_dir
     assert!(
         result.is_ok(),
-        "validate_path_in_dir should accept relative path in valid working_dir: {:?}",
+        "validate_path_relative_to should accept relative path in valid working_dir: {:?}",
         result.err()
     );
     let resolved = result.unwrap();
@@ -572,13 +572,13 @@ fn test_validate_path_in_dir_accepts_outside_cwd() {
     let canonical_temp_dir =
         std::fs::canonicalize(&temp_dir).expect("should canonicalize temp_dir");
 
-    // Act: call validate_path_in_dir with a relative filename
-    let result = validate_path_in_dir("probe.txt", false, &temp_dir);
+    // Act: call validate_path_relative_to with a relative filename
+    let result = validate_path_relative_to("probe.txt", false, &temp_dir);
 
     // Assert: should accept working_dir outside CWD
     assert!(
         result.is_ok(),
-        "validate_path_in_dir should accept working_dir outside CWD: {:?}",
+        "validate_path_relative_to should accept working_dir outside CWD: {:?}",
         result.err()
     );
     let resolved = result.unwrap();
@@ -591,23 +591,6 @@ fn test_validate_path_in_dir_accepts_outside_cwd() {
 }
 
 #[test]
-fn test_edit_overwrite_working_dir_traversal() {
-    // Arrange: create a temporary directory within CWD to use as working_dir
-    let cwd = std::env::current_dir().expect("should get cwd");
-    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
-    let temp_path = temp_dir.path();
-
-    // Act: try to traverse outside working_dir with ../../../etc/passwd
-    let result = validate_path_in_dir("../../../etc/passwd", false, temp_path);
-
-    // Assert: should reject path traversal attack (via parent canonicalize failure)
-    assert!(
-        result.is_err(),
-        "validate_path_in_dir should reject path traversal outside working_dir"
-    );
-}
-
-#[test]
 fn test_edit_replace_with_working_dir() {
     // Arrange: create a temporary directory within CWD and file
     let cwd = std::env::current_dir().expect("should get cwd");
@@ -616,13 +599,13 @@ fn test_edit_replace_with_working_dir() {
     let file_path = temp_path.join("test.txt");
     std::fs::write(&file_path, "hello world").expect("should write test file");
 
-    // Act: call validate_path_in_dir with require_exists=true
-    let result = validate_path_in_dir("test.txt", true, temp_path);
+    // Act: call validate_path_relative_to with require_exists=true
+    let result = validate_path_relative_to("test.txt", true, temp_path);
 
     // Assert: should find the file relative to working_dir
     assert!(
         result.is_ok(),
-        "validate_path_in_dir should find existing file in working_dir: {:?}",
+        "validate_path_relative_to should find existing file in working_dir: {:?}",
         result.err()
     );
     let resolved = result.unwrap();
@@ -655,13 +638,13 @@ fn test_edit_overwrite_working_dir_is_file() {
     let temp_file = temp_dir.path().join("test_file.txt");
     std::fs::write(&temp_file, "test content").expect("should write test file");
 
-    // Act: call validate_path_in_dir with a file as working_dir
-    let result = validate_path_in_dir("some_file.txt", false, &temp_file);
+    // Act: call validate_path_relative_to with a file as working_dir
+    let result = validate_path_relative_to("some_file.txt", false, &temp_file);
 
     // Assert: should reject because working_dir is not a directory
     assert!(
         result.is_err(),
-        "validate_path_in_dir should reject a file as working_dir"
+        "validate_path_relative_to should reject a file as working_dir"
     );
     let err = result.unwrap_err();
     let err_msg = err.message.to_lowercase();
@@ -807,12 +790,13 @@ fn test_validate_path_in_dir_rejects_sibling_prefix() {
 
     // Act: ask for a file inside the sibling dir, using a path that
     // traverses from allowed/ into allowed_sibling/
-    let result = validate_path_in_dir("../allowed_sibling/secret.txt", false, &allowed);
+    let result = validate_path_relative_to("../allowed_sibling/secret.txt", false, &allowed);
 
     // Assert: must be rejected even though "allowed_sibling" starts with "allowed"
+    // This rejection comes from validate_parent_in_root (CVE-2025-53110 protection), not the outer containment check
     assert!(
         result.is_err(),
-        "validate_path_in_dir must reject a path resolving to a sibling directory \
+        "validate_path_relative_to must reject a path resolving to a sibling directory \
              sharing the working_dir name prefix (CVE-2025-53110 pattern)"
     );
     let err = result.unwrap_err();
@@ -830,10 +814,10 @@ fn test_validate_path_in_dir_nonexistent_deep_path() {
     // intermediate directories exist.  With parent-directory validation,
     // this is rejected because the parent a/b/c/d does not exist.
     let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
-    let result = validate_path_in_dir("a/b/c/d/new.txt", false, temp_dir.path());
+    let result = validate_path_relative_to("a/b/c/d/new.txt", false, temp_dir.path());
     assert!(
         result.is_err(),
-        "validate_path_in_dir should reject deeply nested non-existent path"
+        "validate_path_relative_to should reject deeply nested non-existent path"
     );
 }
 
@@ -845,10 +829,10 @@ fn test_validate_path_in_dir_nonexistent_with_existing_parent() {
     let sub = temp_dir.path().join("sub");
     std::fs::create_dir_all(&sub).expect("should create sub dir");
 
-    let result = validate_path_in_dir("sub/new.txt", false, temp_dir.path());
+    let result = validate_path_relative_to("sub/new.txt", false, temp_dir.path());
     assert!(
         result.is_ok(),
-        "validate_path_in_dir should accept file in existing subdir: {:?}",
+        "validate_path_relative_to should accept file in existing subdir: {:?}",
         result.err()
     );
     let resolved = result.unwrap();
