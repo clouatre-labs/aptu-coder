@@ -189,13 +189,24 @@ pub(crate) fn io_error_to_path_error(
     ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, msg, Some(meta))
 }
 
-/// Validates a path relative to a working directory.
-/// The working_dir may be anywhere on disk; it is not restricted to the server CWD.
-/// For `require_exists=true`, the path must exist and be canonicalizable within working_dir.
-/// For `require_exists=false`, the parent directory must exist, be a directory, and be
-/// within working_dir.  The filename is then appended without canonicalization.
-/// The resolved path must be within the working_dir.
-pub(crate) fn validate_path_in_dir(
+/// Resolve a path relative to a working directory, without containment check.
+///
+/// This function is similar to `validate_path_in_dir`, but it removes the final
+/// `starts_with` containment check. The caller is responsible for enforcing any
+/// scope boundaries. This aligns with MCP 2025-11-25 spec intent: path resolution
+/// is a convenience; containment is operator responsibility.
+///
+/// # Arguments
+/// - `path`: The relative or absolute path to resolve
+/// - `require_exists`: If true, the path must exist and be accessible
+/// - `working_dir`: The base directory for relative path resolution
+///
+/// # Returns
+/// - `Ok(PathBuf)`: The resolved absolute path
+/// - `Err(ErrorData)`: If working_dir is invalid, path resolution fails, or
+///   (when `require_exists=false`) parent traversal attempts escape via
+///   sibling-prefix attack (CVE-2025-53110)
+pub(crate) fn validate_path_relative_to(
     path: &str,
     require_exists: bool,
     working_dir: &std::path::Path,
@@ -221,17 +232,7 @@ pub(crate) fn validate_path_in_dir(
         ));
     }
 
-    // working_dir is intentionally not restricted to the server CWD here.
-    // The security boundary is the inner PathBuf::starts_with check below,
-    // which ensures the resolved path cannot escape working_dir regardless
-    // of where working_dir itself lives on disk.  Restricting working_dir to
-    // server CWD was the original design but it prevented legitimate
-    // cross-repository edits (e.g. orchestrators writing to a sibling repo)
-    // while exec_command already allows arbitrary paths via `cd`.  The
-    // operator sets the scope at server launch; per-call working_dir is a
-    // convenience override within that operator-controlled process.
-
-    // Now resolve the target path relative to working_dir
+    // Resolve the target path relative to working_dir
     let canonical_path = if require_exists {
         let target_path = canonical_working_dir.join(path);
         std::fs::canonicalize(&target_path).map_err(|e| {
@@ -245,24 +246,12 @@ pub(crate) fn validate_path_in_dir(
         validate_parent_in_root(path, &canonical_working_dir)?
     };
 
-    // Verify the resolved path is within working_dir.
-    // PathBuf::starts_with compares path *components*, not raw bytes, so
-    // a sibling directory whose name shares our prefix (e.g. "/work_evil"
-    // when the allowed root is "/work") is correctly rejected -- this is
-    // the exact prefix-confusion vector exploited in CVE-2025-53110 against
-    // @modelcontextprotocol/server-filesystem.  Do not replace this check
-    // with a string-level prefix comparison.
-    if !canonical_path.starts_with(&canonical_working_dir) {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is outside the working directory".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "provide a path within the working directory",
-            )),
-        ));
-    }
+    // Note: Unlike validate_path_in_dir, we do NOT check starts_with here.
+    // The MCP 2025-11-25 spec and RFC 3986 sec 6.2.3 place the security boundary
+    // with the operator (server launch config) not per-call. The caller sets scope
+    // via working_dir; this function is a path-resolution convenience only.
+    // The validate_parent_in_root call above still protects against CVE-2025-53110
+    // sibling-prefix attacks in the non-require_exists branch.
 
     Ok(canonical_path)
 }

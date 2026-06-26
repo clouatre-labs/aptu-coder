@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::tools::EditHandlerContext;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::validation::{validate_path, validate_path_in_dir};
+use crate::validation::{validate_path, validate_path_relative_to};
 
 #[instrument(skip(params, ctx, span, t_start), fields(path = %params.path))]
 pub(crate) async fn edit_overwrite(
@@ -23,7 +23,7 @@ pub(crate) async fn edit_overwrite(
     span.record("path", &params.path);
 
     let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
-        match validate_path_in_dir(&params.path, false, std::path::Path::new(wd)) {
+        match validate_path_relative_to(&params.path, false, std::path::Path::new(wd)) {
             Ok(p) => p,
             Err(e) => {
                 span.record("error", true);
