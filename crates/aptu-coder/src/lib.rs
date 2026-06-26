@@ -737,7 +737,6 @@ impl ServerHandler for CodeAnalyzer {
             JSONL metrics at $HOME/.local/share/aptu-coder/ (or $XDG_DATA_HOME/aptu-coder/). Always cd there before jq glob queries."
         );
         let capabilities = ServerCapabilities::builder()
-            .enable_logging()
             .enable_tools()
             .enable_tool_list_changed()
             .enable_completions()
