@@ -176,7 +176,7 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs` (kill on expiry) and `drain_timeout_secs` (post-exit drain window); heredoc missing delimiter rejected before spawn | any |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs` (kill on expiry) and `drain_timeout_secs` (post-exit drain window); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter) | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 

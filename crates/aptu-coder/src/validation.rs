@@ -270,7 +270,6 @@ pub(crate) fn validate_path_in_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell_write::scan_backward_for_file_write;
 
     #[test]
     fn validate_path_no_trailing_slash() {
@@ -299,39 +298,5 @@ mod tests {
                 "file extension should be txt, path has trailing separator"
             );
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Unit tests for scan_backward_for_file_write edge cases.
-    // The inner helpers (token_before_pos, skip_ws_backward) are tested
-    // indirectly via scan_backward_for_file_write with targeted inputs.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn scan_backward_empty_input_not_file_write() {
-        // here_pos == 0: nothing before <<, must not panic and must return false.
-        assert!(!scan_backward_for_file_write(b"", 0));
-    }
-
-    #[test]
-    fn scan_backward_only_whitespace_before_heredoc_not_file_write() {
-        // All whitespace before <<: "   <<"
-        // token_before_pos returns an empty slice, skip_ws_backward leaves pos==0.
-        let cmd = b"   <<";
-        assert!(!scan_backward_for_file_write(cmd, 3));
-    }
-
-    #[test]
-    fn scan_backward_leading_whitespace_file_token_then_redirect() {
-        // "  cat > file <<" -- whitespace at start of string, cat before redirect.
-        let cmd = b"  cat > file <<";
-        assert!(scan_backward_for_file_write(cmd, 13));
-    }
-
-    #[test]
-    fn scan_backward_file_token_only_no_redirect_no_tee_not_file_write() {
-        // "somecmd file <<" -- neither cat/tee nor a redirect; must return false.
-        let cmd = b"somecmd file <<";
-        assert!(!scan_backward_for_file_write(cmd, 13));
     }
 }

@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Shell write validation helpers: heredoc and file-write pattern detection.
 //!
-//! Extracted from `validation.rs` (F5, issue #1221).  This module owns the
-//! pre-spawn exec_command guard; `validation.rs` retains path-safety helpers
-//! used by edit_overwrite and edit_replace.
+//! Pre-spawn exec_command guard: rejects heredoc patterns before any process is spawned.  `validation.rs` retains path-safety helpers used by edit_overwrite and edit_replace.
 
 use rmcp::model::ErrorData;
 
@@ -551,7 +549,7 @@ fn scan_backward_for_stdin_flag(bytes: &[u8], here_pos: usize) -> bool {
     false
 }
 
-pub(crate) fn stdin_flag_heredoc_error() -> ErrorData {
+fn stdin_flag_heredoc_error() -> ErrorData {
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "stdin-consuming flag with heredoc detected (--body-file -, --data -, etc.) -- pass content via the `stdin` parameter instead, or write to a file first with edit_overwrite".to_string(),
@@ -559,7 +557,7 @@ pub(crate) fn stdin_flag_heredoc_error() -> ErrorData {
     )
 }
 
-pub(crate) fn file_write_heredoc_error() -> ErrorData {
+fn file_write_heredoc_error() -> ErrorData {
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "heredoc file-write pattern detected (cat/tee/redirect + <<) -- use edit_overwrite to write files instead of shell heredocs".to_string(),
@@ -567,7 +565,7 @@ pub(crate) fn file_write_heredoc_error() -> ErrorData {
     )
 }
 
-pub(crate) fn missing_heredoc_error() -> ErrorData {
+fn missing_heredoc_error() -> ErrorData {
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "heredoc closing delimiter not found -- likely a quoting or escaping issue; use edit_overwrite to write files instead of shell heredocs".to_string(),
@@ -575,10 +573,43 @@ pub(crate) fn missing_heredoc_error() -> ErrorData {
     )
 }
 
-pub(crate) fn stdin_param_heredoc_error() -> ErrorData {
+fn stdin_param_heredoc_error() -> ErrorData {
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "stdin parameter and heredoc cannot be used together -- pass content via the `stdin` parameter instead".to_string(),
         Some(error_meta("validation", false, "use the stdin parameter instead of a heredoc")),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_backward_for_file_write;
+
+    #[test]
+    fn scan_backward_empty_input_not_file_write() {
+        // here_pos == 0: nothing before <<, must not panic and must return false.
+        assert!(!scan_backward_for_file_write(b"", 0));
+    }
+
+    #[test]
+    fn scan_backward_only_whitespace_before_heredoc_not_file_write() {
+        // All whitespace before <<: "   <<"
+        // token_before_pos returns an empty slice, skip_ws_backward leaves pos==0.
+        let cmd = b"   <<";
+        assert!(!scan_backward_for_file_write(cmd, 3));
+    }
+
+    #[test]
+    fn scan_backward_leading_whitespace_file_token_then_redirect() {
+        // "  cat > file <<" -- whitespace at start of string, cat before redirect.
+        let cmd = b"  cat > file <<";
+        assert!(scan_backward_for_file_write(cmd, 13));
+    }
+
+    #[test]
+    fn scan_backward_file_token_only_no_redirect_no_tee_not_file_write() {
+        // "somecmd file <<" -- neither cat/tee nor a redirect; must return false.
+        let cmd = b"somecmd file <<";
+        assert!(!scan_backward_for_file_write(cmd, 13));
+    }
 }
