@@ -211,6 +211,18 @@ fn validate_pre_spawn_phase(
         return Err(err_to_tool_result(e));
     }
 
+    // Validate that stdin and heredoc are not both present (they'd conflict on stdin)
+    if params.stdin.is_some() && shell_write::has_heredoc(command) {
+        span.record("error", true);
+        span.record("error.type", "invalid_params");
+        let e = ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            "stdin parameter and heredoc cannot be used together -- pass content via the `stdin` parameter instead".to_string(),
+            Some(error_meta("validation", false, "use the stdin parameter instead of a heredoc")),
+        );
+        return Err(err_to_tool_result(e));
+    }
+
     // Validate drain_timeout_secs: negative values are invalid.
     if let Some(n) = params.drain_timeout_secs
         && n < 0

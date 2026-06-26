@@ -1331,3 +1331,268 @@ async fn test_heredoc_escaped_paren_accepted() {
         "expected isError=false for escaped paren in non-write command: {resp}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Heredoc + stdin-consuming flag rejection tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_heredoc_stdin_bodyfile_flag_rejected() {
+    // Arrange: --body-file - with heredoc (both consume stdin)
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl --body-file - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --body-file - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_data_flag_rejected() {
+    // Arrange: --data - with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl --data - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --data - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_data_raw_flag_rejected() {
+    // Arrange: --data-raw - with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl --data-raw - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --data-raw - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_data_binary_flag_rejected() {
+    // Arrange: --data-binary - with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl --data-binary - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --data-binary - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_data_urlencode_flag_rejected() {
+    // Arrange: --data-urlencode - with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl --data-urlencode - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --data-urlencode - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_dash_d_flag_rejected() {
+    // Arrange: -d - with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl -d - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for -d - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_cap_f_flag_rejected() {
+    // Arrange: -F - with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl -F - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for -F - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_stdin_flag_rejected() {
+    // Arrange: --stdin with heredoc
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "some-tool --stdin << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --stdin with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag"),
+        "error should mention stdin-consuming flag: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_cat_dash_rejected() {
+    // Arrange: cat - with heredoc (reads from stdin with - argument).
+    // Note: cat - is already caught by the file-write heredoc check
+    // (cat is a known file-write command), so the error message will
+    // reference file-write rather than stdin-consuming flag.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat - << EOF\ncontent\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for cat - with heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_param_conflict_rejected() {
+    // Arrange: params.stdin set + heredoc in command
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat << EOF\ncontent\nEOF",
+        "stdin": "some_content"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for stdin param + heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin parameter and heredoc cannot be used together"),
+        "error should mention conflict: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_heredoc_stdin_param_no_conflict_succeeds() {
+    // Arrange: params.stdin set, no heredoc (regression guard)
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "cat",
+        "stdin": "hello"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for stdin param without heredoc: {resp}"
+    );
+    let sc = &resp["result"]["structuredContent"];
+    assert_eq!(sc["exit_code"], 0, "cat with stdin should succeed: {sc}");
+}
+
+#[tokio::test]
+async fn test_scan_backward_flag_in_single_quotes_not_rejected() {
+    // Arrange: --body-file - inside single quotes with heredoc
+    // Should NOT be rejected (flag inside quotes is literal, not a flag)
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo '--body-file -' << EOF\ndata\nEOF"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for quoted --body-file - with heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_scan_backward_flag_in_double_quotes_not_rejected() {
+    // Arrange: --data - inside double quotes with heredoc
+    // Should NOT be rejected (flag inside quotes is literal, not a flag)
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo \"--data -\" << EOF\ndata\nEOF"
+    }))
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected isError=false for quoted --data - with heredoc: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_body_file_flag_with_heredoc_rejected() {
+    // Arrange: --body-file - outside quotes with heredoc
+    // MUST be rejected (stdin-consuming flag + heredoc conflict)
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl --body-file - << EOF\ndata\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for --body-file - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag") || text.contains("stdin"),
+        "error should mention stdin conflict: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_data_flag_d_with_heredoc_rejected() {
+    // Arrange: -d - outside quotes with heredoc
+    // MUST be rejected (stdin-consuming flag + heredoc conflict)
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "curl -d - << EOF\ndata\nEOF"
+    }))
+    .await;
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected isError=true for -d - with heredoc: {resp}"
+    );
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("stdin-consuming flag") || text.contains("stdin"),
+        "error should mention stdin conflict: {text}"
+    );
+}
