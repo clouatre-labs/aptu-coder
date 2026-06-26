@@ -10,43 +10,6 @@ use rmcp::model::ErrorData;
 
 use crate::tools::common::error_meta;
 
-/// Returns true if `command` contains a heredoc (`<<`) outside of quotes.
-///
-/// Quote-aware: single-quoted and double-quoted regions are skipped so that
-/// a literal `<<` inside a string does not produce a false positive.
-pub(crate) fn has_heredoc(command: &str) -> bool {
-    let bytes = command.as_bytes();
-    let len = bytes.len();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut i = 0;
-
-    while i < len {
-        let ch = bytes[i] as char;
-
-        if ch == '\'' && !in_double_quote {
-            in_single_quote = !in_single_quote;
-            i += 1;
-            continue;
-        }
-        if ch == '"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
-            i += 1;
-            continue;
-        }
-        if in_single_quote || in_double_quote {
-            i += 1;
-            continue;
-        }
-        if ch == '<' && i + 1 < len && bytes[i + 1] == b'<' {
-            return true;
-        }
-        i += 1;
-    }
-
-    false
-}
-
 /// Scans a shell command string for unclosed heredocs and file-write heredoc
 /// patterns before any process is spawned.
 ///
@@ -62,7 +25,7 @@ pub(crate) fn has_heredoc(command: &str) -> bool {
 /// or `Err(ErrorData)` with `INVALID_PARAMS` otherwise.
 ///
 /// This function does NOT spawn any process; it is a pure string scan.
-pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
+pub(crate) fn validate_heredocs(command: &str, has_stdin: bool) -> Result<(), ErrorData> {
     let bytes = command.as_bytes();
     let len = bytes.len();
 
@@ -96,6 +59,14 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
         while i < len {
             let ch = bytes[i] as char;
 
+            // Backslash escapes: outside single-quote regions, a backslash escapes
+            // the next character so an escaped quote does not toggle quote state.
+            // Inside single quotes, backslash has no special meaning in POSIX sh.
+            if ch == '\\' && !in_single_quote {
+                i += 2; // skip the escaped character
+                continue;
+            }
+
             // Single-quote regions: no escaping inside; toggle on every `'`.
             if ch == '\'' && !in_double_quote {
                 in_single_quote = !in_single_quote;
@@ -124,6 +95,9 @@ pub(crate) fn validate_heredocs(command: &str) -> Result<(), ErrorData> {
                 }
                 if scan_backward_for_stdin_flag(bytes, i) {
                     return Err(stdin_flag_heredoc_error());
+                }
+                if has_stdin {
+                    return Err(stdin_param_heredoc_error());
                 }
                 i += 2;
                 continue;
@@ -598,5 +572,13 @@ pub(crate) fn missing_heredoc_error() -> ErrorData {
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "heredoc closing delimiter not found -- likely a quoting or escaping issue; use edit_overwrite to write files instead of shell heredocs".to_string(),
         Some(error_meta("validation", false, "use edit_overwrite to write files")),
+    )
+}
+
+pub(crate) fn stdin_param_heredoc_error() -> ErrorData {
+    ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        "stdin parameter and heredoc cannot be used together -- pass content via the `stdin` parameter instead".to_string(),
+        Some(error_meta("validation", false, "use the stdin parameter instead of a heredoc")),
     )
 }

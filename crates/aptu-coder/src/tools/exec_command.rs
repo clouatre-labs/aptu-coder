@@ -205,21 +205,9 @@ fn validate_pre_spawn_phase(
     }
 
     // Validate heredocs before spawning any process
-    if let Err(e) = shell_write::validate_heredocs(command) {
+    if let Err(e) = shell_write::validate_heredocs(command, params.stdin.is_some()) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
-        return Err(err_to_tool_result(e));
-    }
-
-    // Validate that stdin and heredoc are not both present (they'd conflict on stdin)
-    if params.stdin.is_some() && shell_write::has_heredoc(command) {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        let e = ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "stdin parameter and heredoc cannot be used together -- pass content via the `stdin` parameter instead".to_string(),
-            Some(error_meta("validation", false, "use the stdin parameter instead of a heredoc")),
-        );
         return Err(err_to_tool_result(e));
     }
 
