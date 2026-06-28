@@ -48,6 +48,8 @@ def load_sessions(worktrees_dir):
             with open(plan_path, "r") as f:
                 plan = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
+            # Missing or corrupted 02-plan.json is expected for incomplete sessions;
+            # keep plan as {} and continue with partial data.
             pass
 
         # Load 03-build.json
@@ -56,6 +58,8 @@ def load_sessions(worktrees_dir):
             with open(build_path, "r") as f:
                 build = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
+            # Missing or corrupted 03-build.json is expected for incomplete sessions;
+            # keep build as {} and continue with partial data.
             pass
 
         # Load 04-validation.json
@@ -64,6 +68,8 @@ def load_sessions(worktrees_dir):
             with open(validation_path, "r") as f:
                 validation = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
+            # Missing or corrupted 04-validation.json is expected for incomplete sessions;
+            # keep validation as {} so the session is counted as incomplete.
             pass
 
         # Derive session_id: validation > plan > dirname
