@@ -40,6 +40,7 @@ regex = { workspace = true }
 tokio-util = { workspace = true }
 tempfile = { workspace = true }
 tree-sitter-rust = { workspace = true }
+fs2 = { workspace = true }
 tree-sitter-go = { workspace = true }
 tree-sitter-cpp = { workspace = true }
 tree-sitter-c-sharp = { workspace = true }
