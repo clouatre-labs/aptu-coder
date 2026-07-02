@@ -31,6 +31,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 schemars = { version = "1", features = ["derive"] }
 tempfile = "=3.27.0"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
+fs2 = "0.4"
 tree-sitter-rust = "0.24.2"
 regex = "1"
 toml = "1.0"

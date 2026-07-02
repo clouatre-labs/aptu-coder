@@ -8,6 +8,7 @@
 //! Files older than 30 days are deleted on startup.
 
 use aptu_coder_core::lang::language_for_extension;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -243,6 +244,11 @@ struct ToolMetrics {
     output_chars: u64,
 }
 
+/// RAII guard that releases an exclusive lock on a metrics .lock file when dropped.
+/// Lock release happens implicitly when the underlying `std::fs::File` is closed.
+#[allow(dead_code)]
+struct MetricsLockGuard(std::fs::File);
+
 impl MetricsWriter {
     pub fn new(
         rx: tokio::sync::mpsc::UnboundedReceiver<MetricEvent>,
@@ -273,7 +279,15 @@ impl MetricsWriter {
     }
 
     /// Write accumulated batch to file. Fire-and-forget semantics: errors are logged but not propagated.
-    async fn flush_batch(file: &mut tokio::fs::File, batch: Vec<MetricEvent>) {
+    /// Flush a batch of events to the JSONL file.
+    /// Acquires an exclusive advisory lock on a sibling .lock file before writing
+    /// to prevent concurrent session writes from corrupting the JSONL file.
+    /// Lock acquisition failures degrade gracefully (warn and continue) per the
+    /// non-blocking observability contract.
+    async fn flush_batch(file: &mut tokio::fs::File, path: &Path, batch: Vec<MetricEvent>) {
+        // Best-effort exclusive lock on sibling .lock file
+        let _lock_guard = Self::acquire_metrics_lock(path).await;
+
         for event in batch {
             // Record to OTel metrics if available
             record_otel_metrics(&event);
@@ -285,6 +299,47 @@ impl MetricsWriter {
             }
         }
         let _ = file.flush().await;
+    }
+
+    /// Acquire an exclusive lock on a sibling .lock file for the metrics JSONL file.
+    /// Returns a guard that releases the lock when dropped.
+    /// On failure, logs a warning and returns None (degrade gracefully).
+    async fn acquire_metrics_lock(path: &Path) -> Option<MetricsLockGuard> {
+        let lock_path = format!("{}.lock", path.display());
+        let file = match std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    lock_path = %lock_path,
+                    "metrics: failed to open lock file; proceeding without lock"
+                );
+                return None;
+            }
+        };
+        let result = tokio::task::spawn_blocking(move || file.lock_exclusive().map(|_| file)).await;
+        match result {
+            Ok(Ok(locked)) => Some(MetricsLockGuard(locked)),
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    error = %e,
+                    "metrics: failed to acquire exclusive lock; proceeding without lock"
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "metrics: spawn_blocking panicked acquiring lock; proceeding without lock"
+                );
+                None
+            }
+        }
     }
 
     /// Check for date transition and rotate metrics file if needed.
@@ -394,7 +449,7 @@ impl MetricsWriter {
                 .await;
 
             if let Ok(mut file) = file {
-                Self::flush_batch(&mut file, batch).await;
+                Self::flush_batch(&mut file, &path, batch).await;
             }
         }
 
@@ -560,6 +615,9 @@ async fn cleanup_old_files(base_dir: &Path) {
                 let file_days = date_to_days_since_epoch(year, month, day);
                 if now_days > file_days && (now_days - file_days) > 30 {
                     let _ = tokio::fs::remove_file(&path).await;
+                    // Remove the sibling lock file created by acquire_metrics_lock.
+                    let lock_path = format!("{}.lock", path.display());
+                    let _ = tokio::fs::remove_file(&lock_path).await;
                 }
             }
             Ok(None) => break,
@@ -1230,6 +1288,128 @@ mod tests {
         unsafe {
             std::env::remove_var("APTU_CODER_METRICS_EXPORT_FILE");
         }
+    }
+
+    #[tokio::test]
+    async fn test_lock_file_created() {
+        // Assert: lock file is created next to JSONL file with deterministic name
+        let dir = TempDir::new().unwrap();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
+        let make_event = || MetricEvent {
+            ts: unix_ms(),
+            tool: "analyze_directory",
+            duration_ms: 1,
+            output_chars: 10,
+            param_path_depth: 1,
+            max_depth: None,
+            result: "ok",
+            error_type: None,
+            error_subtype: None,
+            session_id: None,
+            seq: None,
+            cache_hit: None,
+            cache_write_failure: None,
+            exit_code: None,
+            timed_out: false,
+            cache_tier: None,
+            output_truncated: None,
+            chars_threshold_breach: false,
+            file_ext: None,
+            filter_applied: None,
+            language: None,
+        };
+        tx.send(make_event()).unwrap();
+        drop(tx);
+        writer.run().await;
+
+        // Check that a .lock file exists next to the JSONL file
+        let jsonl_entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("jsonl"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(jsonl_entries.len(), 1);
+        let lock_path = format!("{}.lock", jsonl_entries[0].path().display());
+        assert!(
+            std::path::Path::new(&lock_path).exists(),
+            "lock file must exist next to JSONL file"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_flush_batch_concurrent_writes() {
+        // Edge case: two writers writing to the same metrics directory
+        // should both complete without panic (advisory lock protects against corruption).
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+
+        // Writer 1
+        let (tx1, rx1) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let writer1 = MetricsWriter::new(rx1, Some(base.clone()));
+        let make_event = || MetricEvent {
+            ts: unix_ms(),
+            tool: "analyze_directory",
+            duration_ms: 1,
+            output_chars: 10,
+            param_path_depth: 1,
+            max_depth: None,
+            result: "ok",
+            error_type: None,
+            error_subtype: None,
+            session_id: None,
+            seq: None,
+            cache_hit: None,
+            cache_write_failure: None,
+            exit_code: None,
+            timed_out: false,
+            cache_tier: None,
+            output_truncated: None,
+            chars_threshold_breach: false,
+            file_ext: None,
+            filter_applied: None,
+            language: None,
+        };
+        tx1.send(make_event()).unwrap();
+        tx1.send(make_event()).unwrap();
+        drop(tx1);
+
+        // Writer 2
+        let (tx2, rx2) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let writer2 = MetricsWriter::new(rx2, Some(base));
+        tx2.send(make_event()).unwrap();
+        tx2.send(make_event()).unwrap();
+        drop(tx2);
+
+        // Run both writers concurrently
+        let h1 = tokio::spawn(writer1.run());
+        let h2 = tokio::spawn(writer2.run());
+        let (r1, r2) = tokio::join!(h1, h2);
+        r1.unwrap();
+        r2.unwrap();
+
+        // Both writers succeeded; verify the JSONL file has all 4 events
+        let jsonl_entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("jsonl"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(jsonl_entries.len(), 1);
+        let content = std::fs::read_to_string(jsonl_entries[0].path()).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 4, "expected 4 JSONL lines from 2 writers");
     }
 }
 

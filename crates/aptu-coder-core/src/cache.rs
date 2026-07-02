@@ -8,6 +8,7 @@
 use crate::analyze::{AnalysisOutput, FileAnalysisOutput, FocusedAnalysisOutput};
 use crate::traversal::WalkEntry;
 use crate::types::{AnalysisMode, SymbolMatchMode};
+use fs2::FileExt;
 use lru::LruCache;
 use rayon::prelude::*;
 use serde::{Serialize, de::DeserializeOwned};
@@ -648,6 +649,8 @@ impl DiskCache {
             return None;
         }
         let path = self.entry_path(tool, key);
+        // Acquire shared lock on per-shard .lock sentinel before reading
+        let _lock = lock_shard_shared(path.parent()?);
         let compressed = match std::fs::read(&path) {
             Ok(b) => b,
             Err(_) => return None,
@@ -675,6 +678,8 @@ impl DiskCache {
     }
 
     /// Write compressed data to a temporary file and atomically rename it to the target path.
+    /// Acquires an exclusive lock on the per-shard .lock sentinel before the persist (rename)
+    /// to prevent concurrent writes from corrupting the cache entry.
     /// Returns Err if any step fails; caller silently drops the error.
     fn write_entry_atomically(
         dir: &std::path::Path,
@@ -682,6 +687,8 @@ impl DiskCache {
         compressed: &[u8],
     ) -> Result<(), std::io::Error> {
         use std::io::Write;
+        // Acquire exclusive lock on per-shard .lock sentinel before writing
+        let _lock = lock_shard_exclusive(dir)?;
         let mut tmp = NamedTempFile::new_in(dir)?;
         tmp.write_all(compressed)?;
         tmp.persist(path).map(|_| ()).map_err(|e| e.error)
@@ -767,6 +774,54 @@ fn evict_dir_recursive(
     Ok(())
 }
 
+/// Acquire a shared (read) lock on the per-shard `.lock` sentinel.
+/// Creates the lock file if it does not exist. Lock failures degrade
+/// gracefully (warn and return None) so that read availability is
+/// never blocked by lock infrastructure issues.
+fn lock_shard_shared(shard_dir: &std::path::Path) -> Option<ShardLockGuard> {
+    let lock_path = shard_dir.join(".lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .ok()?;
+    match file.lock_shared() {
+        Ok(()) => Some(ShardLockGuard(file)),
+        Err(e) => {
+            warn!(
+                error = %e, lock_path = %lock_path.display(),
+                "disk cache: failed to acquire shared lock on shard; proceeding without lock"
+            );
+            None
+        }
+    }
+}
+
+/// Acquire an exclusive (write) lock on the per-shard `.lock` sentinel.
+/// Creates the lock file if it does not exist. Returns Err if the lock
+/// file cannot be opened or if the lock acquisition fails, propagating
+/// the error to the caller (which typically degrades gracefully).
+fn lock_shard_exclusive(shard_dir: &std::path::Path) -> Result<ShardLockGuard, std::io::Error> {
+    let lock_path = shard_dir.join(".lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    file.lock_exclusive()?;
+    Ok(ShardLockGuard(file))
+}
+
+/// RAII guard that releases a per-shard flock when dropped.
+/// Closing the underlying file descriptor releases the BSD/OFC lock.
+struct ShardLockGuard(
+    /// Held exclusively for its `Drop` implementation: closing the file
+    /// descriptor releases the advisory flock. Never read directly.
+    #[expect(dead_code)]
+    std::fs::File,
+);
+
 #[cfg(test)]
 mod disk_cache_tests {
     use super::*;
@@ -827,6 +882,82 @@ mod disk_cache_tests {
         assert!(
             cache.disabled,
             "disabled flag must be true after dir creation failure"
+        );
+    }
+
+    #[test]
+    fn test_concurrent_get_put_same_shard() {
+        // Edge case: concurrent get() + put() on the same shard from two threads
+        // must not panic and must return consistent results.
+        let dir = TempDir::new().unwrap();
+        let cache = std::sync::Arc::new(DiskCache::new(dir.path().to_path_buf(), false));
+        let key = blake3::hash(b"concurrent-test-key");
+        let value = serde_json::json!({"result": "from put thread", "n": 42});
+
+        // Pre-populate so get() has a chance to read something
+        cache.put("analyze_file", &key, &value);
+
+        let cache_get = cache.clone();
+        let cache_put = cache.clone();
+        let key_put = key;
+        let key_get = key;
+        let value_put = serde_json::json!({"result": "from put thread", "n": 100});
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                // Write thread: perform put
+                cache_put.put("analyze_file", &key_put, &value_put);
+            });
+            scope.spawn(|| {
+                // Read thread: perform get concurrently
+                let _: Option<serde_json::Value> = cache_get.get("analyze_file", &key_get);
+            });
+        });
+
+        // After both threads complete, verify the cache is in a consistent state
+        let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert!(
+            result.is_some(),
+            "entry must still be retrievable after concurrent access"
+        );
+    }
+
+    #[test]
+    fn test_concurrent_puts_same_shard() {
+        // Edge case: write_entry_atomically acquires exclusive lock before persist;
+        // concurrent writes from two threads must not corrupt the cache entry.
+        let dir = TempDir::new().unwrap();
+        let cache = std::sync::Arc::new(DiskCache::new(dir.path().to_path_buf(), false));
+        let key = blake3::hash(b"concurrent-put-key");
+        let value_a = serde_json::json!({"writer": "A", "data": "hello from A"});
+        let value_b = serde_json::json!({"writer": "B", "data": "hello from B"});
+
+        let cache_a = cache.clone();
+        let cache_b = cache.clone();
+        let key_a = key;
+        let key_b = key;
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                cache_a.put("analyze_file", &key_a, &value_a);
+            });
+            scope.spawn(|| {
+                cache_b.put("analyze_file", &key_b, &value_b);
+            });
+        });
+
+        // After both writes complete, the entry must be deserializable (not corrupt)
+        let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert!(
+            result.is_some(),
+            "entry must be retrievable after concurrent puts"
+        );
+        // Either value is acceptable; the key invariant is that the data is uncorrupted
+        let v = result.unwrap();
+        let writer = v.get("writer").and_then(|w| w.as_str());
+        assert!(
+            writer == Some("A") || writer == Some("B"),
+            "entry must contain data from one of the concurrent writers, got {writer:?}"
         );
     }
 }
