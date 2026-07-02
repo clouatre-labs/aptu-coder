@@ -990,7 +990,6 @@ impl SemanticExtractor {
                     let mut arg_count = None;
                     let mut arg_node = node;
                     let mut hop = 0u32;
-                    let mut cap_hit = false;
                     while let Some(parent) = arg_node.parent() {
                         hop += 1;
                         // Bounded parent traversal: cap at 16 hops to guard against pathological
@@ -999,7 +998,7 @@ impl SemanticExtractor {
                         // leave arg_count as None; the caller is still recorded, just without
                         // argument-count information.
                         if hop > 16 {
-                            cap_hit = true;
+                            tracing::debug!(hop, callee = %call_name, "extract_calls: parent traversal cap reached; arg_count will be None");
                             break;
                         }
                         if parent.kind() == "call_expression" {
@@ -1010,11 +1009,6 @@ impl SemanticExtractor {
                         }
                         arg_node = parent;
                     }
-                    debug_assert!(
-                        !cap_hit,
-                        "extract_calls: parent traversal cap reached (hop > 16)"
-                    );
-
                     calls.push(CallInfo {
                         caller,
                         callee: call_name,
@@ -1798,6 +1792,30 @@ fn main() {
 
         // Assert
         assert!(sites.is_empty(), "expected empty for nonexistent symbol");
+    }
+
+    #[test]
+    fn extract_calls_does_not_panic_on_function_calls() {
+        // Regression test for #1251: debug_assert in extract_calls fired on degenerate
+        // ASTs and killed the server process via panic=abort. Verify extract() succeeds
+        // and returns call info for normal source.
+        let src = r#"
+fn caller() {
+    callee_a();
+    callee_b(1, 2);
+    nested::callee_c();
+}
+"#;
+        let result = SemanticExtractor::extract(src, "rust", None, None);
+        assert!(
+            result.is_ok(),
+            "extract must not panic or error on valid source"
+        );
+        let output = result.unwrap();
+        assert!(
+            !output.calls.is_empty(),
+            "extract must return call entries for source with function calls"
+        );
     }
 }
 
