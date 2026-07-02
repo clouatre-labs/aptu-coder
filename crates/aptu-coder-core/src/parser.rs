@@ -1817,6 +1817,36 @@ fn caller() {
             "extract must return call entries for source with function calls"
         );
     }
+
+    #[test]
+    fn extract_calls_caps_arg_count_at_sixteen_hops() {
+        // Regression test for #1251: verify deeply nested parenthesized arguments
+        // (20 levels) do not cause a panic. The inner call `g()` is always at 1 hop
+        // from its enclosing call_expression (function identifier is a direct child),
+        // so arg_count is Some(0) -- the cap only fires when the captured node is
+        // deeper in the AST than the direct function child of a call_expression.
+        let src = r#"fn main() { f((((((((((((((((((((g())))))))))))))))))))); }"#;
+        let result = SemanticExtractor::extract(src, "rust", None, None);
+        assert!(
+            result.is_ok(),
+            "extract must succeed even with deeply nested parenthesized arguments"
+        );
+        let output = result.unwrap();
+        let g_calls: Vec<&CallInfo> = output.calls.iter().filter(|c| c.callee == "g").collect();
+        assert_eq!(
+            g_calls.len(),
+            1,
+            "expected exactly one CallInfo with callee 'g', got {}",
+            g_calls.len()
+        );
+        // arg_count is Some(0) because g() has 0 arguments; the >16 hop cap is
+        // a parent-traversal guard on the captured node, not on the call nesting.
+        assert_eq!(
+            g_calls[0].arg_count,
+            Some(0),
+            "g() has 0 arguments, expected Some(0)"
+        );
+    }
 }
 
 #[cfg(test)]
