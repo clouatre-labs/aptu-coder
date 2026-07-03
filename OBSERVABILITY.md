@@ -11,7 +11,7 @@ aptu-coder emits two independent telemetry streams that operate in parallel:
 
 - **OpenTelemetry export (opt-in):** Enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Traces, logs, and metrics are exported asynchronously via OTLP/HTTP to any compliant collector (Jaeger, Grafana Tempo, Datadog, etc.). When unset, noop providers are used with zero runtime overhead. This stream is parallel and independent from JSONL.
 
-The two streams have complementary roles: JSONL is the local audit trail and performance baseline; OTel is the distributed tracing signal. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the JSONL schema and rotation policy.
+The two streams have complementary roles: JSONL is the local audit trail and performance baseline; OTel is the distributed tracing signal. See [docs/METRICS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/METRICS.md) for the JSONL schema and rotation policy.
 
 ## Span attribute policy
 

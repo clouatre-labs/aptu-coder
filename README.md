@@ -258,7 +258,7 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 For the JSONL schema, OTel configuration, and span attribute policy, see:
 
 - [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) (repository root)
-- [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md)
+- [docs/METRICS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/METRICS.md)
 
 ## Documentation
 
@@ -267,7 +267,7 @@ For the JSONL schema, OTel configuration, and span attribute policy, see:
 - **[CONTRIBUTING.md](https://github.com/clouatre-labs/aptu-coder/blob/main/CONTRIBUTING.md)** - Development workflow, commit conventions, PR checklist
 - **[DESIGN-GUIDE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/DESIGN-GUIDE.md)** - Design decisions, rationale, and replication guide for building high-performance MCP servers
 - **[MCP Best Practices](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/MCP-BEST-PRACTICES.md)** - Best practices for agentic loops, orchestration patterns, MCP tool design, memory management, and safety controls
-- **[OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md)** - Metrics schema, JSONL format, and retention policy
+- **[METRICS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/METRICS.md)** - Metrics schema, JSONL format, and retention policy
 - **[ROADMAP.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ROADMAP.md)** - Development history and future direction
 - **[SECURITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/SECURITY.md)** - Security policy and vulnerability reporting
 
