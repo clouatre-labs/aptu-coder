@@ -301,7 +301,7 @@ Observed cache impact:
 
 - `ShellOutput` includes `filter_applied`.
 - The README states that `filter_applied` appears in `structuredContent`.
-- [docs/OBSERVABILITY.md](../OBSERVABILITY.md) states that `filter_applied` is not recorded in JSONL.
+- [docs/METRICS.md](../METRICS.md) states that `filter_applied` is not recorded in JSONL.
 
 **Impact:**
 

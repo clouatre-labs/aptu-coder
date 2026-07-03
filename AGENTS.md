@@ -33,12 +33,12 @@ Dependency freshness: new Cargo.lock entries must be >=7 days old; bypass with S
 
 Two parallel telemetry channels; neither blocks tool execution.
 
-- **JSONL (always-on):** daily-rotated files at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl`; 30-day retention. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for schema and span attribute policy.
+- **JSONL (always-on):** daily-rotated files at `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl`; 30-day retention. See [docs/METRICS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/METRICS.md) for schema and span attribute policy.
 - **OpenTelemetry (opt-in):** set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable OTLP/HTTP export; noop providers when unset. W3C Trace Context extracted from MCP `_meta` so tool spans appear as children in the calling agent's distributed trace.
 
 ### JSONL Metrics Analysis
 
-Files: `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/share/aptu-coder/`). Full schema in [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md).
+Files: `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/share/aptu-coder/`). Full schema in [docs/METRICS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/METRICS.md).
 
 Five validated jq one-liners (run from `~/.local/share/aptu-coder/`). Always `cd` there first -- globs expand against CWD and silently match nothing from a different directory.
 
