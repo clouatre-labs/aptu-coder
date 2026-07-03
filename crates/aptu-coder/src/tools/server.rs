@@ -8,18 +8,16 @@
 //! `lib.rs`. This module contains the extracted bodies called by thin shims.
 
 use crate::filters::load_filter_table;
-use crate::logging::LogEvent;
 use crate::shell::resolve_shell;
 use aptu_coder_core::cache::{AnalysisCache, CallGraphCache};
 use rmcp::handler::server::tool::ToolRouter;
-use rmcp::model::{LoggingMessageNotificationParam, Notification, ServerNotification};
 use rmcp::{Peer, RoleServer};
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc};
-use tracing::{instrument, warn};
+use tokio::sync::{Mutex as TokioMutex, RwLock};
+use tracing::instrument;
 use tracing_subscriber::filter::LevelFilter;
 
 /// Builds a fully initialized `CodeAnalyzer`.
@@ -29,7 +27,6 @@ use tracing_subscriber::filter::LevelFilter;
 pub(crate) fn build_analyzer(
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
     log_level_filter: Arc<Mutex<LevelFilter>>,
-    event_rx: mpsc::UnboundedReceiver<LogEvent>,
     metrics_tx: crate::metrics::MetricsSender,
 ) -> crate::CodeAnalyzer {
     let file_cap: usize = std::env::var("APTU_CODER_FILE_CACHE_CAPACITY")
@@ -108,7 +105,6 @@ pub(crate) fn build_analyzer(
         disk_cache,
         peer,
         log_level_filter,
-        event_rx: Arc::new(TokioMutex::new(Some(event_rx))),
         metrics_tx,
         session_call_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         session_id: Arc::new(TokioMutex::new(None)),
@@ -130,10 +126,9 @@ pub(crate) fn build_analyzer(
 /// Handles the `on_initialized` server lifecycle event.
 ///
 /// Contains the logic previously in `ServerHandler::on_initialized`.
-#[instrument(skip(peer, event_rx, tool_router))]
+#[instrument(skip(peer, tool_router))]
 pub(crate) async fn on_initialized_impl(
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
-    event_rx: Arc<TokioMutex<Option<mpsc::UnboundedReceiver<LogEvent>>>>,
     session_id: Arc<TokioMutex<Option<String>>>,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
     session_profile: Arc<std::sync::OnceLock<String>>,
@@ -191,44 +186,6 @@ pub(crate) async fn on_initialized_impl(
 
         router.bind_peer_notifier(context_peer);
     }
-
-    // Spawn consumer task to drain log events from channel with batching.
-    let peer_clone = peer.clone();
-    let event_rx_clone = event_rx.clone();
-
-    tokio::spawn(async move {
-        let rx = {
-            let mut rx_lock = event_rx_clone.lock().await;
-            rx_lock.take()
-        };
-
-        if let Some(mut receiver) = rx {
-            let mut buffer = Vec::with_capacity(64);
-            loop {
-                receiver.recv_many(&mut buffer, 64).await;
-
-                if buffer.is_empty() {
-                    break;
-                }
-
-                let peer_lock = peer_clone.lock().await;
-                if let Some(peer_ref) = peer_lock.as_ref() {
-                    for log_event in buffer.drain(..) {
-                        let notification = ServerNotification::LoggingMessageNotification(
-                            Notification::new(LoggingMessageNotificationParam {
-                                level: log_event.level,
-                                logger: Some(log_event.logger),
-                                data: log_event.data,
-                            }),
-                        );
-                        if let Err(e) = peer_ref.send_notification(notification).await {
-                            warn!("Failed to send logging notification: {}", e);
-                        }
-                    }
-                }
-            }
-        }
-    });
 }
 
 /// Disables the given tool routes on the router.
