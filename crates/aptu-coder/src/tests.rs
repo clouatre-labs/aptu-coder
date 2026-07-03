@@ -9,12 +9,10 @@ use regex::Regex;
 fn make_analyzer() -> CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
     let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
     CodeAnalyzer::new(
         peer,
         log_level_filter,
-        rx,
         crate::metrics::MetricsSender(metrics_tx),
     )
 }
@@ -95,12 +93,10 @@ async fn test_handle_overview_mode_no_summary_block() {
 
     let peer = Arc::new(TokioMutex::new(None));
     let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
     let analyzer = CodeAnalyzer::new(
         peer,
         log_level_filter,
-        rx,
         crate::metrics::MetricsSender(metrics_tx),
     );
 
@@ -147,12 +143,10 @@ async fn test_analyze_directory_summary_false_forces_pagination() {
 
     let peer = Arc::new(TokioMutex::new(None));
     let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
     let analyzer = CodeAnalyzer::new(
         peer,
         log_level_filter,
-        rx,
         crate::metrics::MetricsSender(metrics_tx),
     );
 

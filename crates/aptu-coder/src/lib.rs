@@ -167,7 +167,7 @@ use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as TokioMutex, RwLock, mpsc};
+use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::instrument;
 use tracing_subscriber::filter::LevelFilter;
 
@@ -204,7 +204,6 @@ pub struct CodeAnalyzer {
     disk_cache: std::sync::Arc<cache::DiskCache>,
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
     log_level_filter: Arc<Mutex<LevelFilter>>,
-    event_rx: Arc<TokioMutex<Option<mpsc::UnboundedReceiver<LogEvent>>>>,
     metrics_tx: crate::metrics::MetricsSender,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
     session_id: Arc<TokioMutex<Option<String>>>,
@@ -238,10 +237,9 @@ impl CodeAnalyzer {
     pub fn new(
         peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
         log_level_filter: Arc<Mutex<LevelFilter>>,
-        event_rx: mpsc::UnboundedReceiver<LogEvent>,
         metrics_tx: crate::metrics::MetricsSender,
     ) -> Self {
-        crate::tools::server::build_analyzer(peer, log_level_filter, event_rx, metrics_tx)
+        crate::tools::server::build_analyzer(peer, log_level_filter, metrics_tx)
     }
 
     /// Emit a "received" metric event for the given tool name.
@@ -775,7 +773,6 @@ impl ServerHandler for CodeAnalyzer {
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
         crate::tools::server::on_initialized_impl(
             self.peer.clone(),
-            self.event_rx.clone(),
             self.session_id.clone(),
             self.session_call_seq.clone(),
             self.session_profile.clone(),

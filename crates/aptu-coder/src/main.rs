@@ -219,8 +219,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create shared level filter for dynamic control (std::sync::Mutex for Copy type)
     let log_level_filter = Arc::new(Mutex::new(LevelFilter::WARN));
 
-    // Create unbounded channel for log events
-    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+    // Create unbounded channel for log events; receiver is intentionally dropped --
+    // the log-consumer task was removed in fix(logging) and the capability is no
+    // longer advertised. The sender (held by McpLoggingLayer) silently discards
+    // events when the receiver is gone.
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
 
     // Create MCP logging layer with event sender
     let mcp_logging_layer = McpLoggingLayer::new(event_tx, log_level_filter.clone());
@@ -236,7 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
     tokio::spawn(MetricsWriter::new(metrics_rx, None).run());
 
-    let analyzer = CodeAnalyzer::new(peer, log_level_filter, event_rx, MetricsSender(metrics_tx));
+    let analyzer = CodeAnalyzer::new(peer, log_level_filter, MetricsSender(metrics_tx));
 
     if let Some(p) = port {
         run_http(analyzer, p).await?;
