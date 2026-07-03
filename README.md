@@ -253,27 +253,12 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | `APTU_CODER_PROFILE` | unset | Tool subset: `edit` (edit tools + `exec_command` only), `analyze` (analyze tools + `exec_command` only). Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 
-### Telemetry
-
-| Variable | Default | Description |
-|---|---|---|
-| `DISABLE_PROMPT_CACHING` | unset | Set to `1` to disable prompt caching (recommended for single-pass subagent sessions). |
-| `DISABLE_PROMPT_CACHING_HAIKU` | unset | Set to `1` to disable prompt caching for Haiku-specific pipelines only. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP HTTP endpoint URL (e.g., `http://localhost:4318`). When set, enables trace, log, and metric export via OTLP/HTTP; noop providers when unset. |
-| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | unset | Reserved per OTel GenAI conventions; aptu-coder does not implement this -- bounded parameters are recorded as span attributes instead. |
-| `XDG_DATA_HOME` | `~/.local/share` | Base directory for daily-rotated JSONL metrics files (`$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl`, 30-day retention). |
-
 ## Observability
 
-The server emits two parallel, independent telemetry streams.
+For the JSONL schema, OTel configuration, and span attribute policy, see:
 
-**JSONL metrics (always-on)** are written daily-rotated to `$XDG_DATA_HOME/aptu-coder/` (fallback: `~/.local/share/aptu-coder/`) regardless of configuration. Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. See [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md) for the full schema.
-
-**OpenTelemetry export (opt-in)** is enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set to an OTLP HTTP endpoint URL. When set, the server initializes OpenTelemetry trace, log, and meter providers and exports asynchronously via OTLP/HTTP. When unset, noop providers are used with zero runtime overhead.
-
-Each tool invocation is wrapped in a span carrying OpenTelemetry GenAI semantic attributes (`gen_ai.system`, `gen_ai.operation.name`, `gen_ai.tool.name`). W3C Trace Context is extracted from the MCP `_meta` field on each call, allowing MCP clients to propagate their trace context so tool spans appear as children in a distributed trace.
-
-For the span attribute policy, the never-record list, and details on what is instrumented, see [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) at the repository root.
+- [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) (repository root)
+- [docs/OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/OBSERVABILITY.md)
 
 ## Documentation
 
