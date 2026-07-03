@@ -30,6 +30,9 @@ use tracing::instrument;
 
 pub const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
 
+/// Errors that can occur during code analysis in the MCP tool surface.
+/// Returned as `isError: true` results by `analyze_directory`, `analyze_file`,
+/// `analyze_module`, and `analyze_symbol` tools.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AnalyzeError {
@@ -63,7 +66,9 @@ pub enum AnalyzeError {
     ParseTimeout { path: PathBuf, micros: u64 },
 }
 
-/// Result of directory analysis containing both formatted output and file data.
+/// Result of a directory or module analysis, returned by `analyze_directory` and
+/// `analyze_module` MCP tools. Contains a formatted text tree view (`formatted`) and
+/// structured file metadata (`files`). Pagination is supported via `next_cursor`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[non_exhaustive]
@@ -98,7 +103,9 @@ pub struct AnalysisOutput {
     pub next_cursor: Option<String>,
 }
 
-/// Result of file-level semantic analysis.
+/// Result of a single-file semantic analysis, returned by the `analyze_file` MCP tool.
+/// Contains a formatted text preview (`formatted`), structured function/class/import
+/// data (`semantic`), and pagination support via `next_cursor`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[non_exhaustive]
@@ -322,7 +329,9 @@ pub fn analyze_directory_with_progress(
     Ok(build_analysis_output(entries, analysis_results))
 }
 
-/// Analyze a directory structure and return formatted output and file data.
+/// Analyze a directory tree and return a tree view with per-file LOC, function, and class counts.
+/// Backs the `analyze_directory` MCP tool. Accepts a filesystem root path and optional max depth.
+/// Returns [`AnalysisOutput`] containing both formatted text and structured file metadata.
 #[instrument(skip_all, fields(path = %root.display()))]
 pub fn analyze_directory(
     root: &Path,
@@ -349,7 +358,9 @@ pub fn determine_mode(path: &str, focus: Option<&str>) -> AnalysisMode {
     }
 }
 
-/// Analyze a single file and return semantic analysis with formatted output.
+/// Analyze a single file and return functions, classes, imports, and signatures.
+/// Backs the `analyze_file` MCP tool. Accepts a file path and optional AST recursion limit.
+/// Returns [`FileAnalysisOutput`] with formatted output and structured semantic data.
 #[instrument(skip_all, fields(path))]
 pub fn analyze_file(
     path: &str,
@@ -1230,6 +1241,11 @@ pub fn analyze_focused_with_progress_with_entries(
     )
 }
 
+/// Analyze a symbol's call graph across a directory tree.
+/// Backs the `analyze_symbol` MCP tool. Walks the directory, builds a call graph,
+/// and returns callers, callees, and call depth for the matching symbol.
+/// Accepts optional `follow_depth`, `max_depth`, and `ast_recursion_limit`.
+/// Returns [`FocusedAnalysisOutput`] with formatted chains and structured results.
 #[instrument(skip_all, fields(path = %root.display(), symbol = %focus))]
 pub fn analyze_focused(
     root: &Path,
@@ -1255,8 +1271,10 @@ pub fn analyze_focused(
     analyze_focused_with_progress_with_entries(root, &params, &counter, &ct, &entries)
 }
 
-/// Analyze a single file and return a minimal fixed schema (name, line count, language,
-/// functions, imports) for lightweight code understanding.
+/// Analyze a single file and return a lightweight function/import index (~75% smaller than
+/// `analyze_file`). Backs the `analyze_module` MCP tool. Returns
+/// [`ModuleInfo`](crate::types::ModuleInfo) with name, line count, language, and compact
+/// function/import lists.
 #[instrument(skip_all, fields(path))]
 pub fn analyze_module_file(path: &str) -> Result<crate::types::ModuleInfo, AnalyzeError> {
     // Check file size before reading

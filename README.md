@@ -167,13 +167,14 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `summary` | boolean | auto | Compact output; auto-triggers above 50K chars |
 | `cursor` | string | -- | Pagination cursor from a previous response's `next_cursor` |
 | `page_size` | integer | 100 | Items per page |
+| `git_ref` | string | -- | Restrict analysis to files changed relative to this git ref (branch, tag, or commit); requires a git repository; supported by `analyze_directory` and `analyze_symbol` |
 
 | Tool | Purpose | Languages |
 |------|---------|-----------|
 | `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
 | `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions | all |
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
-| `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
+| `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth. `def_use=true` extracts write/read sites (paginated: first call returns cursor, paginate to retrieve results). `import_lookup=true` finds all files importing a module path; mutually exclusive with call-graph and def_use | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching | all |
 | `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs` (kill on expiry) and `drain_timeout_secs` (post-exit drain window); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter) | any |
@@ -186,7 +187,7 @@ For large codebases, several mechanisms prevent context overflow.
 
 **Pagination**
 
-`analyze_file` and `analyze_symbol` append a `NEXT_CURSOR:` line when output is truncated. Pass the token back as `cursor` to fetch the next page. `summary=true` and `cursor` are mutually exclusive; passing both returns an error.
+`analyze_file` and `analyze_symbol` append a `NEXT_CURSOR:` line when output is truncated. Pass the token back as `cursor` to fetch the next page. `summary=true` and `cursor` are mutually exclusive; passing both returns `INVALID_PARAMS`. See [AGENTS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/AGENTS.md) for the full parameter constraint list.
 
 ```
 # Response ends with:
@@ -250,7 +251,7 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
 | `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
-| `APTU_CODER_PROFILE` | unset | Tool subset: `edit` (edit tools + `exec_command` only), `analyze` (analyze tools + `exec_command` only). Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
+| `APTU_CODER_PROFILE` | unset | Tool subset: `edit` disables all analyze_* tools (analyze_directory, analyze_file, analyze_module, analyze_symbol); `analyze` disables edit tools (edit_overwrite, edit_replace, exec_command, and aliases); absent or unknown enables all 7 tools. Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 
 ### Telemetry
