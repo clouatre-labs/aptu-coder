@@ -8,7 +8,7 @@ This document covers two parallel telemetry streams and their implementation det
 
 - **OpenTelemetry Export** (opt-in): When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, traces, logs, and metrics are exported asynchronously via OTLP/HTTP. Noop providers when unset; zero overhead. Parallel and independent from JSONL.
 
-For span attribute policy, the never-record list, and trace context propagation details, see [OBSERVABILITY.md](../OBSERVABILITY.md) at the repository root.
+For span attribute policy, the never-record list, and trace context propagation details, see [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md).
 
 ## Channel Pattern
 

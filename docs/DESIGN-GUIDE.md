@@ -4,7 +4,7 @@
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - module map and data flow
 - [MCP-BEST-PRACTICES.md](MCP-BEST-PRACTICES.md) - MCP tool design principles and annotation semantics
-- [OBSERVABILITY.md](OBSERVABILITY.md) - metrics schema and channel pattern implementation
+- [METRICS.md](METRICS.md) - metrics schema and channel pattern implementation
 - [ROADMAP.md](ROADMAP.md) - wave history, benchmark results, and small-model-first constraint
 
 ## 1. Purpose and Scope
@@ -145,7 +145,7 @@ graph TD
 }
 ```
 
-*Code Snippet 2: Illustrative metric record shape. See [OBSERVABILITY.md](OBSERVABILITY.md) for the normative field list and schema.*
+*Code Snippet 2: Illustrative metric record shape. See [METRICS.md](METRICS.md) for the normative field list and schema.*
 
 The writer task is isolated from the tool execution path. If disk I/O is slow or the JSONL file is locked, the channel grows; the tool call is unaffected.
 
@@ -153,7 +153,7 @@ The writer task is isolated from the tool execution path. If disk I/O is slow or
 
 **W3C Trace Context extraction:** The MCP `_meta` field can carry W3C Trace Context (`traceparent` header). The server extracts this on every tool call and propagates it as the span parent, allowing tool spans to appear as children in the client's distributed trace. This enables end-to-end tracing across MCP client → server → downstream collectors.
 
-**Span attributes:** Span attributes follow OpenTelemetry GenAI semantic conventions (gen_ai.system, gen_ai.operation.name, gen_ai.tool.name) and include only bounded, safe-to-record values (tool name, path, symbol, parameters, result status, error category). Secrets, file content, command output, and stdin are never recorded. See [OBSERVABILITY.md](OBSERVABILITY.md) for the full span attribute policy and never-record list.
+**Span attributes:** Span attributes follow OpenTelemetry GenAI semantic conventions (gen_ai.system, gen_ai.operation.name, gen_ai.tool.name) and include only bounded, safe-to-record values (tool name, path, symbol, parameters, result status, error category). Secrets, file content, command output, and stdin are never recorded. See [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) for the full span attribute policy and never-record list.
 
 ## 6. Benchmark-Driven Development
 
