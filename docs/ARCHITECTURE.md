@@ -170,7 +170,7 @@ Key sub-operations are wrapped in named child spans so P95 breakdowns are visibl
 
 ### Span attribute policy
 
-All tool handlers record bounded, safe-to-emit span attributes (tool name, path, symbol, result status, error category). Secrets, file content, command output, and stdin are in the never-record list. See [OBSERVABILITY.md](../OBSERVABILITY.md) at the repository root for the full policy and PR review checklist.
+All tool handlers record bounded, safe-to-emit span attributes (tool name, path, symbol, result status, error category). Secrets, file content, command output, and stdin are in the never-record list. See [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) for the full policy and PR review checklist.
 
 ## Language Handler System
 
