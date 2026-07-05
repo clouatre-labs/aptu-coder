@@ -149,6 +149,7 @@ pub fn edit_replace_block(
     let bytes_before = content.len();
     // Find match offset in normalized space, then map back to original byte range
     // SAFETY: match was verified above via count check; find must succeed.
+    // If count verification logic changes, this expect() site must be re-audited.
     #[allow(clippy::expect_used)]
     let norm_match_offset = norm_content
         .find(&norm_old)
