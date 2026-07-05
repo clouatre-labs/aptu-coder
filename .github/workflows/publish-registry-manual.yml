@@ -98,9 +98,9 @@ jobs:
           set -euo pipefail
           gh release download v1.7.8 \
             --repo modelcontextprotocol/registry \
-            --pattern "mcp-publisher_linux_amd64.tar.gz" \
+            --pattern "mcp-publisher_linux_arm64.tar.gz" \
             --output /tmp/mcp-publisher.tar.gz
-          echo "48230dbec85bd88a0d42977ef533cddda23235f0db4331b9263ce53b432cb75c  /tmp/mcp-publisher.tar.gz" | sha256sum --check
+          echo "3eaa88ea0590433b538d3971a6ca0863d0345d3ff5937b0d1874b7a8de71a591  /tmp/mcp-publisher.tar.gz" | sha256sum --check
           tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
           test -f /tmp/mcp-publisher || { echo "mcp-publisher binary not found in tarball"; exit 1; }
           sudo mv /tmp/mcp-publisher /usr/local/bin/mcp-publisher
