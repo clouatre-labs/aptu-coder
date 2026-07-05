@@ -109,6 +109,9 @@ pub struct ShellOutput {
     /// Path to the slot file containing full stderr (if output was persisted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_path: Option<String>,
+    /// Path to the slot file containing full interleaved output (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interleaved_path: Option<String>,
     /// Description of the filter applied to stdout (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_applied: Option<String>,
@@ -137,6 +140,7 @@ impl ShellOutput {
             output_collection_error: None,
             stdout_path: None,
             stderr_path: None,
+            interleaved_path: None,
             filter_applied: None,
             timed_out: false,
         }

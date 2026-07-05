@@ -312,14 +312,36 @@ fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -
         output_text
     };
 
+    // Build truncation notice with slot file paths if present
+    let mut truncation_notice = String::new();
+    if output.stdout_path.is_some()
+        || output.stderr_path.is_some()
+        || output.interleaved_path.is_some()
+    {
+        truncation_notice.push_str("(Full output persisted to: ");
+        let mut paths = Vec::new();
+        if let Some(ref p) = output.stdout_path {
+            paths.push(format!("stdout={}", p));
+        }
+        if let Some(ref p) = output.stderr_path {
+            paths.push(format!("stderr={}", p));
+        }
+        if let Some(ref p) = output.interleaved_path {
+            paths.push(format!("interleaved={}", p));
+        }
+        truncation_notice.push_str(&paths.join(", "));
+        truncation_notice.push_str(")\n");
+    }
+
     let text = format!(
-        "Command: {}\nExit code: {}\nOutput truncated: {}\n\n{}",
+        "Command: {}\nExit code: {}\nOutput truncated: {}\n{}{}",
         params.command,
         output
             .exit_code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "null".to_string()),
         output.output_truncated || combined_truncated,
+        truncation_notice,
         truncated_output_text,
     );
 
@@ -426,7 +448,7 @@ pub(crate) async fn exec_command_impl(
 
     // Phase 3: Spawn and collect
     let resolved_path_str = resolved_path.as_deref();
-    let output = match spawn_and_collect_phase(
+    let mut output = match spawn_and_collect_phase(
         command.clone(),
         working_dir_path.clone(),
         &params,
@@ -470,6 +492,9 @@ pub(crate) async fn exec_command_impl(
 
     // Update output_truncated flag to include combined truncation
     output_truncated = output_truncated || combined_truncated;
+
+    // Sync output_truncated to the struct before serialization (fix #1266)
+    output.output_truncated = output_truncated;
 
     span.record("output_truncated", output_truncated);
 
@@ -787,6 +812,7 @@ pub(crate) async fn run_exec_impl(
 
     // Split tagged lines into stdout, stderr, interleaved post-facto (no locks needed).
     const MAX_BYTES: usize = 50 * 1024;
+    const INTERLEAVED_MAX_BYTES: usize = 60 * 1024;
     let mut stdout_str = String::new();
     let mut stderr_str = String::new();
     let mut interleaved_str = String::new();
@@ -815,10 +841,24 @@ pub(crate) async fn run_exec_impl(
         handle_output_persist(stdout_str, stderr_str, slot);
     output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;
 
-    let mut output = ShellOutput::new(stdout, stderr, interleaved_str, exit_code, output_truncated);
+    // Handle interleaved overflow: cap at INTERLEAVED_MAX_BYTES and write to slot file if needed
+    let (interleaved_preview, interleaved_path) =
+        persist_interleaved_overflow(interleaved_str, INTERLEAVED_MAX_BYTES, slot).await;
+    if interleaved_path.is_some() {
+        output_truncated = true;
+    }
+
+    let mut output = ShellOutput::new(
+        stdout,
+        stderr,
+        interleaved_preview,
+        exit_code,
+        output_truncated,
+    );
     output.output_collection_error = output_collection_error;
     output.stdout_path = stdout_path;
     output.stderr_path = stderr_path;
+    output.interleaved_path = interleaved_path;
     output.timed_out = timed_out;
 
     // Apply filter if exit_code == 0
@@ -850,6 +890,30 @@ pub(crate) async fn run_exec_impl(
 /// Handles output persistence by writing to slot files only when output overflows the line limit.
 /// Writes full stdout/stderr to:
 ///   {temp_dir}/aptu-coder-overflow/slot-{slot}/{stdout,stderr}
+/// Persists interleaved output to a slot file when it exceeds `max_bytes`.
+/// Returns `(preview, path)`: on overflow, `preview` is a tail of `max_bytes` chars and
+/// `path` is `Some(slot_file_path)`; under limit, returns the original string and `None`.
+async fn persist_interleaved_overflow(
+    interleaved: String,
+    max_bytes: usize,
+    slot: u32,
+) -> (String, Option<String>) {
+    if interleaved.len() <= max_bytes {
+        return (interleaved, None);
+    }
+    let base = std::env::temp_dir()
+        .join("aptu-coder-overflow")
+        .join(format!("slot-{slot}"));
+    let _ = tokio::fs::create_dir_all(&base).await;
+    let interleaved_file = base.join("interleaved");
+    let _ = tokio::fs::write(&interleaved_file, interleaved.as_bytes()).await;
+    let path = interleaved_file.display().to_string();
+    // Tail preview: show the most recent output, respecting char boundaries.
+    let tail_start = interleaved.len().saturating_sub(max_bytes);
+    let safe_start = interleaved[..tail_start].floor_char_boundary(tail_start);
+    (interleaved[safe_start..].to_string(), Some(path))
+}
+
 /// Returns (stdout_out, stderr_out, stdout_path, stderr_path).
 /// On overflow: truncates to last 50 lines and sets paths to Some.
 /// Under limit: returns output unchanged and paths as None (no I/O).
