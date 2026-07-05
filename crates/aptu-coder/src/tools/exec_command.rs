@@ -843,7 +843,7 @@ pub(crate) async fn run_exec_impl(
 
     // Handle interleaved overflow: cap at INTERLEAVED_MAX_BYTES and write to slot file if needed
     let (interleaved_preview, interleaved_path) =
-        persist_interleaved_overflow(interleaved_str, INTERLEAVED_MAX_BYTES, slot);
+        persist_interleaved_overflow(interleaved_str, INTERLEAVED_MAX_BYTES, slot).await;
     if interleaved_path.is_some() {
         output_truncated = true;
     }
@@ -893,7 +893,7 @@ pub(crate) async fn run_exec_impl(
 /// Persists interleaved output to a slot file when it exceeds `max_bytes`.
 /// Returns `(preview, path)`: on overflow, `preview` is a tail of `max_bytes` chars and
 /// `path` is `Some(slot_file_path)`; under limit, returns the original string and `None`.
-fn persist_interleaved_overflow(
+async fn persist_interleaved_overflow(
     interleaved: String,
     max_bytes: usize,
     slot: u32,
@@ -904,9 +904,9 @@ fn persist_interleaved_overflow(
     let base = std::env::temp_dir()
         .join("aptu-coder-overflow")
         .join(format!("slot-{slot}"));
-    let _ = std::fs::create_dir_all(&base);
+    let _ = tokio::fs::create_dir_all(&base).await;
     let interleaved_file = base.join("interleaved");
-    let _ = std::fs::write(&interleaved_file, interleaved.as_bytes());
+    let _ = tokio::fs::write(&interleaved_file, interleaved.as_bytes()).await;
     let path = interleaved_file.display().to_string();
     // Tail preview: show the most recent output, respecting char boundaries.
     let tail_start = interleaved.len().saturating_sub(max_bytes);
