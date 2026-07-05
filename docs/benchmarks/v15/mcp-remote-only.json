@@ -3,10 +3,7 @@
     "aptu-coder": {
       "type": "stdio",
       "command": "aptu-coder",
-      "args": [],
-      "env": {
-        "APTU_CODER_PROFILE": "remote"
-      }
+      "args": []
     }
   }
 }

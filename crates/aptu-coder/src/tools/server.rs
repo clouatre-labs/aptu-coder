@@ -108,7 +108,6 @@ pub(crate) fn build_analyzer(
         metrics_tx,
         session_call_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         session_id: Arc::new(TokioMutex::new(None)),
-        session_profile: Arc::new(std::sync::OnceLock::new()),
         client_name: Arc::new(TokioMutex::new(None)),
         client_version: Arc::new(TokioMutex::new(None)),
         resolved_path,
@@ -131,7 +130,6 @@ pub(crate) async fn on_initialized_impl(
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
     session_id: Arc<TokioMutex<Option<String>>>,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
-    session_profile: Arc<std::sync::OnceLock<String>>,
     tool_router: Arc<RwLock<ToolRouter<crate::CodeAnalyzer>>>,
     context_peer: &Peer<RoleServer>,
 ) {
@@ -155,43 +153,9 @@ pub(crate) async fn on_initialized_impl(
     }
     session_call_seq.store(0, std::sync::atomic::Ordering::Relaxed);
 
-    // NON-STANDARD VENDOR EXTENSION: profile-based tool filtering.
-    let active_profile = session_profile
-        .get()
-        .cloned()
-        .or_else(|| std::env::var("APTU_CODER_PROFILE").ok());
-
     {
         let mut router = tool_router.write().await;
-
-        if let Some(ref profile) = active_profile {
-            match profile.as_str() {
-                "edit" => {
-                    disable_routes(
-                        &mut router,
-                        &[
-                            "analyze_directory",
-                            "analyze_file",
-                            "analyze_module",
-                            "analyze_symbol",
-                        ],
-                    );
-                }
-                "analyze" => {
-                    disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
-                }
-                _ => {}
-            }
-        }
-
         router.bind_peer_notifier(context_peer);
-    }
-}
-
-/// Disables the given tool routes on the router.
-pub(crate) fn disable_routes(router: &mut ToolRouter<crate::CodeAnalyzer>, tools: &[&'static str]) {
-    for tool in tools {
-        router.disable_route(*tool);
     }
 }
 

@@ -163,7 +163,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
     CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
-    LoggingLevel, Meta, ServerCapabilities, SetLevelRequestParams,
+    LoggingLevel, ServerCapabilities, SetLevelRequestParams,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -196,13 +196,9 @@ pub(crate) fn err_to_tool_result_from_pagination(
 /// log event channel, metrics sender, and per-session sequence tracking.
 #[derive(Clone)]
 pub struct CodeAnalyzer {
-    // Wrapped in Arc<RwLock> to enable interior mutability for profile-based tool routing.
-    // All clones share the same router instance (per-session state).
     // Read lock acquired by list_tools/call_tool; write lock acquired during on_initialized
-    // to disable tools based on client profile.
-    // IMPORTANT: Do not perform long-running I/O while holding the write lock in
-    // on_initialized. The write lock blocks all concurrent list_tools/call_tool calls
-    // for the duration. Keep the critical section to disable_route() calls only.
+    // for bind_peer_notifier.
+    // IMPORTANT: Do not perform long-running I/O while holding the write lock.
     pub(crate) tool_router: Arc<RwLock<ToolRouter<Self>>>,
     cache: AnalysisCache,
     disk_cache: std::sync::Arc<cache::DiskCache>,
@@ -211,9 +207,6 @@ pub struct CodeAnalyzer {
     metrics_tx: crate::metrics::MetricsSender,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
     session_id: Arc<TokioMutex<Option<String>>>,
-    // Resolved profile string set once in initialize; read in on_initialized and call_tool.
-    // OnceLock is lock-free after the first set; no mutex needed.
-    session_profile: Arc<std::sync::OnceLock<String>>,
     client_name: Arc<TokioMutex<Option<String>>>,
     client_version: Arc<TokioMutex<Option<String>>>,
     // Resolved login shell PATH, captured once at startup via login shell invocation.
@@ -695,11 +688,11 @@ impl CodeAnalyzer {
 
 #[tool_handler]
 impl ServerHandler for CodeAnalyzer {
-    #[instrument(skip(self, context), fields(service.name = tracing::field::Empty, service.version = tracing::field::Empty))]
+    #[instrument(skip(self, _context), fields(service.name = tracing::field::Empty, service.version = tracing::field::Empty))]
     async fn initialize(
         &self,
         request: InitializeRequestParams,
-        context: RequestContext<RoleServer>,
+        _context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, ErrorData> {
         let span = tracing::Span::current();
         span.record("service.name", "aptu-coder");
@@ -713,16 +706,6 @@ impl ServerHandler for CodeAnalyzer {
         {
             let mut client_version_lock = self.client_version.lock().await;
             *client_version_lock = Some(request.client_info.version.clone());
-        }
-
-        // Extract profile string from _meta and store for use in on_initialized and call_tool.
-        if let Some(meta) = context.extensions.get::<Meta>()
-            && let Some(profile) = meta
-                .0
-                .get("io.clouatre-labs/profile")
-                .and_then(|v| v.as_str())
-        {
-            let _ = self.session_profile.set(profile.to_owned());
         }
         Ok(self.get_info())
     }
@@ -779,7 +762,6 @@ impl ServerHandler for CodeAnalyzer {
             self.peer.clone(),
             self.session_id.clone(),
             self.session_call_seq.clone(),
-            self.session_profile.clone(),
             self.tool_router.clone(),
             &context.peer,
         )
