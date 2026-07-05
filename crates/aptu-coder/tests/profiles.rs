@@ -248,10 +248,10 @@ async fn test_analyze_profile_tool_count() {
         .filter_map(|t| t["name"].as_str().map(|s| s.to_string()))
         .collect();
 
-    // Assert: analyze profile should have exactly 5 tools
+    // Assert: analyze profile should have exactly 4 tools
     assert_eq!(
-        tool_count, 5,
-        "analyze profile should enable exactly 5 tools, got: {:?}",
+        tool_count, 4,
+        "analyze profile should enable exactly 4 tools, got: {:?}",
         tool_names
     );
 
@@ -273,8 +273,8 @@ async fn test_analyze_profile_tool_count() {
         "analyze profile should include analyze_symbol"
     );
     assert!(
-        tool_names.contains(&"exec_command".to_string()),
-        "analyze profile should include exec_command"
+        !tool_names.contains(&"exec_command".to_string()),
+        "analyze profile should exclude exec_command"
     );
 }
 
@@ -405,9 +405,9 @@ async fn test_profile_env_var_ignored_when_meta_present() {
         .collect();
 
     // Assert: _meta profile (analyze) should override the env var (edit).
-    // analyze profile enables 5 tools.
+    // analyze profile enables 4 tools.
     assert_eq!(
-        tool_count, 5,
+        tool_count, 4,
         "_meta profile (analyze) should take precedence over env var, got: {:?}",
         tool_names
     );

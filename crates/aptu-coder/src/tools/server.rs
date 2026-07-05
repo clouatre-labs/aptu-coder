@@ -178,7 +178,10 @@ pub(crate) async fn on_initialized_impl(
                     );
                 }
                 "analyze" => {
-                    disable_routes(&mut router, &["edit_replace", "edit_overwrite"]);
+                    disable_routes(
+                        &mut router,
+                        &["edit_replace", "edit_overwrite", "exec_command"],
+                    );
                 }
                 _ => {}
             }
