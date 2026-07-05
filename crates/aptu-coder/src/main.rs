@@ -55,6 +55,9 @@ async fn run_http(analyzer: CodeAnalyzer, port: u16) -> Result<(), Box<dyn std::
         #[cfg(unix)]
         {
             use tokio::signal::unix::{SignalKind, signal};
+            // SAFETY: SIGTERM handling is a critical part of graceful shutdown; failure to install
+            // the handler propagates as a panic since the process cannot function without it.
+            #[allow(clippy::expect_used)]
             let mut sigterm =
                 signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
             tokio::select! {
@@ -191,8 +194,10 @@ fn setup_tracing(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[allow(clippy::expect_used)]
     aws_lc_rs::default_provider()
         .install_default()
+        // SAFETY: CryptoProvider installation is required for TLS; main() cannot proceed without it.
         .expect("failed to install rustls CryptoProvider");
 
     let port = match parse_cli_args() {

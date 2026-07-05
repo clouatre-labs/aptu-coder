@@ -24,6 +24,7 @@
 //! Languages supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 mod filters;
 pub(crate) mod logging;

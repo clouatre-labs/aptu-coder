@@ -79,7 +79,11 @@ pub fn resolve_symbol<'a>(
     );
 
     match matches.len() {
-        1 => Ok(matches.into_iter().next().expect("len==1")),
+        1 => {
+            // SAFETY: match arm for `1` guarantees exactly one element in matches; next() cannot return None.
+            #[allow(clippy::expect_used)]
+            Ok(matches.into_iter().next().expect("len==1"))
+        }
         0 => {
             let hint = match mode {
                 SymbolMatchMode::Exact => {
@@ -171,7 +175,11 @@ impl CallGraph {
         );
 
         match matches.len() {
-            1 => Ok(matches.into_iter().next().expect("len==1")),
+            1 => {
+                // SAFETY: match arm for `1` guarantees exactly one element in matches; next() cannot return None.
+                #[allow(clippy::expect_used)]
+                Ok(matches.into_iter().next().expect("len==1"))
+            }
             0 => Err(GraphError::SymbolNotFound {
                 symbol: query.to_string(),
                 hint: "No symbols matched; try a shorter query or match_mode=contains.".to_string(),

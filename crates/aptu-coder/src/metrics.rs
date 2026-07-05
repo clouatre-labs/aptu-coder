@@ -361,8 +361,10 @@ impl MetricsWriter {
             *current_file = Some(base_dir.join(format!("metrics-{}.jsonl", current_date)));
         }
 
+        #[allow(clippy::expect_used)]
         current_file
             .as_ref()
+            // SAFETY: current_file was just set to Some() in the preceding if block if it was None.
             .expect("current_file is guaranteed Some after check above")
             .clone()
     }

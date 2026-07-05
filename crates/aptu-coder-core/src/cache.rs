@@ -114,9 +114,13 @@ where
     match mutex.lock() {
         Ok(mut guard) => recovery(&mut guard),
         Err(poisoned) => {
+            tracing::warn!("Mutex poisoned in lock_or_recover; creating fresh LruCache");
             // SAFETY: 100 is a non-zero literal
-            let cache_size = NonZeroUsize::new(capacity)
-                .unwrap_or_else(|| NonZeroUsize::new(100).expect("100 is non-zero"));
+            let cache_size = NonZeroUsize::new(capacity).unwrap_or_else(|| {
+                // SAFETY: 100 is guaranteed non-zero
+                #[allow(clippy::expect_used)]
+                NonZeroUsize::new(100).expect("100 is non-zero")
+            });
             let new_cache = LruCache::new(cache_size);
             let mut guard = poisoned.into_inner();
             *guard = new_cache;
@@ -196,6 +200,8 @@ impl CallGraphCache {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
+        // SAFETY: capacity is clamped to a minimum of 1 by .max(1), so NonZeroUsize::new() returns Some.
+        #[allow(clippy::expect_used)]
         let cache_size = NonZeroUsize::new(capacity).expect("capacity is non-zero after .max(1)");
         Self {
             capacity,
@@ -242,8 +248,12 @@ impl AnalysisCache {
     pub fn new(capacity: usize) -> Self {
         let file_capacity = capacity.max(1);
         let dir_capacity = parse_cache_capacity("APTU_CODER_DIR_CACHE_CAPACITY", 20);
+        // SAFETY: file_capacity is clamped to a minimum of 1 by .max(1), so NonZeroUsize::new() returns Some.
+        #[allow(clippy::expect_used)]
         let cache_size =
             NonZeroUsize::new(file_capacity).expect("file_capacity is non-zero after .max(1)");
+        // SAFETY: dir_capacity is clamped to a minimum of 1 by parse_cache_capacity, so NonZeroUsize::new() returns Some.
+        #[allow(clippy::expect_used)]
         let dir_cache_size =
             NonZeroUsize::new(dir_capacity).expect("dir_capacity is non-zero after .max(1)");
         Self {
@@ -649,7 +659,9 @@ impl DiskCache {
             return None;
         }
         let path = self.entry_path(tool, key);
-        // Acquire shared lock on per-shard .lock sentinel before reading
+        // Acquire shared lock on per-shard .lock sentinel before reading.
+        // F13: If the lock file cannot be created/opened (e.g. read-only filesystem),
+        // lock_shard_shared returns None and we gracefully fall through without locking.
         let _lock = lock_shard_shared(path.parent()?);
         let compressed = match std::fs::read(&path) {
             Ok(b) => b,
