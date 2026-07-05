@@ -27,6 +27,7 @@
 //! ```
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 pub mod analyze;
 pub mod cache;

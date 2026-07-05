@@ -53,6 +53,9 @@ impl StaleContextGuard {
     /// Increments the failure counter for `canonical` and returns `true` when the
     /// circuit breaker threshold has been reached.
     fn increment(&mut self, canonical: &str) -> bool {
+        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
+        // this is fatal and should propagate.
+        #[allow(clippy::expect_used)]
         let mut counts = self.counts.lock().expect("edit_failure_counts poisoned");
         if counts.len() >= EDIT_FAILURE_MAP_CAP {
             counts.clear();
@@ -66,6 +69,9 @@ impl StaleContextGuard {
 
     /// Resets the failure counter for `canonical` after a successful edit.
     fn reset(&mut self, canonical: &str) {
+        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
+        // this is fatal and should propagate.
+        #[allow(clippy::expect_used)]
         let mut counts = self.counts.lock().expect("edit_failure_counts poisoned");
         counts.remove(&(self.sid.clone(), canonical.to_owned()));
     }

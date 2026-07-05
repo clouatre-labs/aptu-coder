@@ -16,18 +16,29 @@ use tracing;
 
 // --- compiled patterns (compiled once at startup) ---
 
-static CSS_SELECTOR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[.#][\w-]+[\s,:{]").expect("valid CSS selector pattern"));
+static CSS_SELECTOR: LazyLock<Regex> = LazyLock::new(|| {
+    // SAFETY: static regex patterns are hardcoded literals; compilation never fails.
+    #[allow(clippy::expect_used)]
+    Regex::new(r"^[.#][\w-]+[\s,:{]").expect("valid CSS selector pattern")
+});
 
-static YAML_TOP_KEY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\w[\w-]*): ").expect("valid YAML top-level key pattern"));
+static YAML_TOP_KEY: LazyLock<Regex> = LazyLock::new(|| {
+    // SAFETY: static regex patterns are hardcoded literals; compilation never fails.
+    #[allow(clippy::expect_used)]
+    Regex::new(r"^(\w[\w-]*): ").expect("valid YAML top-level key pattern")
+});
 
 static JSON_FIRST_KEY: LazyLock<Regex> = LazyLock::new(|| {
+    // SAFETY: static regex patterns are hardcoded literals; compilation never fails.
+    #[allow(clippy::expect_used)]
     Regex::new(r#"^\s{0,2}"(\w+)":"#).expect("valid JSON first-level key pattern")
 });
 
-static TOML_SECTION: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\[([^\]]+)\]").expect("valid TOML section header pattern"));
+static TOML_SECTION: LazyLock<Regex> = LazyLock::new(|| {
+    // SAFETY: static regex patterns are hardcoded literals; compilation never fails.
+    #[allow(clippy::expect_used)]
+    Regex::new(r"^\[([^\]]+)\]").expect("valid TOML section header pattern")
+});
 
 // --- extraction functions ---
 

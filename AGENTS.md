@@ -26,7 +26,7 @@ cargo bench
 cargo install --path crates/aptu-coder --profile release   # local install; binary lands in ~/.cargo/bin/
 ```
 
-Workspace lints enforced in CI (deny): undocumented_unsafe_blocks, unwrap_used (test code exempted via cfg_attr).
+Workspace lints enforced in CI (deny): undocumented_unsafe_blocks, unwrap_used, expect_used. Both unwrap_used and expect_used have test-code exemptions via cfg_attr in each crate's lib.rs.
 Dependency freshness: new Cargo.lock entries must be >=7 days old; bypass with SKIP_PACKAGE_AGE_CHECK=true.
 
 ## Observability
