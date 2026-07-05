@@ -836,7 +836,7 @@ pub(crate) async fn run_exec_impl(
         }
     }
 
-    let slot = seq % 8;
+    let slot = seq;
     let (stdout, stderr, stdout_path, stderr_path, byte_truncated) =
         handle_output_persist(stdout_str, stderr_str, slot);
     output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;

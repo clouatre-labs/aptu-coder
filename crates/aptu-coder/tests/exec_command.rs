@@ -4,6 +4,8 @@
 mod common;
 
 use common::call_tool_raw;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
 
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
@@ -1661,4 +1663,115 @@ async fn test_interleaved_overflow_slot_file() {
         sc["output_truncated"], true,
         "output_truncated should be true: {sc}"
     );
+}
+
+#[tokio::test]
+async fn test_concurrent_interleaved_overflow() {
+    // Arrange: send N concurrent exec_command calls over a single MCP connection
+    // so they share the same seq counter. Each call produces interleaved overflow
+    // (~70 KB total, exceeding the 60 KB limit).
+    const N: usize = 4;
+
+    let analyzer = common::make_test_analyzer();
+    let (client, server) = tokio::io::duplex(65536);
+
+    let server_handle = tokio::spawn(async move {
+        let (server_rx, server_tx) = tokio::io::split(server);
+        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
+            let _ = service.waiting().await;
+        }
+    });
+
+    let (client_rx, mut client_tx) = tokio::io::split(client);
+    let mut reader = tokio::io::BufReader::new(client_rx).lines();
+
+    // Initialize
+    let init = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "0.1.0"}
+        }
+    })
+    .to_string()
+        + "\n";
+    client_tx
+        .write_all(init.as_bytes())
+        .await
+        .expect("write init");
+    client_tx.flush().await.expect("flush init");
+    let _resp = reader
+        .next_line()
+        .await
+        .expect("read init response")
+        .expect("init response");
+
+    // Initialized notification
+    let notif = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    })
+    .to_string()
+        + "\n";
+    client_tx
+        .write_all(notif.as_bytes())
+        .await
+        .expect("write notif");
+    client_tx.flush().await.expect("flush notif");
+
+    // Act: send all N tool calls at once (concurrent dispatch)
+    let cmd = serde_json::json!({
+        "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 35000); sys.stderr.write(chr(121) * 35000)'"
+    });
+    for i in 0..N {
+        let call = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": (i + 2) as u64,
+            "method": "tools/call",
+            "params": {
+                "name": "exec_command",
+                "arguments": cmd
+            }
+        })
+        .to_string()
+            + "\n";
+        client_tx
+            .write_all(call.as_bytes())
+            .await
+            .expect("write call");
+    }
+    client_tx.flush().await.expect("flush calls");
+
+    // Collect all N responses (order may vary)
+    let mut responses = Vec::new();
+    for _ in 0..N {
+        let line = reader
+            .next_line()
+            .await
+            .expect("read response")
+            .expect("response");
+        let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
+        responses.push(v);
+    }
+
+    server_handle.abort();
+
+    // Assert: all interleaved_path values are distinct
+    let mut paths = Vec::new();
+    for (i, resp) in responses.iter().enumerate() {
+        let sc = &resp["result"]["structuredContent"];
+        let interleaved_path = sc["interleaved_path"].as_str().unwrap_or_else(|| {
+            panic!("task {i}: interleaved_path should be set on overflow: {sc}")
+        });
+        assert!(
+            !paths.contains(&interleaved_path.to_string()),
+            "task {i}: duplicate interleaved_path {interleaved_path} already seen in concurrent tasks"
+        );
+        paths.push(interleaved_path.to_string());
+    }
+    assert_eq!(paths.len(), N, "all {N} tasks must produce distinct paths");
 }
