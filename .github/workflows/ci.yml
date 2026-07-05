@@ -196,8 +196,8 @@ jobs:
         uses: taiki-e/install-action@682e7d9e49c5e653d371fc6adbda67653461378a # v2.82.4
         with:
           tool: cargo-deny
-      - name: Check advisories and licenses
-        run: cargo deny check advisories licenses
+      - name: Check advisories, licenses, and bans
+        run: cargo deny check advisories licenses bans
       - name: Check package age
         run: bash .github/scripts/check-package-age.sh
 
