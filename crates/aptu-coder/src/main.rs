@@ -198,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     aws_lc_rs::default_provider()
         .install_default()
         // SAFETY: CryptoProvider installation is required for TLS; main() cannot proceed without it.
-        .expect("failed to install rustls CryptoProvider");
+        .expect("failed to install rustls CryptoProvider: TLS is required for server startup and cannot be recovered");
 
     let port = match parse_cli_args() {
         Ok(p) => p,
