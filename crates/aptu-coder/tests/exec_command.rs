@@ -1596,3 +1596,69 @@ async fn test_data_flag_d_with_heredoc_rejected() {
         "error should mention stdin conflict: {text}"
     );
 }
+
+#[tokio::test]
+async fn test_output_truncated_consistency_size_limit() {
+    // Arrange: generate output that exceeds SIZE_LIMIT (5 KB) but stays under
+    // per-stream caps (30 KB stdout / 10 KB stderr). A single stream of 6 KB
+    // of repeated text triggers the combined SIZE_LIMIT cap in format_shell_output_phase.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 6000)'"
+    }))
+    .await;
+
+    // Act: inspect response text and structuredContent
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: text says 'Output truncated: true' AND structuredContent.output_truncated == true
+    assert!(
+        text.contains("Output truncated: true"),
+        "text should indicate truncation: {text}"
+    );
+    assert_eq!(
+        sc["output_truncated"], true,
+        "structuredContent.output_truncated should be true: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_interleaved_overflow_slot_file() {
+    // Arrange: generate interleaved output exceeding 60 KB by writing to both
+    // stdout and stderr. Each stream contributes ~35 KB for ~70 KB total.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 35000); sys.stderr.write(chr(121) * 35000)'"
+    }))
+    .await;
+
+    // Act: inspect structuredContent
+    let sc = &resp["result"]["structuredContent"];
+
+    // Assert: interleaved_path is set, interleaved is a tail preview, output_truncated is true
+    let interleaved_path = sc["interleaved_path"].as_str();
+    assert!(
+        interleaved_path.is_some(),
+        "interleaved_path should be set on overflow: {sc}"
+    );
+    let path = interleaved_path.unwrap();
+    assert!(
+        path.contains("aptu-coder-overflow"),
+        "interleaved_path should reference overflow directory: {path}"
+    );
+    assert!(
+        path.contains("slot-"),
+        "interleaved_path should contain slot identifier: {path}"
+    );
+
+    let interleaved = sc["interleaved"].as_str().unwrap_or("");
+    assert!(
+        interleaved.len() <= 60 * 1024,
+        "interleaved should be tail preview (<=60 KB), got {} bytes",
+        interleaved.len()
+    );
+
+    assert_eq!(
+        sc["output_truncated"], true,
+        "output_truncated should be true: {sc}"
+    );
+}
