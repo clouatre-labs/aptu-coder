@@ -104,6 +104,9 @@ impl DirectoryCacheKey {
     }
 }
 
+/// Fallback cache capacity used in `lock_or_recover` when the caller-supplied capacity is zero.
+const DEFAULT_LOCK_RECOVER_CAPACITY: usize = 100;
+
 /// Recover from a poisoned mutex by clearing the cache.
 /// On poison, creates a new empty cache and returns the recovery value.
 fn lock_or_recover<K, V, T, F>(mutex: &Mutex<LruCache<K, V>>, capacity: usize, recovery: F) -> T
@@ -115,11 +118,11 @@ where
         Ok(mut guard) => recovery(&mut guard),
         Err(poisoned) => {
             tracing::warn!("Mutex poisoned in lock_or_recover; creating fresh LruCache");
-            // SAFETY: 100 is a non-zero literal
+            // SAFETY: DEFAULT_LOCK_RECOVER_CAPACITY is a non-zero named constant.
             let cache_size = NonZeroUsize::new(capacity).unwrap_or_else(|| {
-                // SAFETY: 100 is guaranteed non-zero
                 #[allow(clippy::expect_used)]
-                NonZeroUsize::new(100).expect("100 is non-zero")
+                NonZeroUsize::new(DEFAULT_LOCK_RECOVER_CAPACITY)
+                    .expect("DEFAULT_LOCK_RECOVER_CAPACITY is non-zero")
             });
             let new_cache = LruCache::new(cache_size);
             let mut guard = poisoned.into_inner();
