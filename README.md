@@ -250,7 +250,6 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
 | `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
-| `APTU_CODER_PROFILE` | unset | Tool subset: `edit` (edit tools + `exec_command` only), `analyze` (analyze tools + `exec_command` only). Also settable per-session via `io.clouatre-labs/profile` in MCP `_meta`. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 
 ## Observability

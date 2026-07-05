@@ -229,8 +229,6 @@ extensions:
     cmd: aptu-coder
     args: []
     env_keys: []
-    envs:
-      APTU_CODER_PROFILE: remote
 PROFILE_EOF
   else
     # Bash-only profile (no MCP)
