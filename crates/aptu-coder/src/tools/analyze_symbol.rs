@@ -52,6 +52,27 @@ struct FocusedAnalysisParams {
     parse_timeout_micros: Option<u64>,
 }
 
+/// Helper function to emit error metrics for analyze_symbol.
+/// Extracts the error_type string from ErrorCode and records it on the span.
+fn emit_error_metric(
+    ctx: &AnalyzeSymbolContext,
+    error_type: &str,
+    t_start: std::time::Instant,
+    param_path_depth: Option<usize>,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    tracing::Span::current().record("error", true);
+    tracing::Span::current().record("error.type", error_type);
+    let mut builder = crate::metrics::MetricEventBuilder::new("analyze_symbol", "error", dur)
+        .error_type(Some(error_type.to_string()))
+        .session_id(ctx.sid.clone())
+        .seq(Some(ctx.seq));
+    if let Some(depth) = param_path_depth {
+        builder = builder.param_path_depth(depth);
+    }
+    ctx.metrics_tx.send(builder.build());
+}
+
 /// Validate that `impl_only=true` is only used with directories containing Rust source files.
 pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> Result<(), ErrorData> {
     let has_rust = entries.iter().any(|e| {
@@ -152,7 +173,7 @@ fn paginate_focus_chains(
 
 /// Run focused analysis with auto-summary retry on SIZE_LIMIT overflow.
 async fn run_focused_with_auto_summary(
-    _ctx: &AnalyzeSymbolContext,
+    ctx: &AnalyzeSymbolContext,
     params: &AnalyzeSymbolParams,
     analysis_params: &FocusedAnalysisParams,
     counter: Arc<std::sync::atomic::AtomicUsize>,
@@ -173,6 +194,8 @@ async fn run_focused_with_auto_summary(
         parse_timeout_micros: analysis_params.parse_timeout_micros,
     };
 
+    let t_start = std::time::Instant::now();
+
     let mut output = tokio::task::spawn_blocking({
         let path = analysis_params.path.clone();
         let entries = entries.clone();
@@ -187,6 +210,7 @@ async fn run_focused_with_auto_summary(
     })
     .await
     .map_err(|e| {
+        emit_error_metric(ctx, "internal_error", t_start, None);
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis task panicked: {e}"),
@@ -194,6 +218,7 @@ async fn run_focused_with_auto_summary(
         )
     })?
     .map_err(|e| {
+        emit_error_metric(ctx, "internal_error", t_start, None);
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis failed: {e}"),
@@ -237,15 +262,18 @@ async fn run_focused_with_auto_summary(
                 output.formatted.len(),
                 estimated_tokens
             );
-            return Err(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                message,
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use summary=true or narrow scope",
-                )),
-            ));
+            return Err({
+                emit_error_metric(ctx, "invalid_params", t_start, None);
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    message,
+                    Some(error_meta(
+                        "validation",
+                        false,
+                        "use summary=true or narrow scope",
+                    )),
+                )
+            });
         }
     } else if output.formatted.len() > SIZE_LIMIT && params.output_control.summary == Some(false) {
         let estimated_tokens = output.formatted.len() / 4;
@@ -256,15 +284,18 @@ async fn run_focused_with_auto_summary(
             output.formatted.len(),
             estimated_tokens
         );
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            message,
-            Some(error_meta(
-                "validation",
-                false,
-                "use summary=true or narrow scope",
-            )),
-        ));
+        return Err({
+            emit_error_metric(ctx, "invalid_params", t_start, None);
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                message,
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "use summary=true or narrow scope",
+                )),
+            )
+        });
     }
 
     Ok(output)
@@ -531,8 +562,27 @@ async fn handle_import_lookup(
 
     let output = match handle.await {
         Ok(Ok(v)) => v,
-        Ok(Err(e)) => return Ok(err_to_tool_result(e)),
+        Ok(Err(e)) => {
+            let error_type_str = match e.code {
+                rmcp::model::ErrorCode::INVALID_PARAMS => "invalid_params",
+                rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
+                _ => "unknown",
+            };
+            emit_error_metric(
+                &ctx,
+                error_type_str,
+                t_start,
+                Some(crate::metrics::path_component_count(&param_path)),
+            );
+            return Ok(err_to_tool_result(e));
+        }
         Err(e) => {
+            emit_error_metric(
+                &ctx,
+                "internal_error",
+                t_start,
+                Some(crate::metrics::path_component_count(&param_path)),
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
                 format!("spawn_blocking failed: {e}"),
@@ -740,7 +790,20 @@ async fn handle_call_graph(
     // Call handler for analysis and progress tracking
     let (graph_cache_tier, mut output) = match handle_focused_mode(&ctx, &params, ct).await {
         Ok(v) => v,
-        Err(e) => return Ok(err_to_tool_result(e)),
+        Err(e) => {
+            let error_type_str = match e.code {
+                rmcp::model::ErrorCode::INVALID_PARAMS => "invalid_params",
+                rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
+                _ => "unknown",
+            };
+            emit_error_metric(
+                &ctx,
+                error_type_str,
+                t_start,
+                Some(crate::metrics::path_component_count(&param_path)),
+            );
+            return Ok(err_to_tool_result(e));
+        }
     };
 
     // Surface cache tier in structuredContent for observability and testing.
@@ -749,7 +812,15 @@ async fn handle_call_graph(
     let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
     let (offset, cursor_mode) = match decode_call_graph_cursor(&params) {
         Ok(v) => v,
-        Err(e) => return Ok(e),
+        Err(e) => {
+            emit_error_metric(
+                &ctx,
+                "invalid_params",
+                t_start,
+                Some(crate::metrics::path_component_count(&param_path)),
+            );
+            return Ok(e);
+        }
     };
 
     let use_summary = params.output_control.summary == Some(true);
@@ -763,7 +834,15 @@ async fn handle_call_graph(
         use_summary,
     ) {
         Ok(v) => v,
-        Err(e) => return Ok(e),
+        Err(e) => {
+            emit_error_metric(
+                &ctx,
+                "invalid_params",
+                t_start,
+                Some(crate::metrics::path_component_count(&param_path)),
+            );
+            return Ok(e);
+        }
     };
 
     // When callers are exhausted and callees exist, bootstrap callee pagination
@@ -882,8 +961,10 @@ pub(crate) async fn analyze_symbol_handler(
     call: crate::tools::AnalyzeSymbolCall,
 ) -> Result<CallToolResult, ErrorData> {
     let span = &call.span;
+    let t_start = call.t_start;
 
     if std::path::Path::new(&params.path).is_file() {
+        emit_error_metric(&ctx, "invalid_params", t_start, None);
         return invalid_params(
             span,
             format!(
@@ -898,6 +979,7 @@ pub(crate) async fn analyze_symbol_handler(
         params.output_control.summary,
         params.pagination.cursor.as_deref(),
     ) {
+        emit_error_metric(&ctx, "invalid_params", t_start, None);
         return invalid_params(
             span,
             "summary=true is incompatible with a pagination cursor; use one or the other",
@@ -906,6 +988,7 @@ pub(crate) async fn analyze_symbol_handler(
     }
 
     if params.import_lookup == Some(true) && params.def_use == Some(true) {
+        emit_error_metric(&ctx, "invalid_params", t_start, None);
         return invalid_params(
             span,
             "import_lookup=true and def_use=true are mutually exclusive; use one or the other",
@@ -914,8 +997,7 @@ pub(crate) async fn analyze_symbol_handler(
     }
 
     if let Err(e) = validate_import_lookup(params.import_lookup, &params.symbol) {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
+        emit_error_metric(&ctx, "invalid_params", t_start, None);
         return Ok(err_to_tool_result(e));
     }
 
