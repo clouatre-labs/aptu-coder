@@ -73,6 +73,21 @@ fn emit_error_metric(
     ctx.metrics_tx.send(builder.build());
 }
 
+/// Emit an invalid_params error metric and return the corresponding `ErrorData`.
+fn err_invalid_params(
+    ctx: &AnalyzeSymbolContext,
+    t_start: std::time::Instant,
+    message: String,
+    hint: &'static str,
+) -> ErrorData {
+    emit_error_metric(ctx, "invalid_params", t_start, None);
+    ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        message,
+        Some(error_meta("validation", false, hint)),
+    )
+}
+
 /// Validate that `impl_only=true` is only used with directories containing Rust source files.
 pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> Result<(), ErrorData> {
     let has_rust = entries.iter().any(|e| {
@@ -262,18 +277,12 @@ async fn run_focused_with_auto_summary(
                 output.formatted.len(),
                 estimated_tokens
             );
-            return Err({
-                emit_error_metric(ctx, "invalid_params", t_start, None);
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    message,
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "use summary=true or narrow scope",
-                    )),
-                )
-            });
+            return Err(err_invalid_params(
+                ctx,
+                t_start,
+                message,
+                "use summary=true or narrow scope",
+            ));
         }
     } else if output.formatted.len() > SIZE_LIMIT && params.output_control.summary == Some(false) {
         let estimated_tokens = output.formatted.len() / 4;
@@ -284,18 +293,12 @@ async fn run_focused_with_auto_summary(
             output.formatted.len(),
             estimated_tokens
         );
-        return Err({
-            emit_error_metric(ctx, "invalid_params", t_start, None);
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                message,
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use summary=true or narrow scope",
-                )),
-            )
-        });
+        return Err(err_invalid_params(
+            ctx,
+            t_start,
+            message,
+            "use summary=true or narrow scope",
+        ));
     }
 
     Ok(output)
