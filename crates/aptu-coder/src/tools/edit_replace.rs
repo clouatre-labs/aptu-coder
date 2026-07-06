@@ -423,7 +423,13 @@ pub(crate) async fn edit_replace(
     let resolved_path = match resolve_edit_path(&param_path, params.working_dir.as_deref(), span) {
         Ok(p) => p,
         Err(result) => {
-            send_replace_error_metric(&ctx, t_start, &param_path, "invalid_params", working_dir_used);
+            send_replace_error_metric(
+                &ctx,
+                t_start,
+                &param_path,
+                "invalid_params",
+                working_dir_used,
+            );
             return Ok(result);
         }
     };
@@ -453,7 +459,13 @@ pub(crate) async fn edit_replace(
         Err(e) => {
             span.record("error", true);
             span.record("error.type", "internal_error");
-            send_replace_error_metric(&ctx, t_start, &param_path, "internal_error", working_dir_used);
+            send_replace_error_metric(
+                &ctx,
+                t_start,
+                &param_path,
+                "internal_error",
+                working_dir_used,
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
                 e.to_string(),
