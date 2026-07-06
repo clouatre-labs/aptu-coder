@@ -22,6 +22,8 @@ pub(crate) async fn edit_overwrite(
     span.record("gen_ai.tool.name", "edit_overwrite");
     span.record("path", &params.path);
 
+    let working_dir_used = params.working_dir.is_some();
+
     let resolved_path: std::path::PathBuf = if let Some(ref wd) = params.working_dir {
         match validate_path_relative_to(&params.path, false, std::path::Path::new(wd)) {
             Ok(p) => p,
@@ -65,6 +67,7 @@ pub(crate) async fn edit_overwrite(
                 .error_type(Some("invalid_params".to_string()))
                 .session_id(ctx.sid.clone())
                 .seq(Some(ctx.seq))
+                .working_dir_used(working_dir_used)
                 .build(),
         );
         return Ok(err_to_tool_result(ErrorData::new(
@@ -95,6 +98,7 @@ pub(crate) async fn edit_overwrite(
                     .error_type(Some("invalid_params".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(err_to_tool_result(ErrorData::new(
@@ -117,6 +121,7 @@ pub(crate) async fn edit_overwrite(
                     .error_type(Some("internal_error".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(err_to_tool_result(ErrorData::new(
@@ -149,6 +154,7 @@ pub(crate) async fn edit_overwrite(
                     .error_type(Some("internal_error".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(err_to_tool_result(ErrorData::new(
@@ -171,6 +177,7 @@ pub(crate) async fn edit_overwrite(
                     .error_type(Some("internal_error".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(err_to_tool_result(ErrorData::new(
@@ -223,6 +230,7 @@ pub(crate) async fn edit_overwrite(
             .param_path_depth(crate::metrics::path_component_count(&param_path))
             .session_id(ctx.sid)
             .seq(Some(ctx.seq))
+            .working_dir_used(working_dir_used)
             .build(),
     );
     Ok(result)
