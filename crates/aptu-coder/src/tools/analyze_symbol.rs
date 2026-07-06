@@ -60,7 +60,7 @@ fn emit_error_metric(
     t_start: std::time::Instant,
     param_path_depth: Option<usize>,
 ) {
-    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    let dur = t_start.elapsed().as_millis().min(u64::MAX as u128) as u64;
     tracing::Span::current().record("error", true);
     tracing::Span::current().record("error.type", error_type);
     let mut builder = crate::metrics::MetricEventBuilder::new("analyze_symbol", "error", dur)
