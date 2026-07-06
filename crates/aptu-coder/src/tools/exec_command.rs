@@ -409,6 +409,10 @@ pub(crate) async fn exec_command_impl(
     span.record("command", &params.command);
 
     let param_path = params.working_dir.clone();
+    let working_dir_used = params.working_dir.is_some();
+    let stdin_provided = params.stdin.is_some();
+    let timeout_configured_ms = params.timeout_secs.map(|s| s * 1000);
+    let drain_timeout_ms = params.drain_timeout_secs;
 
     // Phase 1: Validate working_dir and resolve cd-prefix
     let (command, working_dir_path) = match validate_working_dir_phase(&params, &span) {
@@ -427,6 +431,10 @@ pub(crate) async fn exec_command_impl(
                     .session_id(sid)
                     .seq(Some(seq))
                     .output_truncated(Some(false))
+                    .stdin_provided(stdin_provided)
+                    .timeout_configured_ms(timeout_configured_ms)
+                    .drain_timeout_ms(drain_timeout_ms)
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(result);
@@ -447,6 +455,10 @@ pub(crate) async fn exec_command_impl(
                     .session_id(sid)
                     .seq(Some(seq))
                     .output_truncated(Some(false))
+                    .stdin_provided(stdin_provided)
+                    .timeout_configured_ms(timeout_configured_ms)
+                    .drain_timeout_ms(drain_timeout_ms)
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(result);
@@ -480,6 +492,10 @@ pub(crate) async fn exec_command_impl(
                     .seq(Some(seq))
                     .timed_out(true)
                     .output_truncated(Some(false))
+                    .stdin_provided(stdin_provided)
+                    .timeout_configured_ms(timeout_configured_ms)
+                    .drain_timeout_ms(drain_timeout_ms)
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(result);
@@ -549,6 +565,10 @@ pub(crate) async fn exec_command_impl(
                     .exit_code(exit_code)
                     .timed_out(output.timed_out)
                     .output_truncated(Some(output_truncated))
+                    .stdin_provided(stdin_provided)
+                    .timeout_configured_ms(timeout_configured_ms)
+                    .drain_timeout_ms(drain_timeout_ms)
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             return Ok(err_to_tool_result(e));
@@ -570,6 +590,10 @@ pub(crate) async fn exec_command_impl(
             .output_truncated(Some(output_truncated))
             .chars_threshold_breach(text.len() > 30_000)
             .filter_applied(output.filter_applied.clone())
+            .stdin_provided(stdin_provided)
+            .timeout_configured_ms(timeout_configured_ms)
+            .drain_timeout_ms(drain_timeout_ms)
+            .working_dir_used(working_dir_used)
             .build(),
     );
     Ok(result)

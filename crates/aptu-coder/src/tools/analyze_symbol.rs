@@ -623,6 +623,19 @@ async fn handle_import_lookup(
             .seq(Some(seq))
             .cache_hit(Some(false))
             .cache_tier(Some(CacheTier::Miss.as_str()))
+            .match_mode(
+                params
+                    .match_mode
+                    .as_ref()
+                    .map(|m| format!("{:?}", m).to_lowercase()),
+            )
+            .follow_depth(params.follow_depth)
+            .import_lookup(params.import_lookup.unwrap_or(false))
+            .def_use(params.def_use.unwrap_or(false))
+            .impl_only(params.impl_only.unwrap_or(false))
+            .git_ref_used(params.git_ref.is_some())
+            .is_paginated(params.pagination.cursor.is_some())
+            .summary_mode(params.output_control.summary.unwrap_or(false))
             .build(),
     );
     Ok(result)
@@ -933,6 +946,19 @@ async fn handle_call_graph(
             .seq(Some(seq))
             .cache_hit(Some(graph_cache_tier != CacheTier::Miss))
             .cache_tier(Some(graph_cache_tier.as_str()))
+            .match_mode(
+                params
+                    .match_mode
+                    .as_ref()
+                    .map(|m| format!("{:?}", m).to_lowercase()),
+            )
+            .follow_depth(params.follow_depth)
+            .import_lookup(params.import_lookup.unwrap_or(false))
+            .def_use(params.def_use.unwrap_or(false))
+            .impl_only(params.impl_only.unwrap_or(false))
+            .git_ref_used(params.git_ref.is_some())
+            .is_paginated(params.pagination.cursor.is_some())
+            .summary_mode(params.output_control.summary.unwrap_or(false))
             .build(),
     );
     Ok(result)

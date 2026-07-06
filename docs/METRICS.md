@@ -47,6 +47,19 @@ Each line in the JSONL file is one JSON object:
 | `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap, per-stream byte cap, or combined cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
 | `filter_applied` | `string \| null` | Name of the filter rule that matched and transformed the output (e.g., `"git pull"`, `"cargo build"`); `null` when no filter fired or for non-`exec_command` tools. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
 | `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
+| `git_ref_used` | `bool` | `true` when the `git_ref` parameter was supplied on `analyze_directory` or `analyze_symbol`. Omitted from JSONL when `false`. |
+| `summary_mode` | `bool` | `true` when `summary=true` was set on `analyze_directory`, `analyze_file`, or `analyze_symbol`. Omitted from JSONL when `false`. |
+| `is_paginated` | `bool` | `true` when a `cursor` was supplied on `analyze_directory`, `analyze_file`, or `analyze_symbol` (i.e., this is a continuation page). Omitted from JSONL when `false`. |
+| `fields_projected` | `bool` | `true` when the `fields` projection parameter was supplied on `analyze_file`. Omitted from JSONL when `false`. |
+| `match_mode` | `string \| null` | The `match_mode` value passed to `analyze_symbol` (e.g. `"exact"`, `"contains"`); `null` when not set (defaults to `exact` in the handler). Omitted from JSONL when `null`. |
+| `follow_depth` | `u32 \| null` | The `follow_depth` value passed to `analyze_symbol`; `null` when the parameter was not explicitly supplied. Omitted from JSONL when `null`. |
+| `import_lookup` | `bool` | `true` when `import_lookup=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
+| `def_use` | `bool` | `true` when `def_use=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
+| `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
+| `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
+| `timeout_configured_ms` | `i64 \| null` | `timeout_secs * 1000` when `timeout_secs` was supplied to `exec_command`; `null` when the parameter was not set (no limit). Omitted from JSONL when `null`. |
+| `drain_timeout_ms` | `i64 \| null` | The raw `drain_timeout_secs` value passed to `exec_command` (stored as-is; represents milliseconds in the server parameter despite the naming); `null` when not set (defaults to 500 ms in the handler). Omitted from JSONL when `null`. |
+| `working_dir_used` | `bool` | `true` when the `working_dir` parameter was supplied to `exec_command`, `edit_overwrite`, or `edit_replace`. Omitted from JSONL when `false`. |
 
 ### Example record
 
@@ -71,6 +84,19 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `language` | v0.20.x | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
 | `file_ext` | v0.20.x | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
 | `timed_out` | v0.20.1 | `false` (omitted from JSONL when false; set when child process was killed by `timeout_secs`) |
+| `git_ref_used` | v0.23.0 | `false` (omitted when false; `true` only when `git_ref` was supplied) |
+| `summary_mode` | v0.23.0 | `false` (omitted when false; `true` only when `summary=true` was set) |
+| `is_paginated` | v0.23.0 | `false` (omitted when false; `true` only when a `cursor` was supplied) |
+| `fields_projected` | v0.23.0 | `false` (omitted when false; `true` only when `fields` was supplied on `analyze_file`) |
+| `match_mode` | v0.23.0 | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
+| `follow_depth` | v0.23.0 | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
+| `import_lookup` | v0.23.0 | `false` (omitted when false; `true` only when `import_lookup=true` was set) |
+| `def_use` | v0.23.0 | `false` (omitted when false; `true` only when `def_use=true` was set) |
+| `impl_only` | v0.23.0 | `false` (omitted when false; `true` only when `impl_only=true` was set) |
+| `stdin_provided` | v0.23.0 | `false` (omitted when false; `true` only when `stdin` was supplied to `exec_command`) |
+| `timeout_configured_ms` | v0.23.0 | `null` (omitted when null; present only when `timeout_secs` was supplied) |
+| `drain_timeout_ms` | v0.23.0 | `null` (omitted when null; present only when `drain_timeout_secs` was supplied) |
+| `working_dir_used` | v0.23.0 | `false` (omitted when false; `true` only when `working_dir` was supplied) |
 
 The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
 

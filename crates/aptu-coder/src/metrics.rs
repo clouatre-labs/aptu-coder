@@ -68,6 +68,51 @@ pub struct MetricEvent {
     /// `analyze_module`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// Whether the tool call used a `git_ref` parameter. Populated by `analyze_directory`
+    /// and `analyze_symbol`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub git_ref_used: bool,
+    /// Whether the tool call used `summary=true` or was auto-summarized.
+    /// Populated by `analyze_directory`, `analyze_file`, and `analyze_symbol`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summary_mode: bool,
+    /// Whether the tool call used pagination (`cursor` was provided).
+    /// Populated by `analyze_directory`, `analyze_file`, and `analyze_symbol`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_paginated: bool,
+    /// Whether the `fields` parameter was provided to `analyze_file`.
+    /// Populated by `analyze_file`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fields_projected: bool,
+    /// Symbol matching mode used by `analyze_symbol` (e.g., "exact", "insensitive").
+    /// `None` when not an `analyze_symbol` call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_mode: Option<String>,
+    /// Call graph traversal depth for `analyze_symbol` (default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_depth: Option<u32>,
+    /// Whether `import_lookup=true` was set on `analyze_symbol`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub import_lookup: bool,
+    /// Whether `def_use=true` was set on `analyze_symbol`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub def_use: bool,
+    /// Whether `impl_only=true` was set on `analyze_symbol`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub impl_only: bool,
+    /// Whether `stdin` was provided to `exec_command`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stdin_provided: bool,
+    /// Configured timeout in milliseconds for `exec_command`. `None` means no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_configured_ms: Option<i64>,
+    /// Drain timeout in milliseconds for `exec_command`. `None` means default (500ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drain_timeout_ms: Option<i64>,
+    /// Whether a `working_dir` parameter was provided. Populated by `edit_overwrite`,
+    /// `edit_replace`, and `exec_command`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub working_dir_used: bool,
 }
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
 #[derive(Debug, Default)]
@@ -93,6 +138,19 @@ pub(crate) struct MetricEventBuilder {
     file_ext: Option<&'static str>,
     filter_applied: Option<String>,
     language: Option<String>,
+    git_ref_used: bool,
+    summary_mode: bool,
+    is_paginated: bool,
+    fields_projected: bool,
+    match_mode: Option<String>,
+    follow_depth: Option<u32>,
+    import_lookup: bool,
+    def_use: bool,
+    impl_only: bool,
+    stdin_provided: bool,
+    timeout_configured_ms: Option<i64>,
+    drain_timeout_ms: Option<i64>,
+    working_dir_used: bool,
 }
 
 impl MetricEventBuilder {
@@ -192,6 +250,72 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    pub(crate) fn git_ref_used(mut self, v: bool) -> Self {
+        self.git_ref_used = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn summary_mode(mut self, v: bool) -> Self {
+        self.summary_mode = v;
+        self
+    }
+    #[must_use]
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn is_paginated(mut self, v: bool) -> Self {
+        self.is_paginated = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn fields_projected(mut self, v: bool) -> Self {
+        self.fields_projected = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn match_mode(mut self, v: Option<String>) -> Self {
+        self.match_mode = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn follow_depth(mut self, v: Option<u32>) -> Self {
+        self.follow_depth = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn import_lookup(mut self, v: bool) -> Self {
+        self.import_lookup = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn def_use(mut self, v: bool) -> Self {
+        self.def_use = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn impl_only(mut self, v: bool) -> Self {
+        self.impl_only = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn stdin_provided(mut self, v: bool) -> Self {
+        self.stdin_provided = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn timeout_configured_ms(mut self, v: Option<i64>) -> Self {
+        self.timeout_configured_ms = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn drain_timeout_ms(mut self, v: Option<i64>) -> Self {
+        self.drain_timeout_ms = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn working_dir_used(mut self, v: bool) -> Self {
+        self.working_dir_used = v;
+        self
+    }
+    #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
@@ -215,6 +339,19 @@ impl MetricEventBuilder {
             file_ext: self.file_ext,
             filter_applied: self.filter_applied,
             language: self.language,
+            git_ref_used: self.git_ref_used,
+            summary_mode: self.summary_mode,
+            is_paginated: self.is_paginated,
+            fields_projected: self.fields_projected,
+            match_mode: self.match_mode,
+            follow_depth: self.follow_depth,
+            import_lookup: self.import_lookup,
+            def_use: self.def_use,
+            impl_only: self.impl_only,
+            stdin_provided: self.stdin_provided,
+            timeout_configured_ms: self.timeout_configured_ms,
+            drain_timeout_ms: self.drain_timeout_ms,
+            working_dir_used: self.working_dir_used,
         }
     }
 }
@@ -807,8 +944,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         tx.send(make_event()).unwrap();
         tx.send(make_event()).unwrap();
@@ -867,8 +1003,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("analyze_directory"));
@@ -900,8 +1035,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""result":"error""#));
@@ -933,8 +1067,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""error_subtype":"not_found""#));
@@ -962,8 +1095,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""error_subtype":"ambiguous""#));
@@ -993,6 +1125,19 @@ mod tests {
             file_ext: None,
             filter_applied: None,
             language: None,
+            git_ref_used: false,
+            summary_mode: false,
+            is_paginated: false,
+            fields_projected: false,
+            match_mode: None,
+            follow_depth: None,
+            import_lookup: false,
+            def_use: false,
+            impl_only: false,
+            stdin_provided: false,
+            timeout_configured_ms: None,
+            drain_timeout_ms: None,
+            working_dir_used: false,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","error_type":null,"session_id":"1742468880123-42","seq":5}"#;
@@ -1084,8 +1229,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         })
         .unwrap();
         tx.send(MetricEvent {
@@ -1108,8 +1252,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         })
         .unwrap();
         drop(tx);
@@ -1197,8 +1340,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         })
         .unwrap();
         drop(tx);
@@ -1261,8 +1403,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         })
         .unwrap();
         drop(tx);
@@ -1318,8 +1459,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         tx.send(make_event()).unwrap();
         drop(tx);
@@ -1375,8 +1515,7 @@ mod tests {
             output_truncated: None,
             chars_threshold_breach: false,
             file_ext: None,
-            filter_applied: None,
-            language: None,
+            ..Default::default()
         };
         tx1.send(make_event()).unwrap();
         tx1.send(make_event()).unwrap();

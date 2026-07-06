@@ -200,6 +200,9 @@ pub(crate) async fn analyze_file_handler(
                     .seq(Some(seq))
                     .file_ext(crate::metrics::path_file_ext(&param_path))
                     .language(crate::metrics::path_language(&param_path))
+                    .fields_projected(params.fields.is_some())
+                    .summary_mode(params.output_control.summary.unwrap_or(false))
+                    .is_paginated(params.pagination.cursor.is_some())
                     .build(),
             );
             return Ok(err_to_tool_result(e));
@@ -355,6 +358,9 @@ pub(crate) async fn analyze_file_handler(
             .cache_tier(Some(file_cache_hit.as_str()))
             .file_ext(crate::metrics::path_file_ext(&param_path))
             .language(crate::metrics::path_language(&param_path))
+            .fields_projected(params.fields.is_some())
+            .summary_mode(use_summary)
+            .is_paginated(params.pagination.cursor.is_some())
             .build(),
     );
     Ok(result)

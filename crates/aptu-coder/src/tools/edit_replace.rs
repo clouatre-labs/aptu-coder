@@ -140,6 +140,7 @@ fn send_replace_error_metric(
     t_start: std::time::Instant,
     param_path: &str,
     error_type: &str,
+    working_dir_used: bool,
 ) {
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
@@ -148,6 +149,7 @@ fn send_replace_error_metric(
             .error_type(Some(error_type.to_string()))
             .session_id(ctx.sid.clone())
             .seq(Some(ctx.seq))
+            .working_dir_used(working_dir_used)
             .build(),
     );
 }
@@ -207,6 +209,7 @@ fn stale_context_error_msg(threshold: u8, param_path: &str) -> String {
 ///
 /// This keeps the `edit_replace` coordinator function short by moving the per-error-variant
 /// span recording, metric emission, and error response construction into one place.
+#[allow(clippy::too_many_arguments)]
 fn handle_edit_error(
     err: aptu_coder_core::EditError,
     span: &tracing::Span,
@@ -215,6 +218,7 @@ fn handle_edit_error(
     old_text_for_hint: &str,
     guard: &mut StaleContextGuard,
     ctx: &EditHandlerContext<'_>,
+    working_dir_used: bool,
 ) -> CallToolResult {
     span.record("error", true);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -234,6 +238,7 @@ fn handle_edit_error(
                         .error_subtype(Some("stale_context".to_string()))
                         .session_id(ctx.sid.clone())
                         .seq(Some(ctx.seq))
+                        .working_dir_used(working_dir_used)
                         .build(),
                 );
                 return err_to_tool_result(ErrorData::new(
@@ -253,6 +258,7 @@ fn handle_edit_error(
                     .error_subtype(Some("not_found".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             let message = build_not_found_message(&first_20_lines, old_text_for_hint);
@@ -285,6 +291,7 @@ fn handle_edit_error(
                         .error_subtype(Some("stale_context".to_string()))
                         .session_id(ctx.sid.clone())
                         .seq(Some(ctx.seq))
+                        .working_dir_used(working_dir_used)
                         .build(),
                 );
                 return err_to_tool_result(ErrorData::new(
@@ -304,6 +311,7 @@ fn handle_edit_error(
                     .error_subtype(Some("ambiguous".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             let line_numbers_csv = match_lines
@@ -335,6 +343,7 @@ fn handle_edit_error(
                     .error_type(Some("invalid_params".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             err_to_tool_result(ErrorData::new(
@@ -355,6 +364,7 @@ fn handle_edit_error(
                     .error_type(Some("internal_error".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
                     .build(),
             );
             let mut meta = error_meta("resource", false, "check file path and permissions");
@@ -409,10 +419,17 @@ pub(crate) async fn edit_replace(
     span.record("path", &params.path);
 
     let param_path = params.path.clone();
+    let working_dir_used = params.working_dir.is_some();
     let resolved_path = match resolve_edit_path(&param_path, params.working_dir.as_deref(), span) {
         Ok(p) => p,
         Err(result) => {
-            send_replace_error_metric(&ctx, t_start, &param_path, "invalid_params");
+            send_replace_error_metric(
+                &ctx,
+                t_start,
+                &param_path,
+                "invalid_params",
+                working_dir_used,
+            );
             return Ok(result);
         }
     };
@@ -436,12 +453,19 @@ pub(crate) async fn edit_replace(
                 &old_text_for_hint,
                 &mut guard,
                 &ctx,
+                working_dir_used,
             ));
         }
         Err(e) => {
             span.record("error", true);
             span.record("error.type", "internal_error");
-            send_replace_error_metric(&ctx, t_start, &param_path, "internal_error");
+            send_replace_error_metric(
+                &ctx,
+                t_start,
+                &param_path,
+                "internal_error",
+                working_dir_used,
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
                 e.to_string(),
@@ -481,6 +505,7 @@ pub(crate) async fn edit_replace(
             .param_path_depth(crate::metrics::path_component_count(&param_path))
             .session_id(ctx.sid)
             .seq(Some(ctx.seq))
+            .working_dir_used(working_dir_used)
             .build(),
     );
     Ok(result)

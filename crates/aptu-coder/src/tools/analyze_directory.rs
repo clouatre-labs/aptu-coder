@@ -360,6 +360,9 @@ pub(crate) async fn analyze_directory_handler(
             .seq(Some(seq))
             .cache_hit(Some(dir_cache_hit != CacheTier::Miss))
             .cache_tier(Some(dir_cache_hit.as_str()))
+            .git_ref_used(params.git_ref.is_some())
+            .summary_mode(use_summary)
+            .is_paginated(params.pagination.cursor.is_some())
             .build(),
     );
     Ok(result)
