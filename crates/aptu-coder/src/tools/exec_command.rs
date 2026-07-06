@@ -24,6 +24,12 @@ use crate::{ExecCommandParams, SIZE_LIMIT, STDIN_MAX_BYTES, ShellOutput, validat
 /// Default drain timeout in milliseconds for post-exit pipe drain (500ms).
 const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
 
+/// Max bytes to buffer from child stdout during drain (matches handle_output_persist cap).
+const MAX_DRAIN_STDOUT_BYTES: usize = 30_000;
+
+/// Max bytes to buffer from child stderr during drain (matches handle_output_persist cap).
+const MAX_DRAIN_STDERR_BYTES: usize = 10_000;
+
 /// State extracted from `&self` in the `exec_command` shim and passed to `exec_command_impl`.
 pub(crate) struct ExecContext {
     pub(crate) seq: u32,
@@ -43,6 +49,7 @@ pub(crate) struct ExecutionResult {
     output_truncated: bool,
     output_collection_error: Option<String>,
     timed_out: bool,
+    byte_truncated: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -648,27 +655,59 @@ pub(crate) async fn run_with_timeout(
             LinesStream::new(tokio::io::BufReader::new(p).lines()).map(|l| l.map(|s| (true, s)))
         });
 
+        let mut byte_budget_hit = false;
+        let mut so_bytes = 0usize;
+        let mut se_bytes = 0usize;
+
         match (so_stream, se_stream) {
             (Some(so), Some(se)) => {
                 let mut merged = so.merge(se);
                 while let Some(Ok((is_stderr, line))) = merged.next().await {
+                    let entry_len = line.len() + 1; // +1 for newline
+                    if is_stderr {
+                        if se_bytes + entry_len > MAX_DRAIN_STDERR_BYTES {
+                            byte_budget_hit = true;
+                            // Continue reading to drain child pipe; do not send.
+                            continue;
+                        }
+                        se_bytes += entry_len;
+                    } else if so_bytes + entry_len > MAX_DRAIN_STDOUT_BYTES {
+                        byte_budget_hit = true;
+                        continue;
+                    } else {
+                        so_bytes += entry_len;
+                    }
                     let _ = tx.send((is_stderr, line));
                 }
             }
             (Some(so), None) => {
                 let mut stream = so;
                 while let Some(Ok((_, line))) = stream.next().await {
+                    let entry_len = line.len() + 1;
+                    if so_bytes + entry_len > MAX_DRAIN_STDOUT_BYTES {
+                        byte_budget_hit = true;
+                        continue;
+                    }
+                    so_bytes += entry_len;
                     let _ = tx.send((false, line));
                 }
             }
             (None, Some(se)) => {
                 let mut stream = se;
                 while let Some(Ok((_, line))) = stream.next().await {
+                    let entry_len = line.len() + 1;
+                    if se_bytes + entry_len > MAX_DRAIN_STDERR_BYTES {
+                        byte_budget_hit = true;
+                        continue;
+                    }
+                    se_bytes += entry_len;
                     let _ = tx.send((true, line));
                 }
             }
             (None, None) => {}
         }
+
+        byte_budget_hit
     });
 
     let drain_abort = drain_task.abort_handle();
@@ -694,15 +733,20 @@ pub(crate) async fn run_with_timeout(
             };
 
             // Drain remaining buffered output with drain_timeout grace (outside user timeout).
-            let drain_truncated = if timed_out {
+            let (drain_truncated, byte_truncated) = if timed_out {
                 drain_abort.abort();
-                false
+                (false, false)
             } else {
                 match tokio::time::timeout(drain_timeout, drain_task).await {
-                    Ok(_) => false,
+                    Ok(Ok(budget_hit)) => (false, budget_hit),
+                    Ok(Err(join_err)) => {
+                        // Task panicked: treat as no budget truncation, log warning.
+                        tracing::warn!("drain_task panicked: {join_err}");
+                        (false, false)
+                    }
                     Err(_) => {
                         drain_abort.abort();
-                        true
+                        (true, false)
                     }
                 }
             };
@@ -718,6 +762,7 @@ pub(crate) async fn run_with_timeout(
                 output_truncated: drain_truncated,
                 output_collection_error: ocerr,
                 timed_out,
+                byte_truncated,
             }
         }
         _ => {
@@ -726,10 +771,17 @@ pub(crate) async fn run_with_timeout(
             let exit_status = child.wait().await.ok();
             let drain_result = tokio::time::timeout(drain_timeout, drain_task).await;
 
-            let drain_truncated = drain_result.is_err();
-            if drain_truncated {
-                drain_abort.abort();
-            }
+            let (drain_truncated, byte_truncated) = match drain_result {
+                Ok(Ok(budget_hit)) => (false, budget_hit),
+                Ok(Err(join_err)) => {
+                    tracing::warn!("drain_task panicked: {join_err}");
+                    (false, false)
+                }
+                Err(_) => {
+                    drain_abort.abort();
+                    (true, false)
+                }
+            };
             let exit_code = exit_status.and_then(|s| s.code());
             let ocerr = if drain_truncated {
                 Some("post-exit drain timeout: background process held pipes".to_string())
@@ -741,6 +793,7 @@ pub(crate) async fn run_with_timeout(
                 output_truncated: drain_truncated,
                 output_collection_error: ocerr,
                 timed_out: false,
+                byte_truncated,
             }
         }
     }
@@ -799,7 +852,7 @@ pub(crate) async fn run_exec_impl(
 
     let exec_result = run_with_timeout(child, tx, timeout_secs, drain_timeout).await;
     let exit_code = exec_result.exit_code;
-    let mut output_truncated = exec_result.output_truncated;
+    let mut output_truncated = exec_result.output_truncated || exec_result.byte_truncated;
     let output_collection_error = exec_result.output_collection_error;
     let timed_out = exec_result.timed_out;
 

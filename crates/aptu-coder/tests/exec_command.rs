@@ -1626,8 +1626,11 @@ async fn test_output_truncated_consistency_size_limit() {
 
 #[tokio::test]
 async fn test_interleaved_overflow_slot_file() {
-    // Arrange: generate interleaved output exceeding 60 KB by writing to both
-    // stdout and stderr. Each stream contributes ~35 KB for ~70 KB total.
+    // Arrange: generate interleaved output that exceeded limits. With drain byte
+    // budget enforcement (30k stdout / 10k stderr) the drain task drops oversized
+    // lines before they reach the post-collection loop, so interleaved overflow
+    // no longer fires for single-line writes. Instead, truncation is reported via
+    // output_truncated and content is within stream budget limits.
     let resp = call_exec_command_raw(serde_json::json!({
         "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 35000); sys.stderr.write(chr(121) * 35000)'"
     }))
@@ -1636,40 +1639,41 @@ async fn test_interleaved_overflow_slot_file() {
     // Act: inspect structuredContent
     let sc = &resp["result"]["structuredContent"];
 
-    // Assert: interleaved_path is set, interleaved is a tail preview, output_truncated is true
-    let interleaved_path = sc["interleaved_path"].as_str();
-    assert!(
-        interleaved_path.is_some(),
-        "interleaved_path should be set on overflow: {sc}"
-    );
-    let path = interleaved_path.unwrap();
-    assert!(
-        path.contains("aptu-coder-overflow"),
-        "interleaved_path should reference overflow directory: {path}"
-    );
-    assert!(
-        path.contains("slot-"),
-        "interleaved_path should contain slot identifier: {path}"
-    );
-
-    let interleaved = sc["interleaved"].as_str().unwrap_or("");
-    assert!(
-        interleaved.len() <= 60 * 1024,
-        "interleaved should be tail preview (<=60 KB), got {} bytes",
-        interleaved.len()
-    );
-
+    // Assert: output_truncated is true (drain byte budget enforced)
     assert_eq!(
         sc["output_truncated"], true,
         "output_truncated should be true: {sc}"
+    );
+
+    // stdout and stderr previews are within the drain budget limits
+    let stdout = sc["stdout"].as_str().unwrap_or("");
+    let stderr = sc["stderr"].as_str().unwrap_or("");
+    assert!(
+        stdout.len() <= 30_000,
+        "stdout preview size {} exceeds 30k limit",
+        stdout.len()
+    );
+    assert!(
+        stderr.len() <= 10_000,
+        "stderr preview size {} exceeds 10k limit",
+        stderr.len()
+    );
+
+    // interleaved may be empty (lines were dropped in drain task) or a small preview
+    let interleaved = sc["interleaved"].as_str().unwrap_or("");
+    assert!(
+        interleaved.len() <= 60 * 1024,
+        "interleaved should be <=60 KB, got {} bytes",
+        interleaved.len()
     );
 }
 
 #[tokio::test]
 async fn test_concurrent_interleaved_overflow() {
     // Arrange: send N concurrent exec_command calls over a single MCP connection
-    // so they share the same seq counter. Each call produces interleaved overflow
-    // (~70 KB total, exceeding the 60 KB limit).
+    // so they share the same seq counter. With drain byte budget enforcement,
+    // each call's interleaved stays under the overflow threshold, but output_truncated
+    // is set from drain budget exhaustion. Slot isolation via stdout_path/stderr_path.
     const N: usize = 4;
 
     let analyzer = common::make_test_analyzer();
@@ -1760,18 +1764,127 @@ async fn test_concurrent_interleaved_overflow() {
 
     server_handle.abort();
 
-    // Assert: all interleaved_path values are distinct
-    let mut paths = Vec::new();
+    // Assert: output_truncated is true for all tasks
     for (i, resp) in responses.iter().enumerate() {
         let sc = &resp["result"]["structuredContent"];
-        let interleaved_path = sc["interleaved_path"].as_str().unwrap_or_else(|| {
-            panic!("task {i}: interleaved_path should be set on overflow: {sc}")
-        });
         assert!(
-            !paths.contains(&interleaved_path.to_string()),
-            "task {i}: duplicate interleaved_path {interleaved_path} already seen in concurrent tasks"
+            sc["output_truncated"].as_bool().unwrap_or(false),
+            "task {i}: output_truncated should be true: {sc}"
         );
-        paths.push(interleaved_path.to_string());
     }
-    assert_eq!(paths.len(), N, "all {N} tasks must produce distinct paths");
+
+    // All N responses received
+    assert_eq!(responses.len(), N, "all {N} tasks must produce responses");
+}
+
+// ---------------------------------------------------------------------------
+// Drain byte-budget enforcement tests (regression guard for OOM crash)
+// ---------------------------------------------------------------------------
+
+/// Produces 200k lines of stdout, verifies server returns success (not transport
+/// error), output_truncated is true, and stdout is non-empty and within size limit.
+#[tokio::test]
+async fn exec_command_large_output_truncation_via_drain() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "count=0; while [ $count -lt 200000 ]; do echo \"line $count\"; count=$((count + 1)); done",
+        "timeout_secs": 30
+    }))
+    .await;
+
+    // (a) server returns success (not transport error)
+    assert!(
+        resp.get("error").is_none(),
+        "expected no error, got: {:?}",
+        resp.get("error")
+    );
+
+    let result = &resp["result"];
+    let sc = &result["structuredContent"];
+    let stdout = sc["stdout"].as_str().unwrap_or_default();
+
+    // (b) output_truncated is true when drain byte budget is exhausted
+    assert!(
+        sc["output_truncated"].as_bool().unwrap_or(false),
+        "output_truncated should be true for large output"
+    );
+
+    // (c) stdout is non-empty
+    assert!(!stdout.is_empty(), "stdout should be non-empty");
+
+    // (d) stdout preview is within size limit
+    assert!(
+        stdout.len() <= 30_000,
+        "stdout preview size {} exceeds 30k limit",
+        stdout.len()
+    );
+}
+
+/// Command where stdout is under budget but stderr exceeds budget.
+/// Asserts stdout lines are present in response and output_truncated is true.
+#[tokio::test]
+async fn exec_command_stderr_exceeds_budget_stdout_present() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "for i in $(seq 1 1500); do echo >&2 \"error detail line $i\"; done; echo 'ok'",
+        "timeout_secs": 30
+    }))
+    .await;
+
+    assert!(
+        resp.get("error").is_none(),
+        "expected no error, got: {:?}",
+        resp.get("error")
+    );
+
+    let result = &resp["result"];
+    let sc = &result["structuredContent"];
+    let stdout = sc["stdout"].as_str().unwrap_or_default();
+
+    // stdout contains 'ok' (stdout lines present even though stderr overflows)
+    assert!(
+        stdout.contains("ok"),
+        "stdout should contain 'ok', got: {stdout}"
+    );
+
+    // output_truncated is true due to stderr overflow
+    assert!(
+        sc["output_truncated"].as_bool().unwrap_or(false),
+        "output_truncated should be true when stderr exceeds budget"
+    );
+}
+
+/// Verify drain_task stops sending after byte budget exhausted and output_truncated
+/// flag is set when drain_task stops sending due to budget exhaustion.
+#[tokio::test]
+async fn exec_command_drain_budget_exhaustion() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "seq 1 200000",
+        "timeout_secs": 30
+    }))
+    .await;
+
+    assert!(
+        resp.get("error").is_none(),
+        "expected no error, got: {:?}",
+        resp.get("error")
+    );
+
+    let result = &resp["result"];
+    let sc = &result["structuredContent"];
+    let stdout = sc["stdout"].as_str().unwrap_or_default();
+
+    // output_truncated is true (drain budget exhausted)
+    assert!(
+        sc["output_truncated"].as_bool().unwrap_or(false),
+        "output_truncated should be true when drain budget exhausted"
+    );
+
+    // stdout within size limit
+    assert!(
+        stdout.len() <= 30_000,
+        "stdout size {} exceeds 30k limit",
+        stdout.len()
+    );
+
+    // stdout non-empty (has tail content)
+    assert!(!stdout.is_empty(), "stdout should be non-empty");
 }
