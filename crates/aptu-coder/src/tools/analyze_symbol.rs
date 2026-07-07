@@ -479,11 +479,7 @@ async fn handle_call_graph(
             .max_depth(max_depth_val)
             .session_id(sid)
             .seq(Some(seq))
-            .cache_hit(Some(
-                graph_cache_tier != CacheTier::L1OnlyMiss
-                    && graph_cache_tier != CacheTier::L1L2Miss
-                    && graph_cache_tier != CacheTier::Miss,
-            ))
+            .cache_hit(Some(graph_cache_tier.is_hit()))
             .cache_tier(Some(graph_cache_tier.as_str()))
             .l1_eviction_count(l1_eviction_count)
             .l2_entry_count(Some(l2_entry_count))

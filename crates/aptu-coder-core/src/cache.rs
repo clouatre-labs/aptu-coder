@@ -54,6 +54,12 @@ impl CacheTier {
             CacheTier::L1L2Miss => "l1_l2_miss",
         }
     }
+
+    /// Returns `true` when the result was served from any cache tier (L1 or L2).
+    #[must_use]
+    pub fn is_hit(&self) -> bool {
+        matches!(self, CacheTier::L1Memory | CacheTier::L2Disk)
+    }
 }
 
 /// Cache key combining path, modification time, and analysis mode.
