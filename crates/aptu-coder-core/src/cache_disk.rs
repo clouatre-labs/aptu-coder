@@ -213,8 +213,10 @@ impl DiskCache {
         let cutoff = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(retention_days * 86_400))
             .unwrap_or(std::time::UNIX_EPOCH);
-        if let Ok(evicted_count) = evict_dir_recursive(&self.base, cutoff) {
+        if let Ok((evicted_count, evicted_bytes)) = evict_dir_recursive(&self.base, cutoff) {
             self.entry_count.fetch_sub(evicted_count, Ordering::Relaxed);
+            self.total_size_bytes
+                .fetch_sub(evicted_bytes, Ordering::Relaxed);
         }
     }
 }
@@ -222,28 +224,32 @@ impl DiskCache {
 fn evict_dir_recursive(
     dir: &std::path::Path,
     cutoff: std::time::SystemTime,
-) -> std::io::Result<u64> {
+) -> std::io::Result<(u64, u64)> {
     let mut evicted_count = 0u64;
+    let mut evicted_bytes = 0u64;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let meta = entry.metadata()?;
         let path = entry.path();
         if meta.is_dir() {
-            if let Ok(count) = evict_dir_recursive(&path, cutoff) {
+            if let Ok((count, bytes)) = evict_dir_recursive(&path, cutoff) {
                 evicted_count += count;
+                evicted_bytes += bytes;
             }
         } else if meta.is_file()
             && let Ok(mtime) = meta.modified()
             && mtime < cutoff
         {
+            let file_size = meta.len();
             if let Err(e) = std::fs::remove_file(&path) {
                 warn!(path = %path.display(), error = %e, "disk cache: failed to evict stale cache file");
             } else {
                 evicted_count += 1;
+                evicted_bytes += file_size;
             }
         }
     }
-    Ok(evicted_count)
+    Ok((evicted_count, evicted_bytes))
 }
 
 /// Acquire a shared (read) lock on the per-shard `.lock` sentinel.
