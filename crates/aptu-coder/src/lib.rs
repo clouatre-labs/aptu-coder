@@ -30,6 +30,7 @@ mod filters;
 pub(crate) mod heredoc_validation;
 pub(crate) mod logging;
 pub(crate) mod metrics;
+pub(crate) mod metrics_export;
 pub(crate) mod otel;
 pub(crate) mod shell;
 pub(crate) mod shell_scan;
