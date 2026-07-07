@@ -42,6 +42,7 @@ pub mod lang;
 pub mod languages;
 pub mod pagination;
 pub mod parser;
+pub(crate) mod parser_elements;
 pub mod test_detection;
 pub mod traversal;
 pub mod types;
