@@ -3,6 +3,9 @@
 
 [advisories]
 version = 2
+ignore = [
+    { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch upstream fix not yet released; no direct usage of affected fmt::Pointer impl in this codebase" },
+]
 
 [licenses]
 version = 2
