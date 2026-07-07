@@ -27,10 +27,12 @@
 #![cfg_attr(test, allow(clippy::expect_used))]
 
 mod filters;
+pub(crate) mod heredoc_validation;
 pub(crate) mod logging;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod shell;
+pub(crate) mod shell_scan;
 /// Heredoc and shell file-write pattern detection (pre-spawn guard for exec_command).
 pub(crate) mod shell_write;
 pub(crate) mod tools;
