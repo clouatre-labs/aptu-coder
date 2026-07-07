@@ -1,4 +1,5 @@
-use crate::tools::exec_command::{build_exec_command, handle_output_persist, strip_cd_prefix};
+use crate::tools::exec_command::strip_cd_prefix;
+use crate::tools::exec_runtime::{build_exec_command, handle_output_persist};
 use crate::{SIZE_LIMIT, STDIN_MAX_BYTES};
 
 #[test]

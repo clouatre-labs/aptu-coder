@@ -49,7 +49,9 @@ pub(crate) mod common;
 pub(crate) mod edit_overwrite;
 pub(crate) mod edit_replace;
 pub(crate) mod exec_command;
+pub(crate) mod exec_runtime;
 pub(crate) mod server;
+pub(crate) mod symbol_focused;
 
 pub(crate) use analyze_module::AnalyzeModuleContext;
 pub(crate) use analyze_symbol::AnalyzeSymbolContext;

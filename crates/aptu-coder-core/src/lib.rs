@@ -31,6 +31,7 @@
 
 pub mod analyze;
 pub mod cache;
+pub mod cache_disk;
 pub mod completion;
 mod config;
 pub mod edit;
