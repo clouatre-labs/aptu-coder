@@ -282,89 +282,106 @@ pub(crate) fn extract_elements(
                 let capture_name = compiled.element.capture_names()[capture.index as usize];
                 let node = capture.node;
                 match capture_name {
-                    "function" => {
-                        func_node = Some(node);
-                        func_name_text = node
-                            .child_by_field_name("name")
-                            .map(|n| source[n.start_byte()..n.end_byte()].to_string());
+                    "function" => func_node = Some(node),
+                    "func_name" | "method_name" => {
+                        func_name_text =
+                            Some(source[node.start_byte()..node.end_byte()].to_string());
                     }
-                    "class" => {
-                        class_node = Some(node);
-                        class_name_text = node
-                            .child_by_field_name("name")
-                            .map(|n| source[n.start_byte()..n.end_byte()].to_string());
+                    "class" => class_node = Some(node),
+                    "class_name" | "type_name" => {
+                        class_name_text =
+                            Some(source[node.start_byte()..node.end_byte()].to_string());
                     }
                     _ => {}
                 }
             }
 
             if let Some(func_node) = func_node {
-                let func_def = if func_node.kind() == "decorated_definition" {
-                    func_node
-                        .child_by_field_name("definition")
-                        .unwrap_or(func_node)
+                // When a plain function_definition is nested inside a template_declaration
+                // or decorated_definition, it is also matched by the explicit wrapper pattern.
+                // Skip it here to avoid duplicates; the wrapper match will emit it.
+                let parent_kind = func_node.parent().map(|p| p.kind());
+                let parent_is_wrapper = parent_kind
+                    .map(|k| k == "template_declaration" || k == "decorated_definition")
+                    .unwrap_or(false);
+                if func_node.kind() == "function_definition" && parent_is_wrapper {
+                    // Handled by the template_declaration or decorated_definition @function match instead.
                 } else {
-                    func_node
-                };
-
-                let name = func_name_text
-                    .or_else(|| {
-                        func_def
-                            .child_by_field_name("name")
-                            .map(|n| source[n.start_byte()..n.end_byte()].to_string())
-                    })
-                    .unwrap_or_default();
-
-                let func_key = (name.clone(), func_node.start_position().row);
-                if !name.is_empty() && seen_functions.insert(func_key) {
-                    // For C/C++: parameters live under declarator -> parameters.
-                    // For other languages: parameters is a direct child field.
-                    let params = func_def
-                        .child_by_field_name("declarator")
-                        .and_then(|d| d.child_by_field_name("parameters"))
-                        .or_else(|| func_def.child_by_field_name("parameters"))
-                        .map(|p| source[p.start_byte()..p.end_byte()].to_string())
-                        .unwrap_or_default();
-
-                    // Try "type" first (C/C++ uses this field for the return type);
-                    // fall back to "return_type" (Rust, Python, TypeScript, etc.).
-                    let return_type = func_def
-                        .child_by_field_name("type")
-                        .or_else(|| func_def.child_by_field_name("return_type"))
-                        .map(|r| source[r.start_byte()..r.end_byte()].to_string());
-
-                    // Walk backward through contiguous attribute_item siblings
-                    // to find the first attribute line (Rust only).
-                    let first_line = if func_node.kind() == "function_item" {
-                        let mut attrs: Vec<Node> = Vec::new();
-                        let mut sib = func_node.prev_named_sibling();
-                        while let Some(s) = sib {
-                            if s.kind() == "attribute_item" {
-                                attrs.push(s);
-                                sib = s.prev_named_sibling();
-                            } else {
-                                break;
-                            }
-                        }
-                        attrs
-                            .last()
-                            .map(|n| n.start_position().row + 1)
-                            .unwrap_or_else(|| func_node.start_position().row + 1)
+                    // Resolve template_declaration or decorated_definition to inner function_definition
+                    // for declarator/field walks. The captured node may be a wrapper.
+                    let func_def = if func_node.kind() == "template_declaration" {
+                        let mut cursor = func_node.walk();
+                        func_node
+                            .children(&mut cursor)
+                            .find(|n| n.kind() == "function_definition")
+                            .unwrap_or(func_node)
+                    } else if func_node.kind() == "decorated_definition" {
+                        func_node
+                            .child_by_field_name("definition")
+                            .unwrap_or(func_node)
                     } else {
-                        func_node.start_position().row + 1
+                        func_node
                     };
 
-                    functions.push(FunctionInfo {
-                        name,
-                        line: first_line,
-                        end_line: func_node.end_position().row + 1,
-                        parameters: if params.is_empty() {
-                            Vec::new()
+                    let name = func_name_text
+                        .or_else(|| {
+                            func_def
+                                .child_by_field_name("name")
+                                .map(|n| source[n.start_byte()..n.end_byte()].to_string())
+                        })
+                        .unwrap_or_default();
+
+                    let func_key = (name.clone(), func_node.start_position().row);
+                    if !name.is_empty() && seen_functions.insert(func_key) {
+                        // For C/C++: parameters live under declarator -> parameters.
+                        // For other languages: parameters is a direct child field.
+                        let params = func_def
+                            .child_by_field_name("declarator")
+                            .and_then(|d| d.child_by_field_name("parameters"))
+                            .or_else(|| func_def.child_by_field_name("parameters"))
+                            .map(|p| source[p.start_byte()..p.end_byte()].to_string())
+                            .unwrap_or_default();
+
+                        // Try "type" first (C/C++ uses this field for the return type);
+                        // fall back to "return_type" (Rust, Python, TypeScript, etc.).
+                        let return_type = func_def
+                            .child_by_field_name("type")
+                            .or_else(|| func_def.child_by_field_name("return_type"))
+                            .map(|r| source[r.start_byte()..r.end_byte()].to_string());
+
+                        // Walk backward through contiguous attribute_item siblings
+                        // to find the first attribute line (Rust only).
+                        let first_line = if func_node.kind() == "function_item" {
+                            let mut attrs: Vec<Node> = Vec::new();
+                            let mut sib = func_node.prev_named_sibling();
+                            while let Some(s) = sib {
+                                if s.kind() == "attribute_item" {
+                                    attrs.push(s);
+                                    sib = s.prev_named_sibling();
+                                } else {
+                                    break;
+                                }
+                            }
+                            attrs
+                                .last()
+                                .map(|n| n.start_position().row + 1)
+                                .unwrap_or_else(|| func_node.start_position().row + 1)
                         } else {
-                            vec![params]
-                        },
-                        return_type,
-                    });
+                            func_node.start_position().row + 1
+                        };
+
+                        functions.push(FunctionInfo {
+                            name,
+                            line: first_line,
+                            end_line: func_node.end_position().row + 1,
+                            parameters: if params.is_empty() {
+                                Vec::new()
+                            } else {
+                                vec![params]
+                            },
+                            return_type,
+                        });
+                    }
                 }
             }
 
