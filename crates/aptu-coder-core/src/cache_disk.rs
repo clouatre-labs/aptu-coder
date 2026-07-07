@@ -83,13 +83,10 @@ impl DiskCache {
 
     pub fn entry_path(&self, tool: &str, key: &blake3::Hash) -> PathBuf {
         let hex = format!("{}", key);
-        // Two-level sharding: first 2 chars, then next 2 chars, then full hash.
-        // Reduces directory size and improves filesystem performance.
         self.base
             .join(tool)
-            .join(&hex[0..2])
-            .join(&hex[2..4])
-            .join(hex)
+            .join(&hex[..2])
+            .join(format!("{}.json.snap", hex))
     }
 
     /// Retrieves a cached entry by key, decompressing and deserializing on success.
@@ -105,16 +102,6 @@ impl DiskCache {
         let _lock = lock_shard_shared(dir)?;
 
         let compressed = std::fs::read(&path).ok()?;
-        let _decompressed = snap::read::FrameDecoder::new(&compressed[..])
-            .read_to_end(&mut Vec::new())
-            .ok()
-            .and_then(|_| {
-                snap::read::FrameDecoder::new(&compressed[..])
-                    .read_to_end(&mut Vec::new())
-                    .ok()
-            })?;
-
-        // Decompress and deserialize
         let mut decompressed_data = Vec::new();
         snap::read::FrameDecoder::new(&compressed[..])
             .read_to_end(&mut decompressed_data)
