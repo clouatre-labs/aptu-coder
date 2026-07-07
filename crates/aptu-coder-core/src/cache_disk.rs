@@ -204,8 +204,9 @@ fn evict_dir_recursive(
         } else if meta.is_file()
             && let Ok(mtime) = meta.modified()
             && mtime < cutoff
+            && let Err(e) = std::fs::remove_file(&path)
         {
-            let _ = std::fs::remove_file(&path);
+            warn!(path = %path.display(), error = %e, "disk cache: failed to evict stale cache file");
         }
     }
     Ok(())
