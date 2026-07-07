@@ -538,6 +538,44 @@ mod tests {
     }
 
     #[test]
+    fn test_date_to_days_since_epoch_edge_cases() {
+        // Year boundary: last day of year -> first day of next year
+        assert_eq!(date_to_days_since_epoch(1970, 12, 31), 364);
+        assert_eq!(date_to_days_since_epoch(1971, 1, 1), 365);
+        assert_eq!(date_to_days_since_epoch(2023, 12, 31), 19_722);
+        assert_eq!(date_to_days_since_epoch(2024, 1, 1), 19_723);
+
+        // Month transition: Jan->Feb and Feb->Mar
+        assert_eq!(date_to_days_since_epoch(2023, 1, 31), 19_388);
+        assert_eq!(date_to_days_since_epoch(2023, 2, 1), 19_389);
+
+        // Leap year 2024 (divisible by 4, not by 100): Feb 28 -> Feb 29 -> Mar 1
+        assert_eq!(date_to_days_since_epoch(2024, 2, 28), 19_781);
+        assert_eq!(date_to_days_since_epoch(2024, 2, 29), 19_782);
+        assert_eq!(date_to_days_since_epoch(2024, 3, 1), 19_783);
+
+        // Leap year 2000 (divisible by 400): Feb 28 -> Feb 29 -> Mar 1
+        assert_eq!(date_to_days_since_epoch(2000, 2, 28), 11_015);
+        assert_eq!(date_to_days_since_epoch(2000, 3, 1), 11_017);
+
+        // Non-leap century 2100 (divisible by 100 but not 400): no Feb 29
+        assert_eq!(date_to_days_since_epoch(2100, 2, 28), 47_540);
+        assert_eq!(date_to_days_since_epoch(2100, 3, 1), 47_541);
+    }
+
+    #[test]
+    fn test_current_date_str_roundtrip() {
+        // current_date_str() and date_to_days_since_epoch() must agree on today.
+        let s = current_date_str();
+        let year: u32 = s[0..4].parse().expect("year numeric");
+        let month: u32 = s[5..7].parse().expect("month numeric");
+        let day: u32 = s[8..10].parse().expect("day numeric");
+        let from_str = date_to_days_since_epoch(year, month, day);
+        let from_unix = u32::try_from(unix_ms() / 86_400_000).unwrap_or(u32::MAX);
+        assert_eq!(from_str, from_unix);
+    }
+
+    #[test]
     fn test_current_date_str_format() {
         let s = current_date_str();
         assert_eq!(s.len(), 10);
@@ -549,6 +587,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_writer_batching() {
+        let _guard = metrics_export_lock();
         let dir = TempDir::new().unwrap();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
@@ -598,6 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_old_files_deletes_old_keeps_recent() {
+        let _guard = metrics_export_lock();
         let dir = TempDir::new().unwrap();
         let old_file = dir.path().join("metrics-1970-01-01.jsonl");
         let today = current_date_str();
@@ -834,6 +874,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lock_file_created() {
+        let _guard = metrics_export_lock();
         // Assert: lock file is created next to JSONL file with deterministic name
         let dir = TempDir::new().unwrap();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
