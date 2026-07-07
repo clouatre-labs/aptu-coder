@@ -184,6 +184,9 @@ fn test_metric_chars_threshold_breach_fires() {
         timeout_configured_ms: None,
         drain_timeout_ms: None,
         working_dir_used: false,
+        l1_eviction_count: None,
+        l2_entry_count: None,
+        l2_size_bytes: None,
     };
     assert!(
         event.chars_threshold_breach,
@@ -230,6 +233,9 @@ fn test_metric_chars_threshold_breach_no_fire() {
         timeout_configured_ms: None,
         drain_timeout_ms: None,
         working_dir_used: false,
+        l1_eviction_count: None,
+        l2_entry_count: None,
+        l2_size_bytes: None,
     };
     assert!(
         !event.chars_threshold_breach,

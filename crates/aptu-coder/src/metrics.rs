@@ -119,6 +119,15 @@ pub struct MetricEvent {
     /// `edit_replace`, and `exec_command`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub working_dir_used: bool,
+    /// L1 cache eviction count at the time of metric emission. Only populated for cache-related metrics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_eviction_count: Option<u64>,
+    /// L2 disk cache entry count at the time of metric emission. Only populated for cache-related metrics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l2_entry_count: Option<u64>,
+    /// L2 disk cache total size in bytes at the time of metric emission. Only populated for cache-related metrics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l2_size_bytes: Option<u64>,
 }
 
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
@@ -158,6 +167,9 @@ pub(crate) struct MetricEventBuilder {
     timeout_configured_ms: Option<i64>,
     drain_timeout_ms: Option<i64>,
     working_dir_used: bool,
+    l1_eviction_count: Option<u64>,
+    l2_entry_count: Option<u64>,
+    l2_size_bytes: Option<u64>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -325,6 +337,21 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    pub(crate) fn l1_eviction_count(mut self, v: Option<u64>) -> Self {
+        self.l1_eviction_count = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn l2_entry_count(mut self, v: Option<u64>) -> Self {
+        self.l2_entry_count = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn l2_size_bytes(mut self, v: Option<u64>) -> Self {
+        self.l2_size_bytes = v;
+        self
+    }
+    #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
@@ -361,6 +388,9 @@ impl MetricEventBuilder {
             timeout_configured_ms: self.timeout_configured_ms,
             drain_timeout_ms: self.drain_timeout_ms,
             working_dir_used: self.working_dir_used,
+            l1_eviction_count: self.l1_eviction_count,
+            l2_entry_count: self.l2_entry_count,
+            l2_size_bytes: self.l2_size_bytes,
         }
     }
 }
@@ -623,6 +653,9 @@ mod tests {
             timeout_configured_ms: None,
             drain_timeout_ms: None,
             working_dir_used: false,
+            l1_eviction_count: None,
+            l2_entry_count: None,
+            l2_size_bytes: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;

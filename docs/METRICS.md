@@ -60,6 +60,21 @@ Each line in the JSONL file is one JSON object:
 | `timeout_configured_ms` | `i64 \| null` | `timeout_secs * 1000` when `timeout_secs` was supplied to `exec_command`; `null` when the parameter was not set (no limit). Omitted from JSONL when `null`. |
 | `drain_timeout_ms` | `i64 \| null` | The raw `drain_timeout_secs` value passed to `exec_command` (stored as-is; represents milliseconds in the server parameter despite the naming); `null` when not set (defaults to 500 ms in the handler). Omitted from JSONL when `null`. |
 | `working_dir_used` | `bool` | `true` when the `working_dir` parameter was supplied to `exec_command`, `edit_overwrite`, or `edit_replace`. Omitted from JSONL when `false`. |
+| `l1_eviction_count` | `u64 \| null` | Number of L1 in-memory LRU evictions that have occurred in the cache since process start, at the time of metric emission. Process-lifetime counter; resets on restart. Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls that use the call-graph cache. |
+| `l2_entry_count` | `u64 \| null` | Approximate number of entries currently tracked in the L2 disk cache, at the time of metric emission. Incremented on successful `put()`; approximate (does not account for manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
+| `l2_size_bytes` | `u64 \| null` | Approximate total compressed size in bytes of L2 disk cache entries, at the time of metric emission. Incremented on successful `put()` by the compressed entry size; approximate (does not account for evictions or manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
+
+### cache_tier values
+
+The `cache_tier` field encodes where a result was found (or not found):
+
+| Value | Meaning |
+|---|---|
+| `l1_memory` | Result served from the in-process LRU cache (L1). |
+| `l2_disk` | Result served from the on-disk cache (L2); L1 was a miss. |
+| `l1_only_miss` | Both L1 and the tool path were checked; no L2 disk cache was available (disabled or not configured). |
+| `l1_l2_miss` | Both L1 and L2 were checked; neither held a matching entry. Full computation was performed. |
+| `miss` | Legacy value emitted by older server versions; semantically equivalent to `l1_l2_miss`. |
 
 ### Example record
 
@@ -97,6 +112,9 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `timeout_configured_ms` | v0.23.0 | `null` (omitted when null; present only when `timeout_secs` was supplied) |
 | `drain_timeout_ms` | v0.23.0 | `null` (omitted when null; present only when `drain_timeout_secs` was supplied) |
 | `working_dir_used` | v0.23.0 | `false` (omitted when false; `true` only when `working_dir` was supplied) |
+| `l1_eviction_count` | v0.25.0 | `null` (omitted when null; process-lifetime L1 LRU eviction counter; only for `analyze_symbol`) |
+| `l2_entry_count` | v0.25.0 | `null` (omitted when null; approximate L2 entry count; only for `analyze_symbol`) |
+| `l2_size_bytes` | v0.25.0 | `null` (omitted when null; approximate L2 compressed size in bytes; only for `analyze_symbol`) |
 
 The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
 

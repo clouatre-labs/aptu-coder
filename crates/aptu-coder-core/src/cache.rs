@@ -12,6 +12,7 @@ use lru::LruCache;
 use rayon::prelude::*;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tracing::{debug, instrument, warn};
@@ -22,6 +23,8 @@ pub enum CacheTier {
     L1Memory,
     L2Disk,
     Miss,
+    L1OnlyMiss,
+    L1L2Miss,
 }
 
 /// Parse an LRU cache capacity from an environment variable.
@@ -47,6 +50,8 @@ impl CacheTier {
             CacheTier::L1Memory => "l1_memory",
             CacheTier::L2Disk => "l2_disk",
             CacheTier::Miss => "miss",
+            CacheTier::L1OnlyMiss => "l1_only_miss",
+            CacheTier::L1L2Miss => "l1_l2_miss",
         }
     }
 }
@@ -187,6 +192,7 @@ pub type CallGraphCacheValue = Arc<FocusedAnalysisOutput>;
 pub struct CallGraphCache {
     capacity: usize,
     cache: Arc<Mutex<LruCache<CallGraphCacheKey, CallGraphCacheValue>>>,
+    eviction_count: Arc<AtomicU64>,
 }
 
 impl CallGraphCache {
@@ -202,6 +208,7 @@ impl CallGraphCache {
         Self {
             capacity,
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
+            eviction_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -214,8 +221,17 @@ impl CallGraphCache {
     /// Store a result in the cache.
     pub fn put(&self, key: CallGraphCacheKey, value: CallGraphCacheValue) {
         lock_or_recover(&self.cache, self.capacity, |guard| {
+            if guard.len() >= self.capacity {
+                self.eviction_count.fetch_add(1, Ordering::Relaxed);
+            }
             guard.put(key, value);
         });
+    }
+
+    /// Returns the number of LRU evictions that have occurred in this cache.
+    #[must_use]
+    pub fn eviction_count(&self) -> u64 {
+        self.eviction_count.load(Ordering::Relaxed)
     }
 }
 
@@ -224,6 +240,7 @@ impl Clone for CallGraphCache {
         Self {
             capacity: self.capacity,
             cache: Arc::clone(&self.cache),
+            eviction_count: Arc::clone(&self.eviction_count),
         }
     }
 }
@@ -234,6 +251,7 @@ pub struct AnalysisCache {
     dir_capacity: usize,
     cache: Arc<Mutex<LruCache<CacheKey, Arc<FileAnalysisOutput>>>>,
     directory_cache: Arc<Mutex<LruCache<DirectoryCacheKey, Arc<AnalysisOutput>>>>,
+    eviction_count: Arc<AtomicU64>,
 }
 
 impl AnalysisCache {
@@ -257,6 +275,7 @@ impl AnalysisCache {
             dir_capacity,
             cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
             directory_cache: Arc::new(Mutex::new(LruCache::new(dir_cache_size))),
+            eviction_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -293,6 +312,7 @@ impl AnalysisCache {
                         debug!(cache_event = "update", cache_size = cache_size, path = ?key.path);
                     } else {
                         debug!(cache_event = "eviction", cache_size = cache_size, path = ?key.path, evicted_path = ?returned_key.path);
+                        self.eviction_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
@@ -357,6 +377,12 @@ impl AnalysisCache {
             debug!(cache_event = "invalidate_file", cache_size = cache_size, path = ?path);
         });
     }
+
+    /// Returns the number of LRU evictions that have occurred in this cache.
+    #[must_use]
+    pub fn eviction_count(&self) -> u64 {
+        self.eviction_count.load(Ordering::Relaxed)
+    }
 }
 
 impl Clone for AnalysisCache {
@@ -366,6 +392,7 @@ impl Clone for AnalysisCache {
             dir_capacity: self.dir_capacity,
             cache: Arc::clone(&self.cache),
             directory_cache: Arc::clone(&self.directory_cache),
+            eviction_count: Arc::clone(&self.eviction_count),
         }
     }
 }

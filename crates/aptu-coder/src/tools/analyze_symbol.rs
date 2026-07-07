@@ -465,6 +465,13 @@ async fn handle_call_graph(
     let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
     result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+
+    // Collect cache stats for metrics
+    let (l1_eviction_count, (l2_entry_count, l2_size_bytes)) = (
+        Some(ctx.call_graph_cache.eviction_count()),
+        ctx.disk_cache.cache_stats(),
+    );
+
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
             .output_chars(final_text.len())
@@ -472,8 +479,15 @@ async fn handle_call_graph(
             .max_depth(max_depth_val)
             .session_id(sid)
             .seq(Some(seq))
-            .cache_hit(Some(graph_cache_tier != CacheTier::Miss))
+            .cache_hit(Some(
+                graph_cache_tier != CacheTier::L1OnlyMiss
+                    && graph_cache_tier != CacheTier::L1L2Miss
+                    && graph_cache_tier != CacheTier::Miss,
+            ))
             .cache_tier(Some(graph_cache_tier.as_str()))
+            .l1_eviction_count(l1_eviction_count)
+            .l2_entry_count(Some(l2_entry_count))
+            .l2_size_bytes(Some(l2_size_bytes))
             .match_mode(
                 params
                     .match_mode
