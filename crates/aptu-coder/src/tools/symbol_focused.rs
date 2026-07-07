@@ -383,7 +383,7 @@ pub(crate) async fn handle_focused_mode(
         });
     }
 
-    Ok((CacheTier::Miss, output))
+    Ok((CacheTier::L1L2Miss, output))
 }
 
 /// Applies pagination to call graph output based on cursor mode.

@@ -130,9 +130,11 @@ async fn test_analyze_symbol_call_graph_cache_hit() {
     assert!(is_success(&resp2), "second call must succeed; got: {resp2}");
 
     let tier1 = extract_cache_tier(&resp1);
-    assert_eq!(
-        tier1.as_deref(),
-        Some("miss"),
+    assert!(
+        matches!(
+            tier1.as_deref(),
+            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
+        ),
         "first call must be a cache miss; got: {tier1:?}"
     );
 
@@ -164,9 +166,11 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     let (resp1, resp2) = call_tool_twice_sequential("analyze_symbol", params.clone()).await;
     assert!(is_success(&resp1), "pair1 call1 must succeed");
     assert!(is_success(&resp2), "pair1 call2 must succeed");
-    assert_eq!(
-        extract_cache_tier(&resp1).as_deref(),
-        Some("miss"),
+    assert!(
+        matches!(
+            extract_cache_tier(&resp1).as_deref(),
+            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
+        ),
         "pair1 call1 must be a miss"
     );
     assert_eq!(
@@ -188,9 +192,11 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     assert!(is_success(&resp4), "pair2 call2 must succeed");
 
     let tier3 = extract_cache_tier(&resp3);
-    assert_eq!(
-        tier3.as_deref(),
-        Some("miss"),
+    assert!(
+        matches!(
+            tier3.as_deref(),
+            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
+        ),
         "after mtime change, first call on fresh analyzer must be a miss; got: {tier3:?}"
     );
     let tier4 = extract_cache_tier(&resp4);

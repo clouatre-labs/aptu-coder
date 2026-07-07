@@ -30,6 +30,10 @@ pub struct DiskCache {
     write_failures: AtomicU64,
     /// Cumulative write failures across all drains. Never reset; used for threshold checks.
     total_write_failures: AtomicU64,
+    /// Number of entries currently in the disk cache.
+    entry_count: AtomicU64,
+    /// Total size in bytes of all entries in the disk cache (approximate).
+    total_size_bytes: AtomicU64,
 }
 
 impl DiskCache {
@@ -44,6 +48,16 @@ impl DiskCache {
     pub fn is_degraded(&self) -> bool {
         self.total_write_failures.load(Ordering::Relaxed) >= DISK_CACHE_DEGRADED_THRESHOLD
     }
+
+    /// Returns cache statistics as (entry_count, total_size_bytes).
+    /// Note: size_bytes is approximate; deleted files decrement entry_count but not size_bytes.
+    #[must_use]
+    pub fn cache_stats(&self) -> (u64, u64) {
+        (
+            self.entry_count.load(Ordering::Relaxed),
+            self.total_size_bytes.load(Ordering::Relaxed),
+        )
+    }
 }
 
 impl DiskCache {
@@ -56,6 +70,8 @@ impl DiskCache {
                 disabled: true,
                 write_failures: AtomicU64::new(0),
                 total_write_failures: AtomicU64::new(0),
+                entry_count: AtomicU64::new(0),
+                total_size_bytes: AtomicU64::new(0),
             };
         }
         if let Err(e) = std::fs::create_dir_all(&base) {
@@ -65,6 +81,8 @@ impl DiskCache {
                 disabled: true,
                 write_failures: AtomicU64::new(0),
                 total_write_failures: AtomicU64::new(0),
+                entry_count: AtomicU64::new(0),
+                total_size_bytes: AtomicU64::new(0),
             };
         }
         #[cfg(unix)]
@@ -78,6 +96,8 @@ impl DiskCache {
             disabled: false,
             write_failures: AtomicU64::new(0),
             total_write_failures: AtomicU64::new(0),
+            entry_count: AtomicU64::new(0),
+            total_size_bytes: AtomicU64::new(0),
         }
     }
 
@@ -154,12 +174,18 @@ impl DiskCache {
             Some(c) => c,
             None => return,
         };
+        let compressed_size = compressed.len() as u64;
         if Self::write_entry_atomically(&dir, &path, &compressed)
             .ok()
             .is_none()
         {
             self.record_write_failure();
+            return;
         }
+        // Only increment counters on successful write
+        self.entry_count.fetch_add(1, Ordering::Relaxed);
+        self.total_size_bytes
+            .fetch_add(compressed_size, Ordering::Relaxed);
     }
 
     /// Increments both the per-drain and cumulative failure counters. Escalates to `error!`
@@ -187,29 +213,43 @@ impl DiskCache {
         let cutoff = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(retention_days * 86_400))
             .unwrap_or(std::time::UNIX_EPOCH);
-        let _ = evict_dir_recursive(&self.base, cutoff);
+        if let Ok((evicted_count, evicted_bytes)) = evict_dir_recursive(&self.base, cutoff) {
+            self.entry_count.fetch_sub(evicted_count, Ordering::Relaxed);
+            self.total_size_bytes
+                .fetch_sub(evicted_bytes, Ordering::Relaxed);
+        }
     }
 }
 
 fn evict_dir_recursive(
     dir: &std::path::Path,
     cutoff: std::time::SystemTime,
-) -> std::io::Result<()> {
+) -> std::io::Result<(u64, u64)> {
+    let mut evicted_count = 0u64;
+    let mut evicted_bytes = 0u64;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let meta = entry.metadata()?;
         let path = entry.path();
         if meta.is_dir() {
-            let _ = evict_dir_recursive(&path, cutoff);
+            if let Ok((count, bytes)) = evict_dir_recursive(&path, cutoff) {
+                evicted_count += count;
+                evicted_bytes += bytes;
+            }
         } else if meta.is_file()
             && let Ok(mtime) = meta.modified()
             && mtime < cutoff
-            && let Err(e) = std::fs::remove_file(&path)
         {
-            warn!(path = %path.display(), error = %e, "disk cache: failed to evict stale cache file");
+            let file_size = meta.len();
+            if let Err(e) = std::fs::remove_file(&path) {
+                warn!(path = %path.display(), error = %e, "disk cache: failed to evict stale cache file");
+            } else {
+                evicted_count += 1;
+                evicted_bytes += file_size;
+            }
         }
     }
-    Ok(())
+    Ok((evicted_count, evicted_bytes))
 }
 
 /// Acquire a shared (read) lock on the per-shard `.lock` sentinel.
