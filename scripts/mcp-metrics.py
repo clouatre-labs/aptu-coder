@@ -661,11 +661,35 @@ def compute_timeout(records):
 
 
 # ---------------------------------------------------------------------------
-# Text formatter
+# Module-level helpers (extracted from fmt_text inner closures)
 # ---------------------------------------------------------------------------
 
 
-def fmt_text(
+def _section(lines, title):
+    """Append a section header (blank line, = ruler, title, = ruler) to lines."""
+    lines.append("")
+    lines.append("=" * 76)
+    lines.append("  {}".format(title))
+    lines.append("=" * 76)
+
+
+def _table(lines, headers, widths, rows_data):
+    """Append a formatted table to lines. First column left-aligned, rest right-aligned."""
+    parts = []
+    for i, (h, w) in enumerate(zip(headers, widths)):
+        align = "<" if i == 0 else ">"
+        parts.append(("{:" + align + str(w) + "}").format(h))
+    lines.append("  " + "  ".join(parts))
+    lines.append("  " + "-" * (sum(widths) + 2 * (len(widths) - 1)))
+    for row in rows_data:
+        parts = []
+        for i, (v, w) in enumerate(zip(row, widths)):
+            align = "<" if i == 0 else ">"
+            parts.append(("{:" + align + str(w) + "}").format(str(v)[:w]))
+        lines.append("  " + "  ".join(parts))
+
+
+def _build_sections(
     latency,
     reliability,
     cache,
@@ -678,72 +702,343 @@ def fmt_text(
     git_ref=None,
     timeout=None,
 ):
+    """Build a single dict of all computed sections for the formatters."""
+    return {
+        "latency": latency,
+        "reliability": reliability,
+        "cache": cache,
+        "outliers": outliers,
+        "trend": trend,
+        "show_trend": show_trend,
+        "params_usage": params_usage,
+        "pagination": pagination,
+        "features": features,
+        "git_ref": git_ref,
+        "timeout": timeout,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Text formatter
+# ---------------------------------------------------------------------------
+
+
+def fmt_text(sections):
     lines = []
 
-    def section(title):
-        lines.append("")
-        lines.append("=" * 76)
-        lines.append("  {}".format(title))
-        lines.append("=" * 76)
-
-    def table(headers, widths, rows_data):
-        # Header row
-        parts = []
-        for i, (h, w) in enumerate(zip(headers, widths)):
-            align = "<" if i == 0 else ">"
-            parts.append(("{:" + align + str(w) + "}").format(h))
-        lines.append("  " + "  ".join(parts))
-        lines.append("  " + "-" * (sum(widths) + 2 * (len(widths) - 1)))
-        for row in rows_data:
-            parts = []
-            for i, (v, w) in enumerate(zip(row, widths)):
-                align = "<" if i == 0 else ">"
-                parts.append(("{:" + align + str(w) + "}").format(str(v)[:w]))
-            lines.append("  " + "  ".join(parts))
+    def _render_section(title, data, render_fn):
+        """Gate on data is not None, then render section header + content."""
+        if data is not None:
+            _section(lines, title)
+            render_fn(data)
 
     # ------------------------------------------------------------------
     # 1. Latency & Output Size
     # ------------------------------------------------------------------
-    section(
-        "1. Latency & Output Size  "
-        "[OTel: mcp.server.operation.duration | SLO: p50/p95/p99]"
-    )
-    table(
-        [
-            "tool",
-            "calls",
-            "p50ms",
-            "p95ms",
-            "p99ms",
-            "max",
-            "chars_p50",
-            "chars_p95",
-            "trunc%",
-        ],
-        [22, 7, 6, 6, 6, 9, 9, 9, 7],
-        [
-            [
-                r["tool"],
-                r["calls"],
-                r["dur_p50"],
-                r["dur_p95"],
-                r["dur_p99"],
-                ms_to_human(r["dur_max"]),
-                r["chars_p50"],
-                r["chars_p95"],
-                "{:.1f}".format(r["truncated_pct"]),
-            ]
-            for r in latency
-        ],
-    )
+    if sections["latency"] is not None:
+        _render_section(
+            "1. Latency & Output Size  "
+            "[OTel: mcp.server.operation.duration | SLO: p50/p95/p99]",
+            sections["latency"],
+            lambda data: _table(
+                lines,
+                [
+                    "tool",
+                    "calls",
+                    "p50ms",
+                    "p95ms",
+                    "p99ms",
+                    "max",
+                    "chars_p50",
+                    "chars_p95",
+                    "trunc%",
+                ],
+                [22, 7, 6, 6, 6, 9, 9, 9, 7],
+                [
+                    [
+                        r["tool"],
+                        r["calls"],
+                        r["dur_p50"],
+                        r["dur_p95"],
+                        r["dur_p99"],
+                        ms_to_human(r["dur_max"]),
+                        r["chars_p50"],
+                        r["chars_p95"],
+                        "{:.1f}".format(r["truncated_pct"]),
+                    ]
+                    for r in data
+                ],
+            ),
+        )
 
     # ------------------------------------------------------------------
     # 2. Reliability
     # ------------------------------------------------------------------
-    section(
-        "2. Reliability  [OTel: error.type | Signals: success_rate, exit!=0, timed_out]"
-    )
-    table(
+    if sections["reliability"] is not None:
+        _render_section(
+            "2. Reliability  [OTel: error.type | Signals: success_rate, exit!=0, timed_out]",
+            sections["reliability"],
+            lambda data: _render_reliability(lines, data),
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Cache Effectiveness
+    # ------------------------------------------------------------------
+    if sections["cache"] is not None:
+        _section(
+            lines,
+            "3. Cache Effectiveness  "
+            "[Composite: latency saved = miss_median - hit_median per call]",
+        )
+        ch = sections["cache"]
+        lines.append(
+            "  Overall hit rate : {:.1f}%  ({} hits / {} cacheable calls)".format(
+                ch["overall_hit_rate"], ch["total_hits"], ch["total_cacheable"]
+            )
+        )
+        lines.append(
+            "  Est. wall-clock saved : {}  ({:,} chars served from cache)".format(
+                ms_to_human(ch["total_ms_saved"]), ch["total_hit_chars"]
+            )
+        )
+        if ch["write_failures"]:
+            lines.append(
+                "  Cache write failures  : {}  ({:.2f}%)".format(
+                    ch["write_failures"], ch["write_failure_rate"]
+                )
+            )
+        if ch["per_tier"]:
+            tier_str = "  ".join(
+                "{}: {}".format(t["tier"], t["hits"]) for t in ch["per_tier"]
+            )
+            lines.append("  Tier breakdown        : {}".format(tier_str))
+        lines.append("")
+        _table(
+            lines,
+            [
+                "tool",
+                "cacheable",
+                "hits",
+                "hit%",
+                "hit_med_ms",
+                "miss_med_ms",
+                "saved_ms/hit",
+                "total_saved",
+            ],
+            [22, 9, 6, 6, 10, 11, 13, 12],
+            [
+                [
+                    r["tool"],
+                    r["cacheable"],
+                    r["hits"],
+                    "{:.1f}".format(r["hit_rate"]),
+                    r["hit_dur_median"] if r["hit_dur_median"] is not None else "n/a",
+                    r["miss_dur_median"] if r["miss_dur_median"] is not None else "n/a",
+                    r["ms_saved_per_hit"]
+                    if r["ms_saved_per_hit"] is not None
+                    else "n/a",
+                    ms_to_human(r["total_ms_saved"]) if r["total_ms_saved"] else "0ms",
+                ]
+                for r in ch["per_tool"]
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # 4. Outliers
+    # ------------------------------------------------------------------
+    if sections["outliers"] is not None:
+        _section(
+            lines,
+            "4. Outliers  [Top-N slowest calls + high-error sessions]",
+        )
+        outliers = sections["outliers"]
+        lines.append(
+            "  Slowest {} individual calls:".format(len(outliers["slowest_calls"]))
+        )
+        _table(
+            lines,
+            ["duration", "tool", "session_id", "seq", "timed_out", "exit_code"],
+            [10, 22, 24, 5, 9, 9],
+            [
+                [
+                    ms_to_human(r["duration_ms"]),
+                    r["tool"],
+                    str(r["session_id"])[:24],
+                    str(r["seq"]) if r["seq"] is not None else "?",
+                    "YES" if r["timed_out"] else "",
+                    str(r["exit_code"]) if r["exit_code"] is not None else "",
+                ]
+                for r in outliers["slowest_calls"]
+            ],
+        )
+        if outliers["top_sessions_by_errors"]:
+            lines.append("")
+            lines.append("  Sessions with most errors:")
+            _table(
+                lines,
+                ["session_id", "calls", "errors", "exit!=0", "timed_out"],
+                [28, 7, 7, 7, 9],
+                [
+                    [
+                        str(s["session_id"])[:28],
+                        s["calls"],
+                        s["errors"],
+                        s["exit_nonzero"],
+                        s["timed_out"],
+                    ]
+                    for s in outliers["top_sessions_by_errors"]
+                ],
+            )
+        lines.append("")
+        lines.append("  Top sessions by call volume:")
+        _table(
+            lines,
+            ["session_id", "calls", "errors", "total_chars", "total_dur"],
+            [28, 7, 7, 11, 10],
+            [
+                [
+                    str(s["session_id"])[:28],
+                    s["calls"],
+                    s["errors"],
+                    s["total_chars"],
+                    ms_to_human(s["total_dur_ms"]),
+                ]
+                for s in outliers["top_sessions_by_calls"]
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # 5. Daily Trend
+    # ------------------------------------------------------------------
+    if sections["show_trend"]:
+        _render_section(
+            "5. Daily Trend  [p95+p99 for tail-latency regression detection]",
+            sections["trend"],
+            lambda data: _table(
+                lines,
+                [
+                    "day",
+                    "calls",
+                    "success%",
+                    "cache_hit%",
+                    "exec_exit!=0%",
+                    "p95ms",
+                    "p99ms",
+                    "chars_p95",
+                ],
+                [12, 7, 9, 10, 14, 6, 6, 9],
+                [
+                    [
+                        r["day"],
+                        r["calls"],
+                        "{:.1f}".format(r["success_rate"]),
+                        "{:.1f}".format(r["cache_hit_rate"])
+                        if r["cache_hit_rate"] is not None
+                        else "n/a",
+                        "{:.1f}".format(r["exec_nonzero_pct"]),
+                        r["dur_p95"],
+                        r["dur_p99"],
+                        r["chars_p95"],
+                    ]
+                    for r in data
+                ],
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # 6. Parameter Usage
+    # ------------------------------------------------------------------
+    if sections["params_usage"] is not None:
+        _render_section(
+            "6. Parameter Usage  [per-tool bool-field breakdown]",
+            sections["params_usage"],
+            lambda data: _render_params_usage(lines, data),
+        )
+
+    # ------------------------------------------------------------------
+    # 7. Pagination Adoption
+    # ------------------------------------------------------------------
+    if sections["pagination"] is not None:
+        _render_section(
+            "7. Pagination Adoption  [cursor-based vs summary-mode vs first-page-only]",
+            sections["pagination"],
+            lambda data: _table(
+                lines,
+                ["mode", "calls", "pct"],
+                [22, 7, 6],
+                [
+                    [
+                        "paginated (cursor)",
+                        data["paginated"],
+                        "{:.1f}".format(pct(data["paginated"], data["total"])),
+                    ],
+                    [
+                        "summary-mode",
+                        data["summary_mode"],
+                        "{:.1f}".format(pct(data["summary_mode"], data["total"])),
+                    ],
+                    [
+                        "first-page-only",
+                        data["first_page_only"],
+                        "{:.1f}".format(pct(data["first_page_only"], data["total"])),
+                    ],
+                ],
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # 8. Feature Adoption (analyze_symbol)
+    # ------------------------------------------------------------------
+    if sections["features"] is not None:
+        _render_section(
+            "8. Feature Adoption (analyze_symbol)  "
+            "[import_lookup, def_use, impl_only, match_mode]",
+            sections["features"],
+            lambda data: _render_features(lines, data),
+        )
+
+    # ------------------------------------------------------------------
+    # 9. git_ref Adoption
+    # ------------------------------------------------------------------
+    if sections["git_ref"] is not None:
+        _render_section(
+            "9. git_ref Adoption  [analyze_directory + analyze_symbol]",
+            sections["git_ref"],
+            lambda data: _table(
+                lines,
+                ["tool", "calls", "git_ref_used", "adoption%"],
+                [22, 7, 12, 10],
+                [
+                    [
+                        tool,
+                        t["calls"],
+                        t["git_ref_used"],
+                        "{:.1f}".format(pct(t["git_ref_used"], t["calls"])),
+                    ]
+                    for tool, t in sorted(data.items())
+                ],
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # 10. exec_command Timeout Configuration
+    # ------------------------------------------------------------------
+    if sections["timeout"] is not None:
+        _render_section(
+            "10. exec_command Timeout Configuration  "
+            "[timeout_configured_ms + drain_timeout_ms]",
+            sections["timeout"],
+            lambda data: _render_timeout(lines, data),
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_reliability(lines, reliability):
+    """Render reliability section table and error type breakdown."""
+    _table(
+        lines,
         [
             "tool",
             "calls",
@@ -769,7 +1064,6 @@ def fmt_text(
             for r in reliability
         ],
     )
-    # Error type breakdown (non-zero only)
     all_etypes = defaultdict(int)
     for r in reliability:
         for et, cnt in r["error_types"].items():
@@ -780,326 +1074,101 @@ def fmt_text(
         for et, cnt in sorted(all_etypes.items(), key=lambda x: -x[1]):
             lines.append("    {:30s}  {:>5}".format(et, cnt))
 
-    # ------------------------------------------------------------------
-    # 3. Cache Effectiveness
-    # ------------------------------------------------------------------
-    section(
-        "3. Cache Effectiveness  "
-        "[Composite: latency saved = miss_median - hit_median per call]"
-    )
-    ch = cache
-    lines.append(
-        "  Overall hit rate : {:.1f}%  ({} hits / {} cacheable calls)".format(
-            ch["overall_hit_rate"], ch["total_hits"], ch["total_cacheable"]
-        )
-    )
-    lines.append(
-        "  Est. wall-clock saved : {}  ({:,} chars served from cache)".format(
-            ms_to_human(ch["total_ms_saved"]), ch["total_hit_chars"]
-        )
-    )
-    if ch["write_failures"]:
-        lines.append(
-            "  Cache write failures  : {}  ({:.2f}%)".format(
-                ch["write_failures"], ch["write_failure_rate"]
-            )
-        )
-    if ch["per_tier"]:
-        tier_str = "  ".join(
-            "{}: {}".format(t["tier"], t["hits"]) for t in ch["per_tier"]
-        )
-        lines.append("  Tier breakdown        : {}".format(tier_str))
+
+def _render_params_usage(lines, params_usage):
+    """Render parameter usage section table."""
+    bool_fields = [
+        "summary_mode",
+        "fields_projected",
+        "working_dir_used",
+        "stdin_provided",
+    ]
+    headers = ["tool"] + bool_fields
+    widths = [22] + [14] * len(bool_fields)
+    rows_data = []
+    for tool in sorted(params_usage):
+        t = params_usage[tool]
+        row = [tool]
+        for f in bool_fields:
+            cnts = t.get(f)
+            if cnts and cnts["present"]:
+                row.append("{}/{}".format(cnts["true"], cnts["present"]))
+            else:
+                row.append("")
+        rows_data.append(row)
+    _table(lines, headers, widths, rows_data)
+
+
+def _render_features(lines, features):
+    """Render feature adoption section with table and match_mode distribution."""
+    lines.append("  Total analyze_symbol calls: {}".format(features["total"]))
     lines.append("")
-    table(
-        [
-            "tool",
-            "cacheable",
-            "hits",
-            "hit%",
-            "hit_med_ms",
-            "miss_med_ms",
-            "saved_ms/hit",
-            "total_saved",
-        ],
-        [22, 9, 6, 6, 10, 11, 13, 12],
+    bool_fields = ["import_lookup", "def_use", "impl_only"]
+    _table(
+        lines,
+        ["field", "true", "false"],
+        [22, 6, 6],
         [
             [
-                r["tool"],
-                r["cacheable"],
-                r["hits"],
-                "{:.1f}".format(r["hit_rate"]),
-                r["hit_dur_median"] if r["hit_dur_median"] is not None else "n/a",
-                r["miss_dur_median"] if r["miss_dur_median"] is not None else "n/a",
-                r["ms_saved_per_hit"] if r["ms_saved_per_hit"] is not None else "n/a",
-                ms_to_human(r["total_ms_saved"]) if r["total_ms_saved"] else "0ms",
+                f,
+                features["bool_fields"][f]["true"],
+                features["bool_fields"][f]["false"],
             ]
-            for r in ch["per_tool"]
+            for f in bool_fields
         ],
     )
+    lines.append("")
+    lines.append("  match_mode distribution:")
+    for mm, cnt in sorted(features["match_mode"].items(), key=lambda x: -x[1]):
+        lines.append("    {:20s}  {:>5}".format(mm, cnt))
 
-    # ------------------------------------------------------------------
-    # 4. Outliers
-    # ------------------------------------------------------------------
-    section("4. Outliers  [Top-N slowest calls + high-error sessions]")
+
+def _render_timeout(lines, timeout):
+    """Render exec_command timeout configuration section."""
+    lines.append("  Total exec_command calls: {}".format(timeout["total"]))
+    lines.append("")
+    _table(
+        lines,
+        ["bucket", "calls", "pct"],
+        [16, 7, 6],
+        [
+            [bucket, cnt, "{:.1f}".format(pct(cnt, timeout["total"]))]
+            for bucket, cnt in sorted(timeout["timeout_buckets"].items())
+        ],
+    )
+    lines.append("")
     lines.append(
-        "  Slowest {} individual calls:".format(len(outliers["slowest_calls"]))
-    )
-    table(
-        ["duration", "tool", "session_id", "seq", "timed_out", "exit_code"],
-        [10, 22, 24, 5, 9, 9],
-        [
-            [
-                ms_to_human(r["duration_ms"]),
-                r["tool"],
-                str(r["session_id"])[:24],
-                str(r["seq"]) if r["seq"] is not None else "?",
-                "YES" if r["timed_out"] else "",
-                str(r["exit_code"]) if r["exit_code"] is not None else "",
-            ]
-            for r in outliers["slowest_calls"]
-        ],
-    )
-    if outliers["top_sessions_by_errors"]:
-        lines.append("")
-        lines.append("  Sessions with most errors:")
-        table(
-            ["session_id", "calls", "errors", "exit!=0", "timed_out"],
-            [28, 7, 7, 7, 9],
-            [
-                [
-                    str(s["session_id"])[:28],
-                    s["calls"],
-                    s["errors"],
-                    s["exit_nonzero"],
-                    s["timed_out"],
-                ]
-                for s in outliers["top_sessions_by_errors"]
-            ],
+        "  drain_timeout_ms configured: {} / {} ({:.1f}%)".format(
+            timeout["drain_configured"],
+            timeout["total"],
+            pct(timeout["drain_configured"], timeout["total"]),
         )
-    lines.append("")
-    lines.append("  Top sessions by call volume:")
-    table(
-        ["session_id", "calls", "errors", "total_chars", "total_dur"],
-        [28, 7, 7, 11, 10],
-        [
-            [
-                str(s["session_id"])[:28],
-                s["calls"],
-                s["errors"],
-                s["total_chars"],
-                ms_to_human(s["total_dur_ms"]),
-            ]
-            for s in outliers["top_sessions_by_calls"]
-        ],
     )
 
-    # ------------------------------------------------------------------
-    # 5. Daily Trend
-    # ------------------------------------------------------------------
-    if show_trend:
-        section("5. Daily Trend  [p95+p99 for tail-latency regression detection]")
-        table(
-            [
-                "day",
-                "calls",
-                "success%",
-                "cache_hit%",
-                "exec_exit!=0%",
-                "p95ms",
-                "p99ms",
-                "chars_p95",
-            ],
-            [12, 7, 9, 10, 14, 6, 6, 9],
-            [
-                [
-                    r["day"],
-                    r["calls"],
-                    "{:.1f}".format(r["success_rate"]),
-                    "{:.1f}".format(r["cache_hit_rate"])
-                    if r["cache_hit_rate"] is not None
-                    else "n/a",
-                    "{:.1f}".format(r["exec_nonzero_pct"]),
-                    r["dur_p95"],
-                    r["dur_p99"],
-                    r["chars_p95"],
-                ]
-                for r in trend
-            ],
-        )
 
-    # ------------------------------------------------------------------
-    # 6. Parameter Usage
-    # ------------------------------------------------------------------
-    if params_usage is not None:
-        section("6. Parameter Usage  [per-tool bool-field breakdown]")
-        bool_fields = [
-            "summary_mode",
-            "fields_projected",
-            "working_dir_used",
-            "stdin_provided",
-        ]
-        headers = ["tool"] + bool_fields
-        widths = [22] + [14] * len(bool_fields)
-        rows_data = []
-        for tool in sorted(params_usage):
-            t = params_usage[tool]
-            row = [tool]
-            for f in bool_fields:
-                cnts = t.get(f)
-                if cnts and cnts["present"]:
-                    row.append("{}/{}".format(cnts["true"], cnts["present"]))
-                else:
-                    row.append("")
-            rows_data.append(row)
-        table(headers, widths, rows_data)
-
-    # ------------------------------------------------------------------
-    # 7. Pagination Adoption
-    # ------------------------------------------------------------------
-    if pagination is not None:
-        section(
-            "7. Pagination Adoption  [cursor-based vs summary-mode vs first-page-only]"
-        )
-        table(
-            ["mode", "calls", "pct"],
-            [22, 7, 6],
-            [
-                [
-                    "paginated (cursor)",
-                    pagination["paginated"],
-                    "{:.1f}".format(pct(pagination["paginated"], pagination["total"])),
-                ],
-                [
-                    "summary-mode",
-                    pagination["summary_mode"],
-                    "{:.1f}".format(
-                        pct(pagination["summary_mode"], pagination["total"])
-                    ),
-                ],
-                [
-                    "first-page-only",
-                    pagination["first_page_only"],
-                    "{:.1f}".format(
-                        pct(pagination["first_page_only"], pagination["total"])
-                    ),
-                ],
-            ],
-        )
-
-    # ------------------------------------------------------------------
-    # 8. Feature Adoption (analyze_symbol)
-    # ------------------------------------------------------------------
-    if features is not None:
-        section(
-            "8. Feature Adoption (analyze_symbol)  "
-            "[import_lookup, def_use, impl_only, match_mode]"
-        )
-        lines.append("  Total analyze_symbol calls: {}".format(features["total"]))
-        lines.append("")
-        bool_fields = ["import_lookup", "def_use", "impl_only"]
-        table(
-            ["field", "true", "false"],
-            [22, 6, 6],
-            [
-                [
-                    f,
-                    features["bool_fields"][f]["true"],
-                    features["bool_fields"][f]["false"],
-                ]
-                for f in bool_fields
-            ],
-        )
-        lines.append("")
-        lines.append("  match_mode distribution:")
-        for mm, cnt in sorted(features["match_mode"].items(), key=lambda x: -x[1]):
-            lines.append("    {:20s}  {:>5}".format(mm, cnt))
-
-    # ------------------------------------------------------------------
-    # 9. git_ref Adoption
-    # ------------------------------------------------------------------
-    if git_ref is not None:
-        section("9. git_ref Adoption  [analyze_directory + analyze_symbol]")
-        table(
-            ["tool", "calls", "git_ref_used", "adoption%"],
-            [22, 7, 12, 10],
-            [
-                [
-                    tool,
-                    t["calls"],
-                    t["git_ref_used"],
-                    "{:.1f}".format(pct(t["git_ref_used"], t["calls"])),
-                ]
-                for tool, t in sorted(git_ref.items())
-            ],
-        )
-
-    # ------------------------------------------------------------------
-    # 10. exec_command Timeout Configuration
-    # ------------------------------------------------------------------
-    if timeout is not None:
-        section(
-            "10. exec_command Timeout Configuration  "
-            "[timeout_configured_ms + drain_timeout_ms]"
-        )
-        lines.append("  Total exec_command calls: {}".format(timeout["total"]))
-        lines.append("")
-        table(
-            ["bucket", "calls", "pct"],
-            [16, 7, 6],
-            [
-                [bucket, cnt, "{:.1f}".format(pct(cnt, timeout["total"]))]
-                for bucket, cnt in sorted(timeout["timeout_buckets"].items())
-            ],
-        )
-        lines.append("")
-        lines.append(
-            "  drain_timeout_ms configured: {} / {} ({:.1f}%)".format(
-                timeout["drain_configured"],
-                timeout["total"],
-                pct(timeout["drain_configured"], timeout["total"]),
-            )
-        )
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
 # JSON formatter
 # ---------------------------------------------------------------------------
 
 
-def fmt_json(
-    latency,
-    reliability,
-    cache,
-    outliers,
-    trend,
-    show_trend,
-    params_usage=None,
-    pagination=None,
-    features=None,
-    git_ref=None,
-    timeout=None,
-):
+def fmt_json(sections):
     data = {
-        "latency": latency,
-        "reliability": reliability,
-        "cache": cache,
-        "outliers": outliers,
+        "latency": sections["latency"],
+        "reliability": sections["reliability"],
+        "cache": sections["cache"],
+        "outliers": sections["outliers"],
     }
-    if show_trend:
-        data["trend"] = trend
-    if params_usage is not None:
-        data["params_usage"] = params_usage
-    if pagination is not None:
-        data["pagination"] = pagination
-    if features is not None:
-        data["features"] = features
-    if git_ref is not None:
-        data["git_ref"] = git_ref
-    if timeout is not None:
-        data["timeout"] = timeout
+    if sections["show_trend"]:
+        data["trend"] = sections["trend"]
+    if sections["params_usage"] is not None:
+        data["params_usage"] = sections["params_usage"]
+    if sections["pagination"] is not None:
+        data["pagination"] = sections["pagination"]
+    if sections["features"] is not None:
+        data["features"] = sections["features"]
+    if sections["git_ref"] is not None:
+        data["git_ref"] = sections["git_ref"]
+    if sections["timeout"] is not None:
+        data["timeout"] = sections["timeout"]
     return json.dumps(data, indent=2)
 
 
@@ -1108,19 +1177,7 @@ def fmt_json(
 # ---------------------------------------------------------------------------
 
 
-def fmt_csv(
-    latency,
-    reliability,
-    cache,
-    outliers,
-    trend,
-    show_trend,
-    params_usage=None,
-    pagination=None,
-    features=None,
-    git_ref=None,
-    timeout=None,
-):
+def fmt_csv(sections):
     buf = StringIO()
     w = csv.writer(buf)
 
@@ -1139,7 +1196,7 @@ def fmt_csv(
             "truncated_pct",
         ]
     )
-    for r in latency:
+    for r in sections["latency"]:
         w.writerow(
             [
                 r["tool"],
@@ -1170,7 +1227,7 @@ def fmt_csv(
             "timed_out_pct",
         ]
     )
-    for r in reliability:
+    for r in sections["reliability"]:
         w.writerow(
             [
                 r["tool"],
@@ -1200,7 +1257,7 @@ def fmt_csv(
             "hit_chars",
         ]
     )
-    for r in cache["per_tool"]:
+    for r in sections["cache"]["per_tool"]:
         w.writerow(
             [
                 r["tool"],
@@ -1218,7 +1275,7 @@ def fmt_csv(
     w.writerow([])
     w.writerow(["## outliers_slowest"])
     w.writerow(["duration_ms", "tool", "session_id", "seq", "timed_out", "exit_code"])
-    for r in outliers["slowest_calls"]:
+    for r in sections["outliers"]["slowest_calls"]:
         w.writerow(
             [
                 r["duration_ms"],
@@ -1230,7 +1287,7 @@ def fmt_csv(
             ]
         )
 
-    if show_trend and trend:
+    if sections["show_trend"] and sections["trend"]:
         w.writerow([])
         w.writerow(["## trend"])
         w.writerow(
@@ -1246,7 +1303,7 @@ def fmt_csv(
                 "chars_p95",
             ]
         )
-        for r in trend:
+        for r in sections["trend"]:
             w.writerow(
                 [
                     r["day"],
@@ -1264,7 +1321,7 @@ def fmt_csv(
             )
 
     # Section 6: Parameter Usage
-    if params_usage is not None:
+    if sections["params_usage"] is not None:
         w.writerow([])
         w.writerow(["# Section 6: Parameter Usage"])
         bool_fields = [
@@ -1274,8 +1331,8 @@ def fmt_csv(
             "stdin_provided",
         ]
         w.writerow(["tool"] + bool_fields)
-        for tool in sorted(params_usage):
-            t = params_usage[tool]
+        for tool in sorted(sections["params_usage"]):
+            t = sections["params_usage"][tool]
             row = [tool]
             for f in bool_fields:
                 cnts = t.get(f)
@@ -1286,58 +1343,73 @@ def fmt_csv(
             w.writerow(row)
 
     # Section 7: Pagination Adoption
-    if pagination is not None:
+    if sections["pagination"] is not None:
         w.writerow([])
         w.writerow(["# Section 7: Pagination Adoption"])
         w.writerow(["mode", "calls", "pct"])
         w.writerow(
             [
                 "paginated (cursor)",
-                pagination["paginated"],
-                "{:.1f}".format(pct(pagination["paginated"], pagination["total"])),
+                sections["pagination"]["paginated"],
+                "{:.1f}".format(
+                    pct(
+                        sections["pagination"]["paginated"],
+                        sections["pagination"]["total"],
+                    )
+                ),
             ]
         )
         w.writerow(
             [
                 "summary-mode",
-                pagination["summary_mode"],
-                "{:.1f}".format(pct(pagination["summary_mode"], pagination["total"])),
+                sections["pagination"]["summary_mode"],
+                "{:.1f}".format(
+                    pct(
+                        sections["pagination"]["summary_mode"],
+                        sections["pagination"]["total"],
+                    )
+                ),
             ]
         )
         w.writerow(
             [
                 "first-page-only",
-                pagination["first_page_only"],
+                sections["pagination"]["first_page_only"],
                 "{:.1f}".format(
-                    pct(pagination["first_page_only"], pagination["total"])
+                    pct(
+                        sections["pagination"]["first_page_only"],
+                        sections["pagination"]["total"],
+                    )
                 ),
             ]
         )
 
     # Section 8: Feature Adoption (analyze_symbol)
-    if features is not None:
+    if sections["features"] is not None:
         w.writerow([])
         w.writerow(["# Section 8: Feature Adoption (analyze_symbol)"])
-        w.writerow(["total_analyze_symbol_calls", features["total"]])
+        w.writerow(["total_analyze_symbol_calls", sections["features"]["total"]])
         bool_fields = ["import_lookup", "def_use", "impl_only"]
         w.writerow(["field", "true", "false"])
         for f in bool_fields:
             w.writerow(
                 [
                     f,
-                    features["bool_fields"][f]["true"],
-                    features["bool_fields"][f]["false"],
+                    sections["features"]["bool_fields"][f]["true"],
+                    sections["features"]["bool_fields"][f]["false"],
                 ]
             )
-        for mm, cnt in sorted(features["match_mode"].items(), key=lambda x: -x[1]):
+        for mm, cnt in sorted(
+            sections["features"]["match_mode"].items(), key=lambda x: -x[1]
+        ):
             w.writerow(["match_mode:{}".format(mm), cnt])
 
     # Section 9: git_ref Adoption
-    if git_ref is not None:
+    if sections["git_ref"] is not None:
         w.writerow([])
         w.writerow(["# Section 9: git_ref Adoption"])
         w.writerow(["tool", "calls", "git_ref_used", "adoption_pct"])
-        for tool, t in sorted(git_ref.items()):
+        for tool, t in sorted(sections["git_ref"].items()):
             w.writerow(
                 [
                     tool,
@@ -1348,14 +1420,18 @@ def fmt_csv(
             )
 
     # Section 10: exec_command Timeout Configuration
-    if timeout is not None:
+    if sections["timeout"] is not None:
         w.writerow([])
         w.writerow(["# Section 10: exec_command Timeout Configuration"])
-        w.writerow(["total_exec_command_calls", timeout["total"]])
+        w.writerow(["total_exec_command_calls", sections["timeout"]["total"]])
         w.writerow(["bucket", "calls", "pct"])
-        for bucket, cnt in sorted(timeout["timeout_buckets"].items()):
-            w.writerow([bucket, cnt, "{:.1f}".format(pct(cnt, timeout["total"]))])
-        w.writerow(["drain_timeout_ms_configured", timeout["drain_configured"]])
+        for bucket, cnt in sorted(sections["timeout"]["timeout_buckets"].items()):
+            w.writerow(
+                [bucket, cnt, "{:.1f}".format(pct(cnt, sections["timeout"]["total"]))]
+            )
+        w.writerow(
+            ["drain_timeout_ms_configured", sections["timeout"]["drain_configured"]]
+        )
 
     return buf.getvalue()
 
@@ -1448,55 +1524,26 @@ def main():
     git_ref = compute_git_ref(records)
     timeout = compute_timeout(records)
 
+    sections = _build_sections(
+        latency,
+        reliability,
+        cache,
+        outliers,
+        trend,
+        args.trend,
+        params_usage,
+        pagination,
+        features,
+        git_ref,
+        timeout,
+    )
+
     if args.fmt == "json":
-        print(
-            fmt_json(
-                latency,
-                reliability,
-                cache,
-                outliers,
-                trend,
-                args.trend,
-                params_usage,
-                pagination,
-                features,
-                git_ref,
-                timeout,
-            )
-        )
+        print(fmt_json(sections))
     elif args.fmt == "csv":
-        print(
-            fmt_csv(
-                latency,
-                reliability,
-                cache,
-                outliers,
-                trend,
-                args.trend,
-                params_usage,
-                pagination,
-                features,
-                git_ref,
-                timeout,
-            ),
-            end="",
-        )
+        print(fmt_csv(sections), end="")
     else:
-        print(
-            fmt_text(
-                latency,
-                reliability,
-                cache,
-                outliers,
-                trend,
-                args.trend,
-                params_usage,
-                pagination,
-                features,
-                git_ref,
-                timeout,
-            )
-        )
+        print(fmt_text(sections))
 
 
 if __name__ == "__main__":
