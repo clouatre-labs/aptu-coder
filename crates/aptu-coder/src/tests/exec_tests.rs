@@ -1,5 +1,7 @@
 use crate::tools::exec_command::strip_cd_prefix;
-use crate::tools::exec_runtime::{build_exec_command, handle_output_persist};
+use crate::tools::exec_runtime::{
+    build_exec_command, handle_output_persist, persist_interleaved_overflow,
+};
 use crate::{SIZE_LIMIT, STDIN_MAX_BYTES};
 
 #[test]
@@ -221,7 +223,7 @@ fn test_exec_byte_overflow_combined_exceeds_50k() {
     let truncated = if large_output.len() > SIZE_LIMIT {
         combined_truncated = true;
         let tail_start = large_output.len().saturating_sub(SIZE_LIMIT);
-        let safe_start = large_output[..tail_start].floor_char_boundary(tail_start);
+        let safe_start = large_output.floor_char_boundary(tail_start);
         large_output[safe_start..].to_string()
     } else {
         large_output.clone()
@@ -327,4 +329,58 @@ fn test_strip_cd_prefix_splits_on_first_ampersand_only() {
     let (cmd, path) = strip_cd_prefix("cd /a && cmd1 && cd /b && cmd2");
     assert_eq!(path, Some("/a"));
     assert_eq!(cmd, "cmd1 && cd /b && cmd2");
+}
+
+#[tokio::test]
+async fn test_handle_output_persist_mid_char_boundary() {
+    // Regression: tail_start falls inside a multi-byte UTF-8 char.
+    // Construct stdout of exactly MAX_STDOUT_BYTES + 1 bytes where byte 1
+    // is the second byte of a 3-byte char (中, U+4E2D).
+    // Old code: stdout[..tail_start] panics because byte 1 is not a char boundary.
+    // Fix: floor_char_boundary on the full string returns 0, no panic.
+    let mut stdout = String::new();
+    stdout.push('\u{4E2D}'); // 3 bytes: 0xE4 0xB8 0xAD
+    stdout.push_str(&"a".repeat(29998)); // total = 30001 bytes
+    assert_eq!(stdout.len(), 30_001);
+
+    let stderr = String::new();
+    let slot = 99u32;
+
+    let (out_stdout, _out_stderr, _stdout_path, _stderr_path, byte_truncated) =
+        handle_output_persist(stdout, stderr, slot);
+
+    assert!(byte_truncated, "byte_truncated should be true");
+    assert!(
+        out_stdout.is_char_boundary(0),
+        "start should be char boundary"
+    );
+    assert!(
+        out_stdout.is_char_boundary(out_stdout.len()),
+        "end should be char boundary"
+    );
+    let _char_count = out_stdout.chars().count();
+}
+
+#[tokio::test]
+async fn test_persist_interleaved_mid_char_boundary() {
+    // Regression: tail_start falls inside a multi-byte UTF-8 char.
+    // Construct interleaved of max_bytes + 1 bytes where byte 1
+    // is the second byte of a 3-byte char.
+    let mut interleaved = String::new();
+    interleaved.push('\u{4E2D}'); // 3 bytes
+    interleaved.push_str(&"a".repeat(98)); // total = 101 bytes
+    assert_eq!(interleaved.len(), 101);
+
+    let max_bytes = 100usize;
+    let slot = 42u32;
+
+    let (preview, path) = persist_interleaved_overflow(interleaved, max_bytes, slot).await;
+
+    assert!(path.is_some(), "should have overflowed to slot file");
+    assert!(preview.is_char_boundary(0), "start should be char boundary");
+    assert!(
+        preview.is_char_boundary(preview.len()),
+        "end should be char boundary"
+    );
+    let _char_count = preview.chars().count();
 }

@@ -51,7 +51,7 @@ pub(crate) async fn handle_overview_mode(
         )
     })?;
 
-    let canonical_max_depth = max_depth.and_then(|d| if d == 0 { None } else { Some(d) });
+    let canonical_max_depth = max_depth.filter(|&d| d != 0);
     let git_ref_val = params.git_ref.as_deref().filter(|s| !s.is_empty());
     let cache_key = DirectoryCacheKey::from_entries(
         &all_entries,

@@ -291,7 +291,7 @@ fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -
         combined_truncated = true;
         // Use char-boundary-safe tail truncation
         let tail_start = output_text.len().saturating_sub(SIZE_LIMIT);
-        let safe_start = output_text[..tail_start].floor_char_boundary(tail_start);
+        let safe_start = output_text.floor_char_boundary(tail_start);
         output_text[safe_start..].to_string()
     } else {
         output_text
@@ -596,4 +596,55 @@ pub(crate) fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
     let path = path_part.trim();
     let stripped = rest_part.trim();
     (stripped, Some(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ShellOutput;
+
+    #[test]
+    fn test_format_shell_output_mid_char_boundary() {
+        // Regression: tail_start falls inside a multi-byte UTF-8 char.
+        // Construct interleaved of SIZE_LIMIT + 1 bytes where byte 1
+        // is the second byte of a 3-byte char (中, U+4E2D).
+        // Old code: output_text[..tail_start] panics.
+        // Fix: floor_char_boundary on the full string returns 0, no panic.
+        let mut interleaved = String::new();
+        interleaved.push('\u{4E2D}'); // 3 bytes: 0xE4 0xB8 0xAD
+        interleaved.push_str(&"a".repeat(4998)); // total = 5001 bytes
+        assert_eq!(interleaved.len(), 5001);
+
+        let output = ShellOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            interleaved,
+            exit_code: Some(0),
+            output_truncated: false,
+            output_collection_error: None,
+            stdout_path: None,
+            stderr_path: None,
+            interleaved_path: None,
+            filter_applied: None,
+            timed_out: false,
+        };
+
+        let params = ExecCommandParams {
+            command: "echo test".to_string(),
+            working_dir: None,
+            stdin: None,
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+
+        let (result, truncated) = format_shell_output_phase(&output, &params);
+
+        assert!(truncated, "should be truncated");
+        assert!(result.is_char_boundary(0), "start should be char boundary");
+        assert!(
+            result.is_char_boundary(result.len()),
+            "end should be char boundary"
+        );
+        let _char_count = result.chars().count();
+    }
 }
