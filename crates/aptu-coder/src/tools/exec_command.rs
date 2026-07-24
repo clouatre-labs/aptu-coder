@@ -240,8 +240,8 @@ async fn spawn_and_collect_phase(
     filter_table: &Arc<Vec<CompiledRule>>,
     drain_dur: std::time::Duration,
     span: &tracing::Span,
-) -> Result<ShellOutput, CallToolResult> {
-    let output = run_exec_impl(
+) -> Result<(ShellOutput, u64, u64), CallToolResult> {
+    let (output, raw_stdout_bytes, raw_stderr_bytes) = run_exec_impl(
         command,
         working_dir_path,
         params.stdin.clone(),
@@ -268,7 +268,7 @@ async fn spawn_and_collect_phase(
         return Err(result);
     }
 
-    Ok(output)
+    Ok((output, raw_stdout_bytes, raw_stderr_bytes))
 }
 
 /// Phase 4: Format output text and apply truncation limits.
@@ -445,7 +445,7 @@ pub(crate) async fn exec_command_impl(
 
     // Phase 3: Spawn and collect
     let resolved_path_str = resolved_path.as_deref();
-    let mut output = match spawn_and_collect_phase(
+    let (mut output, raw_stdout_bytes, raw_stderr_bytes) = match spawn_and_collect_phase(
         command.clone(),
         working_dir_path.clone(),
         &params,
@@ -555,25 +555,29 @@ pub(crate) async fn exec_command_impl(
 
     result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-    metrics_tx.send(
-        crate::metrics::MetricEventBuilder::new("exec_command", "ok", dur)
-            .output_chars(text.len())
-            .param_path_depth(crate::metrics::path_component_count(
-                param_path.as_deref().unwrap_or(""),
-            ))
-            .session_id(sid)
-            .seq(Some(seq))
-            .exit_code(exit_code)
-            .timed_out(output.timed_out)
-            .output_truncated(Some(output_truncated))
-            .chars_threshold_breach(text.len() > 30_000)
-            .filter_applied(output.filter_applied.clone())
-            .stdin_provided(stdin_provided)
-            .timeout_configured_ms(timeout_configured_ms)
-            .drain_timeout_ms(drain_timeout_ms)
-            .working_dir_used(working_dir_used)
-            .build(),
-    );
+    let mut metric_builder = crate::metrics::MetricEventBuilder::new("exec_command", "ok", dur)
+        .output_chars(text.len())
+        .param_path_depth(crate::metrics::path_component_count(
+            param_path.as_deref().unwrap_or(""),
+        ))
+        .session_id(sid)
+        .seq(Some(seq))
+        .exit_code(exit_code)
+        .timed_out(output.timed_out)
+        .output_truncated(Some(output_truncated))
+        .chars_threshold_breach(text.len() > 30_000)
+        .filter_applied(output.filter_applied.clone())
+        .stdin_provided(stdin_provided)
+        .timeout_configured_ms(timeout_configured_ms)
+        .drain_timeout_ms(drain_timeout_ms)
+        .working_dir_used(working_dir_used);
+    // Emit raw byte counts only when output was truncated and not timed out.
+    if output_truncated && !output.timed_out {
+        metric_builder = metric_builder
+            .stdout_bytes_raw(raw_stdout_bytes)
+            .stderr_bytes_raw(raw_stderr_bytes);
+    }
+    metrics_tx.send(metric_builder.build());
     Ok(result)
 }
 

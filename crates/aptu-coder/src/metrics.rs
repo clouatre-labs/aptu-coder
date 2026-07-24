@@ -128,6 +128,14 @@ pub struct MetricEvent {
     /// L2 disk cache total size in bytes at the time of metric emission. Only populated for cache-related metrics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub l2_size_bytes: Option<u64>,
+    /// Raw stdout bytes read before any truncation. Only populated for `exec_command`
+    /// when `output_truncated=true` and `timed_out=false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout_bytes_raw: Option<u64>,
+    /// Raw stderr bytes read before any truncation. Only populated for `exec_command`
+    /// when `output_truncated=true` and `timed_out=false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_bytes_raw: Option<u64>,
 }
 
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
@@ -170,6 +178,8 @@ pub(crate) struct MetricEventBuilder {
     l1_eviction_count: Option<u64>,
     l2_entry_count: Option<u64>,
     l2_size_bytes: Option<u64>,
+    stdout_bytes_raw: Option<u64>,
+    stderr_bytes_raw: Option<u64>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -352,6 +362,16 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    pub(crate) fn stdout_bytes_raw(mut self, v: u64) -> Self {
+        self.stdout_bytes_raw = Some(v);
+        self
+    }
+    #[must_use]
+    pub(crate) fn stderr_bytes_raw(mut self, v: u64) -> Self {
+        self.stderr_bytes_raw = Some(v);
+        self
+    }
+    #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
@@ -391,6 +411,8 @@ impl MetricEventBuilder {
             l1_eviction_count: self.l1_eviction_count,
             l2_entry_count: self.l2_entry_count,
             l2_size_bytes: self.l2_size_bytes,
+            stdout_bytes_raw: self.stdout_bytes_raw,
+            stderr_bytes_raw: self.stderr_bytes_raw,
         }
     }
 }
@@ -656,9 +678,34 @@ mod tests {
             l1_eviction_count: None,
             l2_entry_count: None,
             l2_size_bytes: None,
+            stdout_bytes_raw: None,
+            stderr_bytes_raw: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;
         assert_eq!(serialized, json_str);
     }
+}
+
+#[test]
+fn test_metric_event_builder_raw_bytes_serialize() {
+    // Happy path: MetricEventBuilder stdout_bytes_raw and stderr_bytes_raw
+    // methods emit correct JSON with skip_serializing_if when set.
+    let event = MetricEventBuilder::new("exec_command", "ok", 100)
+        .stdout_bytes_raw(12345)
+        .stderr_bytes_raw(6789)
+        .build();
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains(r#""stdout_bytes_raw":12345"#));
+    assert!(json.contains(r#""stderr_bytes_raw":6789"#));
+}
+
+#[test]
+fn test_metric_event_builder_raw_bytes_skip_when_none() {
+    // Happy path: when stdout_bytes_raw/stderr_bytes_raw are None,
+    // they are omitted from JSON (skip_serializing_if).
+    let event = MetricEventBuilder::new("exec_command", "ok", 100).build();
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(!json.contains("stdout_bytes_raw"));
+    assert!(!json.contains("stderr_bytes_raw"));
 }

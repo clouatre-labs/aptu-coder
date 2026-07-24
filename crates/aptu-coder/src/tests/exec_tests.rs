@@ -1,8 +1,8 @@
 use crate::tools::exec_command::strip_cd_prefix;
 use crate::tools::exec_runtime::{
-    build_exec_command, handle_output_persist, persist_interleaved_overflow,
+    build_exec_command, handle_output_persist, persist_interleaved_overflow, run_exec_impl,
 };
-use crate::{SIZE_LIMIT, STDIN_MAX_BYTES};
+use crate::{SIZE_LIMIT, STDIN_MAX_BYTES, filters::CompiledRule};
 
 #[test]
 fn test_exec_stdin_size_cap_validation() {
@@ -383,4 +383,77 @@ async fn test_persist_interleaved_mid_char_boundary() {
         "end should be char boundary"
     );
     let _char_count = preview.chars().count();
+}
+
+#[tokio::test]
+async fn test_run_exec_impl_raw_byte_counters() {
+    // Edge case: unconditional byte counters increment on every line received
+    // even after budget check fires. Use a command that produces output exceeding
+    // the drain budget to verify raw counters exceed the budget.
+    let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
+    let (output, raw_so, raw_se) = run_exec_impl(
+        "echo hello && echo world >&2".to_string(),
+        None,
+        None,
+        0,
+        None,
+        &filter_table,
+        Some(5),
+        std::time::Duration::from_millis(500),
+    )
+    .await;
+
+    // Both stdout and stderr should have been captured
+    assert!(raw_so >= 6, "raw_stdout_bytes should be >= 6 (hello\\n)");
+    assert!(raw_se >= 6, "raw_stderr_bytes should be >= 6 (world\\n)");
+    assert_eq!(output.exit_code, Some(0));
+    assert!(!output.timed_out);
+}
+
+#[tokio::test]
+async fn test_run_exec_impl_raw_counters_exceed_budget() {
+    // Edge case: raw counters should exceed the budget when output is large.
+    // Generate 40k bytes of stdout (exceeds 30k MAX_DRAIN_STDOUT_BYTES).
+    let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
+    let large_line = "x".repeat(1000);
+    let cmd = format!("for i in $(seq 1 50); do echo {}; done", large_line);
+    let (output, raw_so, _raw_se) = run_exec_impl(
+        cmd,
+        None,
+        None,
+        0,
+        None,
+        &filter_table,
+        Some(10),
+        std::time::Duration::from_millis(500),
+    )
+    .await;
+
+    // Raw counter should exceed the 30k budget
+    assert!(raw_so > 30_000, "raw_stdout_bytes should exceed 30k budget");
+    assert!(output.output_truncated, "output should be truncated");
+    assert_eq!(output.exit_code, Some(0));
+    assert!(!output.timed_out);
+}
+
+#[tokio::test]
+async fn test_run_exec_impl_raw_counters_zero_on_timeout() {
+    // Edge case: raw byte counters are 0 when timed_out=true because the
+    // drain task is aborted before any output is collected.
+    let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
+    let (output, raw_so, raw_se) = run_exec_impl(
+        "sleep 2".to_string(),
+        None,
+        None,
+        0,
+        None,
+        &filter_table,
+        Some(1), // 1 second timeout, sleep 2 exceeds it
+        std::time::Duration::from_millis(500),
+    )
+    .await;
+
+    assert!(output.timed_out, "command should have timed out");
+    assert_eq!(raw_so, 0, "raw_stdout_bytes should be 0 on timeout");
+    assert_eq!(raw_se, 0, "raw_stderr_bytes should be 0 on timeout");
 }
