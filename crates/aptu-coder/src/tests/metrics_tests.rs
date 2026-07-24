@@ -187,6 +187,8 @@ fn test_metric_chars_threshold_breach_fires() {
         l1_eviction_count: None,
         l2_entry_count: None,
         l2_size_bytes: None,
+        stdout_bytes_raw: None,
+        stderr_bytes_raw: None,
     };
     assert!(
         event.chars_threshold_breach,
@@ -236,6 +238,8 @@ fn test_metric_chars_threshold_breach_no_fire() {
         l1_eviction_count: None,
         l2_entry_count: None,
         l2_size_bytes: None,
+        stdout_bytes_raw: None,
+        stderr_bytes_raw: None,
     };
     assert!(
         !event.chars_threshold_breach,

@@ -25,6 +25,8 @@ pub(crate) struct ExecutionResult {
     pub(crate) output_collection_error: Option<String>,
     pub(crate) timed_out: bool,
     pub(crate) byte_truncated: bool,
+    pub(crate) raw_stdout_bytes: u64,
+    pub(crate) raw_stderr_bytes: u64,
 }
 
 /// Builds a tokio::process::Command with the given parameters.
@@ -88,23 +90,31 @@ pub(crate) async fn run_with_timeout(
         let mut byte_budget_hit = false;
         let mut so_bytes = 0usize;
         let mut se_bytes = 0usize;
+        let mut raw_so = 0usize;
+        let mut raw_se = 0usize;
 
         match (so_stream, se_stream) {
             (Some(so), Some(se)) => {
                 let mut merged = so.merge(se);
                 while let Some(Ok((is_stderr, line))) = merged.next().await {
+                    // entry_len approximates the on-wire byte count: the line content
+                    // plus the newline stripped by LinesStream. This matches the
+                    // byte_budget_hit accounting below.
                     let entry_len = line.len() + 1; // +1 for newline
                     if is_stderr {
+                        raw_se += entry_len;
                         if se_bytes + entry_len > MAX_DRAIN_STDERR_BYTES {
                             byte_budget_hit = true;
                             // Continue reading to drain child pipe; do not send.
                             continue;
                         }
                         se_bytes += entry_len;
-                    } else if so_bytes + entry_len > MAX_DRAIN_STDOUT_BYTES {
-                        byte_budget_hit = true;
-                        continue;
                     } else {
+                        raw_so += entry_len;
+                        if so_bytes + entry_len > MAX_DRAIN_STDOUT_BYTES {
+                            byte_budget_hit = true;
+                            continue;
+                        }
                         so_bytes += entry_len;
                     }
                     let _ = tx.send((is_stderr, line));
@@ -113,7 +123,11 @@ pub(crate) async fn run_with_timeout(
             (Some(so), None) => {
                 let mut stream = so;
                 while let Some(Ok((_, line))) = stream.next().await {
+                    // entry_len approximates the on-wire byte count: the line content
+                    // plus the newline stripped by LinesStream. This matches the
+                    // byte_budget_hit accounting below.
                     let entry_len = line.len() + 1;
+                    raw_so += entry_len;
                     if so_bytes + entry_len > MAX_DRAIN_STDOUT_BYTES {
                         byte_budget_hit = true;
                         continue;
@@ -125,7 +139,11 @@ pub(crate) async fn run_with_timeout(
             (None, Some(se)) => {
                 let mut stream = se;
                 while let Some(Ok((_, line))) = stream.next().await {
+                    // entry_len approximates the on-wire byte count: the line content
+                    // plus the newline stripped by LinesStream. This matches the
+                    // byte_budget_hit accounting below.
                     let entry_len = line.len() + 1;
+                    raw_se += entry_len;
                     if se_bytes + entry_len > MAX_DRAIN_STDERR_BYTES {
                         byte_budget_hit = true;
                         continue;
@@ -137,7 +155,7 @@ pub(crate) async fn run_with_timeout(
             (None, None) => {}
         }
 
-        byte_budget_hit
+        (byte_budget_hit, raw_so, raw_se)
     });
 
     let drain_abort = drain_task.abort_handle();
@@ -163,20 +181,20 @@ pub(crate) async fn run_with_timeout(
             };
 
             // Drain remaining buffered output with drain_timeout grace (outside user timeout).
-            let (drain_truncated, byte_truncated) = if timed_out {
+            let (drain_truncated, byte_truncated, raw_so, raw_se) = if timed_out {
                 drain_abort.abort();
-                (false, false)
+                (false, false, 0, 0)
             } else {
                 match tokio::time::timeout(drain_timeout, drain_task).await {
-                    Ok(Ok(budget_hit)) => (false, budget_hit),
+                    Ok(Ok((budget_hit, rso, rse))) => (false, budget_hit, rso, rse),
                     Ok(Err(join_err)) => {
                         // Task panicked: treat as no budget truncation, log warning.
                         tracing::warn!("drain_task panicked: {join_err}");
-                        (false, false)
+                        (false, false, 0, 0)
                     }
                     Err(_) => {
                         drain_abort.abort();
-                        (true, false)
+                        (true, false, 0, 0)
                     }
                 }
             };
@@ -193,6 +211,8 @@ pub(crate) async fn run_with_timeout(
                 output_collection_error: ocerr,
                 timed_out,
                 byte_truncated,
+                raw_stdout_bytes: raw_so as u64,
+                raw_stderr_bytes: raw_se as u64,
             }
         }
         _ => {
@@ -201,15 +221,15 @@ pub(crate) async fn run_with_timeout(
             let exit_status = child.wait().await.ok();
             let drain_result = tokio::time::timeout(drain_timeout, drain_task).await;
 
-            let (drain_truncated, byte_truncated) = match drain_result {
-                Ok(Ok(budget_hit)) => (false, budget_hit),
+            let (drain_truncated, byte_truncated, raw_so, raw_se) = match drain_result {
+                Ok(Ok((budget_hit, rso, rse))) => (false, budget_hit, rso, rse),
                 Ok(Err(join_err)) => {
                     tracing::warn!("drain_task panicked: {join_err}");
-                    (false, false)
+                    (false, false, 0, 0)
                 }
                 Err(_) => {
                     drain_abort.abort();
-                    (true, false)
+                    (true, false, 0, 0)
                 }
             };
             let exit_code = exit_status.and_then(|s| s.code());
@@ -224,6 +244,8 @@ pub(crate) async fn run_with_timeout(
                 output_collection_error: ocerr,
                 timed_out: false,
                 byte_truncated,
+                raw_stdout_bytes: raw_so as u64,
+                raw_stderr_bytes: raw_se as u64,
             }
         }
     }
@@ -240,7 +262,7 @@ pub(crate) async fn run_exec_impl(
     filter_table: &Arc<Vec<CompiledRule>>,
     timeout_secs: Option<i64>,
     drain_timeout: std::time::Duration,
-) -> ShellOutput {
+) -> (ShellOutput, u64, u64) {
     let mut cmd = build_exec_command(
         &command,
         working_dir_path.as_ref(),
@@ -251,12 +273,16 @@ pub(crate) async fn run_exec_impl(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            return ShellOutput::new(
-                String::new(),
-                format!("failed to spawn command: {e}"),
-                format!("failed to spawn command: {e}"),
-                None,
-                false,
+            return (
+                ShellOutput::new(
+                    String::new(),
+                    format!("failed to spawn command: {e}"),
+                    format!("failed to spawn command: {e}"),
+                    None,
+                    false,
+                ),
+                0,
+                0,
             );
         }
     };
@@ -283,6 +309,8 @@ pub(crate) async fn run_exec_impl(
     let mut output_truncated = exec_result.output_truncated || exec_result.byte_truncated;
     let output_collection_error = exec_result.output_collection_error;
     let timed_out = exec_result.timed_out;
+    let raw_stdout_bytes = exec_result.raw_stdout_bytes;
+    let raw_stderr_bytes = exec_result.raw_stderr_bytes;
 
     rx.close();
 
@@ -366,7 +394,7 @@ pub(crate) async fn run_exec_impl(
         }
     }
 
-    output
+    (output, raw_stdout_bytes, raw_stderr_bytes)
 }
 
 /// Handles output persistence by writing to slot files only when output overflows the line limit.
