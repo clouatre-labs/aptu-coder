@@ -47,8 +47,8 @@ Each line in the JSONL file is one JSON object:
 | `timed_out` | `bool` | `true` when the child process was killed because it exceeded `timeout_secs`; `false` otherwise. Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`). |
 | `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap, per-stream byte cap, or combined cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
 | `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
-| `stdout_bytes_raw` | `u64 \| null` | Raw stdout bytes read before any truncation; populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
-| `stderr_bytes_raw` | `u64 \| null` | Raw stderr bytes read before any truncation; populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
+| `stdout_bytes_raw` | `u64 \| null` | Approximate stdout bytes read before any truncation (counted as `line.len() + 1` per `LinesStream` line; last line and CRLF not exact); populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
+| `stderr_bytes_raw` | `u64 \| null` | Approximate stderr bytes read before any truncation (counted as `line.len() + 1` per `LinesStream` line; last line and CRLF not exact); populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
 | `git_ref_used` | `bool` | `true` when the `git_ref` parameter was supplied on `analyze_directory` or `analyze_symbol`. Omitted from JSONL when `false`. |
 | `summary_mode` | `bool` | `true` when `summary=true` was set on `analyze_directory`, `analyze_file`, or `analyze_symbol`. Omitted from JSONL when `false`. |
 | `is_paginated` | `bool` | `true` when a `cursor` was supplied on `analyze_directory`, `analyze_file`, or `analyze_symbol` (i.e., this is a continuation page). Omitted from JSONL when `false`. |
@@ -94,8 +94,8 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `seq` | early | `null` |
 | `output_truncated` | v0.14.2 | `null` (treat as unknown; does not mean truncation did not occur) |
 | `chars_threshold_breach` | v0.14.2 | `false` (omitted from JSONL when false; safe to query with `// false`) |
-| `stdout_bytes_raw` | v0.21.x | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort) |
-| `stderr_bytes_raw` | v0.21.x | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort) |
+| `stdout_bytes_raw` | v0.21.x | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
+| `stderr_bytes_raw` | v0.21.x | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
 | `filter_applied` | v0.14.2 | `null` (omitted from JSONL when null; only present for `exec_command` calls where a filter matched) |
 | `cache_tier` | v0.18.x | `null` (omitted when null; `l1_memory` or `l2_disk` on a cache hit) |
 | `cache_write_failure` | v0.18.x | `null` (omitted when null; `true` only when an L2 disk write failed) |
