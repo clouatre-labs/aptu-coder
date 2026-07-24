@@ -298,16 +298,15 @@ fn decode_call_graph_cursor(
         .unwrap_or(PaginationMode::Callers);
 
     let offset = if let Some(ref cursor_str) = params.pagination.cursor {
-        match decode_cursor(cursor_str).map_err(|e| {
-            err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                e.to_string(),
-                Some(error_meta("validation", false, "invalid cursor format")),
-            ))
-        }) {
-            Ok(v) => v.offset,
-            Err(e) => return Err(e),
-        }
+        decode_cursor(cursor_str)
+            .map_err(|e| {
+                err_to_tool_result(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    e.to_string(),
+                    Some(error_meta("validation", false, "invalid cursor format")),
+                ))
+            })?
+            .offset
     } else {
         0
     };

@@ -392,7 +392,7 @@ pub(crate) async fn persist_interleaved_overflow(
     let path = interleaved_file.display().to_string();
     // Tail preview: show the most recent output, respecting char boundaries.
     let tail_start = interleaved.len().saturating_sub(max_bytes);
-    let safe_start = interleaved[..tail_start].floor_char_boundary(tail_start);
+    let safe_start = interleaved.floor_char_boundary(tail_start);
     (interleaved[safe_start..].to_string(), Some(path))
 }
 
@@ -449,7 +449,7 @@ pub(crate) fn handle_output_persist(
         byte_truncated = true;
         // Use char-boundary-safe tail truncation
         let tail_start = stdout.len().saturating_sub(MAX_STDOUT_BYTES);
-        let safe_start = stdout[..tail_start].floor_char_boundary(tail_start);
+        let safe_start = stdout.floor_char_boundary(tail_start);
         stdout[safe_start..].to_string()
     } else if stdout_lines.len() > MAX_OUTPUT_LINES {
         stdout_lines[stdout_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
@@ -462,7 +462,7 @@ pub(crate) fn handle_output_persist(
         byte_truncated = true;
         // Use char-boundary-safe tail truncation
         let tail_start = stderr.len().saturating_sub(MAX_STDERR_BYTES);
-        let safe_start = stderr[..tail_start].floor_char_boundary(tail_start);
+        let safe_start = stderr.floor_char_boundary(tail_start);
         stderr[safe_start..].to_string()
     } else if stderr_lines.len() > MAX_OUTPUT_LINES {
         stderr_lines[stderr_lines.len().saturating_sub(OVERFLOW_PREVIEW_LINES)..].join("\n")
