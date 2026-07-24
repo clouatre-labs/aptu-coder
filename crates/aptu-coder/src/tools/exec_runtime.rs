@@ -97,6 +97,9 @@ pub(crate) async fn run_with_timeout(
             (Some(so), Some(se)) => {
                 let mut merged = so.merge(se);
                 while let Some(Ok((is_stderr, line))) = merged.next().await {
+                    // entry_len approximates the on-wire byte count: the line content
+                    // plus the newline stripped by LinesStream. This matches the
+                    // byte_budget_hit accounting below.
                     let entry_len = line.len() + 1; // +1 for newline
                     if is_stderr {
                         raw_se += entry_len;
@@ -120,6 +123,9 @@ pub(crate) async fn run_with_timeout(
             (Some(so), None) => {
                 let mut stream = so;
                 while let Some(Ok((_, line))) = stream.next().await {
+                    // entry_len approximates the on-wire byte count: the line content
+                    // plus the newline stripped by LinesStream. This matches the
+                    // byte_budget_hit accounting below.
                     let entry_len = line.len() + 1;
                     raw_so += entry_len;
                     if so_bytes + entry_len > MAX_DRAIN_STDOUT_BYTES {
@@ -133,6 +139,9 @@ pub(crate) async fn run_with_timeout(
             (None, Some(se)) => {
                 let mut stream = se;
                 while let Some(Ok((_, line))) = stream.next().await {
+                    // entry_len approximates the on-wire byte count: the line content
+                    // plus the newline stripped by LinesStream. This matches the
+                    // byte_budget_hit accounting below.
                     let entry_len = line.len() + 1;
                     raw_se += entry_len;
                     if se_bytes + entry_len > MAX_DRAIN_STDERR_BYTES {

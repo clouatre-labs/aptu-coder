@@ -571,8 +571,10 @@ pub(crate) async fn exec_command_impl(
         .timeout_configured_ms(timeout_configured_ms)
         .drain_timeout_ms(drain_timeout_ms)
         .working_dir_used(working_dir_used);
-    // Emit raw byte counts only when output was truncated and not timed out.
-    if output_truncated && !output.timed_out {
+    // Emit raw byte counts only when output was byte-budget truncated (not timed out
+    // and not a drain-abort), since those are the only cases where the counters are
+    // meaningful (drain-abort forces counters to 0).
+    if output_truncated && !output.timed_out && output.output_collection_error.is_none() {
         metric_builder = metric_builder
             .stdout_bytes_raw(raw_stdout_bytes)
             .stderr_bytes_raw(raw_stderr_bytes);

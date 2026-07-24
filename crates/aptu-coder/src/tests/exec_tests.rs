@@ -387,9 +387,9 @@ async fn test_persist_interleaved_mid_char_boundary() {
 
 #[tokio::test]
 async fn test_run_exec_impl_raw_byte_counters() {
-    // Edge case: unconditional byte counters increment on every line received
-    // even after budget check fires. Use a command that produces output exceeding
-    // the drain budget to verify raw counters exceed the budget.
+    // Happy path: verify raw byte counters are populated for normal (non-truncated)
+    // output. The command produces a small amount of stdout and stderr; counters
+    // should reflect the actual bytes received, not zero.
     let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
     let (output, raw_so, raw_se) = run_exec_impl(
         "echo hello && echo world >&2".to_string(),
