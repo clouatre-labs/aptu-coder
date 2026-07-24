@@ -128,12 +128,14 @@ pub struct MetricEvent {
     /// L2 disk cache total size in bytes at the time of metric emission. Only populated for cache-related metrics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub l2_size_bytes: Option<u64>,
-    /// Raw stdout bytes read before any truncation. Only populated for `exec_command`
-    /// when `output_truncated=true` and `timed_out=false`.
+    /// Approximate stdout bytes read before any truncation, counted as `line.len() + 1`
+    /// per `LinesStream` line (last line and CRLF not exact). Only populated for
+    /// `exec_command` when `output_truncated=true`, `timed_out=false`, and no drain-abort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdout_bytes_raw: Option<u64>,
-    /// Raw stderr bytes read before any truncation. Only populated for `exec_command`
-    /// when `output_truncated=true` and `timed_out=false`.
+    /// Approximate stderr bytes read before any truncation, counted as `line.len() + 1`
+    /// per `LinesStream` line (last line and CRLF not exact). Only populated for
+    /// `exec_command` when `output_truncated=true`, `timed_out=false`, and no drain-abort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr_bytes_raw: Option<u64>,
 }
