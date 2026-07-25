@@ -6,6 +6,7 @@
 //! lives here, along with the five exclusive private helpers. The `#[tool(...)]`-decorated
 //! shim in `lib.rs` extracts state from `&self` and delegates to `exec_command_impl`.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use rmcp::RoleServer;
@@ -303,19 +304,15 @@ fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -
         || output.stderr_path.is_some()
         || output.interleaved_path.is_some()
     {
-        truncation_notice.push_str("(Full output persisted to: ");
-        let mut paths = Vec::new();
         if let Some(ref p) = output.stdout_path {
-            paths.push(format!("stdout={}", p));
+            let _ = writeln!(truncation_notice, "Full output available at: {p}");
         }
         if let Some(ref p) = output.stderr_path {
-            paths.push(format!("stderr={}", p));
+            let _ = writeln!(truncation_notice, "Full stderr available at: {p}");
         }
         if let Some(ref p) = output.interleaved_path {
-            paths.push(format!("interleaved={}", p));
+            let _ = writeln!(truncation_notice, "Full output available at: {p}");
         }
-        truncation_notice.push_str(&paths.join(", "));
-        truncation_notice.push_str(")\n");
     }
 
     let text = format!(
@@ -654,5 +651,116 @@ mod tests {
             "end should be char boundary"
         );
         let _char_count = result.chars().count();
+    }
+
+    #[test]
+    fn test_format_shell_output_stdout_path_hint() {
+        // Arrange: ShellOutput with stdout_path set, no stderr or interleaved paths
+        let output = ShellOutput {
+            stdout: "hello".to_string(),
+            stderr: String::new(),
+            interleaved: String::new(),
+            exit_code: Some(0),
+            output_truncated: true,
+            output_collection_error: None,
+            stdout_path: Some("/tmp/aptu-coder-overflow/slot-0/stdout".to_string()),
+            stderr_path: None,
+            interleaved_path: None,
+            filter_applied: None,
+            timed_out: false,
+        };
+        let params = ExecCommandParams {
+            command: "echo hello".to_string(),
+            working_dir: None,
+            stdin: None,
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+
+        // Act
+        let (result, _) = format_shell_output_phase(&output, &params);
+
+        // Assert
+        assert!(
+            result.contains("Full output available at: /tmp/aptu-coder-overflow/slot-0/stdout"),
+            "should contain stdout path hint: {result}"
+        );
+        assert!(
+            !result.contains("Full stderr available at:"),
+            "should not contain stderr hint when stderr_path is None"
+        );
+    }
+
+    #[test]
+    fn test_format_shell_output_stderr_path_hint() {
+        // Arrange: ShellOutput with only stderr_path set
+        let output = ShellOutput {
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            interleaved: String::new(),
+            exit_code: Some(1),
+            output_truncated: true,
+            output_collection_error: None,
+            stdout_path: None,
+            stderr_path: Some("/tmp/aptu-coder-overflow/slot-1/stderr".to_string()),
+            interleaved_path: None,
+            filter_applied: None,
+            timed_out: false,
+        };
+        let params = ExecCommandParams {
+            command: "false".to_string(),
+            working_dir: None,
+            stdin: None,
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+
+        // Act
+        let (result, _) = format_shell_output_phase(&output, &params);
+
+        // Assert
+        assert!(
+            result.contains("Full stderr available at: /tmp/aptu-coder-overflow/slot-1/stderr"),
+            "should contain stderr path hint: {result}"
+        );
+        assert!(
+            !result.contains("Full output available at:"),
+            "should not contain stdout hint when stdout_path is None"
+        );
+    }
+
+    #[test]
+    fn test_format_shell_output_interleaved_path_hint() {
+        // Arrange: ShellOutput with only interleaved_path set
+        let output = ShellOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            interleaved: "output".to_string(),
+            exit_code: Some(0),
+            output_truncated: true,
+            output_collection_error: None,
+            stdout_path: None,
+            stderr_path: None,
+            interleaved_path: Some("/tmp/aptu-coder-overflow/slot-2/interleaved".to_string()),
+            filter_applied: None,
+            timed_out: false,
+        };
+        let params = ExecCommandParams {
+            command: "echo test".to_string(),
+            working_dir: None,
+            stdin: None,
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+
+        // Act
+        let (result, _) = format_shell_output_phase(&output, &params);
+
+        // Assert
+        assert!(
+            result
+                .contains("Full output available at: /tmp/aptu-coder-overflow/slot-2/interleaved"),
+            "should contain interleaved path hint: {result}"
+        );
     }
 }

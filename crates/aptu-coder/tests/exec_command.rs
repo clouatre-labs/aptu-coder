@@ -355,6 +355,21 @@ async fn test_exec_command_overflow_to_temp_file() {
 }
 
 #[tokio::test]
+async fn test_exec_command_overflow_path_hint_in_text() {
+    // Assert that content[0].text contains 'Full output available at:' when
+    // stdout overflow persists to slot files.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "seq 1 3000"
+    }))
+    .await;
+
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("Full output available at:"),
+        "text should contain overflow path hint: {text}"
+    );
+}
+#[tokio::test]
 async fn test_exec_command_slot_isolation() {
     // Test that overflow calls use slot identifiers (0-7) visible in structuredContent.stdout_path.
     let mut slot_ids = std::collections::HashSet::new();
