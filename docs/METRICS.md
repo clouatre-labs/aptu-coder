@@ -88,43 +88,45 @@ The `cache_tier` field encodes where a result was found (or not found):
 
 The following fields are optional (marked with `#[serde(default)]` in the Rust struct). JSONL files written by older server versions without these fields parse successfully; missing fields default to `null` or `false` as indicated:
 
-| Field | Added in | Default when absent |
-|---|---|---|
-| `session_id` | early | `null` |
-| `seq` | early | `null` |
-| `output_truncated` | v0.14.2 | `null` (treat as unknown; does not mean truncation did not occur) |
-| `chars_threshold_breach` | v0.14.2 | `false` (omitted from JSONL when false; safe to query with `// false`) |
-| `stdout_bytes_raw` | v0.21.x | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
-| `stderr_bytes_raw` | v0.21.x | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
-| `filter_applied` | v0.14.2 | `null` (omitted from JSONL when null; only present for `exec_command` calls where a filter matched) |
-| `cache_tier` | v0.18.x | `null` (omitted when null; `l1_memory` or `l2_disk` on a cache hit) |
-| `cache_write_failure` | v0.18.x | `null` (omitted when null; `true` only when an L2 disk write failed) |
-| `error_subtype` | v0.18.x | `null` (omitted when null; e.g. `not_found`, `ambiguous` for `edit_replace` errors) |
-| `language` | v0.20.x | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
-| `file_ext` | v0.20.x | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
-| `timed_out` | v0.20.1 | `false` (omitted from JSONL when false; set when child process was killed by `timeout_secs`) |
-| `git_ref_used` | v0.23.0 | `false` (omitted when false; `true` only when `git_ref` was supplied) |
-| `summary_mode` | v0.23.0 | `false` (omitted when false; `true` only when `summary=true` was set) |
-| `is_paginated` | v0.23.0 | `false` (omitted when false; `true` only when a `cursor` was supplied) |
-| `fields_projected` | v0.23.0 | `false` (omitted when false; `true` only when `fields` was supplied on `analyze_file`) |
-| `match_mode` | v0.23.0 | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
-| `follow_depth` | v0.23.0 | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
-| `import_lookup` | v0.23.0 | `false` (omitted when false; `true` only when `import_lookup=true` was set) |
-| `def_use` | v0.23.0 | `false` (omitted when false; `true` only when `def_use=true` was set) |
-| `impl_only` | v0.23.0 | `false` (omitted when false; `true` only when `impl_only=true` was set) |
-| `stdin_provided` | v0.23.0 | `false` (omitted when false; `true` only when `stdin` was supplied to `exec_command`) |
-| `timeout_configured_ms` | v0.23.0 | `null` (omitted when null; present only when `timeout_secs` was supplied) |
-| `drain_timeout_ms` | v0.23.0 | `null` (omitted when null; present only when `drain_timeout_secs` was supplied) |
-| `working_dir_used` | v0.23.0 | `false` (omitted when false; `true` only when `working_dir` was supplied) |
-| `l1_eviction_count` | v0.25.0 | `null` (omitted when null; process-lifetime L1 LRU eviction counter; only for `analyze_symbol`) |
-| `l2_entry_count` | v0.25.0 | `null` (omitted when null; approximate L2 entry count; only for `analyze_symbol`) |
-| `l2_size_bytes` | v0.25.0 | `null` (omitted when null; approximate L2 compressed size in bytes; only for `analyze_symbol`) |
+| Field | Default when absent |
+|---|---|
+| `session_id` | `null` |
+| `seq` | `null` |
+| `output_truncated` | `null` (treat as unknown; does not mean truncation did not occur) |
+| `chars_threshold_breach` | `false` (omitted from JSONL when false; safe to query with `// false`) |
+| `stdout_bytes_raw` | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
+| `stderr_bytes_raw` | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
+| `filter_applied` | `null` (omitted from JSONL when null; only present for `exec_command` calls where a filter matched) |
+| `cache_tier` | `null` (omitted when null; `l1_memory` or `l2_disk` on a cache hit) |
+| `cache_write_failure` | `null` (omitted when null; `true` only when an L2 disk write failed) |
+| `error_subtype` | `null` (omitted when null; e.g. `not_found`, `ambiguous` for `edit_replace` errors) |
+| `language` | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
+| `file_ext` | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
+| `timed_out` | `false` (omitted from JSONL when false; set when child process was killed by `timeout_secs`) |
+| `git_ref_used` | `false` (omitted when false; `true` only when `git_ref` was supplied) |
+| `summary_mode` | `false` (omitted when false; `true` only when `summary=true` was set) |
+| `is_paginated` | `false` (omitted when false; `true` only when a `cursor` was supplied) |
+| `fields_projected` | `false` (omitted when false; `true` only when `fields` was supplied on `analyze_file`) |
+| `match_mode` | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
+| `follow_depth` | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
+| `import_lookup` | `false` (omitted when false; `true` only when `import_lookup=true` was set) |
+| `def_use` | `false` (omitted when false; `true` only when `def_use=true` was set) |
+| `impl_only` | `false` (omitted when false; `true` only when `impl_only=true` was set) |
+| `stdin_provided` | `false` (omitted when false; `true` only when `stdin` was supplied to `exec_command`) |
+| `timeout_configured_ms` | `null` (omitted when null; present only when `timeout_secs` was supplied) |
+| `drain_timeout_ms` | `null` (omitted when null; present only when `drain_timeout_secs` was supplied) |
+| `working_dir_used` | `false` (omitted when false; `true` only when `working_dir` was supplied) |
+| `l1_eviction_count` | `null` (omitted when null; process-lifetime L1 LRU eviction counter; only for `analyze_symbol`) |
+| `l2_entry_count` | `null` (omitted when null; approximate L2 entry count; only for `analyze_symbol`) |
+| `l2_size_bytes` | `null` (omitted when null; approximate L2 compressed size in bytes; only for `analyze_symbol`) |
 
-The five jq one-liners in `AGENTS.md` do not reference `output_truncated` and are unaffected. To query truncation events across all retained JSONL files:
+To query truncation events with overflow sizes across all retained JSONL files:
 
 ```bash
-cd ~/.local/share/aptu-coder && jq -r 'select(.output_truncated==true) | [.tool, .output_chars, (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn
+cd ~/.local/share/aptu-coder && jq -r 'select(.output_truncated==true) | [.tool, (.stdout_bytes_raw|tostring), .output_chars, (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn
 ```
+
+Columns: tool, stdout_bytes_raw (pre-truncation; `null` on drain-abort), output_chars (post-truncation preview size), session_id.
 
 ## Daily Rotation and 30-Day Retention
 
