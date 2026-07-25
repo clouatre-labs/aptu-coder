@@ -20,7 +20,7 @@ use crate::otel::{ClientMetadata, extract_and_set_trace_context};
 use crate::shell_write;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 use crate::tools::exec_runtime::{DEFAULT_DRAIN_TIMEOUT_MS, run_exec_impl};
-use crate::{ExecCommandParams, SIZE_LIMIT, STDIN_MAX_BYTES, ShellOutput, validate_path};
+use crate::{ExecCommandParams, STDIN_MAX_BYTES, ShellOutput, validate_path};
 
 /// State extracted from `&self` in the `exec_command` shim and passed to `exec_command_impl`.
 pub(crate) struct ExecContext {
@@ -274,28 +274,13 @@ async fn spawn_and_collect_phase(
 
 /// Phase 4: Format output text and apply truncation limits.
 ///
-/// Returns (formatted_text, combined_truncated).
-fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -> (String, bool) {
+/// Returns the formatted output text string.
+fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -> String {
     // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
     let output_text = if output.interleaved.is_empty() {
         format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
     } else {
         format!("Output:\n{}", output.interleaved)
-    };
-
-    // Apply combined output size limit (SIZE_LIMIT = 5_000 bytes). Per-stream caps
-    // (MAX_STDOUT_BYTES = 30k stdout, MAX_STDERR_BYTES = 10k stderr) already fired in
-    // handle_output_persist; this is the safety net for the interleaved assembly which
-    // can still reach up to ~40k bytes from per-stream content plus headers and formatting.
-    let mut combined_truncated = false;
-    let truncated_output_text = if output_text.len() > SIZE_LIMIT {
-        combined_truncated = true;
-        // Use char-boundary-safe tail truncation
-        let tail_start = output_text.len().saturating_sub(SIZE_LIMIT);
-        let safe_start = output_text.floor_char_boundary(tail_start);
-        output_text[safe_start..].to_string()
-    } else {
-        output_text
     };
 
     // Build truncation notice with slot file paths if present
@@ -315,19 +300,17 @@ fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -
         }
     }
 
-    let text = format!(
+    format!(
         "Command: {}\nExit code: {}\nOutput truncated: {}\n{}{}",
         params.command,
         output
             .exit_code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "null".to_string()),
-        output.output_truncated || combined_truncated,
+        output.output_truncated,
         truncation_notice,
-        truncated_output_text,
-    );
-
-    (text, combined_truncated)
+        output_text,
+    )
 }
 
 /// Free-function implementation of the `exec_command` tool handler.
@@ -478,7 +461,7 @@ pub(crate) async fn exec_command_impl(
     };
 
     let exit_code = output.exit_code;
-    let mut output_truncated = output.output_truncated;
+    let output_truncated = output.output_truncated;
 
     // Record execution results on span
     if let Some(code) = exit_code {
@@ -486,10 +469,7 @@ pub(crate) async fn exec_command_impl(
     }
 
     // Phase 4: Format output
-    let (text, combined_truncated) = format_shell_output_phase(&output, &params);
-
-    // Update output_truncated flag to include combined truncation
-    output_truncated = output_truncated || combined_truncated;
+    let text = format_shell_output_phase(&output, &params);
 
     // Sync output_truncated to the struct before serialization (fix #1266)
     output.output_truncated = output_truncated;
@@ -609,51 +589,6 @@ mod tests {
     use crate::ShellOutput;
 
     #[test]
-    fn test_format_shell_output_mid_char_boundary() {
-        // Regression: tail_start falls inside a multi-byte UTF-8 char.
-        // Construct interleaved of SIZE_LIMIT + 1 bytes where byte 1
-        // is the second byte of a 3-byte char (中, U+4E2D).
-        // Old code: output_text[..tail_start] panics.
-        // Fix: floor_char_boundary on the full string returns 0, no panic.
-        let mut interleaved = String::new();
-        interleaved.push('\u{4E2D}'); // 3 bytes: 0xE4 0xB8 0xAD
-        interleaved.push_str(&"a".repeat(4998)); // total = 5001 bytes
-        assert_eq!(interleaved.len(), 5001);
-
-        let output = ShellOutput {
-            stdout: String::new(),
-            stderr: String::new(),
-            interleaved,
-            exit_code: Some(0),
-            output_truncated: false,
-            output_collection_error: None,
-            stdout_path: None,
-            stderr_path: None,
-            interleaved_path: None,
-            filter_applied: None,
-            timed_out: false,
-        };
-
-        let params = ExecCommandParams {
-            command: "echo test".to_string(),
-            working_dir: None,
-            stdin: None,
-            timeout_secs: None,
-            drain_timeout_secs: None,
-        };
-
-        let (result, truncated) = format_shell_output_phase(&output, &params);
-
-        assert!(truncated, "should be truncated");
-        assert!(result.is_char_boundary(0), "start should be char boundary");
-        assert!(
-            result.is_char_boundary(result.len()),
-            "end should be char boundary"
-        );
-        let _char_count = result.chars().count();
-    }
-
-    #[test]
     fn test_format_shell_output_stdout_path_hint() {
         // Arrange: ShellOutput with stdout_path set, no stderr or interleaved paths
         let output = ShellOutput {
@@ -678,7 +613,7 @@ mod tests {
         };
 
         // Act
-        let (result, _) = format_shell_output_phase(&output, &params);
+        let result = format_shell_output_phase(&output, &params);
 
         // Assert
         assert!(
@@ -716,7 +651,7 @@ mod tests {
         };
 
         // Act
-        let (result, _) = format_shell_output_phase(&output, &params);
+        let result = format_shell_output_phase(&output, &params);
 
         // Assert
         assert!(
@@ -754,7 +689,7 @@ mod tests {
         };
 
         // Act
-        let (result, _) = format_shell_output_phase(&output, &params);
+        let result = format_shell_output_phase(&output, &params);
 
         // Assert
         assert!(
