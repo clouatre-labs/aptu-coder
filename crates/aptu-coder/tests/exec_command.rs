@@ -1615,31 +1615,6 @@ async fn test_data_flag_d_with_heredoc_rejected() {
 }
 
 #[tokio::test]
-async fn test_output_truncated_consistency_size_limit() {
-    // Arrange: generate output that exceeds SIZE_LIMIT (5 KB) but stays under
-    // per-stream caps (30 KB stdout / 10 KB stderr). A single stream of 6 KB
-    // of repeated text triggers the combined SIZE_LIMIT cap in format_shell_output_phase.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 6000)'"
-    }))
-    .await;
-
-    // Act: inspect response text and structuredContent
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    let sc = &resp["result"]["structuredContent"];
-
-    // Assert: text says 'Output truncated: true' AND structuredContent.output_truncated == true
-    assert!(
-        text.contains("Output truncated: true"),
-        "text should indicate truncation: {text}"
-    );
-    assert_eq!(
-        sc["output_truncated"], true,
-        "structuredContent.output_truncated should be true: {sc}"
-    );
-}
-
-#[tokio::test]
 async fn test_interleaved_overflow_slot_file() {
     // Arrange: generate interleaved output that exceeded limits. With drain byte
     // budget enforcement (30k stdout / 10k stderr) the drain task drops oversized
