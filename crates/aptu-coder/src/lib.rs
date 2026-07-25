@@ -159,8 +159,6 @@ use aptu_coder_core::types::{
     EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
 };
 use filters::CompiledRule;
-#[cfg(test)]
-use filters::{apply_filter, maybe_inject_no_stat};
 
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
