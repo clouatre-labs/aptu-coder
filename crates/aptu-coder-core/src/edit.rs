@@ -35,6 +35,8 @@ pub enum EditError {
         path: String,
         match_lines: Vec<usize>,
     },
+    #[error("edit_replace invalid params: {0}")]
+    InvalidParams(String),
 }
 
 fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
@@ -112,12 +114,38 @@ pub fn edit_replace_block(
     old_text: &str,
     new_text: &str,
 ) -> Result<EditReplaceOutput, EditError> {
+    edit_replace_block_inner(path, old_text, new_text, false)
+}
+
+/// Same as `edit_replace_block` but with an explicit `replace_all` flag.
+/// When `replace_all` is true, all non-overlapping occurrences of `old_text`
+/// are replaced in a single pass.
+pub fn edit_replace_block_with_options(
+    path: &Path,
+    old_text: &str,
+    new_text: &str,
+    replace_all: bool,
+) -> Result<EditReplaceOutput, EditError> {
+    edit_replace_block_inner(path, old_text, new_text, replace_all)
+}
+
+pub(crate) fn edit_replace_block_inner(
+    path: &Path,
+    old_text: &str,
+    new_text: &str,
+    replace_all: bool,
+) -> Result<EditReplaceOutput, EditError> {
     if path.is_dir() {
         return Err(EditError::NotAFile(path.to_path_buf()));
     }
     let content = std::fs::read_to_string(path)?;
     let norm_content = normalize_for_match(&content);
     let norm_old = normalize_for_match(old_text);
+    if norm_old.is_empty() && replace_all {
+        return Err(EditError::InvalidParams(
+            "old_text must not be empty when replace_all is true".to_string(),
+        ));
+    }
     let count = norm_content.matches(&norm_old).count();
     match count {
         0 => {
@@ -127,8 +155,8 @@ pub fn edit_replace_block(
                 first_20_lines,
             });
         }
-        1 => {}
-        n => {
+        1 if !replace_all => {}
+        n if !replace_all => {
             let match_lines: Vec<usize> = norm_content
                 .match_indices(&norm_old)
                 .map(|(offset, _)| {
@@ -145,30 +173,71 @@ pub fn edit_replace_block(
                 match_lines,
             });
         }
+        _ => {} // replace_all=true: fall through to single-pass splice
     }
     let bytes_before = content.len();
-    // Find match offset in normalized space, then map back to original byte range
-    // SAFETY: match was verified above via count check; find must succeed.
-    // If count verification logic changes, this expect() site must be re-audited.
-    #[allow(clippy::expect_used)]
-    let norm_match_offset = norm_content
-        .find(&norm_old)
-        .expect("match was verified above via count check; find must succeed");
-    let original_start = norm_offset_to_original(&content, norm_match_offset);
-    let original_end = norm_offset_to_original_from(&content, norm_old.len(), original_start);
-    let updated = [
-        &content[..original_start],
-        new_text,
-        &content[original_end..],
-    ]
-    .concat();
-    let bytes_after = updated.len();
-    write_file_atomic(path, &updated)?;
-    Ok(EditReplaceOutput {
-        path: path.display().to_string(),
-        bytes_before,
-        bytes_after,
-    })
+
+    if replace_all {
+        // Single-pass over original normalized content: collect all match spans,
+        // then splice new_text between unmatched spans in original byte space.
+        let matches: Vec<(usize, usize)> = norm_content
+            .match_indices(&norm_old)
+            .map(|(norm_start, m)| {
+                let original_start = norm_offset_to_original(&content, norm_start);
+                let original_end = norm_offset_to_original_from(&content, m.len(), original_start);
+                (original_start, original_end)
+            })
+            .collect();
+        let occurrences_replaced = matches.len();
+        if occurrences_replaced == 0 {
+            let first_20_lines = content.lines().take(20).collect::<Vec<_>>().join("\n");
+            return Err(EditError::NotFound {
+                path: path.display().to_string(),
+                first_20_lines,
+            });
+        }
+        let mut result =
+            String::with_capacity(bytes_before + new_text.len() * occurrences_replaced);
+        let mut last_end = 0usize;
+        for (start, end) in &matches {
+            result.push_str(&content[last_end..*start]);
+            result.push_str(new_text);
+            last_end = *end;
+        }
+        result.push_str(&content[last_end..]);
+        let bytes_after = result.len();
+        write_file_atomic(path, &result)?;
+        Ok(EditReplaceOutput {
+            path: path.display().to_string(),
+            bytes_before,
+            bytes_after,
+            occurrences_replaced,
+        })
+    } else {
+        // Single-match path (existing behavior)
+        // SAFETY: match was verified above via count check; find must succeed.
+        // If count verification logic changes, this expect() site must be re-audited.
+        #[allow(clippy::expect_used)]
+        let norm_match_offset = norm_content
+            .find(&norm_old)
+            .expect("match was verified above via count check; find must succeed");
+        let original_start = norm_offset_to_original(&content, norm_match_offset);
+        let original_end = norm_offset_to_original_from(&content, norm_old.len(), original_start);
+        let updated = [
+            &content[..original_start],
+            new_text,
+            &content[original_end..],
+        ]
+        .concat();
+        let bytes_after = updated.len();
+        write_file_atomic(path, &updated)?;
+        Ok(EditReplaceOutput {
+            path: path.display().to_string(),
+            bytes_before,
+            bytes_after,
+            occurrences_replaced: 1,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -300,5 +369,46 @@ mod tests {
         assert_eq!(output, "foo  \nbar\nreplaced");
         assert_eq!(result.bytes_before, 17); // "foo  \nbar\nfoo\nbar" = 17 bytes
         assert_eq!(result.bytes_after, 18); // "foo  \nbar\nreplaced" = 18 bytes
+    }
+
+    #[test]
+    fn edit_replace_block_replace_all_three_occurrences() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("all.txt");
+        std::fs::write(&path, "a b a c a d").unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "x", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "x b x c x d");
+        assert_eq!(result.bytes_before, 11);
+        assert_eq!(result.bytes_after, 11);
+        assert_eq!(result.occurrences_replaced, 3);
+    }
+
+    #[test]
+    fn edit_replace_block_replace_all_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nf.txt");
+        std::fs::write(&path, "foo bar baz").unwrap();
+        let err = edit_replace_block_with_options(&path, "missing", "x", true).unwrap_err();
+        std::assert_matches!(&err, EditError::NotFound { .. });
+    }
+
+    #[test]
+    fn edit_replace_block_replace_all_empty_oldtext() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.txt");
+        std::fs::write(&path, "foo bar baz").unwrap();
+        let err = edit_replace_block_with_options(&path, "", "x", true).unwrap_err();
+        std::assert_matches!(&err, EditError::InvalidParams(_));
+    }
+
+    #[test]
+    fn edit_replace_block_replace_all_preserves_crlf() {
+        // CRLF file with replace_all: unmatched spans retain CRLF bytes
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crlf_all.txt");
+        std::fs::write(&path, b"a\r\nb\r\na\r\nc").unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "x", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "x\r\nb\r\nx\r\nc");
+        assert_eq!(result.occurrences_replaced, 2);
     }
 }

@@ -600,7 +600,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces a unique exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). If invalid_params, re-read the file with analyze_file or analyze_module before retrying. CRLF in old_text normalized to LF; all other whitespace matched exactly. Pass empty new_text to delete. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD).",
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). Set replace_all=true to replace every non-overlapping occurrence (sed s/old/new/g); old_text must be non-empty. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. If invalid_params, re-read the file with analyze_file or analyze_module before retrying. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD).",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
