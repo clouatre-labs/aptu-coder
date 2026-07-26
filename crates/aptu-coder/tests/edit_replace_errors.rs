@@ -600,3 +600,230 @@ async fn test_edit_replace_crlf_file_crlf_oldtext() {
     let output = std::fs::read_to_string(&file_path).expect("should read file");
     assert_eq!(output, "line1\r\nreplaced\nline3");
 }
+
+/// replace_all=true replaces every non-overlapping occurrence and returns
+/// occurrences_replaced equal to match count.
+#[tokio::test]
+async fn test_edit_replace_replace_all_happy_path() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    let content = "a b a c a d";
+    std::fs::write(&file_path, content).expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "a",
+            "new_text": "x",
+            "replace_all": true,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "expected success but got error: {resp}"
+    );
+    let output = std::fs::read_to_string(&file_path).expect("should read file");
+    assert_eq!(output, "x b x c x d");
+    let structured = resp["result"]["structuredContent"]
+        .as_object()
+        .expect("structuredContent should be present");
+    let replaced = structured["occurrences_replaced"]
+        .as_u64()
+        .expect("occurrences_replaced should be a number");
+    assert_eq!(replaced, 3);
+}
+
+/// replace_all=true with zero matches still returns not_found error.
+#[tokio::test]
+async fn test_edit_replace_replace_all_not_found() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    let content = "foo bar baz";
+    std::fs::write(&file_path, content).expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "missing",
+            "new_text": "x",
+            "replace_all": true,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(msg.contains("not found"));
+    assert!(!msg.contains("EDIT_STALE_CONTEXT"));
+}
+
+/// replace_all=true with empty old_text returns INVALID_PARAMS.
+#[tokio::test]
+async fn test_edit_replace_replace_all_empty_oldtext() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    let content = "foo bar baz";
+    std::fs::write(&file_path, content).expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "",
+            "new_text": "x",
+            "replace_all": true,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(msg.contains("old_text must not be empty"));
+}
+
+/// replace_all=false (explicit) with two matches still returns ambiguous error.
+#[tokio::test]
+async fn test_edit_replace_replace_all_false_still_ambiguous() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    let content = "alpha\nbeta\nalpha\n";
+    std::fs::write(&file_path, content).expect("should write file");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "alpha",
+            "new_text": "replacement",
+            "replace_all": false,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(msg.contains("Occurrences at lines:"));
+    assert!(msg.contains("2 locations"));
+}
+
+/// replace_all=true success does not trip stale-context circuit breaker.
+#[tokio::test]
+async fn test_edit_replace_replace_all_no_stale_context_trip() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    let file_path = temp_dir.path().join(file_name);
+    let content = "alpha\n";
+    std::fs::write(&file_path, content).expect("should write file");
+
+    // 4 not_found failures, 1 replace_all success, 1 more not_found
+    let mut calls: Vec<(&str, serde_json::Value)> = Vec::new();
+    for _ in 0..4 {
+        calls.push((
+            "edit_replace",
+            serde_json::json!({
+                "path": file_name,
+                "old_text": "nonexistent",
+                "new_text": "x",
+                "working_dir": working_dir
+            }),
+        ));
+    }
+    calls.push((
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "alpha",
+            "new_text": "beta",
+            "replace_all": true,
+            "working_dir": working_dir
+        }),
+    ));
+    calls.push((
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "nonexistent",
+            "new_text": "x",
+            "working_dir": working_dir
+        }),
+    ));
+
+    let responses = call_tool_raw_seq(calls).await;
+
+    for (i, resp) in responses.iter().enumerate().take(4) {
+        assert!(
+            resp["result"]["isError"].as_bool().unwrap_or(false),
+            "call {} expected error: {resp}",
+            i + 1
+        );
+    }
+    let fifth = &responses[4];
+    assert!(
+        !fifth["result"]["isError"].as_bool().unwrap_or(true),
+        "call 5 (replace_all success) expected success: {fifth}"
+    );
+    let sixth = &responses[5];
+    assert!(
+        sixth["result"]["isError"].as_bool().unwrap_or(false),
+        "call 6 expected error: {sixth}"
+    );
+    let sixth_msg = sixth["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have text");
+    assert!(
+        !sixth_msg.contains("EDIT_STALE_CONTEXT"),
+        "call 6 should NOT be stale_context after replace_all success but got: {sixth_msg}"
+    );
+}

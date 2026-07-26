@@ -71,7 +71,9 @@ pub use analyze::{
     analyze_module_file, analyze_str,
 };
 pub use config::AnalysisConfig;
-pub use edit::{EditError, edit_overwrite_content, edit_replace_block};
+pub use edit::{
+    EditError, edit_overwrite_content, edit_replace_block, edit_replace_block_with_options,
+};
 pub use graph::{GraphError, InternalCallChain};
 pub use lang::{language_for_extension, supported_languages};
 pub use pagination::{CursorData, PaginationError};

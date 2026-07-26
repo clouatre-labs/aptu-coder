@@ -879,10 +879,19 @@ pub struct EditReplaceParams {
     pub path: String,
     /// Optional base directory for path resolution (default: server CWD).
     pub working_dir: Option<String>,
-    /// Exact text block to find and replace. Must appear exactly once in the file.
+    /// Exact text block to find and replace. When `replace_all` is false (default), must appear
+    /// exactly once; fails with `ambiguous` if multiple matches are found. When `replace_all` is
+    /// true, every non-overlapping occurrence is replaced. Must be non-empty.
     pub old_text: String,
-    /// Replacement text. Pass empty string to delete the matched block.
+    /// Replacement text. Pass empty string to delete every matched block.
     pub new_text: String,
+    /// When `true`, replaces every non-overlapping occurrence of `old_text` in a single pass
+    /// (sed `s/old/new/g` semantics). Returns `INVALID_PARAMS` if `old_text` is empty.
+    /// When `false` (default), `old_text` must appear exactly once; fails with `ambiguous` if
+    /// multiple matches are found. Check `occurrences_replaced` in the output to confirm how
+    /// many substitutions were made.
+    #[serde(default)]
+    pub replace_all: Option<bool>,
 }
 
 #[non_exhaustive]
@@ -903,6 +912,15 @@ pub struct EditReplaceOutput {
         schemars(schema_with = "crate::schema_helpers::integer_schema")
     )]
     pub bytes_after: usize,
+    /// Number of occurrences replaced. Always 1 when `replace_all` is false (default single-match
+    /// path). When `replace_all` is true, reflects the actual substitution count (0 triggers a
+    /// `not_found` error before this field is populated, so a successful response always has
+    /// `occurrences_replaced >= 1`).
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub occurrences_replaced: usize,
 }
 
 /// Filter rule for command output post-processing.

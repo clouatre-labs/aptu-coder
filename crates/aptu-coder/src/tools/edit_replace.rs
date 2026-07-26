@@ -356,6 +356,27 @@ fn handle_edit_error(
                 )),
             ))
         }
+        aptu_coder_core::EditError::InvalidParams(msg) => {
+            span.record("error.type", "invalid_params");
+            ctx.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .session_id(ctx.sid.clone())
+                    .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
+                    .build(),
+            );
+            err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                msg,
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "old_text must not be empty when replace_all is true",
+                )),
+            ))
+        }
         aptu_coder_core::EditError::Io(io_err) => {
             span.record("error.type", "internal_error");
             ctx.metrics_tx.send(
@@ -435,9 +456,15 @@ pub(crate) async fn edit_replace(
     };
     let old_text = params.old_text.clone();
     let new_text = params.new_text.clone();
+    let replace_all = params.replace_all.unwrap_or(false);
     let old_text_for_hint = old_text.clone();
     let handle = tokio::task::spawn_blocking(move || {
-        aptu_coder_core::edit_replace_block(&resolved_path, &old_text, &new_text)
+        aptu_coder_core::edit_replace_block_with_options(
+            &resolved_path,
+            &old_text,
+            &new_text,
+            replace_all,
+        )
     });
 
     let mut guard = StaleContextGuard::new(ctx.sid.clone(), Arc::clone(ctx.edit_failure_counts));
