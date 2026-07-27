@@ -203,9 +203,9 @@ pub(crate) fn io_error_to_path_error(
 ///
 /// # Returns
 /// - `Ok(PathBuf)`: The resolved absolute path
-/// - `Err(ErrorData)`: If working_dir is invalid, path resolution fails, or
-///   (when `require_exists=false`) parent traversal attempts escape via
-///   sibling-prefix attack (CVE-2025-53110)
+/// - `Err(ErrorData)`: If working_dir is invalid or path resolution fails.
+///   Path resolution only. No containment check. The caller
+///   (orchestrator/operator) is responsible for access control.
 pub(crate) fn validate_path_relative_to(
     path: &str,
     require_exists: bool,
@@ -243,17 +243,11 @@ pub(crate) fn validate_path_relative_to(
             )
         })?
     } else {
-        // For new files (require_exists=false) we resolve the path against
-        // canonical_working_dir without delegating to validate_parent_in_root.
-        // validate_parent_in_root enforces starts_with(root), which correctly
-        // rejects paths that escape CWD when called from validate_path, but is
-        // wrong here: the caller supplied an explicit working_dir whose scope
-        // is the operator's responsibility (MCP 2025-11-25, operator boundary).
-        // Absolute paths must be accepted as long as their parent directory
-        // exists; relative paths are joined to canonical_working_dir first.
+        // For new files (require_exists=false), resolve the path against
+        // canonical_working_dir with no containment check: the caller's
+        // working_dir is the operator-defined scope, and canonicalize requires
+        // the parent directory to exist.
         let p = std::path::Path::new(path);
-
-        // Reject paths with no filename component (bare '..', '.', trailing slash).
         let file_name = p.file_name().ok_or_else(|| {
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -266,68 +260,15 @@ pub(crate) fn validate_path_relative_to(
             )
         })?;
 
-        // Build the candidate parent: join relative paths to working_dir; keep
-        // absolute paths as-is (Path::join discards the left side for absolute
-        // right-hand sides, which is the desired behaviour here).
-        let raw_parent = p
-            .parent()
-            .filter(|pp| !pp.as_os_str().is_empty())
-            .map(|pp| {
-                if pp.is_absolute() {
-                    pp.to_path_buf()
-                } else {
-                    canonical_working_dir.join(pp)
-                }
-            })
-            .unwrap_or_else(|| canonical_working_dir.clone());
-
-        // Canonicalize the parent: this resolves symlinks and catches path-traversal
-        // (e.g. ../sibling) because canonicalize requires the directory to exist and
-        // returns the real, absolute path.  io_error_to_path_error maps NotFound ->
-        // "parent directory does not exist: <path>" and PermissionDenied ->
-        // "permission denied: <path>", so callers can distinguish the two failure modes.
-        let parent_str = p
-            .parent()
-            .and_then(|pp| pp.to_str())
-            .unwrap_or("(invalid utf-8)");
+        let raw_parent =
+            canonical_working_dir.join(p.parent().unwrap_or_else(|| std::path::Path::new("")));
         let canonical_parent = std::fs::canonicalize(&raw_parent).map_err(|e| {
-            let msg = match e.kind() {
-                std::io::ErrorKind::NotFound => {
-                    format!("parent directory does not exist: {parent_str}")
-                }
-                std::io::ErrorKind::PermissionDenied => {
-                    format!("permission denied accessing parent directory: {parent_str}")
-                }
-                _ => format!("parent directory is invalid: {parent_str}"),
-            };
-            let mut meta = error_meta(
-                "validation",
-                false,
-                "provide a valid existing parent directory",
-            );
-            if let Some(obj) = meta.as_object_mut() {
-                obj.insert(
-                    "ioErrorKind".to_string(),
-                    serde_json::json!(format!("{:?}", e.kind())),
-                );
-                obj.insert(
-                    "ioErrorSource".to_string(),
-                    serde_json::json!(e.to_string()),
-                );
-            }
-            ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, msg, Some(meta))
+            io_error_to_path_error(&e, path, "provide a path with an existing parent directory")
         })?;
-
-        // Verify the canonicalized parent is a directory, not a file.  This is a
-        // distinct failure from the canonicalize error above: the path exists but is
-        // not a directory.
-        if !std::fs::metadata(&canonical_parent)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-        {
+        if !canonical_parent.is_dir() {
             return Err(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!("parent path exists but is not a directory: {parent_str}"),
+                "parent path exists but is not a directory".to_string(),
                 Some(error_meta(
                     "validation",
                     false,
@@ -338,19 +279,6 @@ pub(crate) fn validate_path_relative_to(
 
         canonical_parent.join(file_name)
     };
-
-    // Note: Unlike validate_path (CWD-scoped), we do NOT check starts_with here.
-    // The MCP 2025-11-25 spec and RFC 3986 sec 6.2.3 place the security boundary
-    // with the operator (server launch config), not per-call. The caller sets the
-    // scope via working_dir; path resolution is a convenience only.
-    // CVE-2025-53110 sibling-prefix attacks are prevented in the require_exists=false
-    // branch by canonicalize() on the parent directory: a traversal like
-    // "../sibling" resolves to a real path that does not contain working_dir, and
-    // since the operator defined working_dir as the scope, the resolved file inside
-    // that sibling is outside scope -- but we intentionally do not block it here
-    // because the user explicitly named working_dir as the anchor. The old
-    // test_validate_path_in_dir_rejects_sibling_prefix covers the CWD case
-    // (validate_parent_in_root is still used for validate_path).
 
     Ok(canonical_path)
 }

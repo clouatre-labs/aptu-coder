@@ -174,11 +174,8 @@ fn test_validate_path_in_dir_traversal_to_sibling_accepted_with_working_dir() {
     //   allowed/          -- the working_dir
     //   allowed_sibling/  -- a sibling whose name shares the prefix
     //
-    // With an explicit working_dir the containment boundary is the operator's
-    // responsibility (MCP 2025-11-25 spec). validate_path_relative_to must NOT
-    // reject a relative path that resolves outside working_dir -- the operator
-    // chose the scope. CVE-2025-53110 (starts_with prefix attack) is a concern
-    // only for validate_path (CWD-scoped), which still uses validate_parent_in_root.
+    // validate_path_relative_to does not enforce containment; that is the
+    // orchestrator responsibility.
     let cwd = std::env::current_dir().expect("should get cwd");
     let parent = tempfile::TempDir::new_in(&cwd).expect("should create parent temp dir");
     let allowed = parent.path().join("allowed");
