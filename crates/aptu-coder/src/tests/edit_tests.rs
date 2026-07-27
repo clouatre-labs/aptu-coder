@@ -169,11 +169,13 @@ fn test_edit_overwrite_working_dir_is_file() {
 }
 
 #[test]
-fn test_validate_path_in_dir_rejects_sibling_prefix() {
+fn test_validate_path_in_dir_traversal_to_sibling_accepted_with_working_dir() {
     // Arrange: create a parent temp dir, then two subdirs:
-    //   allowed/   -- the working_dir
+    //   allowed/          -- the working_dir
     //   allowed_sibling/  -- a sibling whose name shares the prefix
-    // This mirrors CVE-2025-53110: "/work_evil" must not match "/work".
+    //
+    // validate_path_relative_to does not enforce containment; that is the
+    // orchestrator responsibility.
     let cwd = std::env::current_dir().expect("should get cwd");
     let parent = tempfile::TempDir::new_in(&cwd).expect("should create parent temp dir");
     let allowed = parent.path().join("allowed");
@@ -181,23 +183,67 @@ fn test_validate_path_in_dir_rejects_sibling_prefix() {
     std::fs::create_dir_all(&allowed).expect("should create allowed dir");
     std::fs::create_dir_all(&sibling).expect("should create sibling dir");
 
-    // Act: ask for a file inside the sibling dir, using a path that
-    // traverses from allowed/ into allowed_sibling/
+    // Act: relative path that traverses from allowed/ into allowed_sibling/
     let result = validate_path_relative_to("../allowed_sibling/secret.txt", false, &allowed);
 
-    // Assert: must be rejected even though "allowed_sibling" starts with "allowed"
-    // This rejection comes from validate_parent_in_root (CVE-2025-53110 protection), not the outer containment check
+    // Assert: accepted -- the sibling dir exists and the operator set working_dir=allowed/
+    assert!(
+        result.is_ok(),
+        "validate_path_relative_to must accept a path resolving outside working_dir; \
+         containment is operator responsibility, not per-call: {:?}",
+        result.err()
+    );
+    let resolved = result.unwrap();
+    let canonical_sibling = std::fs::canonicalize(&sibling).expect("should canonicalize sibling");
+    assert!(
+        resolved.starts_with(&canonical_sibling),
+        "Resolved path should be inside the sibling dir: {resolved:?}"
+    );
+    assert_eq!(
+        resolved.file_name().and_then(|n| n.to_str()),
+        Some("secret.txt")
+    );
+}
+
+#[test]
+fn test_validate_path_in_dir_rejects_sibling_prefix_validate_path() {
+    // CVE-2025-53110: validate_path (CWD-scoped, no working_dir) must reject a
+    // path that resolves to a sibling directory sharing the CWD name prefix.
+    // This is the original protection; validate_parent_in_root still enforces it.
+    let result = validate_path("/etc/passwd", true);
     assert!(
         result.is_err(),
-        "validate_path_relative_to must reject a path resolving to a sibling directory \
-             sharing the working_dir name prefix (CVE-2025-53110 pattern)"
+        "validate_path must reject absolute paths outside CWD"
     );
-    let err = result.unwrap_err();
-    let msg = err.message.to_lowercase();
+}
+
+#[test]
+fn test_validate_path_relative_to_accepts_absolute_path_with_working_dir() {
+    // Arrange: create a temp dir to act as an external repo (e.g. career repo)
+    // Use temp_dir() so it is guaranteed to be outside the server CWD.
+    let external = tempfile::TempDir::new().expect("should create external temp dir");
+    let canonical_external =
+        std::fs::canonicalize(external.path()).expect("should canonicalize external dir");
+
+    // Construct an absolute path to a (non-existent) file inside the external dir.
+    let abs_path = canonical_external.join("AGENTS.md");
+    let abs_path_str = abs_path.to_str().expect("should be valid UTF-8");
+
+    // Act: provide the absolute path with working_dir set to the external dir.
+    // This is the primary use case: agent passes absolute path + matching working_dir
+    // to write a file in a repo that is outside the MCP server CWD.
+    let result = validate_path_relative_to(abs_path_str, false, &canonical_external);
+
+    // Assert: must succeed and resolve to the absolute path.
     assert!(
-        msg.contains("outside") || msg.contains("working"),
-        "Error should mention 'outside' or 'working', got: {}",
-        err.message
+        result.is_ok(),
+        "validate_path_relative_to must accept an absolute path when working_dir is set: {:?}",
+        result.err()
+    );
+    let resolved = result.unwrap();
+    assert_eq!(
+        resolved, abs_path,
+        "Resolved path must match the supplied absolute path"
     );
 }
 

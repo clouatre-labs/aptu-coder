@@ -203,9 +203,9 @@ pub(crate) fn io_error_to_path_error(
 ///
 /// # Returns
 /// - `Ok(PathBuf)`: The resolved absolute path
-/// - `Err(ErrorData)`: If working_dir is invalid, path resolution fails, or
-///   (when `require_exists=false`) parent traversal attempts escape via
-///   sibling-prefix attack (CVE-2025-53110)
+/// - `Err(ErrorData)`: If working_dir is invalid or path resolution fails.
+///   Path resolution only. No containment check. The caller
+///   (orchestrator/operator) is responsible for access control.
 pub(crate) fn validate_path_relative_to(
     path: &str,
     require_exists: bool,
@@ -243,15 +243,42 @@ pub(crate) fn validate_path_relative_to(
             )
         })?
     } else {
-        validate_parent_in_root(path, &canonical_working_dir)?
-    };
+        // For new files (require_exists=false), resolve the path against
+        // canonical_working_dir with no containment check: the caller's
+        // working_dir is the operator-defined scope, and canonicalize requires
+        // the parent directory to exist.
+        let p = std::path::Path::new(path);
+        let file_name = p.file_name().ok_or_else(|| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "path must include a filename component".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "provide a path with a filename, not ending in '..' or '/'",
+                )),
+            )
+        })?;
 
-    // Note: Unlike validate_path_in_dir, we do NOT check starts_with here.
-    // The MCP 2025-11-25 spec and RFC 3986 sec 6.2.3 place the security boundary
-    // with the operator (server launch config) not per-call. The caller sets scope
-    // via working_dir; this function is a path-resolution convenience only.
-    // The validate_parent_in_root call above still protects against CVE-2025-53110
-    // sibling-prefix attacks in the non-require_exists branch.
+        let raw_parent =
+            canonical_working_dir.join(p.parent().unwrap_or_else(|| std::path::Path::new("")));
+        let canonical_parent = std::fs::canonicalize(&raw_parent).map_err(|e| {
+            io_error_to_path_error(&e, path, "provide a path with an existing parent directory")
+        })?;
+        if !canonical_parent.is_dir() {
+            return Err(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "parent path exists but is not a directory".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "provide a path whose parent is an existing directory, not a file",
+                )),
+            ));
+        }
+
+        canonical_parent.join(file_name)
+    };
 
     Ok(canonical_path)
 }
