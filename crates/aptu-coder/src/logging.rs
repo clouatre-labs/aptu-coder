@@ -3,9 +3,7 @@
 //! MCP logging integration via tracing.
 //!
 //! Provides a custom tracing subscriber that forwards log events to MCP clients.
-//! Maps Rust tracing levels to `MCP` [`LoggingLevel`].
 
-use rmcp::model::LoggingLevel;
 use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -15,21 +13,10 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::Context;
 
-/// Maps `tracing::Level` to `MCP` [`LoggingLevel`].
-#[must_use]
-pub(crate) fn level_to_mcp(level: &Level) -> LoggingLevel {
-    match *level {
-        Level::TRACE | Level::DEBUG => LoggingLevel::Debug,
-        Level::INFO => LoggingLevel::Info,
-        Level::WARN => LoggingLevel::Warning,
-        Level::ERROR => LoggingLevel::Error,
-    }
-}
-
 /// Lightweight event sent from `McpLoggingLayer` to consumer task via unbounded channel.
 #[derive(Clone, Debug)]
 pub struct LogEvent {
-    pub level: LoggingLevel,
+    pub level: Level,
     pub logger: String,
     pub data: Value,
 }
@@ -77,13 +64,12 @@ where
         let mut visitor = MessageVisitor(&mut fields);
         event.record(&mut visitor);
 
-        let mcp_level = level_to_mcp(&level);
         let logger = target.to_string();
         let data = Value::Object(fields);
 
         // Send LogEvent to channel without blocking on_event.
         let log_event = LogEvent {
-            level: mcp_level,
+            level,
             logger,
             data,
         };
@@ -149,11 +135,12 @@ mod tests {
     use super::*;
     use tracing::Level;
     #[test]
-    fn test_logging_level_to_mcp_mapping() {
-        assert_eq!(level_to_mcp(&Level::TRACE), LoggingLevel::Debug);
-        assert_eq!(level_to_mcp(&Level::DEBUG), LoggingLevel::Debug);
-        assert_eq!(level_to_mcp(&Level::INFO), LoggingLevel::Info);
-        assert_eq!(level_to_mcp(&Level::WARN), LoggingLevel::Warning);
-        assert_eq!(level_to_mcp(&Level::ERROR), LoggingLevel::Error);
+    fn test_log_event_level_is_tracing_level() {
+        let event = LogEvent {
+            level: Level::ERROR,
+            logger: "test".to_string(),
+            data: Value::Null,
+        };
+        assert_eq!(event.level, Level::ERROR);
     }
 }

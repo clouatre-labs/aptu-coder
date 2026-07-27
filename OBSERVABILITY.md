@@ -106,17 +106,21 @@ processors:
 This is a deployment concern, not a codebase change. The SDK-level never-record
 policy is the primary control; the Collector processor is the safety net.
 
-## Log level and MCP client visibility
+## Log level
 
-Logs are forwarded to the MCP client (the calling agent) via the `notifications/message`
-protocol. The default log level forwarded to the client is WARN.
+Log output goes to stderr and, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, to the
+OTel log appender. MCP `notifications/message` forwarding and `logging/setLevel`
+support were removed in v0.25.5 following
+[MCP SEP-2577](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577),
+which deprecated the Logging protocol feature at the spec level.
+
+To control the log level, set `RUST_LOG` (e.g. `RUST_LOG=warn`) or pass
+`--log-level <level>` on the CLI. The default level is WARN.
 
 At DEBUG level, some log events include filesystem paths (from cache and analysis
 operations). These are not secrets, but they do reveal filesystem structure including
 home directory paths. Do not set DEBUG level in contexts where log content is stored
 in untrusted systems.
-
-To change the log level at runtime, use the MCP `logging/setLevel` RPC.
 
 ## Span events for behavioral decisions
 

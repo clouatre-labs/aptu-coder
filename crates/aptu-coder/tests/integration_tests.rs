@@ -5,7 +5,8 @@ mod common;
 
 use aptu_coder::LogEvent;
 use common::call_tool_raw;
-use rmcp::model::{CallToolResult, Content, LoggingLevel, Meta};
+use rmcp::model::{CallToolResult, ContentBlock, Meta};
+use tracing::Level;
 
 #[tokio::test]
 async fn test_batch_draining_with_multiple_events() {
@@ -15,7 +16,7 @@ async fn test_batch_draining_with_multiple_events() {
 
     for i in 0..5 {
         let log_event = LogEvent {
-            level: LoggingLevel::Info,
+            level: Level::INFO,
             logger: format!("logger_{i}"),
             data: json!({"index": i}),
         };
@@ -40,8 +41,8 @@ fn test_call_tool_result_cache_hint_metadata() {
         serde_json::Value::String("no-cache".to_string()),
     );
 
-    let result =
-        CallToolResult::success(vec![Content::text("test output")]).with_meta(Some(Meta(meta)));
+    let result = CallToolResult::success(vec![ContentBlock::text("test output")])
+        .with_meta(Some(Meta(meta)));
 
     let json_val = serde_json::to_value(&result).expect("should serialize");
 

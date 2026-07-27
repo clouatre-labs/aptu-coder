@@ -244,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
     tokio::spawn(MetricsWriter::new(metrics_rx, None).run());
 
-    let analyzer = CodeAnalyzer::new(peer, log_level_filter, MetricsSender(metrics_tx));
+    let analyzer = CodeAnalyzer::new(peer, MetricsSender(metrics_tx));
 
     if let Some(p) = port {
         run_http(analyzer, p).await?;

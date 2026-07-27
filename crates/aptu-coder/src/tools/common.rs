@@ -5,7 +5,7 @@
 //! All items here are `pub(crate)`. OTel-specific types (`ClientMetadata`,
 //! `extract_and_set_trace_context`) live in `crate::otel` where they are `pub`.
 
-use rmcp::model::{CallToolResult, Content, ErrorData, Meta};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData, Meta};
 
 /// Returns `true` when `summary=true` and a `cursor` are both provided, which is an invalid
 /// combination since summary mode and pagination are mutually exclusive.
@@ -39,7 +39,7 @@ pub(crate) fn error_meta(
 #[must_use]
 pub(crate) fn err_to_tool_result(e: ErrorData) -> CallToolResult {
     let mut result =
-        CallToolResult::error(vec![Content::text(e.message)]).with_meta(Some(no_cache_meta()));
+        CallToolResult::error(vec![ContentBlock::text(e.message)]).with_meta(Some(no_cache_meta()));
     if let Some(data) = e.data {
         result.structured_content = Some(data);
     }

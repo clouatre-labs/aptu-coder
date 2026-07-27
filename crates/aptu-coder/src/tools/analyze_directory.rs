@@ -13,7 +13,7 @@ use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
 use aptu_coder_core::types::{AnalysisMode, AnalyzeDirectoryParams};
-use rmcp::model::{CallToolResult, Content, ErrorData};
+use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
@@ -344,9 +344,10 @@ pub(crate) async fn analyze_directory_handler(
     );
     let meta = rmcp::model::Meta(meta);
 
-    let mut result = CallToolResult::success(vec![
-        Content::text(final_text.clone()).with_priority(0.9_f32),
-    ])
+    let mut result = CallToolResult::success(vec![ContentBlock::Text(
+        TextContent::new(final_text.clone())
+            .with_annotations(Annotations::default().with_priority(0.9_f32)),
+    )])
     .with_meta(Some(meta));
     let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
     result.structured_content = Some(structured);

@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use rmcp::RoleServer;
-use rmcp::model::{CallToolResult, Content, ErrorData};
+use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
 use rmcp::service::RequestContext;
 use tracing::instrument;
 
@@ -53,7 +53,7 @@ fn validate_working_dir_phase(
                 if !p.is_dir() {
                     span.record("error", true);
                     span.record("error.type", "invalid_params");
-                    let mut result = CallToolResult::error(vec![Content::text(
+                    let mut result = CallToolResult::error(vec![ContentBlock::text(
                         "working_dir is not a directory; provide an existing directory path"
                             .to_string(),
                     )])
@@ -68,7 +68,7 @@ fn validate_working_dir_phase(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
-                let mut result = CallToolResult::error(vec![Content::text(
+                let mut result = CallToolResult::error(vec![ContentBlock::text(
                     "working_dir is not valid; provide an existing directory path".to_string(),
                 )])
                 .with_meta(Some(no_cache_meta()));
@@ -115,7 +115,7 @@ fn validate_working_dir_phase(
                     Ok(_) => {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
-                        let mut result = CallToolResult::error(vec![Content::text(
+                        let mut result = CallToolResult::error(vec![ContentBlock::text(
                             "cd prefix path is not a directory; set working_dir explicitly or use a valid directory path".to_string(),
                         )])
                         .with_meta(Some(no_cache_meta()));
@@ -127,7 +127,7 @@ fn validate_working_dir_phase(
                     Err(_) => {
                         span.record("error", true);
                         span.record("error.type", "invalid_params");
-                        let mut result = CallToolResult::error(vec![Content::text(
+                        let mut result = CallToolResult::error(vec![ContentBlock::text(
                             "cd prefix path does not exist or is outside CWD; set working_dir explicitly".to_string(),
                         )])
                         .with_meta(Some(no_cache_meta()));
@@ -178,7 +178,7 @@ fn validate_pre_spawn_phase(
     {
         span.record("error", true);
         span.record("error.type", "invalid_params");
-        let result = CallToolResult::error(vec![Content::text(
+        let result = CallToolResult::error(vec![ContentBlock::text(
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "stdin exceeds 1 MB limit".to_string(),
@@ -203,7 +203,7 @@ fn validate_pre_spawn_phase(
     {
         span.record("error", true);
         span.record("error.type", "invalid_params");
-        let result = CallToolResult::error(vec![Content::text(
+        let result = CallToolResult::error(vec![ContentBlock::text(
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 "drain_timeout_secs must be >= 0".to_string(),
@@ -258,7 +258,7 @@ async fn spawn_and_collect_phase(
     if output.timed_out {
         span.record("error", true);
         span.record("error.type", "timeout");
-        let mut result = CallToolResult::error(vec![Content::text(
+        let mut result = CallToolResult::error(vec![ContentBlock::text(
             "Command execution timed out; the process was killed.".to_string(),
         )])
         .with_meta(Some(no_cache_meta()));
@@ -481,7 +481,9 @@ pub(crate) async fn exec_command_impl(
         tracing::debug!(truncated = true, message = "output truncated");
     }
 
-    let content_blocks = vec![Content::text(text.clone()).with_priority(0.0)];
+    let content_blocks = vec![ContentBlock::Text(
+        TextContent::new(text.clone()).with_annotations(Annotations::default().with_priority(0.0)),
+    )];
 
     // Determine if command failed: non-zero exit code.
     // exit_code is None when the post-exit drain times out (background child
