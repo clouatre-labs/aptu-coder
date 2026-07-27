@@ -141,9 +141,9 @@ pub(crate) fn edit_replace_block_inner(
     let content = std::fs::read_to_string(path)?;
     let norm_content = normalize_for_match(&content);
     let norm_old = normalize_for_match(old_text);
-    if norm_old.is_empty() && replace_all {
+    if norm_old.is_empty() {
         return Err(EditError::InvalidParams(
-            "old_text must not be empty when replace_all is true".to_string(),
+            "old_text must not be empty".to_string(),
         ));
     }
     let count = norm_content.matches(&norm_old).count();
@@ -180,24 +180,27 @@ pub(crate) fn edit_replace_block_inner(
     if replace_all {
         // Single-pass over original normalized content: collect all match spans,
         // then splice new_text between unmatched spans in original byte space.
-        let matches: Vec<(usize, usize)> = norm_content
-            .match_indices(&norm_old)
-            .map(|(norm_start, m)| {
-                let original_start = norm_offset_to_original(&content, norm_start);
-                let original_end = norm_offset_to_original_from(&content, m.len(), original_start);
-                (original_start, original_end)
-            })
-            .collect();
-        let occurrences_replaced = matches.len();
-        if occurrences_replaced == 0 {
-            let first_20_lines = content.lines().take(20).collect::<Vec<_>>().join("\n");
-            return Err(EditError::NotFound {
-                path: path.display().to_string(),
-                first_20_lines,
-            });
+        let mut matches: Vec<(usize, usize)> = Vec::new();
+        let mut search_from_original = 0usize;
+        let mut norm_consumed = 0usize;
+        for (norm_start, _m) in norm_content.match_indices(&norm_old) {
+            let original_start = norm_offset_to_original_from(
+                &content,
+                norm_start - norm_consumed,
+                search_from_original,
+            );
+            let original_end =
+                norm_offset_to_original_from(&content, norm_old.len(), original_start);
+            matches.push((original_start, original_end));
+            search_from_original = original_end;
+            norm_consumed = norm_start + norm_old.len();
         }
-        let mut result =
-            String::with_capacity(bytes_before + new_text.len() * occurrences_replaced);
+        let occurrences_replaced = matches.len();
+        let old_span_total: usize = matches.iter().map(|(s, e)| e - s).sum();
+        // capacity upper bound: existing bytes + new bytes added - old bytes removed
+        let mut result = String::with_capacity(
+            bytes_before + new_text.len() * occurrences_replaced - old_span_total,
+        );
         let mut last_end = 0usize;
         for (start, end) in &matches {
             result.push_str(&content[last_end..*start]);
@@ -410,5 +413,48 @@ mod tests {
         let result = edit_replace_block_with_options(&path, "a", "x", true).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x\r\nb\r\nx\r\nc");
         assert_eq!(result.occurrences_replaced, 2);
+    }
+
+    #[test]
+    fn replace_all_deletes_all_occurrences() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("delete.txt");
+        std::fs::write(&path, "a b a c a d").unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), " b  c  d");
+        assert_eq!(result.bytes_before, 11);
+        assert_eq!(result.bytes_after, 8);
+        assert_eq!(result.occurrences_replaced, 3);
+    }
+
+    #[test]
+    fn replace_all_non_overlap_adjacent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("adjacent.txt");
+        std::fs::write(&path, "aaaa").unwrap();
+        let result = edit_replace_block_with_options(&path, "aa", "xx", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "xxxx");
+        assert_eq!(result.occurrences_replaced, 2);
+    }
+
+    #[test]
+    fn replace_all_size_changing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("size.txt");
+        std::fs::write(&path, "x y x z x").unwrap();
+        let result = edit_replace_block_with_options(&path, "x", "yyy", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "yyy y yyy z yyy");
+        assert_eq!(result.bytes_before, 9);
+        assert_eq!(result.bytes_after, 15);
+        assert_eq!(result.occurrences_replaced, 3);
+    }
+
+    #[test]
+    fn replace_all_empty_oldtext_no_replace_all_returns_invalid_params() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.txt");
+        std::fs::write(&path, "foo bar baz").unwrap();
+        let err = edit_replace_block(&path, "", "x").unwrap_err();
+        std::assert_matches!(&err, EditError::InvalidParams(_));
     }
 }

@@ -175,7 +175,7 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
-| `edit_replace` | Replace a unique exact text block; errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching | all |
+| `edit_replace` | Replace a unique exact text block or all non-overlapping occurrences (replace_all=true); errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching; returns occurrences_replaced count | all |
 | `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs` (kill on expiry) and `drain_timeout_secs` (post-exit drain window); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter) | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
