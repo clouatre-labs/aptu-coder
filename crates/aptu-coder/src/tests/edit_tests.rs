@@ -235,8 +235,7 @@ fn test_validate_path_relative_to_accepts_absolute_path_with_working_dir() {
     // Act: provide the absolute path with working_dir set to the external dir.
     // This is the primary use case: agent passes absolute path + matching working_dir
     // to write a file in a repo that is outside the MCP server CWD.
-    let result =
-        validate_path_relative_to(abs_path_str, false, &canonical_external);
+    let result = validate_path_relative_to(abs_path_str, false, &canonical_external);
 
     // Assert: must succeed and resolve to the absolute path.
     assert!(

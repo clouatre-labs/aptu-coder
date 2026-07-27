@@ -281,31 +281,57 @@ pub(crate) fn validate_path_relative_to(
             })
             .unwrap_or_else(|| canonical_working_dir.clone());
 
-        // Canonicalize the parent: this resolves symlinks and catches
-        // path-traversal (e.g. ../sibling) because canonicalize requires the
-        // directory to exist and returns the real, absolute path.
+        // Canonicalize the parent: this resolves symlinks and catches path-traversal
+        // (e.g. ../sibling) because canonicalize requires the directory to exist and
+        // returns the real, absolute path.  io_error_to_path_error maps NotFound ->
+        // "parent directory does not exist: <path>" and PermissionDenied ->
+        // "permission denied: <path>", so callers can distinguish the two failure modes.
+        let parent_str = p
+            .parent()
+            .and_then(|pp| pp.to_str())
+            .unwrap_or("(invalid utf-8)");
         let canonical_parent = std::fs::canonicalize(&raw_parent).map_err(|e| {
-            io_error_to_path_error(
-                &e,
-                p.parent()
-                    .and_then(|pp| pp.to_str())
-                    .unwrap_or("(invalid utf-8)"),
-                "provide a valid parent directory",
-            )
+            let msg = match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    format!("parent directory does not exist: {parent_str}")
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    format!("permission denied accessing parent directory: {parent_str}")
+                }
+                _ => format!("parent directory is invalid: {parent_str}"),
+            };
+            let mut meta = error_meta(
+                "validation",
+                false,
+                "provide a valid existing parent directory",
+            );
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert(
+                    "ioErrorKind".to_string(),
+                    serde_json::json!(format!("{:?}", e.kind())),
+                );
+                obj.insert(
+                    "ioErrorSource".to_string(),
+                    serde_json::json!(e.to_string()),
+                );
+            }
+            ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, msg, Some(meta))
         })?;
 
-        // Verify the canonicalized parent is a directory (not a file).
+        // Verify the canonicalized parent is a directory, not a file.  This is a
+        // distinct failure from the canonicalize error above: the path exists but is
+        // not a directory.
         if !std::fs::metadata(&canonical_parent)
             .map(|m| m.is_dir())
             .unwrap_or(false)
         {
             return Err(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
-                "parent path is not a directory".to_string(),
+                format!("parent path exists but is not a directory: {parent_str}"),
                 Some(error_meta(
                     "validation",
                     false,
-                    "provide a path whose parent is a directory",
+                    "provide a path whose parent is an existing directory, not a file",
                 )),
             ));
         }
