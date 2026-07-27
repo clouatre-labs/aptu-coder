@@ -198,8 +198,9 @@ pub(crate) fn edit_replace_block_inner(
         let occurrences_replaced = matches.len();
         let old_span_total: usize = matches.iter().map(|(s, e)| e - s).sum();
         // capacity upper bound: existing bytes + new bytes added - old bytes removed
+        // saturating_mul guards against overflow on 32-bit targets with pathological inputs
         let mut result = String::with_capacity(
-            bytes_before + new_text.len() * occurrences_replaced - old_span_total,
+            bytes_before + new_text.len().saturating_mul(occurrences_replaced) - old_span_total,
         );
         let mut last_end = 0usize;
         for (start, end) in &matches {
