@@ -1,6 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use tracing_subscriber::filter::LevelFilter;
 
 use crate::tests::helpers::make_analyzer;
 use crate::tools::common::summary_cursor_conflict;
@@ -59,13 +58,8 @@ async fn test_handle_overview_mode_no_summary_block() {
     std::fs::write(tmp.path().join("main.rs"), "fn main() {}").unwrap();
 
     let peer = Arc::new(TokioMutex::new(None));
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    let analyzer = CodeAnalyzer::new(
-        peer,
-        log_level_filter,
-        crate::metrics::MetricsSender(metrics_tx),
-    );
+    let analyzer = CodeAnalyzer::new(peer, crate::metrics::MetricsSender(metrics_tx));
 
     let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
         "path": tmp.path().to_str().unwrap(),
@@ -109,13 +103,8 @@ async fn test_analyze_directory_summary_false_forces_pagination() {
     std::fs::write(tmp.path().join("lib.rs"), "fn foo() {}").unwrap();
 
     let peer = Arc::new(TokioMutex::new(None));
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    let analyzer = CodeAnalyzer::new(
-        peer,
-        log_level_filter,
-        crate::metrics::MetricsSender(metrics_tx),
-    );
+    let analyzer = CodeAnalyzer::new(peer, crate::metrics::MetricsSender(metrics_tx));
 
     let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
         "path": tmp.path().to_str().unwrap(),
@@ -295,7 +284,6 @@ async fn test_analyze_directory_git_ref_filters_changed_files() {
 #[tokio::test]
 async fn test_handle_overview_mode_git_ref_filters_via_handler() {
     use aptu_coder_core::types::AnalyzeDirectoryParams;
-    use std::process::Command;
     use tempfile::TempDir;
 
     // Arrange: create a real git repo with two commits.

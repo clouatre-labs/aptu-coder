@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 use aptu_coder::{LogEvent, McpLoggingLayer};
-use rmcp::model::LoggingLevel;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tracing::Level;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 
@@ -24,7 +24,7 @@ fn test_logging_layer_forwards_event() {
     });
 
     let event = rx.try_recv().expect("expected a LogEvent");
-    assert_eq!(event.level, LoggingLevel::Info);
+    assert_eq!(event.level, Level::INFO);
     assert!(
         event.logger.contains("test_target"),
         "logger should contain target; got: {}",
@@ -52,7 +52,7 @@ fn test_logging_layer_level_filter_warn_drops_info() {
     });
 
     let first = rx.try_recv().expect("expected exactly 1 event (WARN)");
-    assert_eq!(first.level, LoggingLevel::Warning);
+    assert_eq!(first.level, Level::WARN);
     assert!(
         rx.try_recv().is_err(),
         "expected no more events after the WARN one"

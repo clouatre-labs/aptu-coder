@@ -18,7 +18,7 @@ async fn call_tool_twice_sequential(
     let analyzer = make_test_analyzer();
     let (client, server) = tokio::io::duplex(65536);
 
-    let mut server_handle = tokio::spawn(async move {
+    let server_handle = tokio::spawn(async move {
         let (server_rx, server_tx) = tokio::io::split(server);
         if let Ok(service) = serve_server(analyzer, (server_rx, server_tx)).await {
             let _ = service.waiting().await;

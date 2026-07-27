@@ -110,7 +110,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-24.04-arm
     needs: changes
-    if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
+    if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request')
     timeout-minutes: 10
     steps:
       - name: Checkout repository

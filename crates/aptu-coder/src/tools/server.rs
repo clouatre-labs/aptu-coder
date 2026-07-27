@@ -18,7 +18,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::instrument;
-use tracing_subscriber::filter::LevelFilter;
 
 /// Builds a fully initialized `CodeAnalyzer`.
 ///
@@ -26,7 +25,6 @@ use tracing_subscriber::filter::LevelFilter;
 #[must_use]
 pub(crate) fn build_analyzer(
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
-    log_level_filter: Arc<Mutex<LevelFilter>>,
     metrics_tx: crate::metrics::MetricsSender,
 ) -> crate::CodeAnalyzer {
     let file_cap: usize = std::env::var("APTU_CODER_FILE_CACHE_CAPACITY")
@@ -104,7 +102,6 @@ pub(crate) fn build_analyzer(
         cache: AnalysisCache::new(file_cap),
         disk_cache,
         peer,
-        log_level_filter,
         metrics_tx,
         session_call_seq: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         session_id: Arc::new(TokioMutex::new(None)),

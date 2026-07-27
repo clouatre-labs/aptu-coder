@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::tests::helpers::make_analyzer;
 use crate::tools::common::no_cache_meta;
 use aptu_coder_core::analyze;

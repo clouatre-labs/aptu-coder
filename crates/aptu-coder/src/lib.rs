@@ -164,8 +164,8 @@ use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
-    CompletionInfo, Content, ErrorData, Implementation, InitializeRequestParams, InitializeResult,
-    LoggingLevel, ServerCapabilities, SetLevelRequestParams,
+    CompletionInfo, ContentBlock, ErrorData, Implementation, InitializeRequestParams,
+    InitializeResult, ServerCapabilities,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -175,7 +175,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::instrument;
-use tracing_subscriber::filter::LevelFilter;
 
 static GLOBAL_SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -189,7 +188,7 @@ pub(crate) fn err_to_tool_result_from_pagination(
     e: aptu_coder_core::pagination::PaginationError,
 ) -> CallToolResult {
     let msg = format!("Pagination error: {}", e);
-    CallToolResult::error(vec![Content::text(msg)]).with_meta(Some(no_cache_meta()))
+    CallToolResult::error(vec![ContentBlock::text(msg)]).with_meta(Some(no_cache_meta()))
 }
 
 /// MCP server handler that wires the four analysis tools to the rmcp transport.
@@ -205,7 +204,6 @@ pub struct CodeAnalyzer {
     cache: AnalysisCache,
     disk_cache: std::sync::Arc<cache::DiskCache>,
     peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
-    log_level_filter: Arc<Mutex<LevelFilter>>,
     metrics_tx: crate::metrics::MetricsSender,
     session_call_seq: Arc<std::sync::atomic::AtomicU32>,
     session_id: Arc<TokioMutex<Option<String>>>,
@@ -235,10 +233,9 @@ impl CodeAnalyzer {
 
     pub fn new(
         peer: Arc<TokioMutex<Option<Peer<RoleServer>>>>,
-        log_level_filter: Arc<Mutex<LevelFilter>>,
         metrics_tx: crate::metrics::MetricsSender,
     ) -> Self {
-        crate::tools::server::build_analyzer(peer, log_level_filter, metrics_tx)
+        crate::tools::server::build_analyzer(peer, metrics_tx)
     }
 
     /// Emit a "received" metric event for the given tool name.
@@ -836,29 +833,6 @@ impl ServerHandler for CodeAnalyzer {
             };
 
         Ok(CompleteResult::new(completion_info))
-    }
-
-    async fn set_level(
-        &self,
-        params: SetLevelRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<(), ErrorData> {
-        let level_filter = match params.level {
-            LoggingLevel::Debug => LevelFilter::DEBUG,
-            LoggingLevel::Info | LoggingLevel::Notice => LevelFilter::INFO,
-            LoggingLevel::Warning => LevelFilter::WARN,
-            LoggingLevel::Error
-            | LoggingLevel::Critical
-            | LoggingLevel::Alert
-            | LoggingLevel::Emergency => LevelFilter::ERROR,
-        };
-
-        let mut filter_lock = self
-            .log_level_filter
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        *filter_lock = level_filter;
-        Ok(())
     }
 }
 

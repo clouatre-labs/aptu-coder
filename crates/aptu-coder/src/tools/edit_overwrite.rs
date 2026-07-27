@@ -5,7 +5,7 @@
 //! See `tools/mod.rs` for the extraction pattern rules.
 
 use aptu_coder_core::types::{EditOverwriteOutput, EditOverwriteParams};
-use rmcp::model::{CallToolResult, Content, ErrorData};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use tracing::instrument;
 
 use crate::tools::EditHandlerContext;
@@ -30,7 +30,7 @@ pub(crate) async fn edit_overwrite(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
-                let mut result = CallToolResult::error(vec![Content::text(
+                let mut result = CallToolResult::error(vec![ContentBlock::text(
                     "working_dir is not valid; provide an existing directory path".to_string(),
                 )])
                 .with_meta(Some(no_cache_meta()));
@@ -193,8 +193,8 @@ pub(crate) async fn edit_overwrite(
     };
 
     let text = format!("Wrote {} bytes to {}", output.bytes_written, output.path);
-    let mut result =
-        CallToolResult::success(vec![Content::text(text.clone())]).with_meta(Some(no_cache_meta()));
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
+        .with_meta(Some(no_cache_meta()));
     let structured = match serde_json::to_value(&output).map_err(|e| {
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,

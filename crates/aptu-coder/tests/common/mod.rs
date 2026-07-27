@@ -2,20 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #![allow(dead_code)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as TokioMutex;
-use tracing_subscriber::filter::LevelFilter;
 
 pub fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::INFO));
     let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    aptu_coder::CodeAnalyzer::new(
-        peer,
-        log_level_filter,
-        aptu_coder::MetricsSender(metrics_tx),
-    )
+    aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(metrics_tx))
 }
 
 pub async fn call_tool_raw_seq(calls: Vec<(&str, serde_json::Value)>) -> Vec<serde_json::Value> {

@@ -11,7 +11,7 @@ use aptu_coder_core::formatter::{format_file_details_paginated, format_file_deta
 use aptu_coder_core::pagination::{DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor};
 use aptu_coder_core::parser::ParserError;
 use aptu_coder_core::types::{AnalysisMode, AnalyzeFileParams, FunctionInfo};
-use rmcp::model::{CallToolResult, Content, ErrorData};
+use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
 use serde_json::Value;
 use std::sync::Arc;
 use tracing::instrument;
@@ -341,9 +341,10 @@ pub(crate) async fn analyze_file_handler(
     );
     let meta = rmcp::model::Meta(meta);
 
-    let mut result = CallToolResult::success(vec![
-        Content::text(final_text.clone()).with_priority(0.9_f32),
-    ])
+    let mut result = CallToolResult::success(vec![ContentBlock::Text(
+        TextContent::new(final_text.clone())
+            .with_annotations(Annotations::default().with_priority(0.9_f32)),
+    )])
     .with_meta(Some(meta));
     let structured = serde_json::to_value(&response_output).unwrap_or(Value::Null);
     result.structured_content = Some(structured);
