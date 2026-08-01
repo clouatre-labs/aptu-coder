@@ -32,7 +32,7 @@ async fn call_tool_twice_sequential(
     let init = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
             "capabilities": {},
             "clientInfo": {"name": "test-client", "version": "0.1.0"}
         }
