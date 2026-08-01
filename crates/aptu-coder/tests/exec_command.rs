@@ -1685,7 +1685,7 @@ async fn test_concurrent_interleaved_overflow() {
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
             "capabilities": {},
             "clientInfo": {"name": "test-client", "version": "0.1.0"}
         }

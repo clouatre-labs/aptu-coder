@@ -17,6 +17,7 @@ pub(crate) use crate::metrics_export::{
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
+use rmcp::model::ProtocolVersion;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
@@ -499,7 +500,7 @@ pub(crate) fn record_otel_metrics(event: &MetricEvent) {
         KeyValue::new("gen_ai.tool.name", event.tool),
         KeyValue::new("error.type", error_type.to_string()),
         KeyValue::new("mcp.method.name", "tools/call"),
-        KeyValue::new("mcp.protocol.version", "2025-11-25"),
+        KeyValue::new("mcp.protocol.version", ProtocolVersion::LATEST.as_str()),
         KeyValue::new("network.transport", "pipe"),
     ];
 

@@ -30,7 +30,17 @@ fn test_mcp_server_responds_to_tools_call() {
     let mut stdin = child.stdin.take().expect("failed to get stdin");
 
     // Send initialize message
-    let init_msg = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#;
+    let init_msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1.0"}
+        }
+    })
+    .to_string();
     stdin
         .write_all(init_msg.as_bytes())
         .expect("failed to write");
@@ -125,7 +135,17 @@ fn test_mcp_server_recovers_after_tool_error() {
 
     // Writer thread: pace messages to avoid EOF race with the server's async reader.
     let writer = thread::spawn(move || {
-        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#;
+        let init = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"}
+            }
+        })
+        .to_string();
         stdin.write_all(init.as_bytes()).expect("write init");
         stdin.write_all(b"\n").expect("newline");
 
@@ -242,7 +262,17 @@ fn test_mcp_server_exec_command() {
 
     // Writer thread: pace messages to avoid EOF race with the server's async reader.
     let writer = thread::spawn(move || {
-        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#;
+        let init = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"}
+            }
+        })
+        .to_string();
         stdin.write_all(init.as_bytes()).expect("write init");
         stdin.write_all(b"\n").expect("newline");
 

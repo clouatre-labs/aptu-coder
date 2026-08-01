@@ -32,7 +32,7 @@ pub async fn call_tool_raw_seq(calls: Vec<(&str, serde_json::Value)>) -> Vec<ser
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
             "capabilities": {},
             "clientInfo": {"name": "test-client", "version": "0.1.0"}
         }
@@ -133,7 +133,7 @@ pub async fn call_tool_raw(tool_name: &str, params: serde_json::Value) -> serde_
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": "2025-11-25",
+            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
             "capabilities": {},
             "clientInfo": {"name": "test-client", "version": "0.1.0"}
         }

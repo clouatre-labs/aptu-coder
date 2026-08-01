@@ -707,6 +707,18 @@ impl ServerHandler for CodeAnalyzer {
         Ok(self.get_info())
     }
 
+    /// Returns the `InitializeResult` describing server capabilities and metadata.
+    ///
+    /// Once `rmcp` exposes `ServerHandler::discover` (tracked in issue #1349,
+    /// blocked on #998 and modelcontextprotocol/rust-sdk#869), the implementation
+    /// should be:
+    /// ```ignore
+    /// async fn discover(&self, _context: RequestContext<RoleServer>)
+    ///     -> Result<DiscoverResult, ErrorData>
+    /// {
+    ///     Ok(self.get_info().into())
+    /// }
+    /// ```
     fn get_info(&self) -> InitializeResult {
         let excluded = aptu_coder_core::EXCLUDED_DIRS.join(", ");
         let instructions = format!(
