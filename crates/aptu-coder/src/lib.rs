@@ -28,7 +28,6 @@
 
 mod filters;
 pub(crate) mod heredoc_validation;
-pub(crate) mod logging;
 pub(crate) mod metrics;
 pub(crate) mod metrics_export;
 pub(crate) mod otel;
@@ -39,7 +38,6 @@ pub(crate) mod shell_write;
 pub(crate) mod tools;
 pub(crate) mod validation;
 
-pub use logging::{LogEvent, McpLoggingLayer};
 pub use metrics::{MetricEvent, MetricsSender, MetricsWriter, migrate_legacy_metrics_dir};
 pub use otel::{
     ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,

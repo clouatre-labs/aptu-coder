@@ -3,35 +3,8 @@
 
 mod common;
 
-use aptu_coder::LogEvent;
 use common::call_tool_raw;
 use rmcp::model::{CallToolResult, ContentBlock, Meta};
-use tracing::Level;
-
-#[tokio::test]
-async fn test_batch_draining_with_multiple_events() {
-    use serde_json::json;
-
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<LogEvent>();
-
-    for i in 0..5 {
-        let log_event = LogEvent {
-            level: Level::INFO,
-            logger: format!("logger_{i}"),
-            data: json!({"index": i}),
-        };
-        let _ = event_tx.send(log_event);
-    }
-
-    let mut buffer = Vec::with_capacity(64);
-    event_rx.recv_many(&mut buffer, 64).await;
-
-    assert_eq!(buffer.len(), 5);
-    for (i, event) in buffer.iter().enumerate() {
-        assert_eq!(event.logger, format!("logger_{i}"));
-        assert_eq!(event.data, json!({"index": i}));
-    }
-}
 
 #[test]
 fn test_call_tool_result_cache_hint_metadata() {
