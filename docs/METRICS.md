@@ -12,7 +12,7 @@ For span attribute policy, the never-record list, and trace context propagation 
 
 ## Channel Pattern
 
-The metrics channel mirrors the `McpLoggingLayer` pattern exactly:
+The metrics channel uses an unbounded mpsc pattern with a single sender-receiver pair:
 
 - `unbounded_channel::<MetricEvent>()` created in `main()`
 - Sender stored on `CodeAnalyzer` as `MetricsSender` (newtype over `UnboundedSender<MetricEvent>`)

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 use aptu_coder::{
-    CodeAnalyzer, McpLoggingLayer, MetricEvent, MetricsSender, MetricsWriter, init_log_appender,
-    init_meter, init_otel,
+    CodeAnalyzer, MetricEvent, MetricsSender, MetricsWriter, init_log_appender, init_meter,
+    init_otel,
 };
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,10 +13,9 @@ use rmcp::transport::stdio;
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rustls::crypto::aws_lc_rs;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
-use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -165,12 +164,11 @@ fn parse_cli_args() -> Result<Option<u16>, String> {
 
 /// Install the global tracing subscriber with optional OpenTelemetry layers.
 ///
-/// Builds a layered subscriber: stderr fmt layer + MCP logging layer + optional
-/// OTel tracing layer + optional OTel log bridge.  OTel layers are no-ops when
+/// Builds a layered subscriber: stderr fmt layer + optional OTel tracing layer +
+/// optional OTel log bridge.  OTel layers are no-ops when
 /// `OTEL_EXPORTER_OTLP_ENDPOINT` is unset.  Callers retain the original
 /// providers so they can be shut down after the service exits.
 fn setup_tracing(
-    mcp_logging_layer: McpLoggingLayer,
     otel_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
     log_provider: Option<opentelemetry_sdk::logs::SdkLoggerProvider>,
 ) {
@@ -186,7 +184,6 @@ fn setup_tracing(
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(mcp_logging_layer)
         .with(otel_trace_layer)
         .with(otel_log_layer)
         .init();
@@ -218,27 +215,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("Failed to migrate legacy metrics directory: {e}");
     }
 
-    // Create shared peer Arc for logging layer
+    // Create shared peer for CodeAnalyzer::new (used by Streamable HTTP session manager)
     let peer = Arc::new(TokioMutex::new(None));
 
-    // Create shared level filter for dynamic control (std::sync::Mutex for Copy type)
-    let log_level_filter = Arc::new(Mutex::new(LevelFilter::WARN));
-
-    // Create unbounded channel for log events; receiver is intentionally dropped --
-    // the log-consumer task was removed in fix(logging) and the capability is no
-    // longer advertised. The sender (held by McpLoggingLayer) silently discards
-    // events when the receiver is gone.
-    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-
-    // Create MCP logging layer with event sender
-    let mcp_logging_layer = McpLoggingLayer::new(event_tx, log_level_filter.clone());
-
     // Install global tracing subscriber with optional OTel layers
-    setup_tracing(
-        mcp_logging_layer,
-        otel_provider.clone(),
-        log_provider.clone(),
-    );
+    setup_tracing(otel_provider.clone(), log_provider.clone());
 
     // Create metrics channel and spawn writer
     let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
