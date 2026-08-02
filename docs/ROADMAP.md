@@ -168,6 +168,24 @@ Several incremental improvements to the metrics schema and runtime behavior:
 
 ---
 
+### [Complete] replace_all flag for edit_replace (#1335, #1339)
+
+`replace_all` flag added to `edit_replace` for sed-style global replace; O(n*k) offset mapping fixed in #1339.
+
+### [Complete] McpLoggingLayer dead code removal (#1351)
+
+`McpLoggingLayer` dead code removed following MCP SEP-2577, which deprecated the Logging protocol feature.
+
+### [Complete] Hardcoded protocol version replaced with ProtocolVersion::LATEST (#1352)
+
+Hardcoded protocol version string replaced with `ProtocolVersion::LATEST`.
+
+### [Complete] server/discover RPC implementation (#1354)
+
+`server/discover` RPC implemented (MCP SEP-2575).
+
+---
+
 ## Direction (Tentative)
 
 Unimplemented and pertinent:
