@@ -13,7 +13,7 @@ use tracing::instrument;
 
 use crate::tools::EditHandlerContext;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::validation::{validate_path, validate_path_relative_to};
+use crate::validation::{canonical_cwd, validate_path_relative_to};
 
 /// Number of consecutive not_found or ambiguous edit_replace failures on the same
 /// (session_id, canonical_path) pair before returning a stale-context directive error.
@@ -104,7 +104,7 @@ fn resolve_edit_path(
             }
         }
     } else {
-        match validate_path(path, true) {
+        match canonical_cwd().and_then(|cwd| validate_path_relative_to(path, true, &cwd)) {
             Ok(p) => p,
             Err(e) => {
                 span.record("error", true);

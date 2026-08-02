@@ -452,3 +452,135 @@ async fn test_edit_overwrite_parent_is_file() {
         "expected error but got success: {resp}"
     );
 }
+
+/// edit_overwrite with absolute path outside CWD and no working_dir succeeds.
+#[tokio::test]
+async fn edit_overwrite_absolute_path_outside_cwd_no_working_dir() {
+    // Arrange: create a temp dir outside CWD (TempDir::new() uses system temp dir).
+    let temp_dir = tempfile::TempDir::new().expect("should create temp dir outside cwd");
+    let file_path = temp_dir.path().join("outside_cwd.txt");
+    let path_str = file_path.to_str().expect("path is valid UTF-8").to_string();
+
+    // Act: call edit_overwrite with absolute path and no working_dir
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": path_str,
+            "content": "written outside CWD"
+        }),
+    )
+    .await;
+
+    // Assert: tool must succeed and file must exist with correct content
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    assert!(
+        file_path.exists(),
+        "file should exist outside CWD at {:?}",
+        file_path
+    );
+    let written = std::fs::read_to_string(&file_path).expect("should read written file");
+    assert_eq!(written, "written outside CWD");
+}
+
+/// edit_replace with absolute path outside CWD and no working_dir succeeds.
+#[tokio::test]
+async fn edit_replace_absolute_path_outside_cwd_no_working_dir() {
+    // Arrange: create a temp dir outside CWD with a pre-existing file.
+    let temp_dir = tempfile::TempDir::new().expect("should create temp dir outside cwd");
+    let file_path = temp_dir.path().join("outside_cwd.txt");
+    std::fs::write(&file_path, "old content").expect("should write initial file");
+    let path_str = file_path.to_str().expect("path is valid UTF-8").to_string();
+
+    // Act: call edit_replace with absolute path and no working_dir
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": path_str,
+            "old_text": "old content",
+            "new_text": "new content"
+        }),
+    )
+    .await;
+
+    // Assert: tool must succeed and file must be updated
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    let updated = std::fs::read_to_string(&file_path).expect("should read updated file");
+    assert_eq!(updated, "new content");
+}
+
+/// edit_overwrite with nonexistent parent directory and no working_dir still fails.
+#[tokio::test]
+async fn edit_overwrite_nonexistent_parent_outside_cwd_no_working_dir() {
+    // Arrange: create a temp dir outside CWD, use a path whose parent does not exist.
+    let temp_dir = tempfile::TempDir::new().expect("should create temp dir outside cwd");
+    let nonexistent_parent = temp_dir.path().join("nonexistent_subdir").join("child.txt");
+    let path_str = nonexistent_parent
+        .to_str()
+        .expect("path is valid UTF-8")
+        .to_string();
+
+    // Act: call edit_overwrite with absolute path whose parent does not exist
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": path_str,
+            "content": "should not be written"
+        }),
+    )
+    .await;
+
+    // Assert: tool must fail because parent does not exist
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+}
+
+/// edit_overwrite with ../ traversal path resolving outside CWD and no working_dir succeeds.
+#[tokio::test]
+async fn edit_overwrite_traversal_path_outside_cwd_no_working_dir() {
+    // Arrange: create a temp dir outside CWD, compute a relative traversal from CWD to it.
+    let temp_dir = tempfile::TempDir::new().expect("should create temp dir outside cwd");
+    let file_path = temp_dir.path().join("traversal.txt");
+    let cwd = std::env::current_dir().expect("should get cwd");
+
+    // Build a relative path from CWD to the target file using ../ traversal.
+    // Go up from CWD to root, then descend to the target file.
+    let up_count = cwd.components().count();
+    let mut rel = std::path::PathBuf::new();
+    for _ in 0..up_count {
+        rel.push("..");
+    }
+    let file_str = file_path.to_str().expect("path is valid UTF-8");
+    let file_without_root = file_str.trim_start_matches('/');
+    rel.push(file_without_root);
+    let relative_str = rel
+        .to_str()
+        .expect("relative path is valid UTF-8")
+        .to_string();
+
+    // Act: call edit_overwrite with the relative traversal path and no working_dir
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": relative_str,
+            "content": "written via traversal"
+        }),
+    )
+    .await;
+
+    // Assert: tool must succeed (traversal outside CWD now allowed without working_dir)
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    assert!(file_path.exists(), "file should exist at {:?}", file_path);
+    let written = std::fs::read_to_string(&file_path).expect("should read written file");
+    assert_eq!(written, "written via traversal");
+}

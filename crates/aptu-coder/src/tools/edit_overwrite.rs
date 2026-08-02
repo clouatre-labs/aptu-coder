@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::tools::EditHandlerContext;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::validation::{validate_path, validate_path_relative_to};
+use crate::validation::{canonical_cwd, validate_path_relative_to};
 
 #[instrument(skip(params, ctx, span, t_start), fields(path = %params.path))]
 pub(crate) async fn edit_overwrite(
@@ -42,7 +42,9 @@ pub(crate) async fn edit_overwrite(
             }
         }
     } else {
-        match validate_path(&params.path, false) {
+        let resolved =
+            canonical_cwd().and_then(|cwd| validate_path_relative_to(&params.path, false, &cwd));
+        match resolved {
             Ok(p) => p,
             Err(e) => {
                 span.record("error", true);
