@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document is a production reference for engineers building systems with Claude and the Model Context Protocol (MCP). It covers the agentic loop, orchestration patterns, MCP tool design, memory management, safety controls, and prompt engineering for agents, cross-referenced against the MCP specification (2025-11-25), official Anthropic SDK documentation, and security references.
+This document is a production reference for engineers building systems with Claude and the Model Context Protocol (MCP). It covers the agentic loop, orchestration patterns, MCP tool design, memory management, safety controls, and prompt engineering for agents, cross-referenced against the MCP specification, official Anthropic SDK documentation, and security references.
 
 The scope covers three interrelated areas: the mechanics of the agentic loop and how agents perceive, plan, act, and reflect; orchestration patterns for coordinating multiple agents and managing context at scale; and MCP as the interface layer through which agents access tools and external data.
 
@@ -11,7 +11,7 @@ A senior engineer reading this document should be able to design a production ag
 ## See Also
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - module map and data flow for this MCP server implementation
-- [MCP Specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) - canonical protocol reference
+- [MCP Specification](https://modelcontextprotocol.io/specification/latest/server/tools) - canonical protocol reference
 - [DESIGN-GUIDE.md](DESIGN-GUIDE.md) - Design decisions, rationale, and replication guide for building high-performance MCP servers
 
 ---
@@ -197,7 +197,7 @@ A minimal structured handoff contains the task description, any prior results th
 
 ### 3.1 Architecture Overview
 
-MCP defines a client/server protocol through which a host application (the MCP client, typically Claude or a Claude-powered agent) discovers and calls tools, reads resources, and uses prompts exposed by an MCP server (MCP specification 2025-11-25, server/tools).
+MCP defines a client/server protocol through which a host application (the MCP client, typically Claude or a Claude-powered agent) discovers and calls tools, reads resources, and uses prompts exposed by an MCP server (MCP specification, server/tools).
 
 The server exposes a catalog of tools. The client queries that catalog at session start and receives tool definitions including name, description, and input schema. When the model decides to use a tool, the client sends a tool call to the server, receives the result, and injects it into the conversation as a `tool_result` block.
 
@@ -213,7 +213,7 @@ Three principles govern tool design at the MCP layer:
 
 ### 3.3 Tool Annotations
 
-MCP tool definitions support annotations that communicate the behavioral characteristics of a tool to the client. These are not enforced at the protocol level but allow clients to present appropriate confirmation UI and apply policy rules (MCP specification 2025-11-25, server/tools).
+MCP tool definitions support annotations that communicate the behavioral characteristics of a tool to the client. These are not enforced at the protocol level but allow clients to present appropriate confirmation UI and apply policy rules (MCP specification, server/tools).
 
 | Annotation | Type | Meaning |
 |---|---|---|
@@ -279,7 +279,7 @@ if result.action == "accept":
     env = result.data["env"]
 ```
 
-*Code Snippet 3: FastMCP elicitation call. The server pauses tool execution, collects user input via a structured form, and resumes on `accept`. See [MCP 2025-11-25 Elicitation spec](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation).*
+*Code Snippet 3: FastMCP elicitation call. The server pauses tool execution, collects user input via a structured form, and resumes on `accept`. See [MCP Elicitation spec](https://modelcontextprotocol.io/specification/latest/client/elicitation).*
 ## 4. Tool Use Best Practices
 
 ### 4.1 Tool Definition Schema
@@ -310,7 +310,7 @@ Tool definitions in the Anthropic API require three fields: `name`, `description
 
 *Code Snippet 4: Anthropic API tool definition with input_schema, required fields, and optional enum parameter.*
 
-The MCP specification extends this with an optional `outputSchema` field that documents the structure of the tool's return value. Defining an `outputSchema` enables downstream validation and allows orchestrators to verify that tool output matches expectations before injecting it into context (MCP specification 2025-11-25, server/tools).
+The MCP specification extends this with an optional `outputSchema` field that documents the structure of the tool's return value. Defining an `outputSchema` enables downstream validation and allows orchestrators to verify that tool output matches expectations before injecting it into context (MCP specification, server/tools).
 
 ```json
 {
@@ -405,7 +405,7 @@ Test tool selection reliability by constructing requests that could plausibly ro
 
 ### 4.2.1 Tool Name Format and the Dot-Notation Question
 
-The MCP specification (2025-11-25) constrains tool names to alphanumeric characters, underscores, hyphens, and dots, with a maximum length of 64 characters. Spaces are explicitly disallowed. Within those constraints, the spec prescribes no naming style: it is silent on whether to use snake_case, camelCase, or dot-notation.
+The MCP specification constrains tool names to alphanumeric characters, underscores, hyphens, and dots, with a maximum length of 64 characters. Spaces are explicitly disallowed. Within those constraints, the spec prescribes no naming style: it is silent on whether to use snake_case, camelCase, or dot-notation.
 
 **Prefer flat snake_case.** The recommended style for MCP tool names is flat, underscore-separated verb phrases: `extract_invoice_fields`, `search_knowledge_base`, `matrix_multiply`. This style is used by most production MCP servers and by FastMCP's own namespace separator when mounting sub-servers (FastMCP `mount()` produces `prefix_toolname`, not `prefix.toolname`). The `searchFlights` example in Code Snippet 5 uses camelCase for illustration; in a production server, prefer `search_flights` for consistency.
 
@@ -426,7 +426,7 @@ The MCP specification (2025-11-25) constrains tool names to alphanumeric charact
 
 *Table 3: MCP client compatibility with dot-notation tool names.*
 
-**Empirical basis and known limits.** The OpenAI regex is documented at [platform.openai.com/docs/guides/function-calling](https://platform.openai.com/docs/guides/function-calling). FastMCP separator behavior is documented in the FastMCP mounting guide. The MCP 2025-11-25 spec name constraint is at [modelcontextprotocol.io/specification/2025-11-25/server/tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools). No MCP specification proposal (SEP) that mandates dot-notation has reached normative status as of 2026-04-01.
+**Empirical basis and known limits.** The OpenAI regex is documented at [platform.openai.com/docs/guides/function-calling](https://platform.openai.com/docs/guides/function-calling). FastMCP separator behavior is documented in the FastMCP mounting guide. The MCP spec name constraint is at [modelcontextprotocol.io/specification/latest/server/tools](https://modelcontextprotocol.io/specification/latest/server/tools). No MCP specification proposal (SEP) that mandates dot-notation has reached normative status as of 2026-04-01.
 
 ### 4.3 Error Responses
 
@@ -667,8 +667,8 @@ The following patterns produce unreliable, fragile, or unsafe agent systems.
 - MCP Inspector (protocol compliance, not annotation quality): https://github.com/modelcontextprotocol/inspector
 - MCP Prompts Concept: https://modelcontextprotocol.info/docs/concepts/prompts/
 - MCP Python SDK: https://github.com/modelcontextprotocol/python-sdk
-- MCP Specification, Server/Resources: https://modelcontextprotocol.io/specification/2025-11-25/server/resources
-- MCP Specification, Server/Tools: https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+- MCP Specification, Server/Resources: https://modelcontextprotocol.io/specification/latest/server/resources
+- MCP Specification, Server/Tools: https://modelcontextprotocol.io/specification/latest/server/tools
 - MCP Specification, Transports (draft): https://github.com/modelcontextprotocol/specification/blob/main/docs/specification/draft/basic/transports.mdx
 - MCP Specification, Transports (legacy): https://github.com/modelcontextprotocol/specification/blob/main/docs/legacy/concepts/transports.mdx
 - MCP TypeScript SDK: https://github.com/modelcontextprotocol/typescript-sdk

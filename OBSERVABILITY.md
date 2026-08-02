@@ -7,7 +7,7 @@ what is deliberately excluded, and how to configure telemetry export.
 
 aptu-coder emits two independent telemetry streams that operate in parallel:
 
-- **JSONL metrics (always-on):** Daily-rotated files written to `$XDG_DATA_HOME/aptu-coder/metrics/` regardless of any configuration. Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. This stream has zero external dependencies and is always available for local inspection and testing.
+- **JSONL metrics (always-on):** Daily-rotated files written to `$XDG_DATA_HOME/aptu-coder/` regardless of any configuration. Each record captures tool name, duration, output size, and result status. Files are retained for 30 days. This stream has zero external dependencies and is always available for local inspection and testing.
 
 - **OpenTelemetry export (opt-in):** Enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Traces, logs, and metrics are exported asynchronously via OTLP/HTTP to any compliant collector (Jaeger, Grafana Tempo, Datadog, etc.). When unset, noop providers are used with zero runtime overhead. This stream is parallel and independent from JSONL.
 
@@ -110,7 +110,7 @@ policy is the primary control; the Collector processor is the safety net.
 
 Log output goes to stderr and, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, to the
 OTel log appender. MCP `notifications/message` forwarding and `logging/setLevel`
-support were removed in v0.25.5 following
+support was removed following
 [MCP SEP-2577](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577),
 which deprecated the Logging protocol feature at the spec level.
 

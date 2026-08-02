@@ -8,7 +8,7 @@ Rust workspace with two crates:
 - `crates/aptu-coder` -- MCP server, tool handlers, logging, metrics
 
 Seven MCP tools: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family).
-Rust edition 2024, async with tokio, MCP protocol 2025-11-25 via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
+Rust edition 2024, async with tokio, latest MCP protocol via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
 
 ## CI runners
 
@@ -63,7 +63,7 @@ Integration tests for the `aptu-coder` crate live in `crates/aptu-coder/tests/`.
 
 Patterns contributors consistently get wrong:
 
-- Use `Content`, not `RawContent` (does not exist)
+- Use `ContentBlock`, not `Content` (renamed in rmcp v2) or `RawContent` (never existed)
 - Every `#[tool(...)]` requires `output_schema = schema_for_type::<T>()` and `title = "..."`
 - Tool methods take `_context: RequestContext<RoleServer>` as second parameter
 - `#[tool_router]` goes on `impl CodeAnalyzer`; `#[tool_handler]` goes on `impl ServerHandler for CodeAnalyzer` -- they are separate impls
