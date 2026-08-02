@@ -199,7 +199,7 @@ pub(crate) fn canonical_cwd() -> Result<std::path::PathBuf, ErrorData> {
         .map_err(|_| {
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
-                "path is outside the working directory".to_string(),
+                "current working directory is inaccessible".to_string(),
                 Some(error_meta(
                     "validation",
                     false,
