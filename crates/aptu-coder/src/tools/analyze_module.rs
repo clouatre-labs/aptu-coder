@@ -9,7 +9,7 @@ use aptu_coder_core::analyze;
 use aptu_coder_core::cache::CacheTier;
 use aptu_coder_core::formatter::format_module_info;
 use aptu_coder_core::types::{AnalyzeModuleParams, ModuleInfo};
-use rmcp::model::{CallToolResult, ContentBlock, ErrorData, Meta};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData, MetaObject};
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -155,7 +155,7 @@ pub(crate) async fn analyze_module_handler(
                             serde_json::Value::String(content_hash),
                         );
                         let mut result = CallToolResult::success(vec![ContentBlock::text(text)])
-                            .with_meta(Some(Meta(meta)));
+                            .with_meta(Some(MetaObject(meta)));
                         match serde_json::to_value(&mi) {
                             Ok(v) => {
                                 result.structured_content = Some(v);
@@ -235,8 +235,8 @@ pub(crate) async fn analyze_module_handler(
         serde_json::Value::String(content_hash),
     );
 
-    let mut result =
-        CallToolResult::success(vec![ContentBlock::text(text.clone())]).with_meta(Some(Meta(meta)));
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
+        .with_meta(Some(MetaObject(meta)));
     let structured = match serde_json::to_value(&module_info).map_err(|e| {
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,

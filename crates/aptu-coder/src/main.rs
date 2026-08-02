@@ -72,7 +72,7 @@ async fn run_http(analyzer: CodeAnalyzer, port: u16) -> Result<(), Box<dyn std::
     });
 
     let config = StreamableHttpServerConfig::default()
-        .with_stateful_mode(false)
+        .with_legacy_session_mode(false)
         .with_json_response(true)
         .with_sse_keep_alive(None)
         .with_sse_retry(None)

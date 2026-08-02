@@ -107,7 +107,7 @@ fn test_traceparent_malformed_no_panic() {
         "traceparent".to_string(),
         serde_json::Value::String("not-a-valid-traceparent".to_string()),
     );
-    let meta = rmcp::model::Meta(meta_map);
+    let meta = rmcp::model::MetaObject(meta_map);
 
     // Act: call the real extraction function -- must not panic regardless of input
     extract_and_set_trace_context(

@@ -24,7 +24,7 @@ pub struct ClientMetadata {
 /// span has been entered (i.e., inside the function body) for `set_parent` to take effect.
 /// If extraction fails or _meta is absent, silently proceeds with root context (no panic).
 pub fn extract_and_set_trace_context(
-    meta: Option<&rmcp::model::Meta>,
+    meta: Option<&rmcp::model::MetaObject>,
     client_meta: ClientMetadata,
 ) {
     use tracing_opentelemetry::OpenTelemetrySpanExt as _;
