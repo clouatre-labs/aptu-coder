@@ -14,7 +14,7 @@ use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
 use aptu_coder_core::types::{AnalyzeSymbolParams, SymbolMatchMode};
-use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, Meta, TextContent};
+use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, MetaObject, TextContent};
 use serde_json::Value;
 use std::sync::Arc;
 use tracing::instrument;
@@ -249,7 +249,7 @@ async fn handle_import_lookup(
         TextContent::new(final_text.clone())
             .with_annotations(Annotations::default().with_priority(0.9_f32)),
     )])
-    .with_meta(Some(Meta(meta)));
+    .with_meta(Some(MetaObject(meta)));
     let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
     result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -456,7 +456,7 @@ async fn handle_call_graph(
         TextContent::new(final_text.clone())
             .with_annotations(Annotations::default().with_priority(0.9_f32)),
     )])
-    .with_meta(Some(Meta(meta)));
+    .with_meta(Some(MetaObject(meta)));
     // Only include def_use_sites in structuredContent when in DefUse mode.
     // In Callers/Callees modes, clearing the vec prevents large def-use
     // payloads from leaking into paginated non-def-use responses.

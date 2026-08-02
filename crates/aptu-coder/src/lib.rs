@@ -161,9 +161,9 @@ use filters::CompiledRule;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, CancelledNotificationParam, CompleteRequestParams, CompleteResult,
-    CompletionInfo, ContentBlock, ErrorData, Implementation, InitializeRequestParams,
-    InitializeResult, ServerCapabilities,
+    CallToolResponse, CallToolResult, CancelledNotificationParam, CompleteRequestParams,
+    CompleteResult, CompletionInfo, ContentBlock, DiscoverResult, ErrorData, Implementation,
+    InitializeRequestParams, InitializeResult, ServerCapabilities,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -707,18 +707,18 @@ impl ServerHandler for CodeAnalyzer {
         Ok(self.get_info())
     }
 
-    /// Returns the `InitializeResult` describing server capabilities and metadata.
-    ///
-    /// Once `rmcp` exposes `ServerHandler::discover` (tracked in issue #1349,
-    /// blocked on #998 and modelcontextprotocol/rust-sdk#869), the implementation
-    /// should be:
-    /// ```ignore
-    /// async fn discover(&self, _context: RequestContext<RoleServer>)
-    ///     -> Result<DiscoverResult, ErrorData>
-    /// {
-    ///     Ok(self.get_info().into())
-    /// }
-    /// ```
+    /// Returns server discovery information including supported protocol versions
+    /// and capabilities.
+    async fn discover(
+        &self,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<DiscoverResult, ErrorData> {
+        Ok(DiscoverResult::from_server_info(
+            self.supported_protocol_versions().into_owned(),
+            self.get_info(),
+        ))
+    }
+
     fn get_info(&self) -> InitializeResult {
         let excluded = aptu_coder_core::EXCLUDED_DIRS.join(", ");
         let instructions = format!(
@@ -749,18 +749,16 @@ impl ServerHandler for CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
         let router = self.tool_router.read().await;
-        Ok(rmcp::model::ListToolsResult {
-            tools: router.list_all(),
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(rmcp::model::ListToolsResult::with_all_items(
+            router.list_all(),
+        ))
     }
 
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let router = self.tool_router.read().await;
         router.call(tcc).await

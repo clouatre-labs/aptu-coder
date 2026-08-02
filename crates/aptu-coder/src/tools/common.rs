@@ -5,7 +5,7 @@
 //! All items here are `pub(crate)`. OTel-specific types (`ClientMetadata`,
 //! `extract_and_set_trace_context`) live in `crate::otel` where they are `pub`.
 
-use rmcp::model::{CallToolResult, ContentBlock, ErrorData, Meta};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData, MetaObject};
 
 /// Returns `true` when `summary=true` and a `cursor` are both provided, which is an invalid
 /// combination since summary mode and pagination are mutually exclusive.
@@ -46,11 +46,11 @@ pub(crate) fn err_to_tool_result(e: ErrorData) -> CallToolResult {
     result
 }
 
-pub(crate) fn no_cache_meta() -> Meta {
+pub(crate) fn no_cache_meta() -> MetaObject {
     let mut m = serde_json::Map::new();
     m.insert(
         "cache_hint".to_string(),
         serde_json::Value::String("no-cache".to_string()),
     );
-    Meta(m)
+    MetaObject(m)
 }

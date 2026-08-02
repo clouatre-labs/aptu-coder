@@ -342,7 +342,7 @@ pub(crate) async fn analyze_directory_handler(
         "content_hash".to_string(),
         serde_json::Value::String(content_hash),
     );
-    let meta = rmcp::model::Meta(meta);
+    let meta = rmcp::model::MetaObject(meta);
 
     let mut result = CallToolResult::success(vec![ContentBlock::Text(
         TextContent::new(final_text.clone())

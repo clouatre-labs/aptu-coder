@@ -3,8 +3,9 @@
 
 mod common;
 
-use common::call_tool_raw;
-use rmcp::model::{CallToolResult, ContentBlock, Meta};
+use common::{call_tool_raw, make_test_analyzer};
+use rmcp::model::{CallToolResult, ContentBlock, MetaObject};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[test]
 fn test_call_tool_result_cache_hint_metadata() {
@@ -15,7 +16,7 @@ fn test_call_tool_result_cache_hint_metadata() {
     );
 
     let result = CallToolResult::success(vec![ContentBlock::text("test output")])
-        .with_meta(Some(Meta(meta)));
+        .with_meta(Some(MetaObject(meta)));
 
     let json_val = serde_json::to_value(&result).expect("should serialize");
 
@@ -896,5 +897,191 @@ async fn test_meta_field_ordering() {
     assert!(
         cache_hint_pos < content_hash_pos,
         "cache_hint must appear before content_hash in serialized _meta JSON: {meta_str}"
+    );
+}
+
+/// Helper: spin up a fresh in-process MCP server and send a raw `server/discover` request
+/// as the first and only message (no prior initialize handshake), then return the parsed
+/// JSON-RPC response. Exercises the stateless discovery path required by MCP SEP-2575.
+async fn call_discover_raw() -> serde_json::Value {
+    let analyzer = make_test_analyzer();
+    let (client, server) = tokio::io::duplex(65536);
+
+    let server_handle = tokio::spawn(async move {
+        let (server_rx, server_tx) = tokio::io::split(server);
+        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
+            let _ = service.waiting().await;
+        }
+    });
+
+    let (client_rx, mut client_tx) = tokio::io::split(client);
+    let mut reader = BufReader::new(client_rx).lines();
+
+    // server/discover in stateless (inline-lifecycle) mode requires _meta with
+    // io.modelcontextprotocol/protocolVersion and io.modelcontextprotocol/clientCapabilities
+    // per SEP-2575 / rmcp 3.x inline-lifecycle validation.
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "server/discover",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }
+    })
+    .to_string()
+        + "\n";
+    client_tx
+        .write_all(req.as_bytes())
+        .await
+        .expect("failed to write server/discover request");
+    client_tx
+        .flush()
+        .await
+        .expect("failed to flush server/discover request");
+
+    let line = reader
+        .next_line()
+        .await
+        .expect("IO error reading server/discover response")
+        .expect("server closed before sending server/discover response");
+    server_handle.abort();
+    serde_json::from_str(&line).expect("server/discover response is not valid JSON")
+}
+
+#[tokio::test]
+async fn test_discover_without_initialize() {
+    let resp = call_discover_raw().await;
+
+    assert!(
+        resp.get("error").is_none(),
+        "server/discover must not return an error: {resp}"
+    );
+    let result = &resp["result"];
+    assert!(
+        result.get("supportedVersions").is_some() || result.get("supported_versions").is_some(),
+        "server/discover result must contain supported versions: {result}"
+    );
+    let versions = result
+        .get("supportedVersions")
+        .or_else(|| result.get("supported_versions"))
+        .expect("supported versions field must be present");
+    assert!(
+        versions.as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "supported versions must be a non-empty array: {versions}"
+    );
+    assert!(
+        result.get("capabilities").is_some(),
+        "server/discover result must contain capabilities: {result}"
+    );
+}
+
+#[tokio::test]
+async fn test_discover_after_initialize() {
+    // Verify server/discover works in the initialized state (dual-mode requirement).
+    let analyzer = make_test_analyzer();
+    let (client, server) = tokio::io::duplex(65536);
+
+    let server_handle = tokio::spawn(async move {
+        let (server_rx, server_tx) = tokio::io::split(server);
+        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
+            let _ = service.waiting().await;
+        }
+    });
+
+    let (client_rx, mut client_tx) = tokio::io::split(client);
+    let mut reader = BufReader::new(client_rx).lines();
+
+    // Full initialize handshake first.
+    let init = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "0.1.0"}
+        }
+    })
+    .to_string()
+        + "\n";
+    client_tx
+        .write_all(init.as_bytes())
+        .await
+        .expect("failed to write initialize");
+    client_tx.flush().await.expect("failed to flush initialize");
+    let _init_resp = reader
+        .next_line()
+        .await
+        .expect("IO error reading initialize response")
+        .expect("server closed before initialize response");
+
+    let notif = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    })
+    .to_string()
+        + "\n";
+    client_tx
+        .write_all(notif.as_bytes())
+        .await
+        .expect("failed to write initialized notification");
+    client_tx
+        .flush()
+        .await
+        .expect("failed to flush initialized notification");
+
+    // Now send server/discover in the initialized session.
+    // DiscoverRequest always requires inline-lifecycle _meta per rmcp 3.x.
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "server/discover",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }
+    })
+    .to_string()
+        + "\n";
+    client_tx
+        .write_all(req.as_bytes())
+        .await
+        .expect("failed to write server/discover request");
+    client_tx
+        .flush()
+        .await
+        .expect("failed to flush server/discover request");
+
+    let line = reader
+        .next_line()
+        .await
+        .expect("IO error reading server/discover response")
+        .expect("server closed before server/discover response");
+    server_handle.abort();
+
+    let resp: serde_json::Value =
+        serde_json::from_str(&line).expect("server/discover response is not valid JSON");
+    assert!(
+        resp.get("error").is_none(),
+        "server/discover after initialize must not return an error: {resp}"
+    );
+    let result = &resp["result"];
+    assert!(
+        result.get("capabilities").is_some(),
+        "server/discover result must contain capabilities: {result}"
+    );
+    let versions = result
+        .get("supportedVersions")
+        .or_else(|| result.get("supported_versions"))
+        .expect("server/discover result must contain supported versions");
+    assert!(
+        versions.as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "supported versions must be a non-empty array: {versions}"
     );
 }
