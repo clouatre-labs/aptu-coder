@@ -189,6 +189,26 @@ pub(crate) fn io_error_to_path_error(
     ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, msg, Some(meta))
 }
 
+/// Returns the canonicalized current working directory, or an `ErrorData` if it is
+/// inaccessible.  Used by edit tools when no `working_dir` parameter is supplied so
+/// they resolve paths the same way `validate_path_relative_to` does -- without a
+/// containment check -- deferring access control to the operator/orchestrator.
+pub(crate) fn canonical_cwd() -> Result<std::path::PathBuf, ErrorData> {
+    std::env::current_dir()
+        .and_then(|cwd| std::fs::canonicalize(&cwd))
+        .map_err(|_| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "path is outside the working directory".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "ensure the working directory is accessible",
+                )),
+            )
+        })
+}
+
 /// Resolve a path relative to a working directory, without containment check.
 ///
 /// This function is similar to `validate_path_in_dir`, but it removes the final

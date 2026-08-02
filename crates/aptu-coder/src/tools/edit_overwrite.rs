@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::tools::EditHandlerContext;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::validation::validate_path_relative_to;
+use crate::validation::{canonical_cwd, validate_path_relative_to};
 
 #[instrument(skip(params, ctx, span, t_start), fields(path = %params.path))]
 pub(crate) async fn edit_overwrite(
@@ -42,22 +42,8 @@ pub(crate) async fn edit_overwrite(
             }
         }
     } else {
-        let resolved = std::env::current_dir()
-            .and_then(|cwd| std::fs::canonicalize(&cwd))
-            .map_err(|_| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    "path is outside the working directory".to_string(),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "ensure the working directory is accessible",
-                    )),
-                )
-            })
-            .and_then(|canonical_cwd| {
-                validate_path_relative_to(&params.path, false, &canonical_cwd)
-            });
+        let resolved =
+            canonical_cwd().and_then(|cwd| validate_path_relative_to(&params.path, false, &cwd));
         match resolved {
             Ok(p) => p,
             Err(e) => {
