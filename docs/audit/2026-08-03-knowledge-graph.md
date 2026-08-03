@@ -284,9 +284,9 @@ the alternative if full SQL queryability from outside the MCP server becomes a r
 | [aptu#1420](https://github.com/clouatre-labs/aptu/pull/1420) | Merged 2026-08-01. Reference schema for Node/Edge types; postcard migration in aptu#1432. |
 | [aptu#1432](https://github.com/clouatre-labs/aptu/pull/1432) | Merged 2026-08-03. postcard replaces bincode; follow for serialization format. |
 | [#998](https://github.com/clouatre-labs/aptu-coder/issues/998) | MCP 2026-07-28 migration tracking. C-full Resources wiring uses ttlMs/cacheScope from SEP-2549; defer until rmcp exposes the API. |
-| new -- fix: pagination chains lost on L2 reload | `#[serde(skip)]` on `FocusedAnalysisOutput.prod_chains`, `.test_chains`, `.outgoing_chains` breaks cross-session pagination. Orthogonal to the KG question; file separately. |
-| new -- feat: C-hybrid graph module | petgraph DiGraph in aptu-coder-core/src/graph/, internal use only, postcard persistence. |
-| new -- feat: C-full MCP Resources (design) | Follow-on design issue. Resources surface, ttlMs/cacheScope, subscriptions/listen invalidation, optional JSONL export. |
+| [#1361](https://github.com/clouatre-labs/aptu-coder/issues/1361) | fix(cache): pagination chains lost on analyze_symbol L2 cache reload (KG1). `#[serde(skip)]` on `FocusedAnalysisOutput.prod_chains`, `.test_chains`, `.outgoing_chains` breaks cross-session pagination. Orthogonal to the KG question; filed separately. |
+| [#1362](https://github.com/clouatre-labs/aptu-coder/issues/1362) | feat(kg): structural knowledge graph module in aptu-coder-core (C-hybrid, KG7). petgraph DiGraph in aptu-coder-core/src/graph/, internal use only, postcard persistence. |
+| [#1363](https://github.com/clouatre-labs/aptu-coder/issues/1363) | feat(kg): MCP Resource surface for knowledge graph, C-full design issue (KG8). Resources surface, ttlMs/cacheScope, subscriptions/listen invalidation, optional JSONL export. |
 
 ---
 
@@ -294,30 +294,30 @@ the alternative if full SQL queryability from outside the MCP server becomes a r
 
 *Table 4: Findings.*
 
-| ID | Category | Finding |
-|---|---|---|
-| KG1 | GAP | `analyze_symbol` L2 disk cache exists (`symbol_focused.rs:313-316`) but cross-session pagination is broken: `prod_chains`, `test_chains`, `outgoing_chains` are `#[serde(skip)]` on `FocusedAnalysisOutput` and lost on reload |
-| KG2 | GAP | No persistent structural graph (nodes + typed edges) anywhere in aptu-coder-core; all cross-file relationship data is ephemeral |
-| KG3 | CONTEXT | aptu#1420 (merged 2026-08-01) implements a petgraph-backed graph in the downstream aptu repo, not here; schema and postcard serialization pattern are directly reusable |
-| KG4 | DECISION | Committing a raw graph artifact to repos is not recommended (industry consensus); APTU_CODER_DISK_CACHE_DIR gitignored pattern is correct; opt-in JSONL export is acceptable for a future C-full issue |
-| KG5 | DECISION | Approach B (L3 cache tier) is rejected: solves 0.2%-of-calls non-hotspot, serde work does not transfer to C, creates rework |
-| KG6 | DECISION | MCP Resources are available in rmcp 3.1.0 and not blocked; server/discover (SEP-2575) is the blocked item, not Resources |
-| KG7 | RECOMMENDATION | Implement C-hybrid: petgraph DiGraph in aptu-coder-core/src/graph/, internal use, postcard persistence; fix pagination L2 bug separately |
-| KG8 | RECOMMENDATION | File C-full (MCP Resources surface, ttlMs/cacheScope, subscriptions/listen) as a follow-on design issue once C-hybrid ships |
+| ID | Severity | Category | Finding |
+|---|---|---|---|
+| KG1 | High | GAP | `analyze_symbol` L2 disk cache exists (`symbol_focused.rs:313-316`) but cross-session pagination is broken: `prod_chains`, `test_chains`, `outgoing_chains` are `#[serde(skip)]` on `FocusedAnalysisOutput` and lost on reload |
+| KG2 | Medium | GAP | No persistent structural graph (nodes + typed edges) anywhere in aptu-coder-core; all cross-file relationship data is ephemeral |
+| KG3 | Info | CONTEXT | aptu#1420 (merged 2026-08-01) implements a petgraph-backed graph in the downstream aptu repo, not here; schema and postcard serialization pattern are directly reusable |
+| KG4 | Info | DECISION | Committing a raw graph artifact to repos is not recommended (industry consensus); APTU_CODER_DISK_CACHE_DIR gitignored pattern is correct; opt-in JSONL export is acceptable for a future C-full issue |
+| KG5 | Info | DECISION | Approach B (L3 cache tier) is rejected: solves 0.2%-of-calls non-hotspot, serde work does not transfer to C, creates rework |
+| KG6 | Info | DECISION | MCP Resources are available in rmcp 3.1.0 and not blocked; server/discover (SEP-2575) is the blocked item, not Resources |
+| KG7 | Info | RECOMMENDATION | Implement C-hybrid: petgraph DiGraph in aptu-coder-core/src/graph/, internal use, postcard persistence; fix pagination L2 bug separately |
+| KG8 | Info | RECOMMENDATION | File C-full (MCP Resources surface, ttlMs/cacheScope, subscriptions/listen) as a follow-on design issue once C-hybrid ships |
 
 **Recommended action order:**
 
-1. **Fix KG1 (pagination L2 bug)** -- remove `#[serde(skip)]` from `FocusedAnalysisOutput`
+1. **Fix KG1 (pagination L2 bug) -- #1361** -- remove `#[serde(skip)]` from `FocusedAnalysisOutput`
    chain fields or redesign the L2 serialization so cross-session pagination works. Small scope,
    high correctness value.
 
-2. **Implement C-hybrid** -- new `crates/aptu-coder-core/src/graph/` module; petgraph
+2. **Implement C-hybrid -- #1362** -- new `crates/aptu-coder-core/src/graph/` module; petgraph
    `DiGraph<Node, Edge>`; built from existing `analyze.rs` output (no second parse pass, per
    aptu#1408 constraint); postcard-encoded persistence in `APTU_CODER_DISK_CACHE_DIR` following
    aptu#1432; used internally to accelerate `analyze_symbol` and enable multi-hop traversal.
    Reference: Codebase-Memory (arXiv:2603.27277) for production-scale architecture validation.
 
-3. **File C-full as a design issue** -- MCP Resources surface (`list_resources` / `read_resource`
+3. **File C-full as a design issue -- #1363** -- MCP Resources surface (`list_resources` / `read_resource`
    usable today in rmcp 3.1.0), `ttlMs`/`cacheScope` once rmcp exposes the SEP-2549 API,
    `subscriptions/listen`-based invalidation after edit operations, optional JSONL export for
    opt-in committable artifacts.
