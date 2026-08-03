@@ -509,32 +509,26 @@ pub struct FocusedAnalysisOutput {
     pub next_cursor: Option<String>,
     /// Production caller chains (partitioned from incoming chains, excluding test callers).
     /// Not serialized; used for pagination in lib.rs.
-    #[serde(skip)]
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub prod_chains: Vec<InternalCallChain>,
     /// Test caller chains. Not serialized; used for pagination summary in lib.rs.
-    #[serde(skip)]
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub test_chains: Vec<InternalCallChain>,
     /// Outgoing (callee) chains. Not serialized; used for pagination in lib.rs.
-    #[serde(skip)]
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub outgoing_chains: Vec<InternalCallChain>,
     /// Number of definitions for the symbol. Not serialized; used for pagination headers.
-    #[serde(skip)]
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub def_count: usize,
     /// Total unique callers before `impl_only` filter. Not serialized; used for FILTER header.
-    #[serde(skip)]
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub unfiltered_caller_count: usize,
     /// Unique callers after `impl_only` filter. Not serialized; used for FILTER header.
-    #[serde(skip)]
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub impl_trait_caller_count: usize,

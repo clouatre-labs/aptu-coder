@@ -6,6 +6,7 @@
 //! Implements type-aware function matching to disambiguate overloads and name collisions.
 
 use crate::types::{CallEdge, ImplTraitInfo, SemanticAnalysis, SymbolMatchMode};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -205,7 +206,7 @@ fn strip_scope_prefix(name: &str) -> &str {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InternalCallChain {
     pub chain: Vec<(String, PathBuf, usize)>,
 }
