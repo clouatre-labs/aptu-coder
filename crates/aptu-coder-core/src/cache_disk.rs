@@ -318,6 +318,52 @@ mod disk_cache_tests {
     }
 
     #[test]
+    fn test_focused_analysis_output_disk_cache_roundtrip() {
+        // Arrange
+        let dir = TempDir::new().unwrap();
+        let cache = DiskCache::new(dir.path().to_path_buf(), false);
+        let key = blake3::hash(b"focused-analysis-key");
+        let chain = crate::graph::InternalCallChain {
+            chain: vec![("caller_fn".to_string(), PathBuf::from("src/lib.rs"), 10)],
+        };
+        let value = crate::analyze::FocusedAnalysisOutput {
+            formatted: "formatted output".to_string(),
+            next_cursor: None,
+            prod_chains: vec![chain.clone()],
+            test_chains: vec![chain.clone()],
+            outgoing_chains: vec![chain],
+            def_count: 3,
+            unfiltered_caller_count: 5,
+            impl_trait_caller_count: 2,
+            callers: None,
+            test_callers: None,
+            callees: None,
+            def_use_sites: Vec::new(),
+            cache_tier: None,
+        };
+
+        // Act
+        cache.put("analyze_symbol", &key, &value);
+        let retrieved: Option<crate::analyze::FocusedAnalysisOutput> =
+            cache.get("analyze_symbol", &key);
+
+        // Assert
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.prod_chains, value.prod_chains);
+        assert_eq!(retrieved.test_chains, value.test_chains);
+        assert_eq!(retrieved.outgoing_chains, value.outgoing_chains);
+        assert_eq!(retrieved.def_count, value.def_count);
+        assert_eq!(
+            retrieved.unfiltered_caller_count,
+            value.unfiltered_caller_count
+        );
+        assert_eq!(
+            retrieved.impl_trait_caller_count,
+            value.impl_trait_caller_count
+        );
+    }
+
+    #[test]
     fn test_disk_cache_permissions() {
         #[cfg(unix)]
         {
