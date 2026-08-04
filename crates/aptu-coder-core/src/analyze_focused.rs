@@ -180,24 +180,18 @@ fn compute_cache_key(entries: &[WalkEntry]) -> Option<String> {
             mtimes.push((e.path.clone(), m));
         }
     }
-    mtimes.sort();
     Some(GraphDiskStore::cache_key(&entries.first()?.path, &mtimes))
 }
 
 /// Create a GraphDiskStore from env var or XDG data home default.
 fn create_graph_store() -> GraphDiskStore {
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .unwrap_or_default();
     let base = std::env::var("APTU_CODER_DISK_CACHE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let xdg = std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    std::env::var_os("HOME")
-                        .map(|h| PathBuf::from(h).join(".local").join("share"))
-                        .unwrap_or_default()
-                });
-            xdg.join("aptu-coder").join("analysis-cache")
-        });
+        .unwrap_or_else(|_| data_home.join("aptu-coder").join("analysis-cache"));
     GraphDiskStore::new(base)
 }
 
@@ -458,19 +452,18 @@ fn analyze_focused_with_progress_with_entries_internal(
     let mut graph = build_call_graph(analysis_results.clone(), &all_impl_traits)?;
 
     // Best-effort: warm-cache reload or cold-cache build+persist of structural graph.
-    // On warm hit: reload from disk (skips rebuild). On cold miss: build then persist.
-    // I/O errors degrade silently; the call graph result is unaffected either way.
+    // On warm hit: skip rebuild. On cold miss: build from analysis results and persist.
+    // I/O errors degrade silently; the focused call-graph result is unaffected.
     if let Some(key) = &cache_key {
         let store = create_graph_store();
-        if store.get(key).is_some() {
-            tracing::debug!(key, "structural graph cache hit (warm)");
-        } else {
+        if store.get(key).is_none() {
             let sg_entries: Vec<FileAnalysisOutput> = analysis_results
                 .into_iter()
                 .map(|(p, s)| FileAnalysisOutput::new(p.to_string_lossy().into_owned(), s, 0, None))
                 .collect();
-            let structural = StructuralGraph::build_from_analysis(&sg_entries);
-            store.put(key, &structural);
+            store.put(key, &StructuralGraph::build_from_analysis(&sg_entries));
+        } else {
+            tracing::debug!(key, "structural graph cache hit (warm)");
         }
     }
 

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-//! Disk-backed structural graph cache with versioned postcard encoding.
-//! Uses fs2 per-shard locking and atomic writes via NamedTempFile::persist.
-//! All I/O errors degrade silently via tracing::warn!.
+//! Disk-backed structural graph cache with versioned postcard encoding, fs2
+//! per-shard locking, and atomic writes via NamedTempFile::persist. All I/O
+//! errors degrade silently via tracing::warn!.
 
 use super::structural::StructuralGraph;
 use blake3;
@@ -11,13 +11,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use tracing::warn;
-
 const FORMAT_VERSION: u32 = 1;
 
 struct ShardLockGuard {
     _file: std::fs::File,
 }
-
 fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
     let lock_path = shard_dir.join(".lock");
     let file = std::fs::OpenOptions::new()
@@ -26,11 +24,9 @@ fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
         .truncate(false)
         .open(&lock_path)
         .ok()?;
-    file.lock_shared()
-        .map_err(|e| {
-            warn!(error = %e, lock_path = %lock_path.display(), "graph store: shared lock failed");
-        })
-        .ok()?;
+    file.lock_shared().map_err(|e| {
+        warn!(error = %e, lock_path = %lock_path.display(), "graph store: shared lock failed")
+    }).ok()?;
     Some(ShardLockGuard { _file: file })
 }
 
@@ -51,7 +47,6 @@ fn write_entry_atomically(dir: &Path, path: &Path, data: &[u8]) -> Result<(), st
     tmp.write_all(data)?;
     tmp.persist(path).map(|_| ()).map_err(|e| e.error)
 }
-
 pub struct GraphDiskStore {
     base_dir: PathBuf,
 }
@@ -79,7 +74,6 @@ impl GraphDiskStore {
     fn entry_path(&self, key: &str) -> PathBuf {
         self.base_dir.join(&key[..2]).join(format!("{}.bin", key))
     }
-
     pub fn get(&self, key: &str) -> Option<StructuralGraph> {
         let path = self.entry_path(key);
         let dir = path.parent()?;
@@ -108,8 +102,9 @@ impl GraphDiskStore {
         data.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         data.extend_from_slice(&payload);
         let path = self.entry_path(key);
-        let dir = path.parent().map(|d| d.to_path_buf());
-        let Some(dir) = dir else { return };
+        let Some(dir) = path.parent().map(|d| d.to_path_buf()) else {
+            return;
+        };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             warn!(key, error = %e, "graph store: mkdir failed");
             return;

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-//! Structural knowledge graph built from semantic analysis results.
-//! Uses petgraph DiGraph over Node/Edge with BFS blast-radius traversal.
+//! Structural knowledge graph over petgraph DiGraph with BFS blast-radius traversal.
 
 use crate::analyze::FileAnalysisOutput;
 use petgraph::graph::{DiGraph, NodeIndex};
