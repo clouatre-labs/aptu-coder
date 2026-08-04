@@ -16,6 +16,8 @@ const FORMAT_VERSION: u32 = 1;
 struct ShardLockGuard {
     _file: std::fs::File,
 }
+/// `.lock` files are 0-byte advisory control files, never written to.
+/// Shard count is bounded at 256 by the 2-hex-char blake3 key prefix (`&key[..2]`).
 fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
     let lock_path = shard_dir.join(".lock");
     let file = std::fs::OpenOptions::new()
@@ -30,6 +32,8 @@ fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
     Some(ShardLockGuard { _file: file })
 }
 
+/// `.lock` files are 0-byte advisory control files, never written to.
+/// Shard count is bounded at 256 by the 2-hex-char blake3 key prefix (`&key[..2]`).
 fn lock_shard_exclusive(shard_dir: &Path) -> Result<ShardLockGuard, std::io::Error> {
     let lock_path = shard_dir.join(".lock");
     let file = std::fs::OpenOptions::new()

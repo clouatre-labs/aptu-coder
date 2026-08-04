@@ -5,6 +5,7 @@
 use crate::analyze::FileAnalysisOutput;
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -49,6 +50,7 @@ impl StructuralGraph {
     pub fn build_from_analysis(entries: &[FileAnalysisOutput]) -> Self {
         let mut graph = DiGraph::new();
         let mut seen: HashSet<(NodeIndex, NodeIndex)> = HashSet::new();
+        let mut symbol_index: HashMap<String, NodeIndex> = HashMap::new();
 
         for entry in entries {
             let fp = entry.formatted.lines().next().unwrap_or("");
@@ -65,6 +67,7 @@ impl StructuralGraph {
                 if seen.insert((file, n)) {
                     graph.add_edge(file, n, Edge::Contains);
                 }
+                symbol_index.entry(f.name.clone()).or_insert(n);
             }
             for c in &entry.semantic.classes {
                 let n = graph.add_node(Node::Symbol {
@@ -75,6 +78,7 @@ impl StructuralGraph {
                 if seen.insert((file, n)) {
                     graph.add_edge(file, n, Edge::Contains);
                 }
+                symbol_index.entry(c.name.clone()).or_insert(n);
             }
             for im in &entry.semantic.imports {
                 if !im.module.is_empty() {
@@ -87,12 +91,9 @@ impl StructuralGraph {
                 }
             }
             for cl in &entry.semantic.calls {
-                let caller = graph.node_indices().find(
-                    |&i| matches!(&graph[i], Node::Symbol { name, .. } if name == &cl.caller),
-                );
-                let callee = graph.node_indices().find(
-                    |&i| matches!(&graph[i], Node::Symbol { name, .. } if name == &cl.callee),
-                );
+                // Name-only keying preserves the prior first-definition-wins semantics: the first node inserted for a given name wins.
+                let caller = symbol_index.get(&cl.caller).copied();
+                let callee = symbol_index.get(&cl.callee).copied();
                 if let (Some(c), Some(e)) = (caller, callee)
                     && seen.insert((c, e))
                 {
@@ -222,6 +223,9 @@ mod tests {
     }
 
     #[test]
+    /// Two files with the same call edge produce exactly 1 Calls edge because the
+    /// HashMap index resolves both callers to the same first-definition node, and
+    /// the `seen` HashSet deduplicates the edge.
     fn test_build_dedup_edges() {
         let e1 = make_output(
             "src/a.rs",
@@ -242,7 +246,11 @@ mod tests {
             g.0.edge_indices()
                 .filter(|i| g.0[*i] == Edge::Calls)
                 .count();
-        assert_eq!(n, 1, "expected 1 Calls edge, got {}", n);
+        assert_eq!(
+            n, 1,
+            "expected 1 Calls edge (first-definition-wins), got {}",
+            n
+        );
     }
 
     #[test]

@@ -168,7 +168,7 @@ fn build_call_graph(
 }
 
 /// Cache key from file mtimes. Returns None when no mtime data is available.
-fn compute_cache_key(entries: &[WalkEntry]) -> Option<String> {
+fn compute_cache_key(root: &Path, entries: &[WalkEntry]) -> Option<String> {
     let mut mtimes = Vec::new();
     for e in entries {
         if !e.is_dir && !e.is_symlink {
@@ -180,7 +180,7 @@ fn compute_cache_key(entries: &[WalkEntry]) -> Option<String> {
             mtimes.push((e.path.clone(), m));
         }
     }
-    Some(GraphDiskStore::cache_key(&entries.first()?.path, &mtimes))
+    Some(GraphDiskStore::cache_key(root, &mtimes))
 }
 
 /// Create a GraphDiskStore from env var or XDG data home default.
@@ -441,7 +441,7 @@ fn analyze_focused_with_progress_with_entries_internal(
     )?;
 
     // Compute cache key for structural graph store (best-effort, degrades silently)
-    let cache_key = compute_cache_key(entries);
+    let cache_key = compute_cache_key(root, entries);
 
     // Check for cancellation before building the call graph (phase 2)
     if ct.is_cancelled() {
