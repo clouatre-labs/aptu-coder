@@ -59,6 +59,7 @@ version = "0.26.2"
 dependencies = [
  "aptu-coder-core",
  "axum",
+ "base64 0.23.0",
  "blake3",
  "fs2",
  "opentelemetry",

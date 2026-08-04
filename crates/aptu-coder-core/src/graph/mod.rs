@@ -7,3 +7,5 @@ pub mod structural;
 
 #[rustfmt::skip]
 pub use call_graph::{CallGraph, InternalCallChain, GraphError, resolve_symbol};
+pub use store::GraphDiskStore;
+pub use structural::{Edge, Node, StructuralGraph, SymbolKind};
