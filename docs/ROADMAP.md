@@ -49,6 +49,26 @@ Key changes:
 
 2x2 factorial design (model x tool_set) on Rust trait implementations (ripgrep). See [v14 methodology](benchmarks/v14/methodology.md).
 
+### [Complete] Wave 9: Editing Tools [Complete]
+
+Added `edit_overwrite` and `edit_replace` to complete the read-analyze-write loop (#664, #665). `analyze_raw`, `edit_rename`, and `edit_insert` were removed in #779 due to limited adoption. Write tools carry `readOnlyHint=false`, `destructiveHint=true`, `idempotentHint=false`; `exec_command` additionally sets `openWorldHint=true`.
+
+### [Complete] Benchmark v15
+
+2x2 factorial design (model x tool_set) on a Python auth migration task (Django). See [v15 methodology](benchmarks/v15/methodology.md). Sonnet savings: 59% fewer tokens, 59% cheaper. Haiku savings: 14% fewer tokens, 21% cheaper. Validated MCP tooling for Python web frameworks.
+
+### [Complete] Benchmark v16
+
+2x2 factorial design (model x tool_set) on a Fortran aeroelastic audit task (AeroDyn). See [v16 methodology](benchmarks/v16/methodology.md). Sonnet savings: 46% fewer tokens, 42% cheaper. Haiku savings: 68% fewer tokens, 68% cheaper. Validated MCP tooling for scientific Fortran HPC repositories.
+
+### [Complete] Benchmark wave10
+
+Benchmark wave targeting the non-Sonnet model performance gap identified in v10. See [wave10 methodology](benchmarks/wave10/methodology.md). Validated that the gap was closed through server-side improvements (pagination, actionable errors, sequential server instructions).
+
+### [Complete] Benchmark wave11
+
+Benchmark wave validating cross-model consistency. See [wave11 methodology](benchmarks/wave11/methodology.md). Confirmed that small-model improvements from wave10 held across additional model families.
+
 ### [Complete] observability-v1
 
 Full observability stack shipped across #820–#824:
@@ -184,16 +204,29 @@ Hardcoded protocol version string replaced with `ProtocolVersion::LATEST`.
 
 `server/discover` RPC implemented (MCP SEP-2575).
 
+### [Complete] Knowledge Graph: structural module (#1367)
+
+Added `StructuralGraph` backed by `petgraph::DiGraph` with three node types (`File`, `Symbol { SymbolKind }`, `Module`) and six edge types (`Contains`, `Calls`, `Imports`, `Implements`, `HasMethod`, `Tests`). Introduced `GraphDiskStore` for persistent graph cache: postcard-encoded, 256 blake3 shards, `NamedTempFile` atomic writes, `FORMAT_VERSION=1` header, silent degrade on I/O errors. New directory `crates/aptu-coder-core/src/graph/` with `call_graph.rs`, `mod.rs`, `store.rs`, `structural.rs`. Wired into `analyze_focused.rs` -- builds `StructuralGraph` on cold cache miss alongside existing `CallGraph`.
+
+### [Complete] Knowledge Graph: MCP resource surface (#1368)
+
+Three MCP resource templates added in `crates/aptu-coder/src/tools/resources.rs` (391 LOC):
+- `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` -- BFS traversal, default depth=3
+- `aptu-coder://graph/{repo_hash}/import-closure/{module}` -- transitive import closure
+- `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` -- full subgraph for a symbol
+
+Pagination: 50 nodes/page, base64url cursor `{"g": N}`. Cold cache returns a message recommending `analyze_symbol` first. `enable_resources()` wired into server capabilities; no `subscribe`/`list-changed` support. No new MCP tools.
+
 ---
 
 ## Direction (Tentative)
 
+Shipped (v0.26.x):
+
+- Knowledge graph: structural module (#1367) and MCP resource surface (#1368) shipped in v0.26.x.
+
 Unimplemented and pertinent:
 
 - MCP SEP adoption: #1487 (`trustedHint`), #1561 (`unsafeOutputHint`), #1913 (trust/sensitivity annotations), #1984 (governance annotations) -- open upstream; no action until specs stabilize. #1560 (`secretHint`) closed 2026-03-23; evaluate adoption once merged into spec.
-
-## Wave 9: Editing Tools [Complete]
-
-Added `edit_overwrite` and `edit_replace` to complete the read-analyze-write loop (#664, #665). `analyze_raw`, `edit_rename`, and `edit_insert` were removed in #779 due to limited adoption. Write tools carry `readOnlyHint=false`, `destructiveHint=true`, `idempotentHint=false`; `exec_command` additionally sets `openWorldHint=true`.
 
 

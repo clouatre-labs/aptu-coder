@@ -114,8 +114,7 @@ support was removed following
 [MCP SEP-2577](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577),
 which deprecated the Logging protocol feature at the spec level.
 
-To control the log level, set `RUST_LOG` (e.g. `RUST_LOG=warn`) or pass
-`--log-level <level>` on the CLI. The default level is WARN.
+To control the log level, set `RUST_LOG` (e.g. `RUST_LOG=warn`). The default level is WARN.
 
 At DEBUG level, some log events include filesystem paths (from cache and analysis
 operations). These are not secrets, but they do reveal filesystem structure including
@@ -138,4 +137,8 @@ They carry no value payload, only their occurrence:
 - [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (Development status)
 - [OTel MCP semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/)
 - [OTel Collector redaction processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/redactionprocessor)
-- Observability roadmap: [ROADMAP.md](ROADMAP.md), milestone `observability-v1`
+- Observability roadmap: [docs/ROADMAP.md](docs/ROADMAP.md), milestone `observability-v1`
+
+## Resources surface
+
+The MCP Resources surface (`crates/aptu-coder/src/tools/resources.rs`) currently emits no `MetricEvent` spans. Resource reads (`read_resource`) are not instrumented with the same observability as tool calls. This means resource read latency, cache hit rates, and error rates are not recorded in the JSONL metrics or OTel traces. This is a known gap; resource reads will be instrumented in a future wave.

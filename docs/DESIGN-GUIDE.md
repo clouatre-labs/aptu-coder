@@ -239,7 +239,35 @@ Parameter documentation flows through schemars: `///` doc comments on struct fie
 
 **`format:uint` footgun:** schemars emits `"format": "uint"` or `"format": "uint32"` for unsigned integers by default. These formats are non-standard JSON Schema and are ignored or flagged by strict validators. Override them via `schema_with` (see `crates/aptu-coder-core/src/schema_helpers.rs`) for any numeric field where validator compatibility matters.
 
-## 8. Anti-Patterns
+## 8. MCP Resources Design
+
+MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature in this server (PRs #1367, #1368) introduced three resource templates as a second access path to the structural graph that `analyze_symbol` builds.
+
+### Small-Model-First URI Design
+
+**Principle:** Resource URI templates must be self-documenting. A small model reading the template description should be able to construct a valid URI without examples.
+
+*Example: The three resource templates use flat, descriptive paths: `blast-radius/{symbol}`, `import-closure/{module}`, `subgraph/{symbol}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it is returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
+
+### Prescriptive Resource Template Descriptions
+
+**Principle:** Resource template descriptions must state the URI pattern, the required and optional parameters, and the expected response shape. They must also state when the resource is not available (cold cache) and what action the model should take.
+
+*Example: The blast-radius template description includes: the URI pattern with `{repo_hash}` and `{symbol}` placeholders, the optional `depth` query parameter and its default, the pagination format, and a note that the graph must be built first via `analyze_symbol`.*
+
+### Pagination Conventions
+
+**Principle:** Resource pagination should follow the same cursor-based convention as tool pagination. The cursor encoding must be documented in the template description.
+
+*Example: Resource responses use a base64url-encoded cursor `{"g": N}` (page number), with 50 nodes per page. The `next_cursor` field follows the same shape as tool pagination cursors, so models that already understand pagination from tools can apply the same pattern to resources.*
+
+### New Server Checklist Extension
+
+Add to the New Server checklist (Section 9, step 13):
+
+13. **Add MCP resource templates (if applicable).** Resources are URI-addressed, read-only data surfaces. Follow the same design principles as tools: prescriptive descriptions, cursor pagination, cold-cache guidance. Resource templates are discoverable via `resources/templates/list`; the `resources/list` endpoint may return empty if all resources are template-based.
+
+## 9. Anti-Patterns
 
 The following anti-patterns were identified across benchmark waves and wave post-mortems.
 
