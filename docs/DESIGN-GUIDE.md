@@ -241,7 +241,7 @@ Parameter documentation flows through schemars: `///` doc comments on struct fie
 
 ## 8. MCP Resources Design
 
-MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature in this server (PRs #1367, #1368) introduced three resource templates as a second access path to the structural graph that `analyze_symbol` builds.
+MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced three resource templates as a second access path to the structural graph that `analyze_symbol` builds.
 
 ### Small-Model-First URI Design
 
@@ -259,7 +259,7 @@ MCP Resources provide a URI-addressed read-only data surface alongside tools. Th
 
 **Principle:** Resource pagination should follow the same cursor-based convention as tool pagination. The cursor encoding must be documented in the template description.
 
-*Example: Resource responses use a base64url-encoded cursor `{"g": N}` (page number), with 50 nodes per page. The `next_cursor` field follows the same shape as tool pagination cursors, so models that already understand pagination from tools can apply the same pattern to resources.*
+*Example: Resource responses use an opaque cursor in the same shape as tool pagination cursors, so models that already understand pagination from tools can apply the same pattern to resources.*
 
 ### New Server Checklist Extension
 

@@ -89,7 +89,7 @@ Canonical parameter lists live in the `types` module (`crates/aptu-coder-core/sr
 - `exec_command` accepts an optional `drain_timeout_secs` (integer >= 0; 0 or omitted means 500ms default, negative = INVALID_PARAMS, positive = drain window in milliseconds). Controls how long the post-exit drain waits for a background subprocess holding pipes open before returning `output_truncated: true`.
 - `analyze_symbol` uses an L2 on-disk call-graph cache in addition to the L1 in-memory LRU. Configure with `APTU_CODER_DISK_CACHE_DIR` (default: `$XDG_DATA_HOME/aptu-coder/analysis-cache`); disable with `APTU_CODER_DISK_CACHE_DISABLED=1`.
 - `call_frequency` on `analyze_symbol` is filtered out when the `Functions` field is not in the projected fields set.
-- MCP Resource URI templates use `{repo_hash}` (blake3 hash of the canonical directory path), `depth` query parameter (integer, default 3), and `cursor` (base64url-encoded `{"g": <page_number>}`). Resources are paginated at 50 nodes per page. Cold cache returns a message recommending `analyze_symbol` first.
+- MCP Resource URI templates use `{repo_hash}` (blake3 hash of the canonical directory path), `depth` query parameter (integer, default 3), and `cursor` (opaque pagination token). Resources are paginated. Cold cache returns a message recommending `analyze_symbol` first.
 Escalate to `analyze_symbol` when: (1) you need all callers of a function, (2) you need the full call chain for a symbol, (3) you need all files importing a module path (use `import_lookup=true`).
 
 ## Do not

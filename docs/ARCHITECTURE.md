@@ -29,14 +29,14 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
 | `shell_write` | `crates/aptu-coder/src/shell_write.rs` | Pre-spawn heredoc guard for `exec_command`: `validate_heredocs` (Phase 1 file-write pattern + stdin-consuming flag + `params.stdin` conflict scan, Phase 2 missing closing-delimiter scan); `scan_backward_for_file_write`, `scan_backward_for_stdin_flag` |
 | `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative), `validate_path_in_dir` (working_dir-relative with traversal prevention), `io_error_to_path_error` |
-| `resources` | `crates/aptu-coder/src/tools/resources.rs` | MCP Resources surface: `list_resources`, `list_resource_templates`, `read_resource` for the knowledge-graph URI templates (blast-radius, import-closure, subgraph); 391 LOC |
+| `resources` | `crates/aptu-coder/src/tools/resources.rs` | MCP Resources surface: `list_resources`, `list_resource_templates`, `read_resource` for the knowledge-graph URI templates (blast-radius, import-closure, subgraph) |
 | **`aptu-coder-core`** | | |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
 | `cache` | `crates/aptu-coder-core/src/cache.rs` | Two-tier caching: L1 in-memory LRU (`AnalysisCache`, `CallGraphCache`) with mtime invalidation and lock_or_recover pattern; L2 on-disk call-graph cache (`DiskCache`) keyed by canonical path + git HEAD SHA, configurable via `APTU_CODER_DISK_CACHE_DIR` and `APTU_CODER_DISK_CACHE_DISABLED` |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
-| `formatter` | `crates/aptu-coder-core/src/formatter/` (emit.rs, mod.rs, pagination.rs, render.rs, summary.rs) | Output formatting for all seven tools; 1705 LOC |
-| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | CallGraph struct and BFS traversal for symbol focus mode; StructuralGraph (petgraph DiGraph with 3 node types, 6 edge types) for knowledge-graph resource queries; GraphDiskStore (postcard-encoded, 256 blake3 shards, NamedTempFile atomic writes, FORMAT_VERSION=1) for persistent graph cache; 1641 LOC |
+| `formatter` | `crates/aptu-coder-core/src/formatter/` (emit.rs, mod.rs, pagination.rs, render.rs, summary.rs) | Output formatting for all seven tools |
+| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | `CallGraph` and BFS traversal for symbol focus mode; `StructuralGraph` for knowledge-graph resource queries; `GraphDiskStore` for persistent graph cache |
 | `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
 | `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
 | `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
@@ -212,8 +212,8 @@ The server exposes three MCP resource templates that surface the knowledge graph
 | `import-closure/{module}` | Transitive import closure for a module path |
 | `subgraph/{symbol}` | Full subgraph (callers, callees, connections) for a single symbol |
 
-**Pagination:** 50 nodes per page, base64url cursor `{"g": N}`.
+**Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
 
-**Persistence:** The `GraphDiskStore` persists the structural graph to disk using postcard encoding across 256 blake3 shards with `NamedTempFile` atomic writes. On restart, the graph is reloaded from disk if available. The store silently degrades on I/O errors (returns a message indicating the graph is not available).
+**Persistence:** `GraphDiskStore` persists the structural graph to disk. On restart the graph is reloaded if available; I/O errors degrade silently.
 
-**Warm-up requirement:** Resources return a cold-cache message if `analyze_symbol` has not been called on the directory first. The structural graph is built as a side effect of the `analyze_symbol` cold-cache path alongside the existing `CallGraph`.
+**Warm-up requirement:** Resources return a cold-cache message if `analyze_symbol` has not been called on the directory first. The structural graph is built as a side effect of the `analyze_symbol` cold-cache path.

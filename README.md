@@ -188,13 +188,11 @@ The knowledge graph feature exposes three MCP resource templates for navigating 
 | `aptu-coder://graph/{repo_hash}/import-closure/{module}` | All files that directly or transitively import the given module path. |
 | `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` | The full subgraph (callers, callees, and their connections) for a single symbol. |
 
-**Pagination:** Responses are paginated at 50 nodes per page. Pass `?cursor=<base64url>` with the cursor value from a previous response to fetch the next page. The cursor encoding is `{"g": <page_number>}` in base64url.
+**Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
 
-**Depth parameter:** The `blast-radius` template accepts an optional `depth` query parameter (integer, default 3). Higher values expand the BFS radius and may produce proportionally larger responses.
+**Depth parameter:** The `blast-radius` template accepts an optional `depth` query parameter (integer, default 3).
 
-**Cold cache:** If the structural graph has not been built yet (no prior `analyze_symbol` call on the directory), the resource returns a message indicating the graph is not available and recommends calling `analyze_symbol` on the directory first.
-
-**No `subscribe`/`list-changed` support:** Resource content is static once computed; no change notification mechanism is provided.
+**Cold cache:** Call `analyze_symbol` on the directory first to build the graph. Resources return an informational message until the graph is available.
 
 ## Output Management
 

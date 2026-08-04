@@ -55,11 +55,11 @@ Added `edit_overwrite` and `edit_replace` to complete the read-analyze-write loo
 
 ### [Complete] Benchmark v15
 
-2x2 factorial design (model x tool_set) on a Python auth migration task (Django). See [v15 methodology](benchmarks/v15/methodology.md). Sonnet savings: 59% fewer tokens, 59% cheaper. Haiku savings: 14% fewer tokens, 21% cheaper. Validated MCP tooling for Python web frameworks.
+2x2 factorial design (model x tool_set) on a Python auth migration task (Django). See [v15 methodology](benchmarks/v15/methodology.md). Validated MCP tooling for Python web frameworks.
 
 ### [Complete] Benchmark v16
 
-2x2 factorial design (model x tool_set) on a Fortran aeroelastic audit task (AeroDyn). See [v16 methodology](benchmarks/v16/methodology.md). Sonnet savings: 46% fewer tokens, 42% cheaper. Haiku savings: 68% fewer tokens, 68% cheaper. Validated MCP tooling for scientific Fortran HPC repositories.
+2x2 factorial design (model x tool_set) on a Fortran aeroelastic audit task (AeroDyn). See [v16 methodology](benchmarks/v16/methodology.md). Validated MCP tooling for scientific Fortran HPC repositories.
 
 ### [Complete] Benchmark wave10
 
@@ -206,24 +206,22 @@ Hardcoded protocol version string replaced with `ProtocolVersion::LATEST`.
 
 ### [Complete] Knowledge Graph: structural module (#1367)
 
-Added `StructuralGraph` backed by `petgraph::DiGraph` with three node types (`File`, `Symbol { SymbolKind }`, `Module`) and six edge types (`Contains`, `Calls`, `Imports`, `Implements`, `HasMethod`, `Tests`). Introduced `GraphDiskStore` for persistent graph cache: postcard-encoded, 256 blake3 shards, `NamedTempFile` atomic writes, `FORMAT_VERSION=1` header, silent degrade on I/O errors. New directory `crates/aptu-coder-core/src/graph/` with `call_graph.rs`, `mod.rs`, `store.rs`, `structural.rs`. Wired into `analyze_focused.rs` -- builds `StructuralGraph` on cold cache miss alongside existing `CallGraph`.
+Added `StructuralGraph` and `GraphDiskStore` in `crates/aptu-coder-core/src/graph/`. The structural graph models files, symbols, and modules as nodes with typed edges (contains, calls, imports, implements, etc.). The disk store persists the graph alongside the call-graph cache and degrades silently on I/O errors. Built as a side effect of the `analyze_symbol` cold-cache path.
 
 ### [Complete] Knowledge Graph: MCP resource surface (#1368)
 
-Three MCP resource templates added in `crates/aptu-coder/src/tools/resources.rs` (391 LOC):
+Three MCP resource templates added in `crates/aptu-coder/src/tools/resources.rs`:
 - `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` -- BFS traversal, default depth=3
 - `aptu-coder://graph/{repo_hash}/import-closure/{module}` -- transitive import closure
 - `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` -- full subgraph for a symbol
 
-Pagination: 50 nodes/page, base64url cursor `{"g": N}`. Cold cache returns a message recommending `analyze_symbol` first. `enable_resources()` wired into server capabilities; no `subscribe`/`list-changed` support. No new MCP tools.
+Results are paginated via an opaque cursor. Cold cache returns a message recommending `analyze_symbol` first. No new MCP tools.
 
 ---
 
 ## Direction (Tentative)
 
-Shipped (v0.26.x):
-
-- Knowledge graph: structural module (#1367) and MCP resource surface (#1368) shipped in v0.26.x.
+Shipped:
 
 Unimplemented and pertinent:
 
