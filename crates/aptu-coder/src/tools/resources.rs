@@ -179,7 +179,7 @@ fn query_to_nodes(graph: &StructuralGraph, query: &GraphQuery) -> Vec<serde_json
     };
     indices
         .into_iter()
-        .filter_map(|idx| serde_json::to_value(graph.0[idx].clone()).ok())
+        .filter_map(|idx| serde_json::to_value(&graph.0[idx]).ok())
         .collect()
 }
 
