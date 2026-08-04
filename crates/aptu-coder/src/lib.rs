@@ -163,7 +163,8 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResponse, CallToolResult, CancelledNotificationParam, CompleteRequestParams,
     CompleteResult, CompletionInfo, ContentBlock, DiscoverResult, ErrorData, Implementation,
-    InitializeRequestParams, InitializeResult, ServerCapabilities,
+    InitializeRequestParams, InitializeResult, ListResourceTemplatesResult, ListResourcesResult,
+    ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -220,6 +221,8 @@ pub struct CodeAnalyzer {
     // Used to detect stale LLM context and return a directive error instead of
     // repeatedly trying an old_text that no longer matches the file content.
     edit_failure_counts: Arc<Mutex<HashMap<(String, String), u8>>>,
+    // On-disk graph store for structural knowledge graph resources.
+    graph_store: std::sync::Arc<aptu_coder_core::graph::GraphDiskStore>,
 }
 
 #[tool_router]
@@ -734,6 +737,7 @@ impl ServerHandler for CodeAnalyzer {
             .enable_tools()
             .enable_tool_list_changed()
             .enable_completions()
+            .enable_resources()
             .build();
         let server_info = Implementation::new("aptu-coder", env!("CARGO_PKG_VERSION"))
             .with_title("Aptu Coder")
@@ -762,6 +766,30 @@ impl ServerHandler for CodeAnalyzer {
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let router = self.tool_router.read().await;
         router.call(tcc).await
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        tools::resources::list_resources_impl(_request, &_context)
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        tools::resources::list_resource_templates_impl(_request, &_context)
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        tools::resources::read_resource_impl(request, &self.graph_store)
     }
 
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {

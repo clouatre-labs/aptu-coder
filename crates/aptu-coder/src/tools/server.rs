@@ -97,6 +97,13 @@ pub(crate) fn build_analyzer(
 
     let filter_table = Arc::new(load_filter_table(Path::new(".")));
 
+    // Graph disk store uses the same base directory as DiskCache
+    let graph_store_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| xdg_data_home.join("aptu-coder").join("analysis-cache"));
+    let graph_store =
+        std::sync::Arc::new(aptu_coder_core::graph::GraphDiskStore::new(graph_store_dir));
+
     crate::CodeAnalyzer {
         tool_router: Arc::new(RwLock::new(crate::CodeAnalyzer::tool_router())),
         cache: AnalysisCache::new(file_cap),
@@ -116,6 +123,7 @@ pub(crate) fn build_analyzer(
             ))
         },
         edit_failure_counts: Arc::new(Mutex::new(HashMap::new())),
+        graph_store,
     }
 }
 
