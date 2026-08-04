@@ -3,9 +3,12 @@
 //! Focused analysis: call-graph traversal, import lookup, and wildcard resolution.
 
 use crate::analyze::{
-    AnalyzeError, CallChainEntry, FocusedAnalysisConfig, FocusedAnalysisOutput, MAX_FILE_SIZE_BYTES,
+    AnalyzeError, CallChainEntry, FileAnalysisOutput, FocusedAnalysisConfig, FocusedAnalysisOutput,
+    MAX_FILE_SIZE_BYTES,
 };
 use crate::formatter::{format_focused_internal, format_focused_summary_internal};
+use crate::graph::store::GraphDiskStore;
+use crate::graph::structural::StructuralGraph;
 use crate::graph::{CallGraph, InternalCallChain};
 use crate::lang::language_for_extension;
 use crate::parser::SemanticExtractor;
@@ -16,6 +19,7 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
@@ -161,6 +165,40 @@ fn build_call_graph(
         false, // filter applied below after counting
     )
     .map_err(std::convert::Into::into)
+}
+
+/// Cache key from file mtimes. Returns None when no mtime data is available.
+fn compute_cache_key(entries: &[WalkEntry]) -> Option<String> {
+    let mut mtimes = Vec::new();
+    for e in entries {
+        if !e.is_dir && !e.is_symlink {
+            let m = e
+                .mtime?
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .ok()?
+                .as_millis() as u64;
+            mtimes.push((e.path.clone(), m));
+        }
+    }
+    mtimes.sort();
+    Some(GraphDiskStore::cache_key(&entries.first()?.path, &mtimes))
+}
+
+/// Create a GraphDiskStore from env var or XDG data home default.
+fn create_graph_store() -> GraphDiskStore {
+    let base = std::env::var("APTU_CODER_DISK_CACHE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let xdg = std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(|h| PathBuf::from(h).join(".local").join("share"))
+                        .unwrap_or_default()
+                });
+            xdg.join("aptu-coder").join("analysis-cache")
+        });
+    GraphDiskStore::new(base)
 }
 
 /// Phase 3: Resolve symbol and apply `impl_only` filter.
@@ -408,13 +446,33 @@ fn analyze_focused_with_progress_with_entries_internal(
         params.parse_timeout_micros,
     )?;
 
+    // Compute cache key for structural graph store (best-effort, degrades silently)
+    let cache_key = compute_cache_key(entries);
+
     // Check for cancellation before building the call graph (phase 2)
     if ct.is_cancelled() {
         return Err(AnalyzeError::Cancelled);
     }
 
-    // Phase 2: Build call graph
-    let mut graph = build_call_graph(analysis_results, &all_impl_traits)?;
+    // Phase 2: Build call graph (clone analysis_results for structural graph storage)
+    let mut graph = build_call_graph(analysis_results.clone(), &all_impl_traits)?;
+
+    // Best-effort: warm-cache reload or cold-cache build+persist of structural graph.
+    // On warm hit: reload from disk (skips rebuild). On cold miss: build then persist.
+    // I/O errors degrade silently; the call graph result is unaffected either way.
+    if let Some(key) = &cache_key {
+        let store = create_graph_store();
+        if store.get(key).is_some() {
+            tracing::debug!(key, "structural graph cache hit (warm)");
+        } else {
+            let sg_entries: Vec<FileAnalysisOutput> = analysis_results
+                .into_iter()
+                .map(|(p, s)| FileAnalysisOutput::new(p.to_string_lossy().into_owned(), s, 0, None))
+                .collect();
+            let structural = StructuralGraph::build_from_analysis(&sg_entries);
+            store.put(key, &structural);
+        }
+    }
 
     // Check for cancellation before resolving the symbol (phase 3)
     if ct.is_cancelled() {
