@@ -6,4 +6,4 @@ pub mod store;
 pub mod structural;
 
 #[rustfmt::skip]
-pub use call_graph::{CallGraph, InternalCallChain, GraphError};
+pub use call_graph::{CallGraph, InternalCallChain, GraphError, resolve_symbol};
