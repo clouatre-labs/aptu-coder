@@ -12,23 +12,29 @@ aptu-coder is a static analysis server that parses source files using tree-sitte
 |---|---|---|
 | Local file system | Inbound | Source files provided by the MCP client via `path` arguments |
 | stdio (MCP protocol) | Bidirectional | JSON-RPC requests from the client; JSON responses from the server |
+| Streamable HTTP listener | Inbound | When `--port` or `APTU_CODER_PORT` is set, the server binds to `127.0.0.1:PORT` and serves MCP requests over HTTP |
+| OTLP exporter | Outbound | When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the server exports traces, logs, and metrics to the configured collector endpoint via OTLP/HTTP |
 
-The server makes no outbound network calls, holds no credentials, and writes no persistent state. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
+In the default stdio transport mode, the server makes no outbound network calls, holds no credentials, and writes no persistent state. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
+
+**Outbound network calls:** In the default stdio transport, the server makes no outbound network calls. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the OpenTelemetry exporter sends traces, logs, and metrics to the configured collector endpoint via OTLP/HTTP.
+
+**Network listener:** In the default stdio transport, there is no network listener. When `--port` or `APTU_CODER_PORT` is set, the server binds to `127.0.0.1:PORT` and serves MCP requests over the Streamable HTTP transport.
 
 ## Attack surface
 
 The only meaningful attack surface is **malformed or adversarially crafted source files** fed to tree-sitter. tree-sitter performs error recovery by design and never panics or executes the parsed content. The server does not eval, exec, or interpret any analyzed file.
 
-There is no network listener, no database, no deserialization of untrusted network data, and no privilege escalation path.
+There is no database, no deserialization of untrusted network data, and no privilege escalation path. In stdio mode, there is no network listener. When Streamable HTTP is enabled (`--port` or `APTU_CODER_PORT`), the listener binds to `127.0.0.1` only (loopback, not `0.0.0.0`).
 
 ## Common weaknesses countered
 
 | Weakness | Status |
 |---|---|
 | SQL injection | Not applicable -- no database |
-| Shell injection | Not applicable -- no shell exec |
+| Shell injection | Not applicable -- no shell exec in analysis tools; `exec_command` is intentionally separate and runs only when explicitly called |
 | Deserialization of untrusted data | Not applicable -- no network input; only local files parsed by tree-sitter |
-| Network I/O vulnerabilities | Not applicable -- no network I/O |
+| Network I/O vulnerabilities | Not applicable in stdio mode (default). When Streamable HTTP is enabled, the listener is bound to `127.0.0.1` only. When OTLP export is enabled, outbound HTTP is limited to the configured collector endpoint. |
 | Credential exposure | Not applicable -- no credentials or secrets handled |
 
 ## Supply chain hardening

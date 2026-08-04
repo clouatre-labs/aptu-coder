@@ -39,28 +39,26 @@ aptu-coder is a Model Context Protocol server that gives AI agents precise struc
 
 ## Supported Languages
 
-All languages are enabled by default. Disable individual languages at compile time via Cargo feature flags.
-
-| Language | Extensions | Feature flag |
-|----------|------------|--------------|
-| Astro | `.astro` | always-on (regex via TypeScript frontmatter extractor) |
-| C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` | `lang-cpp` |
-| C# | `.cs` | `lang-csharp` |
-| CSS | `.css` | `lang-css` (tree-sitter; regex fallback when disabled) |
-| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` | `lang-fortran` |
-| Go | `.go` | `lang-go` |
-| HTML | `.html`, `.htm` | `lang-html` (stub; no extraction) |
-| Java | `.java` | `lang-java` |
-| JavaScript | `.js`, `.mjs`, `.cjs` | `lang-javascript` |
-| JSON | `.json` | always-on (regex; first-level key extraction) |
-| Kotlin | `.kt`, `.kts` | `lang-kotlin` |
-| Markdown | `.md`, `.mdx` | `lang-markdown` |
-| Python | `.py` | `lang-python` |
-| Rust | `.rs` | `lang-rust` |
-| TOML | `.toml` | always-on (regex; section header extraction) |
-| TSX | `.tsx` | `lang-tsx` |
-| TypeScript | `.ts` | `lang-typescript` |
-| YAML | `.yaml`, `.yml` | `lang-yaml` (tree-sitter; regex fallback when disabled) |
+| Language | Extensions |
+|----------|------------|
+| Astro | `.astro` |
+| C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` |
+| C# | `.cs` |
+| CSS | `.css` |
+| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` |
+| Go | `.go` |
+| HTML | `.html`, `.htm` |
+| Java | `.java` |
+| JavaScript | `.js`, `.mjs`, `.cjs` |
+| JSON | `.json` |
+| Kotlin | `.kt`, `.kts` |
+| Markdown | `.md`, `.mdx` |
+| Python | `.py` |
+| Rust | `.rs` |
+| TOML | `.toml` |
+| TSX | `.tsx` |
+| TypeScript | `.ts` |
+| YAML | `.yaml`, `.yml` |
 
 ## Installation
 
@@ -180,6 +178,22 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
+## MCP Resources
+
+The knowledge graph feature exposes three MCP resource templates for navigating the structural graph built during `analyze_symbol` calls. Resources are URI-addressed; use `resources/templates/list` to discover available templates.
+
+| URI Template | Description |
+|---|---|
+| `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward to configurable depth (default: 3). Returns caller/callee chains in a radial layout. |
+| `aptu-coder://graph/{repo_hash}/import-closure/{module}` | All files that directly or transitively import the given module path. |
+| `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` | The full subgraph (callers, callees, and their connections) for a single symbol. |
+
+**Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
+
+**Depth parameter:** The `blast-radius` template accepts an optional `depth` query parameter (integer, default 3).
+
+**Cold cache:** Call `analyze_symbol` on the directory first to build the graph. Resources return an informational message until the graph is available.
+
 ## Output Management
 
 For large codebases, several mechanisms prevent context overflow.
@@ -245,11 +259,10 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
 | `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 on-disk call-graph cache used by `analyze_symbol`. Created automatically if it does not exist. |
 | `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 disk cache entirely. |
-| `APTU_CODER_EXEC_CACHE_CAPACITY` | `64` | LRU cache size for `exec_command` results. |
-| `APTU_CODER_EXEC_CACHE_TTL_SECS` | `10` | TTL in seconds for `exec_command` result cache. |
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
 | `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
+| `APTU_CODER_BEARER_TOKEN` | unset | Bearer token for Streamable HTTP transport authentication. A warning is logged if the value is fewer than 32 characters. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 
 ## Observability
