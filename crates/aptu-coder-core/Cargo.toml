@@ -39,6 +39,8 @@ tracing = { workspace = true }
 regex = { workspace = true }
 tokio-util = { workspace = true }
 tempfile = { workspace = true }
+petgraph = { version = "0.8", features = ["serde-1"] }  # graph/structural.rs: petgraph DiGraph<Node, Edge> with serde
+postcard = { version = "1", default-features = false, features = ["alloc"] }  # graph/store.rs: binary encoding for graph cache
 tree-sitter-rust = { workspace = true }
 fs2 = { workspace = true }
 tree-sitter-go = { workspace = true }
