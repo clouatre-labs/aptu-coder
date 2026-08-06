@@ -8,6 +8,9 @@
 //! Three resource templates are advertised: blast-radius, import-closure, subgraph.
 
 use aptu_coder_core::graph::{GraphDiskStore, StructuralGraph};
+use aptu_coder_core::pagination::{
+    DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor, paginate_slice,
+};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rmcp::RoleServer;
@@ -183,6 +186,19 @@ fn query_to_nodes(graph: &StructuralGraph, query: &GraphQuery) -> Vec<serde_json
         .collect()
 }
 
+/// Decode a list-handler cursor (core base64-STANDARD encoding) to a page offset.
+///
+/// Distinct from [`decode_graph_cursor`], which uses base64url URL_SAFE_NO_PAD
+/// encoding embedded in graph-node URI query strings.
+fn cursor_to_offset(params: Option<PaginatedRequestParams>) -> Result<usize, ErrorData> {
+    match params.and_then(|p| p.cursor) {
+        Some(s) => decode_cursor(&s)
+            .map(|c| c.offset)
+            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, e.to_string(), None)),
+        None => Ok(0),
+    }
+}
+
 /// Return an empty resources list (concrete graph slices are unbounded;
 /// clients use templates).
 pub(crate) fn list_resources_impl(
@@ -194,7 +210,7 @@ pub(crate) fn list_resources_impl(
 
 /// Return three ResourceTemplate entries for the graph URI scheme.
 pub(crate) fn list_resource_templates_impl(
-    _params: Option<PaginatedRequestParams>,
+    params: Option<PaginatedRequestParams>,
     _context: &RequestContext<RoleServer>,
 ) -> Result<ListResourceTemplatesResult, ErrorData> {
     let templates = vec![
@@ -217,7 +233,17 @@ pub(crate) fn list_resource_templates_impl(
         .with_description("Subgraph centered on a symbol")
         .with_mime_type("application/json"),
     ];
-    Ok(ListResourceTemplatesResult::with_all_items(templates))
+    let offset = cursor_to_offset(params)?;
+    let paginated = paginate_slice(
+        &templates,
+        offset,
+        DEFAULT_PAGE_SIZE,
+        PaginationMode::Default,
+    )
+    .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, e.to_string(), None))?;
+    let mut result = ListResourceTemplatesResult::with_all_items(paginated.items);
+    result.next_cursor = paginated.next_cursor;
+    Ok(result)
 }
 
 /// Read a graph resource identified by URI.
