@@ -90,7 +90,7 @@ The new stable `build.warnings = "deny"` in `[build]` of `.cargo/config.toml` ac
 
 | Crate | Workspace pin | Cargo.lock resolved | Latest confirmed | Breaking? | Action |
 |---|---|---|---|---|---|
-| `rmcp` | `"3"` | `3.1.0` | `3.1.0` | n/a | None |
+| `rmcp` | `"3"` | `3.1.0` | `3.1.1` | No | Cosmetic: bump floor pin to `"3.1.1"` |
 | `schemars` | `"1"` | `1.2.2` | `1.2.2` | n/a | None |
 | `thiserror` | `"2.0.18"` | `2.0.19` | `2.0.19` | No | Cosmetic: raise pin floor to `"2.0.19"` |
 | `opentelemetry` stack | `"0.32"` | `0.32.0` | `0.32.0` | n/a | None |
@@ -255,7 +255,7 @@ Manual source inspection across `cache.rs`, `edit.rs`, `call_graph.rs`, `structu
 - No un-annotated `needless_pass_by_value` violations found (all existing `#[allow]` sites have inline justification comments)
 - No `large_enum_variant` candidates found (all inspected enum variants hold Strings or small primitives, none approaching 200 bytes)
 - No `redundant_clone` patterns found (all `Arc::clone` sites are reference-count bumps, not deep clones)
-- 11 of 12 sampled `pub fn` in `cache.rs`, `cache_disk.rs`, `call_graph.rs` already carry `#[must_use]`
+- 13 of 31 `pub fn` across `cache.rs`, `cache_disk.rs`, `call_graph.rs` carry `#[must_use]`: 11/17 in `cache.rs`, 1/8 in `cache_disk.rs` (`cache_stats` only; `drain_write_failures` and `is_degraded` are the confirmed gaps -- see CB-5), 1/6 in `call_graph.rs` (`new` only)
 
 **Gap**: `DiskCache::drain_write_failures` and `DiskCache::is_degraded` in `cache_disk.rs` (see CB-5) are the only confirmed `must_use_candidate` violations.
 
