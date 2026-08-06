@@ -39,12 +39,14 @@ pub struct DiskCache {
 impl DiskCache {
     /// Returns the number of write failures accumulated since the last call and resets the
     /// per-drain counter. The cumulative `total_write_failures` is never reset.
+    #[must_use]
     pub fn drain_write_failures(&self) -> u64 {
         self.write_failures.swap(0, Ordering::Relaxed)
     }
 
     /// Returns true when cumulative write failures have reached `DISK_CACHE_DEGRADED_THRESHOLD`.
     /// Callers can use this to emit a degraded health signal without polling the counter.
+    #[must_use]
     pub fn is_degraded(&self) -> bool {
         self.total_write_failures.load(Ordering::Relaxed) >= DISK_CACHE_DEGRADED_THRESHOLD
     }
