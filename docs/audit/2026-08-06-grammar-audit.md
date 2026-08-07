@@ -1,119 +1,185 @@
-# Grammar Crate Version Audit -- 2026-08-06
+# Audit: Tree-Sitter Grammar Crate Versions
 
-Audited all 13 tree-sitter grammar crates pinned in `Cargo.toml` against their
-current crates.io latest versions. Tree-sitter core: **0.26.11** (from `Cargo.lock`).
-ABI bridge: `tree-sitter-language 0.1.7` (all 13 grammar crates depend on this, not
-directly on `tree-sitter`; the bridge is backward-compatible across the 0.24--0.26 range).
+Date: 2026-08-06
+Commit: c4d6fb8
+Version: v0.27.0
+Toolchain: Rust / tree-sitter 0.26.11 / tree-sitter-language 0.1.7
+
+## Purpose
+
+Point-in-time audit of all 13 tree-sitter grammar crates pinned in the root `Cargo.toml`
+against their current crates.io latest versions. Establishes whether any crate is behind, how
+large each gap is, and whether bumping would require migration work or is safe to land in a
+single batch PR.
+
+Scope: version gap classification, ABI compatibility against tree-sitter core 0.26.11, and a
+recommendation per crate. No `Cargo.toml` changes in this session.
+
+## Methodology
+
+`cargo search <crate> --limit 1` for each of the 13 crates. Pinned versions read from
+`Cargo.toml`. ABI bridge chain confirmed from `Cargo.lock` (all grammar crates resolve to
+`tree-sitter-language 0.1.7`; none carry a direct `tree-sitter` dependency). Gap classified as:
+
+- **BEHIND**: pinned version is below the latest published release.
+- **CURRENT**: pinned version equals the latest published release.
 
 ---
 
-## Version Table
+## Findings
 
-| Crate | Pinned | Latest (crates.io) | Gap | Breaking? | Action |
-|---|---|---|---|---|---|
-| tree-sitter-rust | 0.24.2 | 0.24.2 | none | no | hold (at latest) |
-| tree-sitter-go | 0.25.0 | 0.25.0 | none | no | hold (at latest) |
-| tree-sitter-cpp | 0.23.4 | 0.23.4 | none | no | hold (at latest) |
-| tree-sitter-c-sharp | 0.23.5 | 0.23.5 | none | no | hold (at latest) |
-| tree-sitter-java | 0.23.5 | 0.23.5 | none | no | hold (at latest) |
-| tree-sitter-kotlin-ng | 1.1.0 | 1.1.0 | none | no | hold (at latest) |
-| tree-sitter-python | 0.25.0 | 0.25.0 | none | no | hold (at latest) |
-| tree-sitter-typescript | 0.23.2 | 0.23.2 | none | no | hold (at latest) |
-| tree-sitter-javascript | 0.25.0 | 0.25.0 | none | no | hold (at latest) |
-| tree-sitter-fortran | 0.6.0 | 0.6.0 | none | no | hold (at latest) |
-| tree-sitter-md | 0.5.3 | 0.5.3 | none | no | hold (at latest) |
-| tree-sitter-css | 0.25.0 | 0.25.0 | none | no | hold (at latest) |
-| tree-sitter-yaml | 0.7.2 | 0.7.2 | none | no | hold (at latest) |
+### G01 -- CURRENT -- tree-sitter-rust at 0.24.2
+
+Latest on crates.io: `0.24.2`. No gap. The upstream grammar has not published a newer release.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
 
 ---
 
-## Per-Crate Recommendation
+### G02 -- CURRENT -- tree-sitter-go at 0.25.0
 
-All 13 grammar crates are pinned to their current crates.io latest version. No
-version gap exists for any crate. Recommendation for each: **hold (at latest)**.
+Latest on crates.io: `0.25.0`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
 
-| Crate | Recommendation | Rationale |
-|---|---|---|
-| tree-sitter-rust | hold (at latest) | 0.24.2 == crates.io latest |
-| tree-sitter-go | hold (at latest) | 0.25.0 == crates.io latest |
-| tree-sitter-cpp | hold (at latest) | 0.23.4 == crates.io latest |
-| tree-sitter-c-sharp | hold (at latest) | 0.23.5 == crates.io latest |
-| tree-sitter-java | hold (at latest) | 0.23.5 == crates.io latest |
-| tree-sitter-kotlin-ng | hold (at latest) | 1.1.0 == crates.io latest |
-| tree-sitter-python | hold (at latest) | 0.25.0 == crates.io latest |
-| tree-sitter-typescript | hold (at latest) | 0.23.2 == crates.io latest |
-| tree-sitter-javascript | hold (at latest) | 0.25.0 == crates.io latest |
-| tree-sitter-fortran | hold (at latest) | 0.6.0 == crates.io latest |
-| tree-sitter-md | hold (at latest) | 0.5.3 == crates.io latest |
-| tree-sitter-css | hold (at latest) | 0.25.0 == crates.io latest |
-| tree-sitter-yaml | hold (at latest) | 0.7.2 == crates.io latest |
+**Action:** none.
+
+---
+
+### G03 -- CURRENT -- tree-sitter-cpp at 0.23.4
+
+Latest on crates.io: `0.23.4`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G04 -- CURRENT -- tree-sitter-c-sharp at 0.23.5
+
+Latest on crates.io: `0.23.5`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G05 -- CURRENT -- tree-sitter-java at 0.23.5
+
+Latest on crates.io: `0.23.5`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G06 -- CURRENT -- tree-sitter-kotlin-ng at 1.1.0
+
+Latest on crates.io: `1.1.0`. No gap. This crate uses an independent versioning convention
+(major version tracks a significant grammar rewrite, not tree-sitter core). The `1.x` version
+is not a semantic mismatch with the `0.2x` range of other grammar crates.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G07 -- CURRENT -- tree-sitter-python at 0.25.0
+
+Latest on crates.io: `0.25.0`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G08 -- CURRENT -- tree-sitter-typescript at 0.23.2
+
+Latest on crates.io: `0.23.2`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G09 -- CURRENT -- tree-sitter-javascript at 0.25.0
+
+Latest on crates.io: `0.25.0`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G10 -- CURRENT -- tree-sitter-fortran at 0.6.0
+
+Latest on crates.io: `0.6.0`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G11 -- CURRENT -- tree-sitter-md at 0.5.3
+
+Latest on crates.io: `0.5.3`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G12 -- CURRENT -- tree-sitter-css at 0.25.0
+
+Latest on crates.io: `0.25.0`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
+
+---
+
+### G13 -- CURRENT -- tree-sitter-yaml at 0.7.2
+
+Latest on crates.io: `0.7.2`. No gap.
+ABI: links `tree-sitter-language 0.1.7`. Compatible with core 0.26.11.
+
+**Action:** none.
 
 ---
 
 ## ABI Compatibility Note
 
-Since tree-sitter 0.24, grammar crates do not depend on the `tree-sitter` crate
-directly. They depend on `tree-sitter-language 0.1.7`, a stable, version-agnostic
-ABI bridge crate that exposes only the `Language` type. The calling crate
-(`aptu-coder-core`) links `tree-sitter 0.26.11` separately. As long as grammar
-crates were published against `tree-sitter-language >= 0.1` (all 13 were), they are
-ABI-compatible with any tree-sitter core in the 0.24--0.26+ range. No
-compatibility issues exist in the current workspace.
+Since tree-sitter 0.24, grammar crates depend on `tree-sitter-language` rather than `tree-sitter`
+directly. `tree-sitter-language 0.1.7` is a stable, version-agnostic bridge crate that exposes
+only the `Language` struct. The calling crate (`aptu-coder-core`) links `tree-sitter 0.26.11`
+separately. All grammar crates published against `tree-sitter-language >= 0.1` are ABI-compatible
+with any tree-sitter core in the 0.24--0.26+ range. Cargo resolves a single
+`tree-sitter-language 0.1.7` across all 13 grammar crates; no duplicate resolver conflict exists.
 
-Version spread across the grammar crates (0.23.x, 0.24.x, 0.25.x, 1.x) reflects
-each upstream grammar project's independent release cadence, not a version skew
-problem. Cargo resolves a single `tree-sitter-language 0.1.7` for all of them.
+The version spread across grammar crates (0.23.x, 0.24.x, 0.25.x, 1.x) reflects each upstream
+grammar project's independent release cadence. It is not a skew problem.
 
 ---
 
 ## Summary
 
-| Category | Count | Crates |
+*Table 1: Finding classification by count.*
+
+| Classification | Count | Findings |
 |---|---|---|
-| bump-safe | 0 | -- |
-| bump-needs-test | 0 | -- |
-| hold (at latest) | 13 | all 13 |
+| CURRENT (no gap) | 13 | G01-G13 |
+| BEHIND (gap exists) | 0 | -- |
 
 **Safe to bump in a single PR:** 0 (all crates are already at crates.io latest).
-**Need investigation:** 0.
+**Require investigation before bumping:** 0.
 
-No grammar-bump PR is needed at this time. Re-run this audit after any upstream
-grammar crate publishes a new version; the tooling is: `cargo search <crate> --limit 1`.
+No grammar-bump PR is warranted. Re-run this audit after any upstream grammar crate publishes a
+new version. Tooling: `cargo search <crate> --limit 1` for each entry in `Cargo.toml`.
 
----
+## Recommended Action Order
 
-## Follow-on PR Prompt
+No actions required. All 13 grammar crates are at their published crates.io latest version and
+are ABI-compatible with tree-sitter core 0.26.11 via the `tree-sitter-language 0.1.7` bridge.
 
-No follow-on bump PR is warranted because all 13 crates are already at their latest
-published version. The prompt below is templated for future use when gaps exist.
-
----
-
-### Template: Grammar Bump PR (activate when gaps are found)
-
-```text
-Bump the following tree-sitter grammar crates in Cargo.toml.
-No source or test changes -- dependency version lines only.
-Run `cargo test` and `cargo clippy -- -D warnings` after each change to confirm
-no API breakage. Commit with:
-
-  chore(deps): bump tree-sitter grammar crates to latest
-
-Cargo.toml changes (replace pinned version strings):
-  # <crate-name> = "<old>" -> "<new>"
-  # List populated by next audit run when gaps exist.
-
-Verification:
-  cargo build
-  cargo test
-  cargo clippy -- -D warnings
-  cargo fmt --check
-
-PR: draft; target main; one squash commit; no Cargo.lock hand-edits.
-```
-
----
-
-*Audit method: `cargo search <crate> --limit 1` for each crate on 2026-08-06.*
-*Pinned versions sourced from `Cargo.toml` root workspace.*
-*Lock file: `Cargo.lock` at HEAD on branch `main`.*
+Next audit trigger: any Dependabot or Renovate alert on a grammar crate, or a manual re-run
+after 30 days.
