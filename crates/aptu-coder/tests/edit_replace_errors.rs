@@ -39,7 +39,7 @@ async fn test_edit_replace_not_found_shows_file_preview() {
     let msg = resp["result"]["content"][0]["text"]
         .as_str()
         .expect("should have error text");
-    assert!(msg.contains("The file begins:"));
+    assert!(msg.contains("The file around line"));
     assert!(msg.contains("line one"));
     assert!(msg.contains("Nearest match:"));
     assert!(!msg.contains(working_dir));

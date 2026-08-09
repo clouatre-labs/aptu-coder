@@ -123,6 +123,7 @@ pub(crate) fn build_analyzer(
             ))
         },
         edit_failure_counts: Arc::new(Mutex::new(HashMap::new())),
+        file_edit_locks: Arc::new(Mutex::new(HashMap::new())),
         graph_store,
     }
 }
