@@ -217,6 +217,10 @@ Three MCP resource templates added in `crates/aptu-coder/src/tools/resources.rs`
 
 Results are paginated via an opaque cursor. Cold cache returns a message recommending `analyze_symbol` first. No new MCP tools.
 
+### [Complete] edit_replace concurrent safety, staleness detection, hot-path opts (#1380, #1381)
+
+`edit_replace` gained concurrent edit safety via a per-path mutex registry (acquired inside `spawn_blocking`) that serializes read-modify-write cycles on the same file, plus an optional `expected_content_hash` (blake3 of raw bytes) that rejects stale edits with `INVALID_PARAMS` when the file changed since the caller read it. Hot-path optimizations: `normalize_for_match` now returns `Cow` (zero allocation when no CRLF), and CRLF offset mapping switched from a linear walk to a binary-search partition_point over a pre-built index.
+
 ---
 
 ## Direction (Tentative)
