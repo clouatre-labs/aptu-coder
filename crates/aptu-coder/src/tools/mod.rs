@@ -59,7 +59,12 @@ pub(crate) use analyze_symbol::AnalyzeSymbolContext;
 
 use aptu_coder_core::cache::AnalysisCache;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+/// Per-path mutex registry for edit_replace serialization.
+/// Maps resolved file paths to their dedicated `Arc<Mutex<()>>` lock.
+pub(crate) type FileEditLockRegistry = Arc<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>>;
 
 /// Shared handler context passed to extracted edit tool free functions.
 ///
@@ -71,6 +76,7 @@ pub(crate) struct EditHandlerContext<'a> {
     pub(crate) cache: &'a AnalysisCache,
     pub(crate) metrics_tx: &'a crate::metrics::MetricsSender,
     pub(crate) edit_failure_counts: &'a Arc<Mutex<HashMap<(String, String), u8>>>,
+    pub(crate) file_edit_locks: &'a FileEditLockRegistry,
 }
 
 /// Shared handler context passed to extracted `analyze_directory` free functions.

@@ -3,6 +3,7 @@
 //! File write utilities for the `edit_overwrite` and `edit_replace` tools.
 
 use crate::types::{EditOverwriteOutput, EditReplaceOutput};
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -37,6 +38,14 @@ pub enum EditError {
     },
     #[error("edit_replace invalid params: {0}")]
     InvalidParams(String),
+    #[error(
+        "stale content hash for {path}: expected {expected} but file has {actual} — re-read the file with analyze_file or analyze_module, then retry with the current content hash"
+    )]
+    StaleContentHash {
+        expected: String,
+        actual: String,
+        path: String,
+    },
 }
 
 fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
@@ -55,25 +64,30 @@ fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
 
 /// Normalize content for matching: replace `\r\n` with `\n`.
 /// Single `\r` bytes are left unchanged.
-fn normalize_for_match(s: &str) -> String {
-    s.replace("\r\n", "\n")
+///
+/// Returns `Cow::Borrowed` when no `\r` byte is present (fast path, zero allocation).
+/// Returns `Cow::Owned` when CRLF sequences require replacement.
+fn normalize_for_match(s: &str) -> Cow<'_, str> {
+    if !s.as_bytes().contains(&b'\r') {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(s.replace("\r\n", "\n"))
+    }
 }
 
-/// Map a byte offset in normalized content (CRLF -> LF) back to the corresponding
-/// byte offset in the original content, starting from `original_start`.
-fn norm_offset_to_original_from(
-    original: &str,
-    norm_offset: usize,
-    original_start: usize,
-) -> usize {
-    // Performance: O(n) byte walk is acceptable for the file sizes MCP tools operate on
-    // (source files, typically <1 MB). If very large file support becomes a requirement,
-    // a pre-built CRLF offset index could reduce this to O(log n) per lookup.
+/// Build a sorted vector of normalized byte offsets at which each `\r\n`-derived `\n`
+/// occurs. Used to map normalized offsets back to original byte offsets via binary search.
+///
+/// When the vector is empty, the content has no CRLF sequences and normalized offsets
+/// are identical to original offsets (identity mapping).
+fn build_crlf_positions(original: &str) -> Vec<usize> {
     let bytes = original.as_bytes();
+    let mut positions = Vec::new();
     let mut norm_pos = 0usize;
-    let mut i = original_start;
-    while i < bytes.len() && norm_pos < norm_offset {
+    let mut i = 0usize;
+    while i < bytes.len() {
         if bytes[i] == b'\r' && i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+            positions.push(norm_pos);
             norm_pos += 1;
             i += 2;
         } else {
@@ -81,13 +95,21 @@ fn norm_offset_to_original_from(
             i += 1;
         }
     }
-    i
+    positions
 }
 
-/// Map a byte offset in normalized content back to the corresponding byte offset
-/// in the original content.
-fn norm_offset_to_original(original: &str, norm_offset: usize) -> usize {
-    norm_offset_to_original_from(original, norm_offset, 0)
+/// Map a normalized byte offset back to the corresponding original byte offset
+/// using a pre-built CRLF position index.
+///
+/// When `crlf_positions` is empty, returns `norm_offset` unchanged (identity).
+/// Otherwise, counts how many CRLF sequences precede `norm_offset` via binary search
+/// and adds that count: `original = norm_offset + crlf_count`.
+fn norm_to_original_offset(norm_offset: usize, crlf_positions: &[usize]) -> usize {
+    if crlf_positions.is_empty() {
+        norm_offset
+    } else {
+        norm_offset + crlf_positions.partition_point(|&x| x < norm_offset)
+    }
 }
 
 pub fn edit_overwrite_content(
@@ -114,19 +136,25 @@ pub fn edit_replace_block(
     old_text: &str,
     new_text: &str,
 ) -> Result<EditReplaceOutput, EditError> {
-    edit_replace_block_inner(path, old_text, new_text, false)
+    edit_replace_block_inner(path, old_text, new_text, false, None)
 }
 
-/// Same as `edit_replace_block` but with an explicit `replace_all` flag.
+/// Same as `edit_replace_block` but with an explicit `replace_all` flag and an
+/// optional `expected_content_hash` for optimistic-concurrency staleness
+/// detection.
+///
 /// When `replace_all` is true, all non-overlapping occurrences of `old_text`
-/// are replaced in a single pass.
+/// are replaced in a single pass. When `expected_content_hash` is `Some`, the
+/// raw file bytes are hashed with blake3 and compared before the edit proceeds.
+/// A mismatch returns `EditError::StaleContentHash`.
 pub fn edit_replace_block_with_options(
     path: &Path,
     old_text: &str,
     new_text: &str,
     replace_all: bool,
+    expected_content_hash: Option<&str>,
 ) -> Result<EditReplaceOutput, EditError> {
-    edit_replace_block_inner(path, old_text, new_text, replace_all)
+    edit_replace_block_inner(path, old_text, new_text, replace_all, expected_content_hash)
 }
 
 pub(crate) fn edit_replace_block_inner(
@@ -134,11 +162,27 @@ pub(crate) fn edit_replace_block_inner(
     old_text: &str,
     new_text: &str,
     replace_all: bool,
+    expected_content_hash: Option<&str>,
 ) -> Result<EditReplaceOutput, EditError> {
     if path.is_dir() {
         return Err(EditError::NotAFile(path.to_path_buf()));
     }
     let content = std::fs::read_to_string(path)?;
+
+    // Staleness check: hash the raw file bytes (as read by read_to_string) and compare
+    // with the caller-provided expected hash. Runs inside the per-path lock (caller
+    // acquires the lock before calling this function via spawn_blocking).
+    if let Some(expected_hash) = expected_content_hash {
+        let actual_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+        if actual_hash != expected_hash {
+            return Err(EditError::StaleContentHash {
+                expected: expected_hash.to_string(),
+                actual: actual_hash,
+                path: path.display().to_string(),
+            });
+        }
+    }
+
     let norm_content = normalize_for_match(&content);
     let norm_old = normalize_for_match(old_text);
     if norm_old.is_empty() {
@@ -146,7 +190,10 @@ pub(crate) fn edit_replace_block_inner(
             "old_text must not be empty".to_string(),
         ));
     }
-    let count = norm_content.matches(&norm_old).count();
+    // Build CRLF offset index once. When no CRLF is present (Cow::Borrowed),
+    // the index is empty and offset mapping is identity.
+    let crlf_positions = build_crlf_positions(&content);
+    let count = norm_content.matches(norm_old.as_ref()).count();
     match count {
         0 => {
             let first_20_lines = content.lines().take(20).collect::<Vec<_>>().join("\n");
@@ -158,7 +205,7 @@ pub(crate) fn edit_replace_block_inner(
         1 if !replace_all => {}
         n if !replace_all => {
             let match_lines: Vec<usize> = norm_content
-                .match_indices(&norm_old)
+                .match_indices(norm_old.as_ref())
                 .map(|(offset, _)| {
                     norm_content[..offset]
                         .bytes()
@@ -181,19 +228,11 @@ pub(crate) fn edit_replace_block_inner(
         // Single-pass over original normalized content: collect all match spans,
         // then splice new_text between unmatched spans in original byte space.
         let mut matches: Vec<(usize, usize)> = Vec::new();
-        let mut search_from_original = 0usize;
-        let mut norm_consumed = 0usize;
-        for (norm_start, _m) in norm_content.match_indices(&norm_old) {
-            let original_start = norm_offset_to_original_from(
-                &content,
-                norm_start - norm_consumed,
-                search_from_original,
-            );
+        for (norm_start, _m) in norm_content.match_indices(norm_old.as_ref()) {
+            let original_start = norm_to_original_offset(norm_start, &crlf_positions);
             let original_end =
-                norm_offset_to_original_from(&content, norm_old.len(), original_start);
+                norm_to_original_offset(norm_start + norm_old.len(), &crlf_positions);
             matches.push((original_start, original_end));
-            search_from_original = original_end;
-            norm_consumed = norm_start + norm_old.len();
         }
         let occurrences_replaced = matches.len();
         let old_span_total: usize = matches.iter().map(|(s, e)| e - s).sum();
@@ -223,10 +262,11 @@ pub(crate) fn edit_replace_block_inner(
         // If count verification logic changes, this expect() site must be re-audited.
         #[allow(clippy::expect_used)]
         let norm_match_offset = norm_content
-            .find(&norm_old)
+            .find(norm_old.as_ref())
             .expect("match was verified above via count check; find must succeed");
-        let original_start = norm_offset_to_original(&content, norm_match_offset);
-        let original_end = norm_offset_to_original_from(&content, norm_old.len(), original_start);
+        let original_start = norm_to_original_offset(norm_match_offset, &crlf_positions);
+        let original_end =
+            norm_to_original_offset(norm_match_offset + norm_old.len(), &crlf_positions);
         let updated = [
             &content[..original_start],
             new_text,
@@ -380,7 +420,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("all.txt");
         std::fs::write(&path, "a b a c a d").unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "x", true).unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "x", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x b x c x d");
         assert_eq!(result.bytes_before, 11);
         assert_eq!(result.bytes_after, 11);
@@ -392,7 +432,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nf.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let err = edit_replace_block_with_options(&path, "missing", "x", true).unwrap_err();
+        let err = edit_replace_block_with_options(&path, "missing", "x", true, None).unwrap_err();
         std::assert_matches!(&err, EditError::NotFound { .. });
     }
 
@@ -401,7 +441,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let err = edit_replace_block_with_options(&path, "", "x", true).unwrap_err();
+        let err = edit_replace_block_with_options(&path, "", "x", true, None).unwrap_err();
         std::assert_matches!(&err, EditError::InvalidParams(_));
     }
 
@@ -411,7 +451,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("crlf_all.txt");
         std::fs::write(&path, b"a\r\nb\r\na\r\nc").unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "x", true).unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "x", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x\r\nb\r\nx\r\nc");
         assert_eq!(result.occurrences_replaced, 2);
     }
@@ -421,7 +461,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("delete.txt");
         std::fs::write(&path, "a b a c a d").unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "", true).unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), " b  c  d");
         assert_eq!(result.bytes_before, 11);
         assert_eq!(result.bytes_after, 8);
@@ -433,7 +473,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("adjacent.txt");
         std::fs::write(&path, "aaaa").unwrap();
-        let result = edit_replace_block_with_options(&path, "aa", "xx", true).unwrap();
+        let result = edit_replace_block_with_options(&path, "aa", "xx", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "xxxx");
         assert_eq!(result.occurrences_replaced, 2);
     }
@@ -443,7 +483,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("size.txt");
         std::fs::write(&path, "x y x z x").unwrap();
-        let result = edit_replace_block_with_options(&path, "x", "yyy", true).unwrap();
+        let result = edit_replace_block_with_options(&path, "x", "yyy", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "yyy y yyy z yyy");
         assert_eq!(result.bytes_before, 9);
         assert_eq!(result.bytes_after, 15);
@@ -457,5 +497,62 @@ mod tests {
         std::fs::write(&path, "foo bar baz").unwrap();
         let err = edit_replace_block(&path, "", "x").unwrap_err();
         std::assert_matches!(&err, EditError::InvalidParams(_));
+    }
+
+    #[test]
+    fn expected_content_hash_mismatch_returns_stale_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stale.txt");
+        std::fs::write(&path, "hello world").unwrap();
+        let err = edit_replace_block_with_options(
+            &path,
+            "hello",
+            "hi",
+            false,
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+        )
+        .unwrap_err();
+        std::assert_matches!(&err, EditError::StaleContentHash { path: p, .. } if p.contains("stale.txt"));
+        // File must be unmodified
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn expected_content_hash_match_proceeds_normally() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("match.txt");
+        std::fs::write(&path, "hello world").unwrap();
+        let raw_bytes = std::fs::read(&path).unwrap();
+        let hash = blake3::hash(&raw_bytes).to_hex().to_string();
+        let result =
+            edit_replace_block_with_options(&path, "hello", "hi", false, Some(&hash)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hi world");
+        assert_eq!(result.occurrences_replaced, 1);
+    }
+
+    #[test]
+    fn expected_content_hash_none_skips_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nohash.txt");
+        std::fs::write(&path, "foo bar baz").unwrap();
+        let result = edit_replace_block_with_options(&path, "bar", "qux", false, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "foo qux baz");
+        assert_eq!(result.occurrences_replaced, 1);
+    }
+
+    #[test]
+    fn replace_all_crlf_offset_index_byte_identical() {
+        // After Cow fast path and offset-index refactor, replace_all on a mixed
+        // CRLF/LF file produces byte-identical output to the previous linear-walk.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mixed_crlf.txt");
+        // Mixed CRLF and LF: "a\r\nb\na\r\nc\na\r\nd"
+        let original = b"a\r\nb\na\r\nc\na\r\nd";
+        std::fs::write(&path, original).unwrap();
+        let result = edit_replace_block_with_options(&path, "a", "XYZ", true, None).unwrap();
+        assert_eq!(result.occurrences_replaced, 3);
+        let output = std::fs::read(&path).unwrap();
+        // Expected: "XYZ\r\nb\nXYZ\r\nc\nXYZ\r\nd"
+        assert_eq!(output, b"XYZ\r\nb\nXYZ\r\nc\nXYZ\r\nd");
     }
 }

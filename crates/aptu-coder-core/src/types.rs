@@ -892,6 +892,13 @@ pub struct EditReplaceParams {
     /// many substitutions were made.
     #[serde(default)]
     pub replace_all: Option<bool>,
+    /// Blake3 hex hash of the raw file bytes the caller last saw. If provided and the file
+    /// has changed since the caller last read it, the edit is rejected with `INVALID_PARAMS`
+    /// directing the caller to re-read the file. The hash is computed over the raw file bytes
+    /// as read by `read_to_string` (i.e. the exact bytes on disk, before any normalization).
+    /// Omit to skip the staleness check (backward compatible).
+    #[serde(default)]
+    pub expected_content_hash: Option<String>,
 }
 
 #[non_exhaustive]

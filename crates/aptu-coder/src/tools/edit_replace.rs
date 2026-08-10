@@ -80,7 +80,9 @@ impl StaleContextGuard {
 /// Resolves and validates the target path for an edit operation.
 ///
 /// Returns `Ok(PathBuf)` on success, or `Err(CallToolResult)` when path validation
-/// fails. Directory-path errors are detected here and returned as `Err`.
+/// fails. Directory-path errors are detected inside `edit_replace_block_inner`
+/// (running in spawn_blocking) rather than here, to avoid a blocking metadata
+/// syscall in the async context.
 fn resolve_edit_path(
     path: &str,
     working_dir: Option<&str>,
@@ -114,23 +116,6 @@ fn resolve_edit_path(
         }
     };
 
-    if std::fs::metadata(&resolved)
-        .map(|m| m.is_dir())
-        .unwrap_or(false)
-    {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        return Err(err_to_tool_result(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "path is a directory; cannot edit a directory".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "provide a file path, not a directory",
-            )),
-        )));
-    }
-
     Ok(resolved)
 }
 
@@ -157,18 +142,21 @@ fn send_replace_error_metric(
 /// Builds the diagnostic hint message for a `not_found` failure.
 ///
 /// Returns a short message when `first_20_lines` is empty, or a longer message with
-/// the nearest-matching line from the file when it has content.
+/// the nearest-matching line from the file when it has content. Shows only 3 lines
+/// centered on the best-match line (clamped to file bounds) to reduce token waste.
 fn build_not_found_message(first_20_lines: &str, old_text_for_hint: &str) -> String {
     if first_20_lines.is_empty() {
         return "old_text not found (0 matches). Re-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying.".to_string();
     }
 
+    let all_lines: Vec<&str> = first_20_lines.lines().collect();
+    let total_lines = all_lines.len();
     let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
-    let mut best_line_idx = 1usize;
+    let mut best_line_idx = 0usize;
     let mut best_line = "";
     let mut best_lcp = 0usize;
 
-    for (i, file_line) in first_20_lines.lines().enumerate() {
+    for (i, file_line) in all_lines.iter().enumerate() {
         let lcp = file_line
             .chars()
             .zip(first_old_line.chars())
@@ -177,19 +165,25 @@ fn build_not_found_message(first_20_lines: &str, old_text_for_hint: &str) -> Str
         if lcp > best_lcp {
             best_lcp = lcp;
             best_line = file_line;
-            best_line_idx = i + 1;
+            best_line_idx = i;
         }
     }
 
-    let numbered_lines: String = first_20_lines
-        .lines()
+    // Show 3 lines centered on best_line_idx (clamped to file bounds)
+    let start = best_line_idx.saturating_sub(1);
+    let end = (start + 3).min(total_lines);
+    let start = end.saturating_sub(3).min(start);
+
+    let numbered_lines: String = all_lines[start..end]
+        .iter()
         .enumerate()
-        .map(|(i, line)| format!("  Line {}: {}", i + 1, line))
+        .map(|(i, line)| format!("  Line {}: {}", start + i + 1, line))
         .collect::<Vec<_>>()
         .join("\n");
 
+    let best_line_num = best_line_idx + 1;
     format!(
-        "old_text not found (0 matches).\nThe file begins:\n{numbered_lines}\n\nNearest match: line {best_line_idx} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
+        "old_text not found (0 matches). File has {total_lines} lines.\nThe file around line {best_line_num}:\n{numbered_lines}\n\nNearest match: line {best_line_num} contains \"{best_line}\" which shares {best_lcp} characters with the start of old_text.\nRe-read the file with analyze_file or analyze_module to obtain the current content, then derive old_text from the live file before retrying."
     )
 }
 
@@ -377,6 +371,38 @@ fn handle_edit_error(
                 )),
             ))
         }
+        aptu_coder_core::EditError::StaleContentHash {
+            expected,
+            actual,
+            path: stale_path,
+        } => {
+            span.record("error.type", "invalid_params");
+            ctx.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some("stale_content_hash".to_string()))
+                    .session_id(ctx.sid.clone())
+                    .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
+                    .build(),
+            );
+            let mut meta = error_meta(
+                "validation",
+                false,
+                "re-read the file with analyze_file or analyze_module, then retry with the current content hash",
+            );
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("path".to_string(), serde_json::json!(stale_path));
+            }
+            err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!(
+                    "Content hash mismatch: the file has changed since you last read it.\nExpected hash: {expected}\nActual hash:   {actual}\nRe-read the file with analyze_file or analyze_module, then retry edit_replace with the current content hash in expected_content_hash."
+                ),
+                Some(meta),
+            ))
+        }
         aptu_coder_core::EditError::Io(io_err) => {
             span.record("error.type", "internal_error");
             ctx.metrics_tx.send(
@@ -454,16 +480,41 @@ pub(crate) async fn edit_replace(
             return Ok(result);
         }
     };
+
+    // Look up or create the per-path mutex from the registry.
+    // The lock is acquired INSIDE spawn_blocking so the async worker is never blocked.
+    let path_lock = {
+        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
+        // this is fatal and should propagate.
+        #[allow(clippy::expect_used)]
+        let mut locks = ctx
+            .file_edit_locks
+            .lock()
+            .expect("file_edit_locks poisoned");
+        Arc::clone(
+            locks
+                .entry(resolved_path.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    };
+
     let old_text = params.old_text.clone();
     let new_text = params.new_text.clone();
     let replace_all = params.replace_all.unwrap_or(false);
-    let old_text_for_hint = old_text.clone();
+    let expected_content_hash = params.expected_content_hash.clone();
     let handle = tokio::task::spawn_blocking(move || {
+        // Acquire the per-path lock as the first line inside spawn_blocking,
+        // holding it across the entire read-modify-write cycle.
+        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
+        // this is fatal and should propagate.
+        #[allow(clippy::expect_used)]
+        let _guard = path_lock.lock().expect("per-path edit lock poisoned");
         aptu_coder_core::edit_replace_block_with_options(
             &resolved_path,
             &old_text,
             &new_text,
             replace_all,
+            expected_content_hash.as_deref(),
         )
     });
 
@@ -477,7 +528,7 @@ pub(crate) async fn edit_replace(
                 span,
                 t_start,
                 &param_path,
-                &old_text_for_hint,
+                &params.old_text,
                 &mut guard,
                 &ctx,
                 working_dir_used,
@@ -558,7 +609,7 @@ mod tests {
         let file_content = "fn foo() {\n    let x = 1;\n}\n";
         let old_text = "fn foo()";
         let msg = build_not_found_message(file_content, old_text);
-        assert!(msg.contains("The file begins"));
+        assert!(msg.contains("The file around line"));
         assert!(msg.contains("Nearest match"));
         assert!(msg.contains("fn foo()"));
     }

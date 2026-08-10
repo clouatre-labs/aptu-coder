@@ -221,6 +221,10 @@ pub struct CodeAnalyzer {
     // Used to detect stale LLM context and return a directive error instead of
     // repeatedly trying an old_text that no longer matches the file content.
     edit_failure_counts: Arc<Mutex<HashMap<(String, String), u8>>>,
+    // Per-path mutex registry for edit_replace serialization. Each path gets an
+    // Arc<Mutex<()>> that is acquired inside spawn_blocking to prevent concurrent
+    // read-modify-write cycles on the same file (silent data loss prevention).
+    file_edit_locks: tools::FileEditLockRegistry,
     // On-disk graph store for structural knowledge graph resources.
     graph_store: std::sync::Arc<aptu_coder_core::graph::GraphDiskStore>,
 }
@@ -587,6 +591,7 @@ impl CodeAnalyzer {
                 cache: &self.cache,
                 metrics_tx: &self.metrics_tx,
                 edit_failure_counts: &self.edit_failure_counts,
+                file_edit_locks: &self.file_edit_locks,
             },
             &span,
             t_start,
@@ -598,7 +603,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). Set replace_all=true to replace every non-overlapping occurrence; old_text must be non-empty. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. If invalid_params, re-read the file with analyze_file or analyze_module before retrying. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD).",
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). Set replace_all=true to replace every non-overlapping occurrence; old_text must be non-empty. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Pass expected_content_hash (blake3 hex of raw file bytes) to detect stale context; a mismatch rejects the edit. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD).",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
@@ -639,6 +644,7 @@ impl CodeAnalyzer {
                 cache: &self.cache,
                 metrics_tx: &self.metrics_tx,
                 edit_failure_counts: &self.edit_failure_counts,
+                file_edit_locks: &self.file_edit_locks,
             },
             &span,
             t_start,
