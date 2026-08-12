@@ -11,6 +11,8 @@ on:
       - 'clippy.toml'
       - '.github/workflows/**'
       - 'tests/**'
+      - 'docs/**'
+      - '.markdownlint*'
   pull_request:
 
 concurrency:
@@ -32,6 +34,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,6 +53,9 @@ jobs:
               - 'tests/**'
             workflows:
               - '.github/workflows/**'
+            docs:
+              - 'docs/**'
+              - '.markdownlint*'
 
   commitlint:
     name: Lint Commits
@@ -202,6 +208,20 @@ jobs:
       - name: Check package age
         run: bash .github/scripts/check-package-age.sh
 
+  lint-docs:
+    name: Lint Docs
+    runs-on: ubuntu-24.04-arm
+    needs: changes
+    if: (needs.changes.outputs.docs == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Lint markdown
+        run: bunx markdownlint-cli2@0.23.1 '**/*.md' '#.worktrees' '#.handoff'
+
   msrv:
     name: MSRV Check
     runs-on: ubuntu-24.04-arm
@@ -280,7 +300,7 @@ jobs:
     name: CI Result
     runs-on: ubuntu-24.04-arm
     if: always()
-    needs: [changes, commitlint, check-base, lint, coverage, deny, msrv, zizmor, semver-checks]
+    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, zizmor, semver-checks]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |
