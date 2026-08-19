@@ -161,10 +161,10 @@ use filters::CompiledRule;
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResponse, CallToolResult, CancelledNotificationParam, CompleteRequestParams,
-    CompleteResult, CompletionInfo, ContentBlock, DiscoverResult, ErrorData, Implementation,
-    InitializeRequestParams, InitializeResult, ListResourceTemplatesResult, ListResourcesResult,
-    ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
+    CacheScope, CallToolResponse, CallToolResult, CancelledNotificationParam,
+    CompleteRequestParams, CompleteResult, CompletionInfo, ContentBlock, DiscoverResult, ErrorData,
+    Implementation, InitializeRequestParams, InitializeResult, ListResourceTemplatesResult,
+    ListResourcesResult, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -759,9 +759,11 @@ impl ServerHandler for CodeAnalyzer {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
         let router = self.tool_router.read().await;
-        Ok(rmcp::model::ListToolsResult::with_all_items(
-            router.list_all(),
-        ))
+        Ok(
+            rmcp::model::ListToolsResult::with_all_items(router.list_all())
+                .with_ttl_ms(3_600_000)
+                .with_cache_scope(CacheScope::Public),
+        )
     }
 
     async fn call_tool(
