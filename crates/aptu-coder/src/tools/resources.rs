@@ -15,9 +15,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rmcp::RoleServer;
 use rmcp::model::{
-    ErrorCode, ErrorData, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, ResourceContents,
-    ResourceTemplate,
+    CacheScope, ErrorCode, ErrorData, ListResourceTemplatesResult, ListResourcesResult,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+    ResourceContents, ResourceTemplate,
 };
 use rmcp::service::RequestContext;
 
@@ -205,7 +205,9 @@ pub(crate) fn list_resources_impl(
     _params: Option<PaginatedRequestParams>,
     _context: &RequestContext<RoleServer>,
 ) -> Result<ListResourcesResult, ErrorData> {
-    Ok(ListResourcesResult::with_all_items(Vec::new()))
+    Ok(ListResourcesResult::with_all_items(Vec::new())
+        .with_ttl_ms(3_600_000)
+        .with_cache_scope(CacheScope::Public))
 }
 
 /// Return three ResourceTemplate entries for the graph URI scheme.
