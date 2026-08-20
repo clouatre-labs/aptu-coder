@@ -257,7 +257,7 @@ jobs:
         with:
           advanced-security: false
           annotations: true
-          min-severity: high
+          min-severity: medium
 
   semver-checks:
     name: semver checks
