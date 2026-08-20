@@ -15,16 +15,29 @@ jobs:
     permissions:
       contents: read
       security-events: write
-      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
+      - name: Install Scorecard CLI
+        env:
+          VERSION: "5.5.0"
+          SHA256: "3ce59d20c1d53e540c4a14e0da1e0d96b3b294e8ddc96a3c5a7b8a637b32991e"
+        run: |
+          curl -fsSL "https://github.com/ossf/scorecard/releases/download/v${VERSION}/scorecard_${VERSION}_linux_arm64.tar.gz" \
+            -o scorecard.tar.gz
+          echo "${SHA256}  scorecard.tar.gz" | sha256sum -c -
+          tar -xzf scorecard.tar.gz
+
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        env:
+          ENABLE_SARIF: "1"
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scorecard --repo=github.com/clouatre-labs/aptu-coder --format=sarif --show-details > results.sarif
+
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
+          sarif_file: results.sarif
