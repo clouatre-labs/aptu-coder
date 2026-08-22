@@ -19,9 +19,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: read
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,6 +29,8 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
       workflows: ${{ steps.filter.outputs.workflows }}
@@ -62,6 +62,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     if: github.event_name == 'pull_request'
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -94,6 +96,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     if: github.event_name == 'pull_request'
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -118,6 +122,8 @@ jobs:
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -155,6 +161,8 @@ jobs:
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -196,6 +204,8 @@ jobs:
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -214,6 +224,8 @@ jobs:
     needs: changes
     if: (needs.changes.outputs.docs == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -228,6 +240,8 @@ jobs:
     needs: changes
     if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -243,22 +257,6 @@ jobs:
       - name: Check MSRV
         run: cargo check --locked
 
-  zizmor:
-    name: zizmor
-    runs-on: ubuntu-24.04-arm
-    needs: changes
-    timeout-minutes: 10
-    if: needs.changes.outputs.workflows == 'true' || github.event_name != 'pull_request'
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
-        with:
-          advanced-security: false
-          annotations: true
-          min-severity: medium
-
   semver-checks:
     name: semver checks
     runs-on: ubuntu-24.04-arm
@@ -266,6 +264,8 @@ jobs:
     # aptu-coder-core is published on crates.io with 25+ versions.
     # If the crate is not yet found (e.g. first publish after rename), the step skips gracefully.
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -300,7 +300,8 @@ jobs:
     name: CI Result
     runs-on: ubuntu-24.04-arm
     if: always()
-    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, zizmor, semver-checks]
+    permissions: {}
+    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |

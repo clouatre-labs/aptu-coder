@@ -1,5 +1,5 @@
 # Commitlint configuration
-# Enforced by CI via wagoid/commitlint-github-action
+# Enforced by CI via npx commitlint
 # See: https://commitlint.js.org/reference/rules.html
 
 extends:
