@@ -1,3 +1,3 @@
-# All paths are owned by the maintainer.
+# Protects security-sensitive paths under .github/ from unreviewed changes.
 # GitHub Copilot reviews do not satisfy this requirement.
-* @clouatre
+.github/ @clouatre

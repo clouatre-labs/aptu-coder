@@ -4,4 +4,4 @@
 rules:
   bot-conditions:
     ignore:
-      - ci.yml:203
+      - ci.yml
