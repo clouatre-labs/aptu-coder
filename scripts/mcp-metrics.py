@@ -116,6 +116,8 @@ def load_records(
                         continue
                     if not all_tools and tool not in CURRENT_TOOLS:
                         continue
+                    if rec.get("result") == "received":
+                        continue
                     records.append(rec)
         except OSError as exc:
             print("WARNING: cannot read {}: {}".format(path, exc), file=sys.stderr)

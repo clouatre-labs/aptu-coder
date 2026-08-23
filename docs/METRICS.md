@@ -34,7 +34,7 @@ Each line in the JSONL file is one JSON object:
 | `file_ext` | `string \| null` | Lowercased file extension of `params.path`: known extension key (e.g. `"rs"`), `"other"` for unrecognized extensions, `null` when the path has no extension. Only populated for `analyze_file` and `analyze_module`. |
 | `language` | `string \| null` | Human-readable programming language name derived from the file extension (e.g. `"rust"` for `.rs`). `null` when the path has no extension or the extension is not recognized. Only populated for `analyze_file` and `analyze_module`. Omitted from JSONL when `null` for backward compatibility. |
 | `max_depth` | `u32 \| null` | The `max_depth` param if present; `null` for `analyze_file` and `analyze_module` |
-| `result` | `string` | `"ok"` on success, `"error"` on early-exit error paths |
+| `result` | `string` | `"ok"` on success, `"error"` on early-exit error paths, `"received"` on request entry (emitted at handler entry with `duration_ms=0` and `cache_hit=null`; excluded from all analysis aggregates by design) |
 | `error_type` | `string \| null` | On error: `invalid_params`, `parse`, or `unknown`; `null` on success |
 | `error_subtype` | `string \| null` | On error: detailed subtype (e.g., `not_found`, `ambiguous`, `stale_content_hash` for `edit_replace`); `null` on success or for generic errors. Omitted from JSONL when `null` for backward compatibility. |
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
