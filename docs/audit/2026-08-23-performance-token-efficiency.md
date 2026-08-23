@@ -102,18 +102,18 @@ being cited as a measured gain.
 
 *Table 4: Prior findings and new findings.*
 
-| ID | Severity | Type | Finding | Status |
-|---|---|---|---|---|
-| F1 | High | Bug | `exec_command` cache scaffolding documented but inactive | Fixed (#1049) |
-| F2 | High | Refactor | `analyze_module` bypassed the module fast path | Fixed (#1051) |
-| F3 | High | Refactor | Shallow `analyze_directory` performed unbounded walk | Fixed (#1051) |
-| F4 | Medium | Refactor | Directory analysis read eligible files twice | Fixed (#1050) |
-| F5 | Medium | Feature | `analyze_symbol` had no reusable cache | Fixed (#1052) |
-| F6 | High | Feature | `analyze_file(fields=...)` didn't project structured output | Fixed (#1053) |
-| F7 | Medium | Feature | JSONL metrics couldn't show which exec filter fired | Fixed (#1050) |
-| F8 | Low | Refactor | Tool guidance needed a token-efficiency pass | Fixed (#1387) |
-| G1 | Medium | Optimization | `StructuralGraph::build_from_analysis` has no cache check before rebuilding | Open |
-| G2 | Low | Robustness | Graph resource handler materializes full node set before paginating | Open |
+| ID | Severity | Type | Finding | Issue | Status |
+|---|---|---|---|---|---|
+| F1 | High | Bug | `exec_command` cache scaffolding documented but inactive | [#1039](https://github.com/clouatre-labs/aptu-coder/issues/1039) | Closed (#1049) |
+| F2 | High | Refactor | `analyze_module` bypassed the module fast path | [#1046](https://github.com/clouatre-labs/aptu-coder/issues/1046) | Closed (#1051) |
+| F3 | High | Refactor | Shallow `analyze_directory` performed unbounded walk | [#1044](https://github.com/clouatre-labs/aptu-coder/issues/1044) | Closed (#1051) |
+| F4 | Medium | Refactor | Directory analysis read eligible files twice | [#1041](https://github.com/clouatre-labs/aptu-coder/issues/1041) | Closed (#1050) |
+| F5 | Medium | Feature | `analyze_symbol` had no reusable cache | [#1040](https://github.com/clouatre-labs/aptu-coder/issues/1040) | Closed (#1052) |
+| F6 | High | Feature | `analyze_file(fields=...)` didn't project structured output | [#1045](https://github.com/clouatre-labs/aptu-coder/issues/1045) | Closed (#1053) |
+| F7 | Medium | Feature | JSONL metrics couldn't show which exec filter fired | [#1042](https://github.com/clouatre-labs/aptu-coder/issues/1042) | Closed (#1050) |
+| F8 | Low | Refactor | Tool guidance needed a token-efficiency pass | [#1043](https://github.com/clouatre-labs/aptu-coder/issues/1043) | Closed (#1387) |
+| G1 | Medium | Refactor | `StructuralGraph::build_from_analysis` has no cache check before rebuilding | [#1406](https://github.com/clouatre-labs/aptu-coder/issues/1406) | Open |
+| G2 | Low | Refactor | Graph resource handler materializes full node set before paginating | [#1407](https://github.com/clouatre-labs/aptu-coder/issues/1407) | Open |
 
 ## F1-F8: Verification Against Current Source
 
@@ -208,8 +208,14 @@ pagination so the full reachable set is never materialized for deep traversals.
 
 1. Establish a controlled, fixed-workload benchmark for exec/analyze latency instead of comparing
    opportunistic metrics corpora -- the comparison-validity gaps in Table 3 will recur on every
-   future re-run otherwise.
-2. Close G1 (graph cache) before resource-surface usage grows past occasional PR-review queries.
+   future re-run otherwise. Tracked as
+   [#1408](https://github.com/clouatre-labs/aptu-coder/issues/1408): extend the existing
+   `crates/aptu-coder-core/benches/analysis.rs` criterion harness with `CallGraphCache` and
+   `StructuralGraph::build_from_analysis` benchmarks, in-process against the repo's own `src/`.
+2. Close G1 ([#1406](https://github.com/clouatre-labs/aptu-coder/issues/1406), graph cache)
+   before resource-surface usage grows past occasional PR-review queries.
 3. Validate F5's `CallGraph` cache effectiveness under a workload that actually repeats symbol
-   lookups; neither corpus sampled here does.
-4. Revisit G2 only if depth limits are relaxed or graph size grows materially.
+   lookups; neither corpus sampled here does. Covered by the same benchmark work in
+   [#1408](https://github.com/clouatre-labs/aptu-coder/issues/1408).
+4. Revisit G2 ([#1407](https://github.com/clouatre-labs/aptu-coder/issues/1407)) only if depth
+   limits are relaxed or graph size grows materially.
