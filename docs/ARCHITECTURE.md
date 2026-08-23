@@ -208,7 +208,7 @@ The server exposes three MCP resource templates that surface the knowledge graph
 
 | Resource Template | Description |
 |---|---|
-| `blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward; depth defaults to 3 |
+| `blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward; depth defaults to 3 (max 5) |
 | `import-closure/{module}` | Transitive import closure for a module path |
 | `subgraph/{symbol}` | Full subgraph (callers, callees, connections) for a single symbol |
 

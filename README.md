@@ -190,7 +190,7 @@ The knowledge graph feature exposes three MCP resource templates for navigating 
 
 **Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
 
-**Depth parameter:** The `blast-radius` template accepts an optional `depth` query parameter (integer, default 3).
+**Depth parameter:** The `blast-radius` template accepts an optional `depth` query parameter (integer in range 1-5, default 3).
 
 **Cold cache:** Call `analyze_symbol` on the directory first to build the graph. Resources return an informational message until the graph is available.
 

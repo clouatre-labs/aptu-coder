@@ -211,7 +211,7 @@ Added `StructuralGraph` and `GraphDiskStore` in `crates/aptu-coder-core/src/grap
 ### [Complete] Knowledge Graph: MCP resource surface (#1368)
 
 Three MCP resource templates added in `crates/aptu-coder/src/tools/resources.rs`:
-- `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` -- BFS traversal, default depth=3
+- `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` -- BFS traversal, default depth=3, max 5
 - `aptu-coder://graph/{repo_hash}/import-closure/{module}` -- transitive import closure
 - `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` -- full subgraph for a symbol
 
