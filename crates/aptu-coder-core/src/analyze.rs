@@ -92,6 +92,16 @@ pub struct AnalysisOutput {
         )
     )]
     pub next_cursor: Option<String>,
+    /// Cache tier that served this result: `l1_memory`, `l2_disk`, or `miss`.
+    /// Set by the handler after cache lookup; absent in outputs constructed
+    /// outside the handler return path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(description = "Cache tier for this result: l1_memory, l2_disk, or miss")
+    )]
+    pub cache_tier: Option<String>,
 }
 
 /// Result of file-level semantic analysis.
@@ -259,6 +269,7 @@ fn build_analysis_output(
         entries,
         next_cursor: None,
         subtree_counts: None,
+        cache_tier: None,
     }
 }
 
