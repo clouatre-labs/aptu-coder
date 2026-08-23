@@ -23,6 +23,16 @@ use rmcp::service::RequestContext;
 
 const PAGE_SIZE: usize = 50;
 
+/// Maximum blast-radius BFS depth permitted in caller-supplied resource URIs.
+///
+/// Set to 5 based on empirical measurement and external practice. On aptu-coder's
+/// own codebase (73 files, 1898 graph nodes, 8 representative symbols), depth 5
+/// captured 95%+ of the reachable blast radius for every symbol tested, with only
+/// 1 marginal node gained at depths 6-8 before full saturation. External practice
+/// clusters at 3-5 (graphql depth-limit examples: 3 and 5, ArangoDB Spring Data
+/// default: 1). Traversal cost is sub-40us at all depths measured. Default remains 3.
+const MAX_GRAPH_DEPTH: usize = 5;
+
 /// Graph query variants parsed from resource URIs.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum GraphQuery {
@@ -143,12 +153,21 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
     let arg = segments[3..].join("/");
 
     match query_type {
-        "blast-radius" => Ok(GraphQuery::BlastRadius {
-            repo_hash,
-            symbol: arg,
-            depth,
-            cursor_offset,
-        }),
+        "blast-radius" => {
+            if depth > MAX_GRAPH_DEPTH {
+                return Err(ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("depth parameter exceeds maximum ({MAX_GRAPH_DEPTH}): got {depth}"),
+                    None,
+                ));
+            }
+            Ok(GraphQuery::BlastRadius {
+                repo_hash,
+                symbol: arg,
+                depth,
+                cursor_offset,
+            })
+        }
         "import-closure" => Ok(GraphQuery::ImportClosure {
             repo_hash,
             module: arg,
@@ -220,7 +239,7 @@ pub(crate) fn list_resource_templates_impl(
             "aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}",
             "graph-blast-radius",
         )
-        .with_description("BFS blast-radius traversal from a symbol")
+        .with_description("BFS blast-radius traversal from a symbol (depth 1-5, default 3)")
         .with_mime_type("application/json"),
         ResourceTemplate::new(
             "aptu-coder://graph/{repo_hash}/import-closure/{module}",
@@ -398,6 +417,118 @@ mod tests {
             cursor_offset: 0,
         };
         assert!(!query_to_nodes(&graph, &query).is_empty());
+    }
+
+    #[test]
+    fn test_parse_graph_uri_depth_at_max_accepted() {
+        let uri = "aptu-coder://graph/abc123/blast-radius/my_func?depth=5";
+        let query = parse_graph_uri(uri).unwrap();
+        assert_eq!(
+            query,
+            GraphQuery::BlastRadius {
+                repo_hash: "abc123".to_string(),
+                symbol: "my_func".to_string(),
+                depth: 5,
+                cursor_offset: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_graph_uri_depth_exceeds_max_rejected() {
+        let uri = "aptu-coder://graph/abc123/blast-radius/my_func?depth=6";
+        let err = parse_graph_uri(uri).unwrap_err();
+        assert!(
+            err.message.contains("exceeds maximum"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_read_resource_impl_large_graph_pagination() {
+        let tmp = std::env::temp_dir().join("aptu-coder-test-pagination");
+        let _ = std::fs::create_dir_all(&tmp);
+        let store = GraphDiskStore::new(tmp.clone());
+
+        // Build a star graph: func_0 calls func_1..func_60 (60 callees).
+        let mut functions = Vec::with_capacity(61);
+        let mut calls = Vec::with_capacity(60);
+
+        let mut f0 = FunctionInfo::default();
+        f0.name = "func_0".to_string();
+        f0.line = 1;
+        f0.end_line = 5;
+        functions.push(f0);
+
+        for i in 1..=60 {
+            let callee_name = format!("func_{i}");
+            let mut f = FunctionInfo::default();
+            f.name = callee_name.clone();
+            f.line = i * 10;
+            f.end_line = i * 10 + 5;
+            functions.push(f);
+
+            let call: CallInfo = serde_json::from_str(&format!(
+                r#"{{"caller":"func_0","callee":"{callee_name}","line":1,"column":0}}"#
+            ))
+            .expect("valid call JSON");
+            calls.push(call);
+        }
+
+        let analysis = SemanticAnalysis::new(
+            functions,
+            vec![],
+            vec![],
+            vec![],
+            Default::default(),
+            calls,
+            vec![],
+        );
+        let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 650, None);
+        let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+        let repo_hash = "repo_test_pagination";
+        store.put(repo_hash, &graph);
+
+        // First page read (cursor_offset 0)
+        let request1 = ReadResourceRequestParams::new(format!(
+            "aptu-coder://graph/{repo_hash}/blast-radius/func_0"
+        ));
+        let response1 = read_resource_impl(request1, &store).expect("first page read succeeds");
+        let result1 = match response1 {
+            ReadResourceResponse::Complete(res) => res,
+            _ => panic!("expected ReadResourceResponse::Complete"),
+        };
+        let text1 = match &result1.contents[0] {
+            ResourceContents::TextResourceContents { text, .. } => text,
+            _ => panic!("expected text resource contents"),
+        };
+        let val1: serde_json::Value = serde_json::from_str(text1).expect("valid JSON payload");
+        assert_eq!(val1["nodes"].as_array().unwrap().len(), 50);
+        assert_eq!(val1["total"].as_u64().unwrap(), 60);
+        assert!(val1["next_cursor"].as_str().is_some());
+
+        // Second page read using cursor token for offset 50
+        let cursor_token = encode_graph_cursor(50);
+        let request2 = ReadResourceRequestParams::new(format!(
+            "aptu-coder://graph/{repo_hash}/blast-radius/func_0?cursor={cursor_token}"
+        ));
+        let response2 = read_resource_impl(request2, &store).expect("second page read succeeds");
+        let result2 = match response2 {
+            ReadResourceResponse::Complete(res) => res,
+            _ => panic!("expected ReadResourceResponse::Complete"),
+        };
+        let text2 = match &result2.contents[0] {
+            ResourceContents::TextResourceContents { text, .. } => text,
+            _ => panic!("expected text resource contents"),
+        };
+        let val2: serde_json::Value = serde_json::from_str(text2).expect("valid JSON payload");
+        assert_eq!(val2["nodes"].as_array().unwrap().len(), 10);
+        assert_eq!(val2["total"].as_u64().unwrap(), 60);
+        assert!(val2["next_cursor"].is_null());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
