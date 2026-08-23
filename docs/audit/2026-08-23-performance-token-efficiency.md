@@ -88,7 +88,7 @@ only 2 completed calls total (1 `ok`, 1 `error`); the `error` call never reaches
 by design, leaving a single checkable sample -- too small to conclude anything.
 
 `exec_command` reliability over the same window: 116 errors (2.68%), 1 timeout. The long tail is
-real, not corpus noise: over 100 calls exceeded 60 seconds, including a handful near 180 seconds.
+real, not corpus noise: 17 calls exceeded 60 seconds, including three near 180 seconds.
 
 *Table 2: June 2026 tool metrics, reproduced from the prior audit for reference.*
 
