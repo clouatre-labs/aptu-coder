@@ -5,9 +5,11 @@ Tests verify that fmt_text, fmt_csv, and fmt_json produce identical output
 to pre-refactor golden strings after consolidating section rendering logic.
 """
 
+import importlib.util
+import json
+import tempfile
 from datetime import date
 from pathlib import Path
-import importlib.util
 
 # importlib is required because the filename contains a hyphen
 # conftest.py ensures scripts/ is on sys.path before this module loads
@@ -574,6 +576,139 @@ def test_all_sections_in_registry():
     assert actual_keys == expected_keys
 
 
+def test_load_records_filters_received():
+    """Test load_records excludes received records and includes ok/error."""
+    # Arrange
+    with tempfile.TemporaryDirectory() as tmpdir:
+        jsonl_path = Path(tmpdir) / "metrics-2026-08-23.jsonl"
+        events = [
+            {
+                "ts": 1000,
+                "tool": "analyze_file",
+                "result": "received",
+                "duration_ms": 0,
+                "cache_hit": None,
+            },
+            {
+                "ts": 1050,
+                "tool": "analyze_file",
+                "result": "ok",
+                "duration_ms": 50,
+                "cache_hit": False,
+                "output_chars": 120,
+            },
+            {
+                "ts": 1100,
+                "tool": "analyze_file",
+                "result": "received",
+                "duration_ms": 0,
+                "cache_hit": None,
+            },
+            {
+                "ts": 1110,
+                "tool": "analyze_file",
+                "result": "error",
+                "duration_ms": 10,
+                "cache_hit": None,
+                "error_type": "invalid_params",
+            },
+            {
+                "ts": 1200,
+                "tool": "analyze_directory",
+                "result": "ok",
+                "duration_ms": 200,
+                "cache_hit": True,
+                "output_chars": 500,
+            },
+        ]
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            f.writelines(json.dumps(ev) + "\n" for ev in events)
+
+        # Act
+        records = mcp_metrics.load_records(tmpdir)
+
+        # Assert
+        assert len(records) == 3
+        results = [r.get("result") for r in records]
+        assert "received" not in results
+        assert results == ["ok", "error", "ok"]
+
+
+def test_compute_latency_with_loaded_records_ignores_received():
+    """Test compute_latency does not produce dur_p50 of 0 when received rows are filtered."""
+    # Arrange
+    with tempfile.TemporaryDirectory() as tmpdir:
+        jsonl_path = Path(tmpdir) / "metrics-2026-08-23.jsonl"
+        events = [
+            {
+                "ts": 1000,
+                "tool": "analyze_file",
+                "result": "received",
+                "duration_ms": 0,
+                "cache_hit": None,
+            },
+            {
+                "ts": 1050,
+                "tool": "analyze_file",
+                "result": "ok",
+                "duration_ms": 100,
+                "cache_hit": False,
+                "output_chars": 120,
+            },
+        ]
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            f.writelines(json.dumps(ev) + "\n" for ev in events)
+
+        # Act
+        records = mcp_metrics.load_records(tmpdir)
+        latency = mcp_metrics.compute_latency(records)
+
+        # Assert
+        assert len(latency) == 1
+        assert latency[0]["tool"] == "analyze_file"
+        assert latency[0]["calls"] == 1
+        assert latency[0]["dur_p50"] == 100
+
+
+def test_compute_cache_with_loaded_records_ignores_received():
+    """Test compute_cache does not count cache_hit=null received rows as cache misses."""
+    # Arrange
+    with tempfile.TemporaryDirectory() as tmpdir:
+        jsonl_path = Path(tmpdir) / "metrics-2026-08-23.jsonl"
+        events = [
+            {
+                "ts": 1000,
+                "tool": "analyze_file",
+                "result": "received",
+                "duration_ms": 0,
+                "cache_hit": None,
+            },
+            {
+                "ts": 1050,
+                "tool": "analyze_file",
+                "result": "ok",
+                "duration_ms": 10,
+                "cache_hit": True,
+                "cache_tier": "l1_memory",
+                "output_chars": 120,
+            },
+        ]
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            f.writelines(json.dumps(ev) + "\n" for ev in events)
+
+        # Act
+        records = mcp_metrics.load_records(tmpdir)
+        cache = mcp_metrics.compute_cache(records)
+
+        # Assert
+        assert cache["total_hits"] == 1
+        assert cache["total_misses"] == 0
+        assert len(cache["per_tool"]) == 1
+        assert cache["per_tool"][0]["hits"] == 1
+        assert cache["per_tool"][0]["cacheable"] == 1
+        assert cache["per_tool"][0]["hit_rate"] == 100.0
+
+
 if __name__ == "__main__":
     # Run tests
     test_fmt_text_happy_path()
@@ -587,4 +722,7 @@ if __name__ == "__main__":
     test_table_alignment()
     test_section_header()
     test_all_sections_in_registry()
+    test_load_records_filters_received()
+    test_compute_latency_with_loaded_records_ignores_received()
+    test_compute_cache_with_loaded_records_ignores_received()
     print("All tests passed!")
