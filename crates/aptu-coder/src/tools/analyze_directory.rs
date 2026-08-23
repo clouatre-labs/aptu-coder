@@ -51,6 +51,25 @@ pub(crate) async fn handle_overview_mode(
         )
     })?;
 
+    let all_entries = if let Some(ref git_ref) = params.git_ref
+        && !git_ref.is_empty()
+    {
+        let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!("git_ref filter failed: {e}"),
+                Some(error_meta(
+                    "resource",
+                    false,
+                    "ensure git is installed and path is inside a git repository",
+                )),
+            )
+        })?;
+        filter_entries_by_git_ref(all_entries, &changed, path)
+    } else {
+        all_entries
+    };
+
     let canonical_max_depth = max_depth.filter(|&d| d != 0);
     let git_ref_val = params.git_ref.as_deref().filter(|s| !s.is_empty());
     let cache_key = DirectoryCacheKey::from_entries(
@@ -97,25 +116,6 @@ pub(crate) async fn handle_overview_mode(
         ctx.cache.put_directory(cache_key.clone(), arc.clone());
         return Ok((arc, CacheTier::L2Disk));
     }
-
-    let all_entries = if let Some(ref git_ref) = params.git_ref
-        && !git_ref.is_empty()
-    {
-        let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!("git_ref filter failed: {e}"),
-                Some(error_meta(
-                    "resource",
-                    false,
-                    "ensure git is installed and path is inside a git repository",
-                )),
-            )
-        })?;
-        filter_entries_by_git_ref(all_entries, &changed, path)
-    } else {
-        all_entries
-    };
 
     let subtree_counts = if max_depth.is_some_and(|d| d > 0) {
         Some(aptu_coder_core::traversal::subtree_counts_from_entries(
@@ -234,6 +234,8 @@ pub(crate) async fn analyze_directory_handler(
         Ok(owned) => owned,
         Err(arc) => (*arc).clone(),
     };
+
+    output.cache_tier = Some(dir_cache_hit.as_str().to_owned());
 
     if summary_cursor_conflict(
         params.output_control.summary,
