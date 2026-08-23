@@ -1016,6 +1016,7 @@ fn caller_c() { target(); }
             &counter,
             &ct,
             &entries,
+            None,
         )
         .expect("def_use analysis should succeed");
 

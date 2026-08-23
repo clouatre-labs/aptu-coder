@@ -151,7 +151,7 @@ impl ShellOutput {
 
 #[cfg(test)]
 use aptu_coder_core::cache::CacheTier;
-use aptu_coder_core::cache::{AnalysisCache, CallGraphCache};
+use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
 use aptu_coder_core::types::{
     AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, AnalyzeSymbolParams,
     EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
@@ -217,6 +217,9 @@ pub struct CodeAnalyzer {
     // L1 in-memory LRU cache for call graph results (analyze_symbol).
     // Capacity controlled by APTU_CODER_SYMBOL_CACHE_CAPACITY env var (default 32).
     call_graph_cache: CallGraphCache,
+    // L1 in-memory LRU cache for structural graph results (analyze_focused).
+    // Capacity controlled by APTU_CODER_STRUCTURAL_CACHE_CAPACITY env var (default 16).
+    structural_graph_cache: StructuralGraphCache,
     // Per-(session_id, canonical_path) consecutive edit_replace failure counter.
     // Used to detect stale LLM context and return a directive error instead of
     // repeatedly trying an old_text that no longer matches the file content.
@@ -476,6 +479,7 @@ impl CodeAnalyzer {
         let ctx = tools::AnalyzeSymbolContext {
             metrics_tx: self.metrics_tx.clone(),
             call_graph_cache: self.call_graph_cache.clone(),
+            structural_graph_cache: self.structural_graph_cache.clone(),
             disk_cache: self.disk_cache.clone(),
             sid: sid.clone(),
             seq,
