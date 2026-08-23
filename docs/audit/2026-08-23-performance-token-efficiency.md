@@ -26,41 +26,59 @@ This is a research-only audit. No code was modified.
 - Prior findings F1-F8 from the June audit, re-verified against current source.
 - New scope: `crates/aptu-coder-core/src/graph/structural.rs` and
   `crates/aptu-coder/src/tools/resources.rs`, never previously audited.
-- Local metrics corpus from `~/.local/share/aptu-coder/metrics-2026-08-23.jsonl`.
+- Local metrics corpus: all 11 files under `~/.local/share/aptu-coder/` within the 30-day
+  retention window, `metrics-2026-08-10.jsonl` through `metrics-2026-08-23.jsonl` (10,313 events),
+  aggregated via `scripts/mcp-metrics.py`.
 
 ## Methodology
 
-Two delegates in sequence: (1) a scout re-running the June methodology -- fresh metrics
-snapshot, live tool calls to confirm F1-F8 behavior, source reads for new surface area; (2) an
-adversarial guard cross-checking every scout claim against source and metrics, in the same
-pattern used by the 2026-08-03 knowledge-graph audit. The guard corrected three material errors
-in the scout's draft, folded into this document:
+Three passes. (1) A scout delegate re-ran the June methodology -- metrics snapshot, live tool
+calls to confirm F1-F8 behavior, source reads for new surface area. (2) An adversarial guard
+cross-checked the scout's claims against source and metrics, in the pattern used by the
+2026-08-03 knowledge-graph audit, and corrected a mislabeled cache-hit-rate comparison and an
+entirely missed module (now G1, G2 below). (3) User review of the resulting draft caught a
+methodology defect neither delegate had: both had scoped the "August" metrics snapshot to only
+`metrics-2026-08-23.jsonl` (2,360 calls, one day) and compared it against June's full 30-day
+corpus (66,598 calls), then reasoned about statistical validity from that mismatched premise.
 
-1. The scout compared an August corpus of 2,360 calls (single recent session) against June's
-   66,598 calls (multi-day production use) and reported the deltas as straight percentage
-   improvements. Given the ~3.5% sample size and different workload composition, most headline
-   latency percentages are not statistically defensible and are caveated or dropped below.
-2. The scout reported August cache hit rates for `analyze_file` (52.8%) and `analyze_module`
-   (40.0%) as improvements; they are lower than June's (69.6%, 55.9%) and are declines, not gains.
-3. The scout searched for a "knowledge-graph module," found nothing under that literal name, and
-   concluded it did not exist -- misattributing it to the F5 `CallGraph` cache. The module exists
-   at `crates/aptu-coder-core/src/graph/structural.rs` (284 lines) with an MCP resource handler at
-   `crates/aptu-coder/src/tools/resources.rs` (419 lines); neither had been examined. Both are
-   audited below (G1, G2).
+The correct fix is not a caveat -- it's rerunning the snapshot against every file in the
+retention window, matching how the June audit itself was produced (`git log` shows June's number
+was also a multi-day aggregate). That correction is what appears below. Three effects fell out of
+it:
+
+1. Real sample sizes are far larger than the flawed draft reported (e.g. `exec_command`: 8,540
+   calls, not 2,011), so most before/after comparisons are now directly usable instead of caveated.
+2. The `analyze_file`/`analyze_module`/`analyze_directory` cache-hit-rate decline the guard flagged
+   as "not a sampling artifact" turned out to be correct for the wrong reason -- it isn't a
+   sampling artifact, and it isn't just "different workload" either. Aggregating the full window
+   surfaces a real, source-level cause for at least part of it (G3, below).
+3. The single-day file itself was contaminated by this very audit's own tool calls: the scout and
+   guard delegates repeatedly called `analyze_file`/`analyze_module` on the same handful of source
+   files (`structural.rs`, `resources.rs`, `cache.rs`) while writing this document, which inflates
+   same-day cache-hit rate in a way that has nothing to do with steady-state usage. The prior
+   June audit had the same theoretical exposure, but at 66,598 calls spanning multiple days, one
+   session's self-referential traffic is diluted to noise. Anyone re-running this audit should
+   aggregate the full retention window for exactly this reason, not just for sample size.
 
 ## Metrics Snapshot
 
-*Table 1: August 2026 tool metrics (post-call events, `duration_ms > 0`).*
+*Table 1: August 2026 tool metrics, aggregated across the full retention window
+(`metrics-2026-08-10.jsonl` through `metrics-2026-08-23.jsonl`, 10,313 events).*
 
 | Tool | Calls | p50 ms | p95 ms | p99 ms | p95 chars | Cache hit rate | Truncated |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `exec_command` | 2,011 | 30 | 2,130 | 26,856 | 10,148 | 0.0% | 4.4% |
-| `edit_replace` | 148 | 1 | 7 | 10 | 148 | n/a | 0.0% |
-| `edit_overwrite` | 89 | 1 | 2 | 2 | 136 | n/a | 0.0% |
-| `analyze_file` | 53 | 4 | 384 | 394 | 2,366 | 52.8% | 0.0% |
-| `analyze_module` | 40 | 7 | 392 | 398 | 906 | 40.0% | 0.0% |
-| `analyze_directory` | 18 | 35 | 373 | 373 | 1,237 | 16.7% | 0.0% |
-| `analyze_symbol` | 1 | 67 | 67 | 67 | 0 | 0.0% | 0.0% |
+| `exec_command` | 8,540 | 0 | 1,399 | 6,468 | 6,974 | n/a (no cache) | 1.49% |
+| `edit_replace` | 726 | 0 | 5 | 10 | 148 | n/a | 0.0% |
+| `edit_overwrite` | 507 | 0 | 1 | 2 | 133 | n/a | 0.0% |
+| `analyze_file` | 254 | 0 | 358 | 385 | 1,995 | 14.57% (37/254) | 0.0% |
+| `analyze_module` | 169 | 0 | 362 | 393 | 913 | 11.24% (19/169) | 0.0% |
+| `analyze_directory` | 113 | 0 | 383 | 413 | 1,324 | 3.54% (4/113) | 0.0% |
+| `analyze_symbol` | 4 | 32 | 66 | 66 | 38 | 0.0% (0/4) | 0.0% |
+
+Cache tier breakdown across all cacheable tools: 540 cacheable calls, 60 hits (10 L1-memory, 50
+L2-disk), overall hit rate 11.1%. `exec_command` reliability over the same window: 98.64% success,
+370 non-zero exits (4.33%), 1 timeout. The long tail is real, not corpus noise: 116 calls exceeded
+60 seconds, including a handful near 180 seconds.
 
 *Table 2: June 2026 tool metrics, reproduced from the prior audit for reference.*
 
@@ -76,27 +94,31 @@ in the scout's draft, folded into this document:
 
 ### Comparison validity
 
-August's corpus is a single recent session (2,360 calls); June's is multi-day accumulated
-production use (66,598 calls) -- roughly 3.5% the sample size, with different workload
-composition. Percentile statistics on the August side (especially `analyze_directory` and
-`analyze_symbol`, n=18 and n=1) are not reliable enough to support point comparisons.
+With the corpus corrected, August's sample sizes are smaller than June's for every tool except
+`exec_command` (8,540 vs 56,589 -- August is larger here), but no longer the 3.5%-of-June sliver
+the flawed draft reported. `analyze_symbol` (n=4) is still too small for percentile claims;
+everything else is usable.
 
-*Table 3: Validity of each apparent before/after delta.*
+*Table 3: Validity of each before/after delta, corrected corpus.*
 
 | Metric | June | August | Verdict |
 |---|---:|---:|---|
-| `exec_command` p50 | 95 ms | 30 ms | Misleading -- workload composition differs, do not cite as 3.2x |
-| `exec_command` p95 | 3,862 ms | 2,130 ms | Caveated -- directionally plausible, not confirmed |
-| `exec_command` truncation | 62.56% | 4.4% | Defensible -- F7 filter-attribution fix gives a mechanism, not just a number |
-| `analyze_directory` p50/p95 | 115 / 1,028 ms | 35 / 373 ms | Drop -- n=18, not usable for percentile claims |
-| `analyze_file` cache hit rate | 69.61% | 52.8% | Decline, not improvement |
-| `analyze_module` cache hit rate | 55.92% | 40.0% | Decline, not improvement |
-| `analyze_symbol` cache hit rate | 0.0% | 0.0% (n=1) | Consistent, but neither sample exercises the cache |
+| `exec_command` p50 | 95 ms | 0 ms | Real -- n=8,540, most calls now resolve near-instantly |
+| `exec_command` p95 | 3,862 ms | 1,399 ms | Real -- 64% faster at n=8,540 |
+| `exec_command` p99 | 32,699 ms | 6,468 ms | Real -- 80% faster; long tail still exists (116 calls >60s) |
+| `exec_command` truncation | 62.56% | 1.49% | Real -- F7 filter-attribution fix gives a mechanism, not just a number |
+| `analyze_directory` p95/p99 | 1,028 / 1,047 ms | 383 / 413 ms | Real -- n=113, 63%/61% faster |
+| `analyze_file` p95/p99 | 457 / 520 ms | 358 / 385 ms | Real -- n=254, 22%/26% faster |
+| `analyze_module` p95/p99 | 452 / 514 ms | 362 / 393 ms | Real -- n=169, 20%/24% faster |
+| `analyze_symbol` p95/p99 | 534 / 620 ms | 66 / 66 ms | Directionally real, but n=4 -- treat as a lead, not a measurement |
+| `analyze_file` cache hit rate | 69.61% | 14.57% | Real decline -- see G3 |
+| `analyze_module` cache hit rate | 55.92% | 11.24% | Real decline -- see G3 |
+| `analyze_directory` cache hit rate | 30.31% | 3.54% | Real decline -- root cause identified, see G3 |
+| `analyze_symbol` cache hit rate | 0.0% | 0.0% (n=4) | Consistent; still no sample large enough to exercise the cache |
 
-The only metric defensible as a real improvement across both corpora is the truncation drop,
-because it is backed by a source-level mechanism (F7's `filter_applied` attribution), not just a
-sample-to-sample percentage. Everything else needs a controlled, fixed-workload benchmark before
-being cited as a measured gain.
+Latency improved across every tool with a usable sample. Cache hit rates fell across every
+per-file and per-directory tool, and that decline is now investigated rather than caveated away
+(G3).
 
 ## Summary
 
@@ -114,27 +136,29 @@ being cited as a measured gain.
 | F8 | Low | Refactor | Tool guidance needed a token-efficiency pass | [#1043](https://github.com/clouatre-labs/aptu-coder/issues/1043) | Closed (#1387) |
 | G1 | Medium | Refactor | `StructuralGraph::build_from_analysis` has no cache check before rebuilding | [#1406](https://github.com/clouatre-labs/aptu-coder/issues/1406) | Open |
 | G2 | Low | Refactor | Graph resource handler materializes full node set before paginating | [#1407](https://github.com/clouatre-labs/aptu-coder/issues/1407) | Open |
+| G3 | Medium | Bug | `analyze_directory` cache key invalidates on any unrelated file mtime change in the walked tree | [#1409](https://github.com/clouatre-labs/aptu-coder/issues/1409) | Open |
 
 ## F1-F8: Verification Against Current Source
 
-All eight fixes are confirmed present and correct in source, independent of the corpus caveats
+All eight fixes are confirmed present and correct in source, independent of the corpus correction
 above:
 
 - **F1** -- `crates/aptu-coder/src/tools/exec_command.rs` has no cache lookup path; metrics report
-  a consistent 0.0% hit rate; tool description no longer advertises caching.
+  a consistent 0.0% hit rate across 8,540 calls; tool description no longer advertises caching.
 - **F2** -- `analyze_module` routes through the lightweight `ModuleInfo` extraction path
   (functions + imports only), confirmed by direct tool call and source read.
 - **F3** -- `crates/aptu-coder-core/src/traversal.rs`'s `walk_directory` takes `max_depth` into
   the `WalkBuilder` itself rather than filtering post-walk.
 - **F4** -- `process_file_entry` in `analyze.rs` reads each eligible file exactly once.
 - **F5** -- `CallGraphCache` (`crates/aptu-coder-core/src/cache.rs`) is a real LRU keyed on root
-  path, git ref, follow depth, match mode, `impl_only`, and file mtimes. Neither corpus exercises
-  repeated symbol lookups, so hit-rate effectiveness is unverified by metrics, but the
-  implementation is unit-tested and present.
-- **F6** -- `analyze_file.rs:261` calls `semantic.project(params.fields.as_deref())`, so
-  `structuredContent` is filtered, not just the text payload.
+  path, git ref, follow depth, match mode, `impl_only`, and file mtimes. Even the corrected
+  corpus only has 4 `analyze_symbol` calls, still too few to exercise repeated lookups; the
+  implementation is unit-tested and present, but effectiveness stays unverified by metrics.
+- **F6** -- `analyze_file.rs:261` calls `semantic.project(params.fields.as_deref())`. The
+  corrected corpus shows this is exercised in practice, not just theoretically wired up:
+  `fields_projected` is `true` on 28 of 254 `analyze_file` calls in the aggregated window.
 - **F7** -- exec metrics events now carry `filter_applied`, giving filter-tuning visibility that
-  didn't exist in June.
+  didn't exist in June; truncation dropped from 62.56% to 1.49% at n=8,540.
 - **F8** -- tool descriptions were trimmed (#1387, merged 2026-08-10) while the
   `analyze_directory -> analyze_module -> analyze_file` routing guidance was preserved.
 
@@ -196,26 +220,98 @@ pagination so the full reachable set is never materialized for deep traversals.
   once `offset + PAGE_SIZE` nodes are found.
 - A large-graph test case exists to catch regressions.
 
+### G3: `analyze_directory`'s cache key invalidates on any file mtime change in the walked tree
+
+**Severity:** Medium
+**Type:** Bug (cache design)
+**File:** `crates/aptu-coder-core/src/cache.rs:73-111`
+
+**Observed state:**
+
+- `DirectoryCacheKey` (lines 73-79) is `{ files: Vec<(PathBuf, SystemTime)>, mode, max_depth,
+  git_ref }`, where `files` is every file's path and mtime under the walked subtree, sorted and
+  hashed as one unit.
+- `handle_overview_mode` (`crates/aptu-coder/src/tools/analyze_directory.rs:56-61`) builds this
+  key from the full `walk_directory` result before checking the cache.
+- Consequence: touching *any* file anywhere in the walked subtree -- unrelated to what the caller
+  actually asked about -- changes the key and invalidates the cached result for the whole
+  directory, at any depth.
+- `git_ref` in the key is caller-supplied (`params.git_ref`, defaults to `None`) for
+  filtered-vs-unfiltered diffing; it is not automatically the repository's current commit, so it
+  does not independently explain the decline.
+
+**Impact:** In a repository under active, multi-file development -- exactly what the 11-day
+August window captures, and exactly the environment this tool is meant to serve -- the cache
+entry for `analyze_directory` is invalidated far more often than a caller's actual query would
+warrant. This is the most concrete, source-confirmed explanation for `analyze_directory`'s hit
+rate falling from 30.31% (June) to 3.54% (August, n=113). It plausibly also contributes to the
+`analyze_file`/`analyze_module` declines to a lesser degree, since directory-level cache misses
+cascade into re-analyzing the files underneath, but those two tools have their own per-file
+`CacheKey { path, modified, mode }` (`cache.rs:65-71`) which should be far less sensitive to
+unrelated churn -- their decline (69.61%->14.57%, 55.92%->11.24%) needs separate investigation
+and is not fully explained by this finding alone.
+
+**Fix direction:** Scope the cache key to what the query actually depends on, not the whole
+walked subtree:
+
+- For `max_depth`-bounded or `fields`-projected queries, key on only the files within scope of
+  the response, not every file the walk happened to traverse.
+- Alternatively, move to a directory-tree fingerprint that changes only when structurally
+  relevant files change (e.g. hash of the file *list* separately from mtimes, so unrelated
+  content edits within already-known files don't bust listing-level caches).
+
+**Acceptance criteria:**
+
+- Cache hit rate for `analyze_directory` improves under a benchmark that edits one file outside
+  the query's effective scope between calls.
+- No regression: a change to a file within scope still invalidates correctly.
+- `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check` pass.
+
+**Open question (not yet a filed finding):** whether the `analyze_file`/`analyze_module`
+hit-rate decline is a similar cache-design issue or simply reflects August's workload touching a
+more diverse set of files across many unrelated tasks than June's corpus did. The per-file
+`CacheKey` design looks sound on inspection; confirming this needs the controlled benchmark from
+[#1408](https://github.com/clouatre-labs/aptu-coder/issues/1408) rather than more corpus reading.
+
 ## Best Practices Affirmed
 
 - The two-tier cache design (L1 in-memory, L2 disk) established by F5 and extended by the
-  knowledge-graph work is sound and consistent across subsystems, except for the gap in G1.
-- JSONL metrics now carry enough attribution (`filter_applied`, `cache_tier`,
-  `output_truncated`) to drive this kind of audit without extra instrumentation.
-- Bounded traversal (F3) and fast paths (F2) hold up under direct testing.
+  knowledge-graph work is sound and consistent across subsystems, except for the gaps in G1 and
+  G3.
+- JSONL metrics now carry enough attribution (`filter_applied`, `cache_tier`, `fields_projected`,
+  `output_truncated`) to drive this kind of audit without extra instrumentation -- provided the
+  full retention window is aggregated, not a single day's file.
+- Bounded traversal (F3) and fast paths (F2) hold up under direct testing, and latency improved
+  across every tool with a usable sample size.
 
 ## Remaining Opportunities
 
-1. Establish a controlled, fixed-workload benchmark for exec/analyze latency instead of comparing
-   opportunistic metrics corpora -- the comparison-validity gaps in Table 3 will recur on every
-   future re-run otherwise. Tracked as
+1. Establish a controlled, fixed-workload benchmark for exec/analyze latency and cache
+   effectiveness, complementing (not replacing) the corrected JSONL aggregation above. Tracked as
    [#1408](https://github.com/clouatre-labs/aptu-coder/issues/1408): extend the existing
    `crates/aptu-coder-core/benches/analysis.rs` criterion harness with `CallGraphCache` and
    `StructuralGraph::build_from_analysis` benchmarks, in-process against the repo's own `src/`.
-2. Close G1 ([#1406](https://github.com/clouatre-labs/aptu-coder/issues/1406), graph cache)
+2. Fix G3 ([#1409](https://github.com/clouatre-labs/aptu-coder/issues/1409), `analyze_directory`
+   cache key scoping) -- this is the highest-confidence, most actionable finding in this audit
+   and directly explains a measured regression.
+3. Close G1 ([#1406](https://github.com/clouatre-labs/aptu-coder/issues/1406), graph cache)
    before resource-surface usage grows past occasional PR-review queries.
-3. Validate F5's `CallGraph` cache effectiveness under a workload that actually repeats symbol
-   lookups; neither corpus sampled here does. Covered by the same benchmark work in
+4. Investigate whether the `analyze_file`/`analyze_module` cache-hit decline shares G3's root
+   cause or is workload-driven, using [#1408](https://github.com/clouatre-labs/aptu-coder/issues/1408)'s
+   controlled benchmark rather than further corpus reading.
+5. Validate F5's `CallGraph` cache effectiveness under a workload that actually repeats symbol
+   lookups; no corpus sampled across either audit does. Covered by
    [#1408](https://github.com/clouatre-labs/aptu-coder/issues/1408).
-4. Revisit G2 ([#1407](https://github.com/clouatre-labs/aptu-coder/issues/1407)) only if depth
+6. Revisit G2 ([#1407](https://github.com/clouatre-labs/aptu-coder/issues/1407)) only if depth
    limits are relaxed or graph size grows materially.
+
+## Process Note
+
+The corpus-scoping defect in this audit's first two passes is worth naming plainly: both the
+scout and guard delegates ran `jq`/the metrics script against a single day's file, and neither
+caught it despite AGENTS.md documenting the full `metrics-*.jsonl` glob convention. The guard's
+adversarial pass caught a missed module and a mislabeled comparison, but did not think to
+question the corpus's own scope -- it adversarially checked the scout's *claims*, not the
+scout's *inputs*. Future audit re-runs delegated this way should have the guard (or a dedicated
+check) explicitly verify the metrics corpus covers the full retention window before any
+percentile or cache-hit-rate claim is trusted.
