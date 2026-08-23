@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use aptu_coder_core::cache::{CallGraphCache, CallGraphCacheKey};
+use aptu_coder_core::cache::{
+    CallGraphCache, CallGraphCacheKey, StructuralGraphCache, StructuralGraphCacheKey,
+};
 use aptu_coder_core::graph::StructuralGraph;
 use aptu_coder_core::types::SymbolMatchMode;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -381,6 +383,35 @@ fn structural_graph_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
+fn structural_graph_cache_benchmark(c: &mut Criterion) {
+    let root = Path::new("src");
+    let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
+
+    let file_outputs: Vec<_> = entries
+        .iter()
+        .filter(|e| !e.is_dir && e.path.extension().is_some_and(|ext| ext == "rs"))
+        .map(|e| aptu_coder_core::analyze::analyze_file(e.path.to_str().unwrap(), None).unwrap())
+        .collect();
+
+    let key = StructuralGraphCacheKey::from_entries(root, &entries);
+    let graph = StructuralGraph::build_from_analysis(&file_outputs);
+    let cache = StructuralGraphCache::new(32);
+    cache.put(key.clone(), Arc::new(graph));
+
+    let mut group = c.benchmark_group("structural_graph_cache");
+    group.sample_size(10);
+
+    group.bench_function("cold_miss", |b| {
+        b.iter(|| StructuralGraph::build_from_analysis(std::hint::black_box(&file_outputs)));
+    });
+
+    group.bench_function("warm_hit", |b| {
+        b.iter(|| cache.get(std::hint::black_box(&key)));
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     overview_benchmark,
@@ -392,6 +423,7 @@ criterion_group!(
     analyze_module_benchmark,
     analyze_directory_depth_benchmark,
     call_graph_cache_benchmark,
-    structural_graph_benchmark
+    structural_graph_benchmark,
+    structural_graph_cache_benchmark
 );
 criterion_main!(benches);

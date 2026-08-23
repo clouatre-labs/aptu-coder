@@ -107,6 +107,7 @@ pub(crate) async fn run_focused_with_auto_summary(
 
     let t_start = std::time::Instant::now();
 
+    let sg_cache = ctx.structural_graph_cache.clone();
     let mut output = tokio::task::spawn_blocking({
         let path = analysis_params.path.clone();
         let entries = entries.clone();
@@ -114,8 +115,13 @@ pub(crate) async fn run_focused_with_auto_summary(
         let ct = ct.clone();
         let config = config_initial.clone();
         move || {
-            analyze::analyze_focused_with_progress_with_entries(
-                &path, &config, &counter, &ct, &entries,
+            analyze::analyze_focused_with_progress_with_entries_cached(
+                &path,
+                &config,
+                &counter,
+                &ct,
+                &entries,
+                Some(sg_cache),
             )
         }
     })
@@ -147,16 +153,18 @@ pub(crate) async fn run_focused_with_auto_summary(
             use_summary: true,
             ..config_initial
         };
+        let sg_cache = ctx.structural_graph_cache.clone();
         let summary_result = tokio::task::spawn_blocking({
             let path = analysis_params.path.clone();
             let entries = entries.clone();
             move || {
-                analyze::analyze_focused_with_progress_with_entries(
+                analyze::analyze_focused_with_progress_with_entries_cached(
                     &path,
                     &config_retry,
                     &counter2,
                     &ct,
                     &entries,
+                    Some(sg_cache),
                 )
             }
         })

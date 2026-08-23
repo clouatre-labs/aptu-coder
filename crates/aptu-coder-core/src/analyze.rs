@@ -593,7 +593,7 @@ pub(crate) use crate::analyze_focused::chains_to_entries;
 pub(crate) use crate::analyze_focused::resolve_wildcard_imports;
 pub use crate::analyze_focused::{
     analyze_focused, analyze_focused_with_progress, analyze_focused_with_progress_with_entries,
-    analyze_import_lookup, analyze_module_file,
+    analyze_focused_with_progress_with_entries_cached, analyze_import_lookup, analyze_module_file,
 };
 /// Read a file and return its raw content with line numbers for a specified range.
 #[cfg(test)]

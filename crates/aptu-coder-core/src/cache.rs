@@ -6,12 +6,13 @@
 //! Recovers gracefully from poisoned mutex conditions.
 
 use crate::analyze::{AnalysisOutput, FileAnalysisOutput, FocusedAnalysisOutput};
+use crate::graph::StructuralGraph;
 use crate::traversal::WalkEntry;
 use crate::types::{AnalysisMode, SymbolMatchMode};
 use lru::LruCache;
 use rayon::prelude::*;
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -242,6 +243,102 @@ impl CallGraphCache {
 }
 
 impl Clone for CallGraphCache {
+    fn clone(&self) -> Self {
+        Self {
+            capacity: self.capacity,
+            cache: Arc::clone(&self.cache),
+            eviction_count: Arc::clone(&self.eviction_count),
+        }
+    }
+}
+
+/// Cache key for structural graph caching combining root path and sorted file mtimes.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct StructuralGraphCacheKey {
+    root_path: PathBuf,
+    /// Sorted (path, mtime_as_unix_nanos) pairs for all non-dir, non-symlink entries.
+    file_mtimes: Vec<(PathBuf, u64)>,
+}
+
+impl StructuralGraphCacheKey {
+    /// Build a `StructuralGraphCacheKey` from walk entries.
+    /// Files are sorted by path for deterministic hashing.
+    /// Directories and symlinks are filtered out; only regular file entries contribute to the key.
+    #[must_use]
+    pub fn from_entries(root: &Path, entries: &[WalkEntry]) -> Self {
+        let mut file_mtimes: Vec<(PathBuf, u64)> = entries
+            .par_iter()
+            .filter(|e| !e.is_dir && !e.is_symlink)
+            .map(|e| {
+                let mtime = e
+                    .mtime
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0);
+                (e.path.clone(), mtime)
+            })
+            .collect();
+        file_mtimes.sort_by(|a, b| a.0.cmp(&b.0));
+        Self {
+            root_path: root.to_path_buf(),
+            file_mtimes,
+        }
+    }
+}
+
+/// Cached structural graph result: `Arc<StructuralGraph>`.
+pub type StructuralGraphCacheValue = Arc<StructuralGraph>;
+
+/// L1 in-memory LRU cache for structural graph results.
+/// Capacity is controlled via `APTU_CODER_GRAPH_CACHE_CAPACITY` env var (default 32).
+pub struct StructuralGraphCache {
+    capacity: usize,
+    cache: Arc<Mutex<LruCache<StructuralGraphCacheKey, StructuralGraphCacheValue>>>,
+    eviction_count: Arc<AtomicU64>,
+}
+
+impl StructuralGraphCache {
+    /// Create a new `StructuralGraphCache` with the given capacity.
+    ///
+    /// `capacity` is clamped to a minimum of 1 so a zero value does not panic.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
+        // SAFETY: capacity is clamped to a minimum of 1 by .max(1), so NonZeroUsize::new() returns Some.
+        #[allow(clippy::expect_used)]
+        let cache_size = NonZeroUsize::new(capacity).expect("capacity is non-zero after .max(1)");
+        Self {
+            capacity,
+            cache: Arc::new(Mutex::new(LruCache::new(cache_size))),
+            eviction_count: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Look up a cached result by key. Returns `None` on miss or mutex poison.
+    #[must_use]
+    pub fn get(&self, key: &StructuralGraphCacheKey) -> Option<StructuralGraphCacheValue> {
+        lock_or_recover(&self.cache, self.capacity, |guard| guard.get(key).cloned())
+    }
+
+    /// Store a result in the cache.
+    pub fn put(&self, key: StructuralGraphCacheKey, value: StructuralGraphCacheValue) {
+        lock_or_recover(&self.cache, self.capacity, |guard| {
+            if guard.len() >= self.capacity {
+                self.eviction_count.fetch_add(1, Ordering::Relaxed);
+            }
+            guard.put(key, value);
+        });
+    }
+
+    /// Returns the number of LRU evictions that have occurred in this cache.
+    #[must_use]
+    pub fn eviction_count(&self) -> u64 {
+        self.eviction_count.load(Ordering::Relaxed)
+    }
+}
+
+impl Clone for StructuralGraphCache {
     fn clone(&self) -> Self {
         Self {
             capacity: self.capacity,
@@ -602,6 +699,92 @@ mod tests {
 
         // Assert: falls back to default
         assert_eq!(result, 8);
+    }
+
+    #[test]
+    fn test_structural_graph_cache_cold_miss() {
+        // Arrange
+        let cache = StructuralGraphCache::new(32);
+        let key = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root"),
+            file_mtimes: vec![(PathBuf::from("/test/root/lib.rs"), 1000)],
+        };
+
+        // Act
+        let result = cache.get(&key);
+
+        // Assert
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_structural_graph_cache_warm_hit() {
+        // Arrange
+        let cache = StructuralGraphCache::new(32);
+        let key = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root"),
+            file_mtimes: vec![(PathBuf::from("/test/root/lib.rs"), 1000)],
+        };
+        let graph = Arc::new(StructuralGraph::build_from_analysis(&[]));
+        cache.put(key.clone(), Arc::clone(&graph));
+
+        // Act
+        let result = cache.get(&key);
+
+        // Assert
+        assert!(result.is_some());
+        assert_eq!(Arc::strong_count(&result.unwrap()), 3);
+    }
+
+    #[test]
+    fn test_structural_graph_cache_changed_mtime_returns_none() {
+        // Arrange
+        let cache = StructuralGraphCache::new(32);
+        let key1 = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root"),
+            file_mtimes: vec![(PathBuf::from("/test/root/lib.rs"), 1000)],
+        };
+        let key2 = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root"),
+            file_mtimes: vec![(PathBuf::from("/test/root/lib.rs"), 2000)],
+        };
+        let graph = Arc::new(StructuralGraph::build_from_analysis(&[]));
+        cache.put(key1, graph);
+
+        // Act
+        let result = cache.get(&key2);
+
+        // Assert
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_structural_graph_cache_eviction_count() {
+        // Arrange
+        let cache = StructuralGraphCache::new(2);
+        let graph = Arc::new(StructuralGraph::build_from_analysis(&[]));
+        let key1 = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root1"),
+            file_mtimes: vec![],
+        };
+        let key2 = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root2"),
+            file_mtimes: vec![],
+        };
+        let key3 = StructuralGraphCacheKey {
+            root_path: PathBuf::from("/test/root3"),
+            file_mtimes: vec![],
+        };
+
+        // Act: insert 3 entries into capacity-2 cache
+        cache.put(key1, Arc::clone(&graph));
+        cache.put(key2, Arc::clone(&graph));
+        assert_eq!(cache.eviction_count(), 0);
+
+        cache.put(key3, graph);
+
+        // Assert: 1 eviction occurred
+        assert_eq!(cache.eviction_count(), 1);
     }
 }
 

@@ -32,6 +32,7 @@ use crate::tools::symbol_focused::{apply_call_graph_pagination, handle_focused_m
 pub(crate) struct AnalyzeSymbolContext {
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
     pub(crate) call_graph_cache: CallGraphCache,
+    pub(crate) structural_graph_cache: aptu_coder_core::cache::StructuralGraphCache,
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
     pub(crate) sid: Option<String>,
     pub(crate) seq: u32,

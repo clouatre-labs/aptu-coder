@@ -6,6 +6,7 @@ use crate::analyze::{
     AnalyzeError, CallChainEntry, FileAnalysisOutput, FocusedAnalysisConfig, FocusedAnalysisOutput,
     MAX_FILE_SIZE_BYTES,
 };
+use crate::cache::{StructuralGraphCache, StructuralGraphCacheKey};
 use crate::formatter::{format_focused_internal, format_focused_summary_internal};
 use crate::graph::store::GraphDiskStore;
 use crate::graph::structural::StructuralGraph;
@@ -391,6 +392,7 @@ pub fn analyze_focused_with_progress(
         &ct,
         &internal_params,
         &entries,
+        None,
     )
 }
 
@@ -403,6 +405,7 @@ fn analyze_focused_with_progress_with_entries_internal(
     ct: &CancellationToken,
     params: &InternalFocusedParams,
     entries: &[WalkEntry],
+    structural_graph_cache: Option<&StructuralGraphCache>,
 ) -> Result<FocusedAnalysisOutput, AnalyzeError> {
     // Check if already cancelled
     if ct.is_cancelled() {
@@ -451,19 +454,32 @@ fn analyze_focused_with_progress_with_entries_internal(
     // Phase 2: Build call graph (clone analysis_results for structural graph storage)
     let mut graph = build_call_graph(analysis_results.clone(), &all_impl_traits)?;
 
-    // Best-effort: warm-cache reload or cold-cache build+persist of structural graph.
-    // On warm hit: skip rebuild. On cold miss: build from analysis results and persist.
+    // Best-effort: L1 memory cache and L2 disk cache for structural graph.
+    // L1 is checked first; on hit, skip L2 entirely.
+    // On L1 miss, check L2; if L2 hits, populate L1.
+    // On L1+L2 miss, build from analysis results and populate both L1 and L2.
     // I/O errors degrade silently; the focused call-graph result is unaffected.
-    if let Some(key) = &cache_key {
+    let l1_key = StructuralGraphCacheKey::from_entries(root, entries);
+    if let Some(cached_graph) = structural_graph_cache.and_then(|c| c.get(&l1_key)) {
+        tracing::debug!(root = %root.display(), "structural graph L1 cache hit");
+        drop(cached_graph);
+    } else if let Some(key) = &cache_key {
         let store = create_graph_store();
-        if store.get(key).is_none() {
+        if let Some(l2_graph) = store.get(key) {
+            tracing::debug!(key, "structural graph cache hit (warm)");
+            if let Some(c) = structural_graph_cache {
+                c.put(l1_key, Arc::new(l2_graph));
+            }
+        } else {
             let sg_entries: Vec<FileAnalysisOutput> = analysis_results
                 .into_iter()
                 .map(|(p, s)| FileAnalysisOutput::new(p.to_string_lossy().into_owned(), s, 0, None))
                 .collect();
-            store.put(key, &StructuralGraph::build_from_analysis(&sg_entries));
-        } else {
-            tracing::debug!(key, "structural graph cache hit (warm)");
+            let built_graph = StructuralGraph::build_from_analysis(&sg_entries);
+            store.put(key, &built_graph);
+            if let Some(c) = structural_graph_cache {
+                c.put(l1_key, Arc::new(built_graph));
+            }
         }
     }
 
@@ -710,6 +726,37 @@ pub fn analyze_focused_with_progress_with_entries(
         ct,
         &internal_params,
         entries,
+        None,
+    )
+}
+
+/// Analyze a symbol's call graph using pre-walked directory entries with optional structural graph caching.
+pub fn analyze_focused_with_progress_with_entries_cached(
+    root: &Path,
+    params: &FocusedAnalysisConfig,
+    progress: &Arc<AtomicUsize>,
+    ct: &CancellationToken,
+    entries: &[WalkEntry],
+    structural_graph_cache: Option<StructuralGraphCache>,
+) -> Result<FocusedAnalysisOutput, AnalyzeError> {
+    let internal_params = InternalFocusedParams {
+        focus: params.focus.clone(),
+        match_mode: params.match_mode.clone(),
+        follow_depth: params.follow_depth,
+        ast_recursion_limit: params.ast_recursion_limit,
+        use_summary: params.use_summary,
+        impl_only: params.impl_only,
+        def_use: params.def_use,
+        parse_timeout_micros: params.parse_timeout_micros,
+    };
+    analyze_focused_with_progress_with_entries_internal(
+        root,
+        params.max_depth,
+        progress,
+        ct,
+        &internal_params,
+        entries,
+        structural_graph_cache.as_ref(),
     )
 }
 
