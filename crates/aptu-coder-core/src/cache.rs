@@ -193,16 +193,18 @@ impl CallGraphCacheKey {
 /// `CallGraph` is not serializable, so caching is L1 memory only.
 pub type CallGraphCacheValue = Arc<FocusedAnalysisOutput>;
 
-/// L1 in-memory LRU cache for call graph results.
-/// Capacity is controlled via `APTU_CODER_SYMBOL_CACHE_CAPACITY` env var (default 32).
-pub struct CallGraphCache {
+/// Generic thread-safe LRU cache with eviction tracking and poison recovery.
+///
+/// Wraps an [`LruCache`] in `Arc<Mutex<...>>` with an atomic eviction counter.
+/// Recovers gracefully from mutex poisoning by clearing the cache.
+pub struct AnalysisLruCache<K: std::hash::Hash + Eq + Clone, V: Clone> {
     capacity: usize,
-    cache: Arc<Mutex<LruCache<CallGraphCacheKey, CallGraphCacheValue>>>,
+    cache: Arc<Mutex<LruCache<K, V>>>,
     eviction_count: Arc<AtomicU64>,
 }
 
-impl CallGraphCache {
-    /// Create a new `CallGraphCache` with the given capacity.
+impl<K: std::hash::Hash + Eq + Clone, V: Clone> AnalysisLruCache<K, V> {
+    /// Create a new `AnalysisLruCache` with the given capacity.
     ///
     /// `capacity` is clamped to a minimum of 1 so a zero value does not panic.
     #[must_use]
@@ -220,17 +222,22 @@ impl CallGraphCache {
 
     /// Look up a cached result by key. Returns `None` on miss or mutex poison.
     #[must_use]
-    pub fn get(&self, key: &CallGraphCacheKey) -> Option<CallGraphCacheValue> {
+    pub fn get(&self, key: &K) -> Option<V> {
         lock_or_recover(&self.cache, self.capacity, |guard| guard.get(key).cloned())
     }
 
-    /// Store a result in the cache.
-    pub fn put(&self, key: CallGraphCacheKey, value: CallGraphCacheValue) {
+    /// Store a key-value pair in the cache.
+    ///
+    /// Uses [`LruCache::push`] to distinguish between insertions, updates of existing
+    /// keys, and evictions of other entries. Eviction count only increments when a
+    /// different key is evicted at capacity.
+    pub fn put(&self, key: K, value: V) {
         lock_or_recover(&self.cache, self.capacity, |guard| {
-            if guard.len() >= self.capacity {
+            if let Some((evicted_key, _)) = guard.push(key.clone(), value)
+                && evicted_key != key
+            {
                 self.eviction_count.fetch_add(1, Ordering::Relaxed);
             }
-            guard.put(key, value);
         });
     }
 
@@ -241,13 +248,45 @@ impl CallGraphCache {
     }
 }
 
-impl Clone for CallGraphCache {
+impl<K: std::hash::Hash + Eq + Clone, V: Clone> Clone for AnalysisLruCache<K, V> {
     fn clone(&self) -> Self {
         Self {
             capacity: self.capacity,
             cache: Arc::clone(&self.cache),
             eviction_count: Arc::clone(&self.eviction_count),
         }
+    }
+}
+
+/// L1 in-memory LRU cache for call graph results.
+/// Capacity is controlled via `APTU_CODER_SYMBOL_CACHE_CAPACITY` env var (default 32).
+#[derive(Clone)]
+pub struct CallGraphCache(AnalysisLruCache<CallGraphCacheKey, CallGraphCacheValue>);
+
+impl CallGraphCache {
+    /// Create a new `CallGraphCache` with the given capacity.
+    ///
+    /// `capacity` is clamped to a minimum of 1 so a zero value does not panic.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self(AnalysisLruCache::new(capacity))
+    }
+
+    /// Look up a cached result by key. Returns `None` on miss or mutex poison.
+    #[must_use]
+    pub fn get(&self, key: &CallGraphCacheKey) -> Option<CallGraphCacheValue> {
+        self.0.get(key)
+    }
+
+    /// Store a result in the cache.
+    pub fn put(&self, key: CallGraphCacheKey, value: CallGraphCacheValue) {
+        self.0.put(key, value);
+    }
+
+    /// Returns the number of LRU evictions that have occurred in this cache.
+    #[must_use]
+    pub fn eviction_count(&self) -> u64 {
+        self.0.eviction_count()
     }
 }
 
@@ -602,6 +641,61 @@ mod tests {
 
         // Assert: falls back to default
         assert_eq!(result, 8);
+    }
+
+    #[test]
+    fn test_analysis_lru_cache_hit_miss_recency_and_eviction() {
+        let cache = AnalysisLruCache::<&'static str, i32>::new(2);
+        cache.put("a", 1);
+        cache.put("b", 2);
+        // hit returns Some, miss returns None
+        assert_eq!(cache.get(&"a"), Some(1));
+        assert_eq!(cache.get(&"z"), None);
+        // "a" is now MRU; inserting "c" evicts "b" (LRU)
+        cache.put("c", 3);
+        assert_eq!(cache.get(&"a"), Some(1));
+        assert_eq!(cache.get(&"b"), None);
+        assert_eq!(cache.eviction_count(), 1);
+    }
+
+    #[test]
+    fn test_analysis_lru_cache_put_update_at_capacity_no_false_eviction() {
+        let cache = AnalysisLruCache::<String, i32>::new(2);
+        cache.put("k1".to_string(), 10);
+        cache.put("k2".to_string(), 20);
+        assert_eq!(cache.eviction_count(), 0);
+        // update existing key at full capacity
+        cache.put("k1".to_string(), 99);
+        // no false eviction on update
+        assert_eq!(cache.eviction_count(), 0);
+        assert_eq!(cache.get(&"k1".to_string()), Some(99));
+        assert_eq!(cache.get(&"k2".to_string()), Some(20));
+    }
+
+    #[test]
+    fn test_analysis_lru_cache_clone_shares_eviction_counter() {
+        let cache1 = AnalysisLruCache::<&'static str, i32>::new(1);
+        let cache2 = cache1.clone();
+        cache1.put("k1", 1);
+        cache2.put("k2", 2);
+        // cloned instances share eviction_count
+        assert_eq!(cache1.eviction_count(), 1);
+        assert_eq!(cache2.eviction_count(), 1);
+        assert_eq!(cache1.get(&"k1"), None);
+        assert_eq!(cache1.get(&"k2"), Some(2));
+    }
+
+    #[test]
+    fn test_analysis_lru_cache_new_clamps_zero_capacity_to_one() {
+        let cache = AnalysisLruCache::<&'static str, i32>::new(0);
+        assert_eq!(cache.capacity, 1);
+        cache.put("item1", 1);
+        assert_eq!(cache.get(&"item1"), Some(1));
+        assert_eq!(cache.eviction_count(), 0);
+        cache.put("item2", 2);
+        assert_eq!(cache.eviction_count(), 1);
+        assert_eq!(cache.get(&"item1"), None);
+        assert_eq!(cache.get(&"item2"), Some(2));
     }
 }
 
