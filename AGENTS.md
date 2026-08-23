@@ -42,8 +42,8 @@ Files: `$XDG_DATA_HOME/aptu-coder/metrics-YYYY-MM-DD.jsonl` (default: `~/.local/
 
 Six validated jq one-liners (run from `~/.local/share/aptu-coder/`). Always `cd` there first -- globs expand against CWD and silently match nothing from a different directory.
 
-1. Tool call volume: `jq -r '.tool' metrics-*.jsonl | sort | uniq -c | sort -rn`
-2. Avg duration by tool: `jq -r '[.tool, .duration_ms] | @tsv' metrics-*.jsonl | awk -F'\t' '{c[$1]++;s[$1]+=$2} END{for(t in c) printf "%s\t%dms avg\n",t,s[t]/c[t]}' | sort -t$'\t' -k2 -rn`
+1. Tool call volume: `jq -r 'select(.result != "received") | .tool' metrics-*.jsonl | sort | uniq -c | sort -rn`
+2. Avg duration by tool: `jq -r 'select(.result != "received") | [.tool, .duration_ms] | @tsv' metrics-*.jsonl | awk -F'\t' '{c[$1]++;s[$1]+=$2} END{for(t in c) printf "%s\t%dms avg\n",t,s[t]/c[t]}' | sort -t$'\t' -k2 -rn`
 3. Error rate by tool: `jq -r 'select(.result=="error") | .tool' metrics-*.jsonl | sort | uniq -c | sort -rn`
 4. Cache hit rate by day: `for f in metrics-*.jsonl; do d=${f#metrics-}; d=${d%.jsonl}; total=$(jq 'select(.cache_hit!=null)' $f | wc -l); hits=$(jq 'select(.cache_hit==true)' $f | wc -l); echo "$d: $hits/$total"; done`
 5. Slowest 10 calls: `jq -r '[.tool, (.duration_ms|tostring), (.session_id//"?")] | @tsv' metrics-*.jsonl | sort -t$'\t' -k2 -rn | head -10`
