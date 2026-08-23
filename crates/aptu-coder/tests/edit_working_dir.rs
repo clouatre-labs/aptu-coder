@@ -216,6 +216,48 @@ async fn edit_overwrite_invalid_working_dir_no_path_leak() {
     );
 }
 
+/// edit_overwrite preserves diagnostic fields (ioErrorKind, ioErrorSource, suggestedAction)
+/// in structuredContent on working_dir validation failure, matching the no-working_dir branch.
+#[tokio::test]
+async fn edit_overwrite_invalid_working_dir_preserves_diagnostics() {
+    let bad_wd = "/nonexistent-working-dir-for-edit-overwrite-diag-test";
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": "test.txt",
+            "content": "hello",
+            "working_dir": bad_wd
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let structured = &resp["result"]["structuredContent"];
+    assert!(
+        structured.is_object(),
+        "structuredContent must be an object: {resp}"
+    );
+    assert!(
+        structured.get("ioErrorKind").is_some(),
+        "structuredContent must include ioErrorKind: {resp}"
+    );
+    assert!(
+        structured.get("ioErrorSource").is_some(),
+        "structuredContent must include ioErrorSource: {resp}"
+    );
+    assert!(
+        structured.get("suggestedAction").is_some(),
+        "structuredContent must include suggestedAction: {resp}"
+    );
+    assert!(
+        structured.get("errorCategory").is_some(),
+        "structuredContent must include errorCategory: {resp}"
+    );
+}
+
 /// edit_replace reports invalid working_dir without exposing path in error message.
 #[tokio::test]
 async fn edit_replace_invalid_working_dir_no_path_leak() {
@@ -243,6 +285,49 @@ async fn edit_replace_invalid_working_dir_no_path_leak() {
     assert!(
         !msg.contains(bad_wd),
         "error message must not contain working_dir path: {msg}"
+    );
+}
+
+/// edit_replace preserves diagnostic fields (ioErrorKind, ioErrorSource, suggestedAction)
+/// in structuredContent on working_dir validation failure, matching the no-working_dir branch.
+#[tokio::test]
+async fn edit_replace_invalid_working_dir_preserves_diagnostics() {
+    let bad_wd = "/nonexistent-working-dir-for-edit-replace-diag-test";
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": "test.txt",
+            "old_text": "old",
+            "new_text": "new",
+            "working_dir": bad_wd
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let structured = &resp["result"]["structuredContent"];
+    assert!(
+        structured.is_object(),
+        "structuredContent must be an object: {resp}"
+    );
+    assert!(
+        structured.get("ioErrorKind").is_some(),
+        "structuredContent must include ioErrorKind: {resp}"
+    );
+    assert!(
+        structured.get("ioErrorSource").is_some(),
+        "structuredContent must include ioErrorSource: {resp}"
+    );
+    assert!(
+        structured.get("suggestedAction").is_some(),
+        "structuredContent must include suggestedAction: {resp}"
+    );
+    assert!(
+        structured.get("errorCategory").is_some(),
+        "structuredContent must include errorCategory: {resp}"
     );
 }
 
