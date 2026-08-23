@@ -94,15 +94,7 @@ fn resolve_edit_path(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
-                let mut result = CallToolResult::error(vec![ContentBlock::text(
-                    "working_dir is not valid; provide an existing directory path".to_string(),
-                )])
-                .with_meta(Some(no_cache_meta()));
-                result.structured_content = Some(serde_json::json!({
-                    "workingDir": wd,
-                    "error": e.message,
-                }));
-                return Err(result);
+                return Err(err_to_tool_result(e));
             }
         }
     } else {
