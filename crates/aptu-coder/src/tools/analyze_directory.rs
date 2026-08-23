@@ -25,6 +25,36 @@ use crate::tools::common::{
 };
 use crate::tools::{AnalyzeDirectoryContext, DirectoryHandlerCall};
 
+/// Applies an optional `git_ref` filter to the directory walk entries.
+///
+/// If `git_ref` is `None` or empty, `entries` is returned unchanged.
+/// If `git_ref` is non-empty, calls `changed_files_from_git_ref` to resolve the
+/// changed set and filters `entries` accordingly.
+pub(crate) fn apply_git_ref_filter(
+    path: &Path,
+    entries: Vec<WalkEntry>,
+    git_ref: Option<&str>,
+) -> Result<Vec<WalkEntry>, ErrorData> {
+    if let Some(git_ref) = git_ref
+        && !git_ref.is_empty()
+    {
+        let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!("git_ref filter failed: {e}"),
+                Some(error_meta(
+                    "resource",
+                    false,
+                    "ensure git is installed and path is inside a git repository",
+                )),
+            )
+        })?;
+        Ok(filter_entries_by_git_ref(entries, &changed, path))
+    } else {
+        Ok(entries)
+    }
+}
+
 /// Core analysis logic for the `analyze_directory` tool (overview mode).
 ///
 /// Checks L1/L2 caches, walks the directory, optionally filters by git ref,
@@ -51,24 +81,7 @@ pub(crate) async fn handle_overview_mode(
         )
     })?;
 
-    let all_entries = if let Some(ref git_ref) = params.git_ref
-        && !git_ref.is_empty()
-    {
-        let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!("git_ref filter failed: {e}"),
-                Some(error_meta(
-                    "resource",
-                    false,
-                    "ensure git is installed and path is inside a git repository",
-                )),
-            )
-        })?;
-        filter_entries_by_git_ref(all_entries, &changed, path)
-    } else {
-        all_entries
-    };
+    let all_entries = apply_git_ref_filter(path, all_entries, params.git_ref.as_deref())?;
 
     let canonical_max_depth = max_depth.filter(|&d| d != 0);
     let git_ref_val = params.git_ref.as_deref().filter(|s| !s.is_empty());

@@ -9,9 +9,19 @@
 mod common;
 
 use common::make_test_analyzer;
+use filetime::{FileTime, set_file_mtime};
 use rmcp::serve_server;
 use serde_json::Value;
 use std::process::Command;
+
+/// Sets a deterministic future mtime on `path` to avoid `sleep` in tests.
+fn bump_mtime(path: &std::path::Path) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("valid unix epoch")
+        .as_secs() as i64;
+    set_file_mtime(path, FileTime::from_unix_time(now + 3600, 0)).expect("set future mtime");
+}
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Shared MCP connection state for sequential calls on the same analyzer.
@@ -192,9 +202,9 @@ async fn test_dir_cache_out_of_scope_file_does_not_bust() {
     );
 
     // Touch the out-of-scope file (utils.rs is NOT in the git_ref diff).
-    // Sleep >= 1s so the filesystem registers a new mtime.
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // Set a deterministic future mtime without sleeping.
     std::fs::write(&utils_path, "fn helper() {}\n").expect("touch utils.rs");
+    bump_mtime(&utils_path);
 
     // Call 3: should STILL be an L1 cache hit (the fix).
     // Out-of-scope file mtime change must not bust the cache.
@@ -248,9 +258,9 @@ async fn test_dir_cache_in_scope_file_change_still_invalidates() {
     );
 
     // Modify the in-scope file (lib.rs is in the git_ref diff).
-    std::thread::sleep(std::time::Duration::from_secs(1));
     std::fs::write(&lib_path, "fn hello() {}\nfn world() {}\nfn extra() {}\n")
         .expect("modify lib.rs again");
+    bump_mtime(&lib_path);
 
     // Call 3: cache miss (in-scope file changed, cache must invalidate).
     let resp3 = mcp.call("analyze_directory", &params).await;

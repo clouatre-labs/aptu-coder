@@ -48,6 +48,7 @@ base64 = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = { workspace = true }
+filetime = { workspace = true }
 serial_test = "=4.0.1"
 tower = { version = "=0.5.3", features = ["util"] }
 rmcp = { workspace = true, features = ["client"] }

@@ -377,6 +377,122 @@ async fn test_handle_overview_mode_git_ref_filters_via_handler() {
     );
 }
 
+#[tokio::test]
+async fn test_apply_git_ref_filter_none_returns_all_entries() {
+    use crate::tools::analyze_directory::apply_git_ref_filter;
+    use tempfile::TempDir;
+
+    // Arrange: create temp dir with files and walk entries
+    let dir = TempDir::new().unwrap();
+    let file1 = dir.path().join("a.rs");
+    let file2 = dir.path().join("b.rs");
+    std::fs::write(&file1, "fn a() {}").unwrap();
+    std::fs::write(&file2, "fn b() {}").unwrap();
+
+    let entries = traversal::walk_directory(dir.path(), None).unwrap();
+    let count_before = entries.len();
+
+    // Act: apply_git_ref_filter with git_ref=None and empty string
+    let filtered_none = apply_git_ref_filter(dir.path(), entries.clone(), None)
+        .expect("apply_git_ref_filter with None must succeed");
+    let filtered_empty = apply_git_ref_filter(dir.path(), entries, Some(""))
+        .expect("apply_git_ref_filter with empty string must succeed");
+
+    // Assert: all entries returned unchanged
+    assert_eq!(
+        filtered_none.len(),
+        count_before,
+        "None git_ref must return all entries unchanged"
+    );
+    assert_eq!(
+        filtered_empty.len(),
+        count_before,
+        "Empty git_ref must return all entries unchanged"
+    );
+}
+
+#[tokio::test]
+async fn test_apply_git_ref_filter_with_git_ref() {
+    use crate::tools::analyze_directory::apply_git_ref_filter;
+    use tempfile::TempDir;
+
+    // Arrange: create a real git repo with two commits
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path();
+
+    let git_no_hook = |repo_path: &std::path::Path, args: &[&str]| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["-c", "core.hooksPath=/dev/null"]);
+        cmd.args(args);
+        cmd.current_dir(repo_path);
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+    };
+    git_no_hook(repo, &["init"]);
+    git_no_hook(
+        repo,
+        &[
+            "-c",
+            "user.email=ci@example.com",
+            "-c",
+            "user.name=CI",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ],
+    );
+
+    std::fs::write(repo.join("file_a.rs"), "fn a() {}").unwrap();
+    git_no_hook(repo, &["add", "file_a.rs"]);
+    git_no_hook(
+        repo,
+        &[
+            "-c",
+            "user.email=ci@example.com",
+            "-c",
+            "user.name=CI",
+            "commit",
+            "-m",
+            "add a",
+        ],
+    );
+
+    std::fs::write(repo.join("file_b.rs"), "fn b() {}").unwrap();
+    git_no_hook(repo, &["add", "file_b.rs"]);
+    git_no_hook(
+        repo,
+        &[
+            "-c",
+            "user.email=ci@example.com",
+            "-c",
+            "user.name=CI",
+            "commit",
+            "-m",
+            "add b",
+        ],
+    );
+
+    let canon_repo = std::fs::canonicalize(repo).unwrap();
+    let entries = traversal::walk_directory(&canon_repo, None).unwrap();
+
+    // Act: apply_git_ref_filter with git_ref=HEAD~1
+    let filtered = apply_git_ref_filter(&canon_repo, entries, Some("HEAD~1"))
+        .expect("apply_git_ref_filter with HEAD~1 must succeed");
+    let filtered_files: Vec<_> = filtered.iter().filter(|e| !e.is_dir).collect();
+
+    // Assert: only file_b.rs remains
+    assert_eq!(
+        filtered_files.len(),
+        1,
+        "only 1 file must remain after git_ref filter"
+    );
+    assert!(
+        filtered_files[0].path.ends_with("file_b.rs"),
+        "the remaining file must be file_b.rs"
+    );
+}
+
 #[test]
 fn test_tool_annotations() {
     // Arrange: get tool list via static method
