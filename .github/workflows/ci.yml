@@ -283,8 +283,8 @@ jobs:
       - name: Install cargo-semver-checks
         if: steps.published.outputs.available == 'true'
         env:
-          VERSION: "0.48.0"
-          SHA256: "1bc0d4d70af9c3ae086af958e67da2a12eaa4978896596f5499792755b62ea60"
+          VERSION: "0.50.0"
+          SHA256: "e35f435ea322659381f52e7034bb4f0470108f5b267d29f13cf08152fa4af29b"
         run: |
           curl -fsSL "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${VERSION}/cargo-semver-checks-aarch64-unknown-linux-gnu.tar.gz" \
             -o cargo-semver-checks.tar.gz
