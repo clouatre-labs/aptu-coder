@@ -180,12 +180,11 @@ Tool parameters, constraints, and examples are available via your MCP client's t
 
 ## MCP Resources
 
-The knowledge graph feature exposes three MCP resource templates for navigating the structural graph built during `analyze_symbol` calls. Resources are URI-addressed; use `resources/templates/list` to discover available templates.
+The knowledge graph feature exposes MCP resource templates for navigating the structural graph built during `analyze_symbol` calls. Resources are URI-addressed; use `resources/templates/list` to discover available templates.
 
 | URI Template | Description |
 |---|---|
 | `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward to configurable depth (default: 3). Returns caller/callee chains in a radial layout. |
-| `aptu-coder://graph/{repo_hash}/import-closure/{module}` | All files that directly or transitively import the given module path. |
 | `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` | The full subgraph (callers, callees, and their connections) for a single symbol. |
 
 **Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.

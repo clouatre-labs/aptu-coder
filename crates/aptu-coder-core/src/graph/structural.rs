@@ -52,6 +52,7 @@ impl StructuralGraph {
         let mut seen: HashSet<(NodeIndex, NodeIndex)> = HashSet::new();
         let mut symbol_index: HashMap<String, NodeIndex> = HashMap::new();
 
+        // Pass 1: Add all File, Symbol, and Module nodes; populate symbol_index.
         for entry in entries {
             let fp = entry.formatted.lines().next().unwrap_or("");
             let file = graph.add_node(Node::File {
@@ -90,6 +91,10 @@ impl StructuralGraph {
                     }
                 }
             }
+        }
+
+        // Pass 2: Resolve call edges against the now-complete symbol_index.
+        for entry in entries {
             for cl in &entry.semantic.calls {
                 // Name-only keying preserves the prior first-definition-wins semantics: the first node inserted for a given name wins.
                 let caller = symbol_index.get(&cl.caller).copied();
@@ -101,6 +106,7 @@ impl StructuralGraph {
                 }
             }
         }
+
         StructuralGraph(graph)
     }
 
