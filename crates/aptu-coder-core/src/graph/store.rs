@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use tracing::warn;
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 
 struct ShardLockGuard {
     _file: std::fs::File,
@@ -91,7 +91,9 @@ impl GraphDiskStore {
             warn!(key, "graph store: format version mismatch");
             return None;
         }
-        postcard::from_bytes(payload).ok()
+        let mut graph: StructuralGraph = postcard::from_bytes(payload).ok()?;
+        graph.rebuild_symbol_index();
+        Some(graph)
     }
 
     pub fn put(&self, key: &str, graph: &StructuralGraph) {
@@ -130,7 +132,7 @@ mod tests {
         g.add_node(Node::File {
             path: "t.rs".into(),
         });
-        StructuralGraph(g)
+        StructuralGraph::from_graph(g)
     }
 
     #[test]
@@ -141,7 +143,7 @@ mod tests {
         store.put("key1", &graph);
         let got = store.get("key1");
         assert!(got.is_some());
-        assert_eq!(got.unwrap().0.node_count(), 1);
+        assert_eq!(got.unwrap().graph.node_count(), 1);
     }
 
     #[test]
