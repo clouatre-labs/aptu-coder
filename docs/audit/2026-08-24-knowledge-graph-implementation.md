@@ -3,7 +3,7 @@
 Date: 2026-08-24
 Commit: 8c5e699
 Version: v0.30.0
-Toolchain: Rust 1.98 / rmcp 3.x / tokio async / petgraph 0.7
+Toolchain: Rust 1.97.1 / rmcp 3.1.4 / tokio async / petgraph 0.8.3
 
 ## Purpose
 
@@ -217,7 +217,7 @@ resolution).
 
 | ID | Prior Finding | Status |
 |---|---|---|
-| KG1 | `FocusedAnalysisOutput` chain fields `#[serde(skip)]` breaks L2 pagination | **Unresolved** -- `#[serde(skip)]` still present on `prod_chains`, `test_chains`, `outgoing_chains` (`analyze.rs:496-540`). Filed as #1361. |
+| KG1 | `FocusedAnalysisOutput` chain fields `#[serde(skip)]` breaks L2 pagination | **Resolved** -- fields now carry `#[serde(default)]`, not `#[serde(skip)]` (`analyze.rs:523,527,531`). Issue #1361 is closed. |
 | KG2 | No persistent structural graph | **Resolved** -- `StructuralGraph` + `GraphDiskStore` shipped. |
 | KG3 | aptu#1420 reference schema | **Adopted** -- Node/Edge types mirror aptu's schema. |
 | KG4 | Do not commit raw graph to repo | **Honored** -- graph stored in `APTU_CODER_DISK_CACHE_DIR`. |
@@ -367,14 +367,15 @@ formatting) that `StructuralGraph` does not need. The `StructuralGraph` has pers
 MCP exposure that `CallGraph` does not need. Keep both, but fix the `StructuralGraph` builder
 to match `CallGraph`'s construction quality (R1).
 
-### R7: Resolve KG1 -- fix serde-skipped pagination fields
+### R7: Resolve KG1 -- fix serde-skipped pagination fields (already resolved, no action needed)
 
-**Priority:** High (pre-existing, filed as #1361)
-**LoC impact:** -4 lines (remove `#[serde(skip)]` attributes)
+**Priority:** N/A -- resolved prior to this audit
+**LoC impact:** None (fix already shipped)
 
-Remove `#[serde(skip)]` from `FocusedAnalysisOutput.prod_chains`, `.test_chains`,
-`.outgoing_chains` in `analyze.rs`. These fields are needed for cross-session pagination on
-L2 cache reload. This was identified in the prior audit (KG1) and remains unresolved.
+This recommendation is stale. `FocusedAnalysisOutput.prod_chains`, `.test_chains`,
+`.outgoing_chains` in `analyze.rs` already carry `#[serde(default)]`, not `#[serde(skip)]`.
+Issue #1361 is closed. Retained here only for historical continuity with the prior audit's
+KG1 finding; see F8.
 
 ---
 
@@ -391,7 +392,7 @@ L2 cache reload. This was identified in the prior audit (KG1) and remains unreso
 | F5 | Low | PERF | BFS start lookup is O(V) linear scan -- no retained symbol-to-NodeIndex index |
 | F6 | Low | ROBUST | mtime-based cache key, not content hashes -- can go stale in edge cases |
 | F7 | Info | ARCH | Two parallel graph representations (`StructuralGraph` petgraph vs `CallGraph` HashMap) -- justified by different workloads |
-| F8 | Info | STATUS | KG1 (serde-skipped pagination) remains unresolved; KG2-KG8 resolved |
+| F8 | Info | STATUS | KG1 resolved (issue #1361 closed, `#[serde(default)]` fix already shipped); KG2-KG8 resolved |
 
 *Table 6: Recommendations.*
 
@@ -403,21 +404,20 @@ L2 cache reload. This was identified in the prior audit (KG1) and remains unreso
 | R4 | Medium | +15 to +20 | Add edge context to resource payloads (fixes F4) |
 | R5 | Low | -4 net | Retain `symbol_index` on `StructuralGraph` for O(1) lookup (fixes F5) |
 | R6 | Info | 0 | Do not unify graph representations (addresses F7) |
-| R7 | High | -4 | Remove `#[serde(skip)]` from `FocusedAnalysisOutput` chain fields (fixes KG1) |
+| R7 | N/A | None | Already resolved prior to this audit -- KG1 fix shipped as `#[serde(default)]`, issue #1361 closed |
 
-**Net LoC impact if all recommendations implemented:** -33 to -53 lines reduction, with
-improved correctness and robustness. The largest reduction comes from removing the broken
-import-closure feature (R2) and dead enum variants (R3).
+**Net LoC impact of the still-actionable recommendations (R1-R5):** -29 to -49 lines
+reduction, with improved correctness and robustness. The largest reduction comes from removing
+the broken import-closure feature (R2) and dead enum variants (R3). R7 is excluded from this
+total: it was already resolved before this audit and requires no further action.
 
 **Recommended action order:**
 
-1. **R7 (KG1 fix)** -- remove `#[serde(skip)]` from `FocusedAnalysisOutput` chain fields.
-   Small scope, high correctness value. Pre-existing issue #1361.
-2. **R1 (builder fix)** -- two-pass symbol index in `build_from_analysis`. Eliminates silent
+1. **R1 (builder fix)** -- two-pass symbol index in `build_from_analysis`. Eliminates silent
    cross-file call edge loss.
-3. **R2 (remove import-closure)** -- delete non-functional resource template and related code.
+2. **R2 (remove import-closure)** -- delete non-functional resource template and related code.
    Reduces complexity.
-4. **R3 (remove dead variants)** -- clean up ontology, bump FORMAT_VERSION. Reduces serialized
+3. **R3 (remove dead variants)** -- clean up ontology, bump FORMAT_VERSION. Reduces serialized
    graph size.
-5. **R4 (edge context)** -- add edges to resource payloads. Improves MCP client usability.
-6. **R5 (symbol_index)** -- O(1) BFS start lookup. Performance improvement for large codebases.
+4. **R4 (edge context)** -- add edges to resource payloads. Improves MCP client usability.
+5. **R5 (symbol_index)** -- O(1) BFS start lookup. Performance improvement for large codebases.
