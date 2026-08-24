@@ -141,7 +141,7 @@ async fn test_list_resources_no_cursor() {
     );
 }
 
-/// Happy path: resources/templates/list without a cursor returns all three
+/// Happy path: resources/templates/list without a cursor returns both
 /// templates and no nextCursor.
 #[tokio::test]
 async fn test_list_resource_templates_no_cursor() {
@@ -155,8 +155,8 @@ async fn test_list_resource_templates_no_cursor() {
         .unwrap_or_else(|| panic!("expected resourceTemplates array, got: {resp}"));
     assert_eq!(
         templates.len(),
-        3,
-        "expected three advertised templates, got: {resp}"
+        2,
+        "expected two advertised templates, got: {resp}"
     );
     assert!(
         resp["result"].get("nextCursor").is_none(),

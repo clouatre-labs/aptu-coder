@@ -29,7 +29,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
 | `shell_write` | `crates/aptu-coder/src/shell_write.rs` | Pre-spawn heredoc guard for `exec_command`: `validate_heredocs` (Phase 1 file-write pattern + stdin-consuming flag + `params.stdin` conflict scan, Phase 2 missing closing-delimiter scan); `scan_backward_for_file_write`, `scan_backward_for_stdin_flag` |
 | `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative), `validate_path_in_dir` (working_dir-relative with traversal prevention), `io_error_to_path_error` |
-| `resources` | `crates/aptu-coder/src/tools/resources.rs` | MCP Resources surface: `list_resources`, `list_resource_templates`, `read_resource` for the knowledge-graph URI templates (blast-radius, import-closure, subgraph) |
+| `resources` | `crates/aptu-coder/src/tools/resources.rs` | MCP Resources surface: `list_resources`, `list_resource_templates`, `read_resource` for the knowledge-graph URI templates (blast-radius, subgraph) |
 | **`aptu-coder-core`** | | |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
@@ -202,14 +202,13 @@ Use `AnalysisConfig::default()` for standard behavior with no limits applied.
 
 ## MCP Resources
 
-The server exposes three MCP resource templates that surface the knowledge graph built during `analyze_symbol` calls. Resources are URI-addressed and read-only; no `subscribe` or `list-changed` support is provided.
+The server exposes MCP resource templates that surface the knowledge graph built during `analyze_symbol` calls. Resources are URI-addressed and read-only; no `subscribe` or `list-changed` support is provided.
 
 **URI scheme:** `aptu-coder://graph/{repo_hash}/{type}/{path}?{params}`
 
 | Resource Template | Description |
 |---|---|
 | `blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward; depth defaults to 3 (max 5) |
-| `import-closure/{module}` | Transitive import closure for a module path |
 | `subgraph/{symbol}` | Full subgraph (callers, callees, connections) for a single symbol |
 
 **Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.

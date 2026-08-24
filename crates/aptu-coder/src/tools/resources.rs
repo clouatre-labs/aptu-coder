@@ -5,7 +5,7 @@
 //!
 //! Implements `list_resources`, `list_resource_templates`, and `read_resource`
 //! for the `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...` URI scheme.
-//! Three resource templates are advertised: blast-radius, import-closure, subgraph.
+//! Two resource templates are advertised: blast-radius, subgraph.
 
 use aptu_coder_core::graph::{GraphDiskStore, StructuralGraph};
 use aptu_coder_core::pagination::{
@@ -42,11 +42,6 @@ pub(crate) enum GraphQuery {
         depth: usize,
         cursor_offset: usize,
     },
-    ImportClosure {
-        repo_hash: String,
-        module: String,
-        cursor_offset: usize,
-    },
     Subgraph {
         repo_hash: String,
         symbol: String,
@@ -58,7 +53,6 @@ impl GraphQuery {
     fn repo_hash(&self) -> &str {
         match self {
             Self::BlastRadius { repo_hash, .. } => repo_hash,
-            Self::ImportClosure { repo_hash, .. } => repo_hash,
             Self::Subgraph { repo_hash, .. } => repo_hash,
         }
     }
@@ -66,7 +60,6 @@ impl GraphQuery {
     fn cursor_offset(&self) -> usize {
         match self {
             Self::BlastRadius { cursor_offset, .. } => *cursor_offset,
-            Self::ImportClosure { cursor_offset, .. } => *cursor_offset,
             Self::Subgraph { cursor_offset, .. } => *cursor_offset,
         }
     }
@@ -168,11 +161,6 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
                 cursor_offset,
             })
         }
-        "import-closure" => Ok(GraphQuery::ImportClosure {
-            repo_hash,
-            module: arg,
-            cursor_offset,
-        }),
         "subgraph" => Ok(GraphQuery::Subgraph {
             repo_hash,
             symbol: arg,
@@ -180,9 +168,7 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
         }),
         _ => Err(ErrorData::new(
             ErrorCode::INVALID_PARAMS,
-            format!(
-                "unknown query type '{query_type}': expected blast-radius, import-closure, or subgraph"
-            ),
+            format!("unknown query type '{query_type}': expected blast-radius or subgraph"),
             None,
         )),
     }
@@ -196,7 +182,6 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
 fn query_to_nodes(graph: &StructuralGraph, query: &GraphQuery) -> Vec<serde_json::Value> {
     let indices = match query {
         GraphQuery::BlastRadius { symbol, depth, .. } => graph.bfs_blast_radius(symbol, *depth),
-        GraphQuery::ImportClosure { module, .. } => graph.bfs_blast_radius(module, 1),
         GraphQuery::Subgraph { symbol, .. } => graph.bfs_blast_radius(symbol, 2),
     };
     indices
@@ -229,7 +214,7 @@ pub(crate) fn list_resources_impl(
         .with_cache_scope(CacheScope::Public))
 }
 
-/// Return three ResourceTemplate entries for the graph URI scheme.
+/// Return two ResourceTemplate entries for the graph URI scheme.
 pub(crate) fn list_resource_templates_impl(
     params: Option<PaginatedRequestParams>,
     _context: &RequestContext<RoleServer>,
@@ -240,12 +225,6 @@ pub(crate) fn list_resource_templates_impl(
             "graph-blast-radius",
         )
         .with_description("BFS blast-radius traversal from a symbol (depth 1-5, default 3)")
-        .with_mime_type("application/json"),
-        ResourceTemplate::new(
-            "aptu-coder://graph/{repo_hash}/import-closure/{module}",
-            "graph-import-closure",
-        )
-        .with_description("Import closure for a module path")
         .with_mime_type("application/json"),
         ResourceTemplate::new(
             "aptu-coder://graph/{repo_hash}/subgraph/{symbol}",

@@ -247,7 +247,7 @@ MCP Resources provide a URI-addressed read-only data surface alongside tools. Th
 
 **Principle:** Resource URI templates must be self-documenting. A small model reading the template description should be able to construct a valid URI without examples.
 
-*Example: The three resource templates use flat, descriptive paths: `blast-radius/{symbol}`, `import-closure/{module}`, `subgraph/{symbol}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it is returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
+*Example: The resource templates use flat, descriptive paths: `blast-radius/{symbol}`, `subgraph/{symbol}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it is returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
 
 ### Prescriptive Resource Template Descriptions
 
