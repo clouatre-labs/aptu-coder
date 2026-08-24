@@ -739,7 +739,7 @@ mod tests {
         let cache = StructuralGraphCache::new(2);
         let key1 = "key1".to_string();
         let key2 = "key2".to_string();
-        let graph = Arc::new(StructuralGraph(petgraph::graph::DiGraph::new()));
+        let graph = Arc::new(StructuralGraph::from_graph(petgraph::graph::DiGraph::new()));
 
         // Miss on non-existent key
         assert!(cache.get("nonexistent").is_none());
@@ -759,7 +759,7 @@ mod tests {
     #[test]
     fn test_structural_graph_cache_eviction() {
         let cache = StructuralGraphCache::new(2);
-        let graph = Arc::new(StructuralGraph(petgraph::graph::DiGraph::new()));
+        let graph = Arc::new(StructuralGraph::from_graph(petgraph::graph::DiGraph::new()));
 
         cache.put("k1".to_string(), graph.clone());
         cache.put("k2".to_string(), graph.clone());
@@ -777,7 +777,7 @@ mod tests {
     fn test_structural_graph_cache_clone_shares_counter() {
         let cache1 = StructuralGraphCache::new(1);
         let cache2 = cache1.clone();
-        let graph = Arc::new(StructuralGraph(petgraph::graph::DiGraph::new()));
+        let graph = Arc::new(StructuralGraph::from_graph(petgraph::graph::DiGraph::new()));
 
         cache1.put("k1".to_string(), graph.clone());
         cache2.put("k2".to_string(), graph);

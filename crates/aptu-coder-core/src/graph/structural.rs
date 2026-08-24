@@ -12,10 +12,6 @@ use std::collections::HashSet;
 pub enum SymbolKind {
     Function,
     Class,
-    Struct,
-    Enum,
-    Trait,
-    Impl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -38,15 +34,38 @@ pub enum Edge {
     Contains,
     Calls,
     Imports,
-    Implements,
-    HasMethod,
-    Tests,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StructuralGraph(pub DiGraph<Node, Edge>);
+pub struct StructuralGraph {
+    pub graph: DiGraph<Node, Edge>,
+    #[serde(skip)]
+    symbol_index: HashMap<String, NodeIndex>,
+}
 
 impl StructuralGraph {
+    fn build_symbol_index(graph: &DiGraph<Node, Edge>) -> HashMap<String, NodeIndex> {
+        let mut index = HashMap::new();
+        for idx in graph.node_indices() {
+            if let Node::Symbol { name, .. } = &graph[idx] {
+                index.entry(name.clone()).or_insert(idx);
+            }
+        }
+        index
+    }
+
+    pub fn from_graph(graph: DiGraph<Node, Edge>) -> Self {
+        let symbol_index = Self::build_symbol_index(&graph);
+        StructuralGraph {
+            graph,
+            symbol_index,
+        }
+    }
+
+    pub(crate) fn rebuild_symbol_index(&mut self) {
+        self.symbol_index = Self::build_symbol_index(&self.graph);
+    }
+
     pub fn build_from_analysis(entries: &[FileAnalysisOutput]) -> Self {
         let mut graph = DiGraph::new();
         let mut seen: HashSet<(NodeIndex, NodeIndex)> = HashSet::new();
@@ -107,15 +126,14 @@ impl StructuralGraph {
             }
         }
 
-        StructuralGraph(graph)
+        StructuralGraph {
+            graph,
+            symbol_index,
+        }
     }
 
     pub fn bfs_blast_radius(&self, symbol: &str, depth: usize) -> Vec<NodeIndex> {
-        let Some(start) = self
-            .0
-            .node_indices()
-            .find(|&i| matches!(&self.0[i], Node::Symbol { name, .. } if name == symbol))
-        else {
+        let Some(start) = self.symbol_index.get(symbol).copied() else {
             return vec![];
         };
         let mut visited = HashSet::new();
@@ -128,7 +146,7 @@ impl StructuralGraph {
             }
             let mut next = Vec::new();
             for node in frontier {
-                for nb in self.0.neighbors(node) {
+                for nb in self.graph.neighbors(node) {
                     if visited.insert(nb) {
                         result.push(nb);
                         next.push(nb);
@@ -215,17 +233,17 @@ mod tests {
             vec![("main", "helper")],
         );
         let g = StructuralGraph::build_from_analysis(&[e]);
-        assert!(g.0.node_count() >= 4, "nodes={}", g.0.node_count());
-        assert!(g.0.edge_count() >= 5, "edges={}", g.0.edge_count());
-        assert!(g.0.edge_indices().any(|i| g.0[i] == Edge::Calls));
+        assert!(g.graph.node_count() >= 4, "nodes={}", g.graph.node_count());
+        assert!(g.graph.edge_count() >= 5, "edges={}", g.graph.edge_count());
+        assert!(g.graph.edge_indices().any(|i| g.graph[i] == Edge::Calls));
     }
 
     #[test]
     fn test_build_empty_input() {
         let e = make_output("src/e.rs", vec![], vec![], vec![], vec![]);
         let g = StructuralGraph::build_from_analysis(&[e]);
-        assert_eq!(g.0.node_count(), 1);
-        assert_eq!(g.0.edge_count(), 0);
+        assert_eq!(g.graph.node_count(), 1);
+        assert_eq!(g.graph.edge_count(), 0);
     }
 
     #[test]
@@ -248,10 +266,11 @@ mod tests {
             vec![("main", "helper")],
         );
         let g = StructuralGraph::build_from_analysis(&[e1, e2]);
-        let n =
-            g.0.edge_indices()
-                .filter(|i| g.0[*i] == Edge::Calls)
-                .count();
+        let n = g
+            .graph
+            .edge_indices()
+            .filter(|i| g.graph[*i] == Edge::Calls)
+            .count();
         assert_eq!(
             n, 1,
             "expected 1 Calls edge (first-definition-wins), got {}",
@@ -277,14 +296,14 @@ mod tests {
         g.add_edge(a, c, Edge::Calls);
         g.add_edge(b, d, Edge::Calls);
         g.add_edge(c, d, Edge::Calls);
-        let graph = StructuralGraph(g);
+        let graph = StructuralGraph::from_graph(g);
         let r = graph.bfs_blast_radius("A", 2);
         assert_eq!(r.len(), 3, "expected 3 nodes, got {:?}", r);
     }
 
     #[test]
     fn test_bfs_symbol_not_found() {
-        let graph = StructuralGraph(DiGraph::new());
+        let graph = StructuralGraph::from_graph(DiGraph::new());
         assert!(graph.bfs_blast_radius("x", 3).is_empty());
     }
 }
