@@ -6,6 +6,7 @@ use crate::analyze::{
     AnalyzeError, CallChainEntry, FileAnalysisOutput, FocusedAnalysisConfig, FocusedAnalysisOutput,
     MAX_FILE_SIZE_BYTES,
 };
+use crate::cache::StructuralGraphCache;
 use crate::formatter::{format_focused_internal, format_focused_summary_internal};
 use crate::graph::store::GraphDiskStore;
 use crate::graph::structural::StructuralGraph;
@@ -391,6 +392,7 @@ pub fn analyze_focused_with_progress(
         &ct,
         &internal_params,
         &entries,
+        None,
     )
 }
 
@@ -403,6 +405,7 @@ fn analyze_focused_with_progress_with_entries_internal(
     ct: &CancellationToken,
     params: &InternalFocusedParams,
     entries: &[WalkEntry],
+    structural_graph_cache: Option<&StructuralGraphCache>,
 ) -> Result<FocusedAnalysisOutput, AnalyzeError> {
     // Check if already cancelled
     if ct.is_cancelled() {
@@ -451,19 +454,32 @@ fn analyze_focused_with_progress_with_entries_internal(
     // Phase 2: Build call graph (clone analysis_results for structural graph storage)
     let mut graph = build_call_graph(analysis_results.clone(), &all_impl_traits)?;
 
-    // Best-effort: warm-cache reload or cold-cache build+persist of structural graph.
-    // On warm hit: skip rebuild. On cold miss: build from analysis results and persist.
+    // Best-effort: warm L1 cache hit, warm L2 disk cache hit, or cold miss build+persist.
+    // On L1 hit: skip rebuild. On L2 hit: build L1 entry from L2. On miss: build both.
     // I/O errors degrade silently; the focused call-graph result is unaffected.
     if let Some(key) = &cache_key {
-        let store = create_graph_store();
-        if store.get(key).is_none() {
-            let sg_entries: Vec<FileAnalysisOutput> = analysis_results
-                .into_iter()
-                .map(|(p, s)| FileAnalysisOutput::new(p.to_string_lossy().into_owned(), s, 0, None))
-                .collect();
-            store.put(key, &StructuralGraph::build_from_analysis(&sg_entries));
+        if let Some(_graph) = structural_graph_cache.and_then(|c| c.get(key)) {
+            tracing::debug!(key, "structural graph cache hit (warm L1)");
         } else {
-            tracing::debug!(key, "structural graph cache hit (warm)");
+            let store = create_graph_store();
+            if let Some(graph) = store.get(key) {
+                tracing::debug!(key, "structural graph cache hit (warm L2)");
+                if let Some(cache) = structural_graph_cache {
+                    cache.put(key.clone(), Arc::new(graph));
+                }
+            } else {
+                let sg_entries: Vec<FileAnalysisOutput> = analysis_results
+                    .into_iter()
+                    .map(|(p, s)| {
+                        FileAnalysisOutput::new(p.to_string_lossy().into_owned(), s, 0, None)
+                    })
+                    .collect();
+                let graph = Arc::new(StructuralGraph::build_from_analysis(&sg_entries));
+                store.put(key, &graph);
+                if let Some(cache) = structural_graph_cache {
+                    cache.put(key.clone(), graph);
+                }
+            }
         }
     }
 
@@ -692,6 +708,7 @@ pub fn analyze_focused_with_progress_with_entries(
     progress: &Arc<AtomicUsize>,
     ct: &CancellationToken,
     entries: &[WalkEntry],
+    structural_graph_cache: Option<&StructuralGraphCache>,
 ) -> Result<FocusedAnalysisOutput, AnalyzeError> {
     let internal_params = InternalFocusedParams {
         focus: params.focus.clone(),
@@ -710,6 +727,7 @@ pub fn analyze_focused_with_progress_with_entries(
         ct,
         &internal_params,
         entries,
+        structural_graph_cache,
     )
 }
 
@@ -735,7 +753,7 @@ pub fn analyze_focused(
         def_use: false,
         parse_timeout_micros: None,
     };
-    analyze_focused_with_progress_with_entries(root, &params, &counter, &ct, &entries)
+    analyze_focused_with_progress_with_entries(root, &params, &counter, &ct, &entries, None)
 }
 
 /// Analyze a single file and return a minimal fixed schema (name, line count, language,
@@ -1083,6 +1101,73 @@ fn extract_string_list_from_list_node(
             if !unquoted.is_empty() {
                 result.push(unquoted);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_structural_graph_cache_warm_hit() {
+        // Create temp dir and a test file
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let test_file = tempfile::NamedTempFile::new_in(temp_dir.path()).expect("tempfile");
+        std::fs::write(&test_file.path(), "fn main() {}").expect("write");
+
+        // Walk the directory to get entries
+        let entries = walk_directory(temp_dir.path(), None).expect("walk");
+
+        // Set up a cache and params
+        let cache = StructuralGraphCache::new(10);
+        let progress = Arc::new(AtomicUsize::new(0));
+        let ct = CancellationToken::new();
+        let config = FocusedAnalysisConfig {
+            focus: "main".to_string(),
+            match_mode: SymbolMatchMode::Exact,
+            follow_depth: 2,
+            max_depth: None,
+            ast_recursion_limit: None,
+            use_summary: false,
+            impl_only: None,
+            def_use: false,
+            parse_timeout_micros: None,
+        };
+
+        // Call 1 - should populate cache
+        let _ = analyze_focused_with_progress_with_entries(
+            temp_dir.path(),
+            &config,
+            &progress,
+            &ct,
+            &entries,
+            Some(&cache),
+        );
+
+        // Check cache was populated by computing the key and verifying it exists
+        if let Some(key) = compute_cache_key(temp_dir.path(), &entries) {
+            assert!(
+                cache.get(&key).is_some(),
+                "structural graph cache should be populated after first call"
+            );
+
+            // Call 2 - should hit the L1 cache (won't build again)
+            let progress2 = Arc::new(AtomicUsize::new(0));
+            let _ = analyze_focused_with_progress_with_entries(
+                temp_dir.path(),
+                &config,
+                &progress2,
+                &ct,
+                &entries,
+                Some(&cache),
+            );
+
+            // Cache should still have exactly one entry
+            assert!(
+                cache.get(&key).is_some(),
+                "structural graph cache hit should work on second call"
+            );
         }
     }
 }

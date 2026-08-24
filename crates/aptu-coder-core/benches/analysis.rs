@@ -321,6 +321,7 @@ fn call_graph_cache_benchmark(c: &mut Criterion) {
         &precomputed_progress,
         &precomputed_ct,
         &entries,
+        None,
     )
     .unwrap();
 
@@ -350,6 +351,7 @@ fn call_graph_cache_benchmark(c: &mut Criterion) {
                 std::hint::black_box(&progress),
                 std::hint::black_box(&ct),
                 std::hint::black_box(&entries),
+                None,
             )
         });
     });
@@ -362,6 +364,8 @@ fn call_graph_cache_benchmark(c: &mut Criterion) {
 }
 
 fn structural_graph_benchmark(c: &mut Criterion) {
+    use aptu_coder_core::cache::StructuralGraphCache;
+
     let root = Path::new("src");
     let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
 
@@ -371,11 +375,37 @@ fn structural_graph_benchmark(c: &mut Criterion) {
         .map(|e| aptu_coder_core::analyze::analyze_file(e.path.to_str().unwrap(), None).unwrap())
         .collect();
 
+    // Compute cache key from mtimes
+    let mut mtimes = Vec::new();
+    for e in &entries {
+        if !e.is_dir && !e.is_symlink {
+            let m = e
+                .mtime
+                .and_then(|t| {
+                    t.duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| d.as_millis() as u64)
+                })
+                .unwrap_or(0);
+            mtimes.push((e.path.clone(), m));
+        }
+    }
+    let cache_key = aptu_coder_core::graph::GraphDiskStore::cache_key(root, &mtimes);
+
+    // Pre-build and populate cache
+    let graph = std::sync::Arc::new(StructuralGraph::build_from_analysis(&file_outputs));
+    let sg_cache = StructuralGraphCache::new(16);
+    sg_cache.put(cache_key.clone(), graph.clone());
+
     let mut group = c.benchmark_group("structural_graph");
     group.sample_size(10);
 
-    group.bench_function("build_from_analysis", |b| {
+    group.bench_function("cold_miss", |b| {
         b.iter(|| StructuralGraph::build_from_analysis(std::hint::black_box(&file_outputs)));
+    });
+
+    group.bench_function("warm_hit", |b| {
+        b.iter(|| sg_cache.get(std::hint::black_box(&cache_key)));
     });
 
     group.finish();

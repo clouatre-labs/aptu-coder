@@ -6,6 +6,7 @@
 //! Recovers gracefully from poisoned mutex conditions.
 
 use crate::analyze::{AnalysisOutput, FileAnalysisOutput, FocusedAnalysisOutput};
+use crate::graph::structural::StructuralGraph;
 use crate::traversal::WalkEntry;
 use crate::types::{AnalysisMode, SymbolMatchMode};
 use lru::LruCache;
@@ -280,6 +281,41 @@ impl CallGraphCache {
 
     /// Store a result in the cache.
     pub fn put(&self, key: CallGraphCacheKey, value: CallGraphCacheValue) {
+        self.0.put(key, value);
+    }
+
+    /// Returns the number of LRU evictions that have occurred in this cache.
+    #[must_use]
+    pub fn eviction_count(&self) -> u64 {
+        self.0.eviction_count()
+    }
+}
+
+/// Cached structural graph result: the fully-built `StructuralGraph`.
+pub type StructuralGraphCacheValue = Arc<StructuralGraph>;
+
+/// L1 in-memory LRU cache for structural graph results.
+/// Capacity is controlled via `APTU_CODER_STRUCTURAL_CACHE_CAPACITY` env var (default 16).
+#[derive(Clone)]
+pub struct StructuralGraphCache(AnalysisLruCache<String, StructuralGraphCacheValue>);
+
+impl StructuralGraphCache {
+    /// Create a new `StructuralGraphCache` with the given capacity.
+    ///
+    /// `capacity` is clamped to a minimum of 1 so a zero value does not panic.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self(AnalysisLruCache::new(capacity))
+    }
+
+    /// Look up a cached result by key. Returns `None` on miss or mutex poison.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<StructuralGraphCacheValue> {
+        self.0.get(&key.to_string())
+    }
+
+    /// Store a result in the cache.
+    pub fn put(&self, key: String, value: StructuralGraphCacheValue) {
         self.0.put(key, value);
     }
 
@@ -696,6 +732,59 @@ mod tests {
         assert_eq!(cache.eviction_count(), 1);
         assert_eq!(cache.get(&"item1"), None);
         assert_eq!(cache.get(&"item2"), Some(2));
+    }
+
+    #[test]
+    fn test_structural_graph_cache_hit_miss() {
+        let cache = StructuralGraphCache::new(2);
+        let key1 = "key1".to_string();
+        let key2 = "key2".to_string();
+        let graph = Arc::new(StructuralGraph(petgraph::graph::DiGraph::new()));
+
+        // Miss on non-existent key
+        assert!(cache.get("nonexistent").is_none());
+
+        // Put and hit
+        cache.put(key1.clone(), graph.clone());
+        assert!(cache.get("key1").is_some());
+
+        // Miss on different key
+        assert!(cache.get("key2").is_none());
+
+        // Put second key
+        cache.put(key2.clone(), graph.clone());
+        assert!(cache.get("key2").is_some());
+    }
+
+    #[test]
+    fn test_structural_graph_cache_eviction() {
+        let cache = StructuralGraphCache::new(2);
+        let graph = Arc::new(StructuralGraph(petgraph::graph::DiGraph::new()));
+
+        cache.put("k1".to_string(), graph.clone());
+        cache.put("k2".to_string(), graph.clone());
+        assert_eq!(cache.eviction_count(), 0);
+
+        // Inserting k3 evicts k1 (LRU)
+        cache.put("k3".to_string(), graph.clone());
+        assert_eq!(cache.eviction_count(), 1);
+        assert!(cache.get("k1").is_none());
+        assert!(cache.get("k2").is_some());
+        assert!(cache.get("k3").is_some());
+    }
+
+    #[test]
+    fn test_structural_graph_cache_clone_shares_counter() {
+        let cache1 = StructuralGraphCache::new(1);
+        let cache2 = cache1.clone();
+        let graph = Arc::new(StructuralGraph(petgraph::graph::DiGraph::new()));
+
+        cache1.put("k1".to_string(), graph.clone());
+        cache2.put("k2".to_string(), graph);
+
+        // Cloned instances share eviction_count
+        assert_eq!(cache1.eviction_count(), 1);
+        assert_eq!(cache2.eviction_count(), 1);
     }
 }
 

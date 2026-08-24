@@ -9,7 +9,7 @@
 
 use crate::filters::load_filter_table;
 use crate::shell::resolve_shell;
-use aptu_coder_core::cache::{AnalysisCache, CallGraphCache};
+use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::{Peer, RoleServer};
 
@@ -120,6 +120,12 @@ pub(crate) fn build_analyzer(
             CallGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
                 "APTU_CODER_SYMBOL_CACHE_CAPACITY",
                 32,
+            ))
+        },
+        structural_graph_cache: {
+            StructuralGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
+                "APTU_CODER_STRUCTURAL_CACHE_CAPACITY",
+                16,
             ))
         },
         edit_failure_counts: Arc::new(Mutex::new(HashMap::new())),
