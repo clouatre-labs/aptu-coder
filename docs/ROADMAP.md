@@ -63,11 +63,11 @@ Added `edit_overwrite` and `edit_replace` to complete the read-analyze-write loo
 
 ### [Complete] Benchmark wave10
 
-Benchmark wave targeting the non-Sonnet model performance gap identified in v10. See [wave10 methodology](benchmarks/wave10/methodology.md). Validated that the gap was closed through server-side improvements (pagination, actionable errors, sequential server instructions).
+Benchmark wave targeting the non-Sonnet model performance gap identified in v10. See [experiment design](benchmarks/wave10/experiment-design.json). Validated that the gap was closed through server-side improvements (pagination, actionable errors, sequential server instructions).
 
 ### [Complete] Benchmark wave11
 
-Benchmark wave validating cross-model consistency. See [wave11 methodology](benchmarks/wave11/methodology.md). Confirmed that small-model improvements from wave10 held across additional model families.
+Benchmark wave validating cross-model consistency. See [experiment design](benchmarks/wave11/experiment-design.json). Confirmed that small-model improvements from wave10 held across additional model families.
 
 ### [Complete] observability-v1
 

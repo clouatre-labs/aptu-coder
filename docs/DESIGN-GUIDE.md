@@ -208,7 +208,7 @@ The annotation posture for this server is stable and locked until new MCP SEPs l
 |---|---|---|---|---|---|
 | `analyze_*` | `true` | `false` | `true` | `false` | Read-only, deterministic, bounded by input path |
 | `edit_*` | `false` | `true` | `false` | `false` | Write-capable, non-idempotent, bounded by input path |
-| `exec_*` | `false` | `true` | `false` | `true` | Executes arbitrary shell commands; open_world_hint surfaces the safety warning to MCP clients |
+| `exec_command` | `false` | `true` | `false` | `true` | Executes arbitrary shell commands; open_world_hint surfaces the safety warning to MCP clients |
 
 *Table 4: Tool annotation posture by family. See [ROADMAP.md](ROADMAP.md) for the rationale and SEP tracking references.*
 
@@ -241,7 +241,7 @@ Parameter documentation flows through schemars: `///` doc comments on struct fie
 
 ## 8. MCP Resources Design
 
-MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced three resource templates as a second access path to the structural graph that `analyze_symbol` builds.
+MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced two resource templates as a second access path to the structural graph that `analyze_symbol` builds.
 
 ### Small-Model-First URI Design
 
