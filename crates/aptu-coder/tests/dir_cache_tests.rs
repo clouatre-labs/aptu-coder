@@ -284,3 +284,139 @@ async fn test_dir_cache_in_scope_file_change_still_invalidates() {
         extract_cache_tier(&resp4)
     );
 }
+
+#[tokio::test]
+async fn test_dir_cache_out_of_scope_depth_file_does_not_bust() {
+    // Arrange: temp dir with in-scope file at depth 1 and out-of-scope file at depth 4.
+    let cwd = std::env::current_dir().expect("must have cwd");
+    let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+    let root = dir.path();
+
+    // Create in-scope file at depth 1: dir/a.rs
+    let in_scope_path = root.join("a.rs");
+    std::fs::write(&in_scope_path, "fn alpha() {}\n").expect("write a.rs");
+
+    // Create out-of-scope file at depth 4: dir/sub1/sub2/sub3/deep.rs
+    let deep_dir = root.join("sub1/sub2/sub3");
+    std::fs::create_dir_all(&deep_dir).expect("create deep dirs");
+    let out_of_scope_path = deep_dir.join("deep.rs");
+    std::fs::write(&out_of_scope_path, "fn deeper() {}\n").expect("write deep.rs");
+
+    let params = serde_json::json!({
+        "path": root.to_str().unwrap(),
+        "max_depth": 2,
+        "page_size": 100
+    });
+
+    let mut mcp = SequentialMcp::new().await;
+
+    // Call 1: cache miss (populates cache).
+    let resp1 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp1), "call 1 must succeed; got: {resp1}");
+    let tier1 = extract_cache_tier(&resp1);
+    assert!(
+        matches!(
+            tier1.as_deref(),
+            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
+        ),
+        "call 1 must be a cache miss; got: {tier1:?}"
+    );
+
+    // Call 2: L1 cache hit (no file changes since call 1).
+    let resp2 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp2), "call 2 must succeed; got: {resp2}");
+    let tier2 = extract_cache_tier(&resp2);
+    assert_eq!(
+        tier2.as_deref(),
+        Some("l1_memory"),
+        "call 2 must be an L1 cache hit; got: {tier2:?}"
+    );
+
+    // Touch the out-of-scope file (depth 4 is beyond max_depth=2).
+    // Set a deterministic future mtime without sleeping.
+    std::fs::write(&out_of_scope_path, "fn deeper() {}\n").expect("touch deep.rs");
+    bump_mtime(&out_of_scope_path);
+
+    // Call 3: should STILL be an L1 cache hit (the fix).
+    // Out-of-scope depth file mtime change must not bust the cache.
+    let resp3 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp3), "call 3 must succeed; got: {resp3}");
+    let tier3 = extract_cache_tier(&resp3);
+    assert_eq!(
+        tier3.as_deref(),
+        Some("l1_memory"),
+        "call 3 must be an L1 cache hit after touching out-of-scope depth file; got: {tier3:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_dir_cache_in_scope_depth_file_change_still_invalidates() {
+    // Arrange: temp dir with in-scope file at depth 1 and out-of-scope file at depth 4.
+    let cwd = std::env::current_dir().expect("must have cwd");
+    let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+    let root = dir.path();
+
+    // Create in-scope file at depth 1: dir/a.rs
+    let in_scope_path = root.join("a.rs");
+    std::fs::write(&in_scope_path, "fn alpha() {}\n").expect("write a.rs");
+
+    // Create out-of-scope file at depth 4: dir/sub1/sub2/sub3/deep.rs
+    let deep_dir = root.join("sub1/sub2/sub3");
+    std::fs::create_dir_all(&deep_dir).expect("create deep dirs");
+    let out_of_scope_path = deep_dir.join("deep.rs");
+    std::fs::write(&out_of_scope_path, "fn deeper() {}\n").expect("write deep.rs");
+
+    let params = serde_json::json!({
+        "path": root.to_str().unwrap(),
+        "max_depth": 2,
+        "page_size": 100
+    });
+
+    let mut mcp = SequentialMcp::new().await;
+
+    // Call 1: cache miss.
+    let resp1 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp1), "call 1 must succeed; got: {resp1}");
+    assert!(
+        matches!(
+            extract_cache_tier(&resp1).as_deref(),
+            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
+        ),
+        "call 1 must be a cache miss"
+    );
+
+    // Call 2: L1 cache hit.
+    let resp2 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp2), "call 2 must succeed; got: {resp2}");
+    assert_eq!(
+        extract_cache_tier(&resp2).as_deref(),
+        Some("l1_memory"),
+        "call 2 must be an L1 cache hit"
+    );
+
+    // Modify the in-scope file (depth 1 is within max_depth=2).
+    std::fs::write(&in_scope_path, "fn alpha() {}\nfn beta() {}\n").expect("modify a.rs");
+    bump_mtime(&in_scope_path);
+
+    // Call 3: cache miss (in-scope file changed, cache must invalidate).
+    let resp3 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp3), "call 3 must succeed; got: {resp3}");
+    let tier3 = extract_cache_tier(&resp3);
+    assert!(
+        matches!(
+            tier3.as_deref(),
+            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
+        ),
+        "call 3 must be a cache miss after in-scope depth file change; got: {tier3:?}"
+    );
+
+    // Call 4: L1 cache hit (cache repopulated by call 3).
+    let resp4 = mcp.call("analyze_directory", &params).await;
+    assert!(is_success(&resp4), "call 4 must succeed; got: {resp4}");
+    assert_eq!(
+        extract_cache_tier(&resp4).as_deref(),
+        Some("l1_memory"),
+        "call 4 must be an L1 cache hit after repopulation; got: {:?}",
+        extract_cache_tier(&resp4)
+    );
+}
