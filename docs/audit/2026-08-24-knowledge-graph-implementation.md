@@ -3,7 +3,7 @@
 Date: 2026-08-24
 Commit: 8c5e699
 Version: v0.30.0
-Toolchain: Rust 1.97.1 / rmcp 3.1.4 / tokio async / petgraph 0.8.3
+Toolchain: Rust 1.98.0 / rmcp 3.1.4 / tokio async / petgraph 0.8.3
 
 ## Purpose
 
