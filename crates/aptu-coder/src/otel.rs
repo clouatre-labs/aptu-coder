@@ -208,3 +208,4 @@ pub fn init_meter() -> Option<SdkMeterProvider> {
 
     Some(provider)
 }
+
