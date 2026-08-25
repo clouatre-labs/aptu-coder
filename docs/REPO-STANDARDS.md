@@ -131,29 +131,7 @@ gh api \
 
 The initial Trivy breach (February 28, 2026) was enabled by a `pull_request_target` workflow present since October 2025: it allowed a malicious fork PR to steal an org-scoped PAT. Poutine had flagged the pattern three months before the breach. The combination of `pull_request_target`, access to secrets, and checkout of the PR head SHA is the highest-risk pattern in GitHub Actions.
 
-Run poutine as a required CI status check. If `pull_request_target` is unavoidable, isolate every secret behind an Environment with required reviewers and never check out `github.event.pull_request.head.sha`.
-
-```yaml
-# poutine step in CI; add as a required status check
-- name: Audit workflow security
-  uses: boostsecurityio/poutine-action@84c0a0d32e8d57ae12651222be1eb15351429228  # v0.15.2
-  with:
-    action: analyze_local
-```
-
-```bash
-# Org-wide audit for pull_request_target usage via gh api with base64 decode
-gh api /orgs/{org}/repos --paginate --jq '.[].full_name' | while read repo; do
-  gh api /repos/$repo/contents/.github/workflows --jq '.[].path' 2>/dev/null | \
-  while read path; do
-    content=$(gh api /repos/$repo/contents/$path --jq '.content' | base64 -d 2>/dev/null)
-    if echo "$content" | grep -q 'pull_request_target'; then
-      echo "FOUND: $repo/$path"
-    fi
-  done
-done
-```
-*Code Snippet 2: poutine CI step and org-wide audit for `pull_request_target` workflows.*
+Run zizmor as a required CI status check to audit GitHub Actions workflows for security misconfigurations. If `pull_request_target` is unavoidable, isolate every secret behind an Environment with required reviewers and never check out `github.event.pull_request.head.sha`.
 
 **6. Fork PR Workflow Approval**
 
@@ -477,7 +455,7 @@ gh api "/orgs/{org}/audit-log?phrase=action:tag.create+action:repo.create&per_pa
 | 1 | Actions permissions | Overprivileged GITHUB_TOKEN; unreviewed third-party actions | `PUT /orgs/{org}/actions/permissions` |
 | 2 | SHA pinning | Tag poisoning (Trivy breach, Feb-Mar 2026) | zizmor required check; Renovate or Dependabot |
 | 3 | OIDC Trusted Publishers | Stored registry token exfiltration (LiteLLM breach) | Workflow hardening; no `password=` field |
-| 4 | `pull_request_target` ban | Fork PR PAT theft (Trivy breach, Feb 28 2026) | poutine required check; workflow audit |
+| 4 | `pull_request_target` ban | Fork PR PAT theft (Trivy breach, Feb 28 2026) | zizmor required check; workflow audit |
 | 5 | Environment protection | Secrets reachable from fork PRs or unapproved refs | `PUT /repos/{org}/{repo}/environments/{name}` |
 | 6 | Fork PR workflow approval | Untrusted code on org runners; wasted CI minutes | `PUT /orgs/{org}/actions/permissions/fork-pr-contributor-approval` |
 | 7 | Secret scanning (gitleaks) | Long-lived tokens persisting in repository history | gitleaks required check |
