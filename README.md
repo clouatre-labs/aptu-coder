@@ -285,3 +285,4 @@ For the JSONL schema, OTel configuration, and span attribute policy, see:
 ## License
 
 Apache-2.0. See [LICENSE](https://github.com/clouatre-labs/aptu-coder/blob/main/LICENSE) for details.
+
