@@ -110,6 +110,7 @@ pub(crate) async fn handle_file_details_mode(
                     path = params.path,
                 );
                 let output = analyze::FileAnalysisOutput::new(
+                    params.path.clone(),
                     formatted,
                     aptu_coder_core::types::SemanticAnalysis::default(),
                     line_count,
@@ -325,6 +326,7 @@ pub(crate) async fn analyze_file_handler(
     }
 
     let response_output = analyze::FileAnalysisOutput::new(
+        params.path.clone(),
         formatted,
         arc_output.semantic.project(params.fields.as_deref()),
         line_count,

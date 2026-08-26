@@ -532,6 +532,7 @@ mod tests {
         };
         let output = Arc::new(FileAnalysisOutput::new(
             String::new(),
+            String::new(),
             SemanticAnalysis::default(),
             0,
             None,
@@ -561,6 +562,7 @@ mod tests {
             mode: AnalysisMode::FileDetails,
         };
         let output = Arc::new(FileAnalysisOutput::new(
+            String::new(),
             String::new(),
             SemanticAnalysis::default(),
             0,

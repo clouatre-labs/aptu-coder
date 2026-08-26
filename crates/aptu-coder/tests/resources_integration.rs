@@ -256,7 +256,13 @@ async fn test_resources_read_with_edges() {
         vec![call],
         vec![],
     );
-    let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 30, None);
+    let entry = FileAnalysisOutput::new(
+        "test.rs".to_string(),
+        "test.rs:1:1:1".to_string(),
+        analysis,
+        30,
+        None,
+    );
     let graph = StructuralGraph::build_from_analysis(&[entry]);
 
     // Write the graph to disk via GraphDiskStore

@@ -74,7 +74,7 @@ impl StructuralGraph {
 
         // Pass 1: Add all File, Symbol, and Module nodes; populate symbol_index.
         for entry in entries {
-            let fp = entry.formatted.lines().next().unwrap_or("");
+            let fp = &entry.path;
             let file = graph.add_node(Node::File {
                 path: fp.to_string(),
             });
@@ -217,6 +217,7 @@ mod tests {
         calls: Vec<(&str, &str)>,
     ) -> FileAnalysisOutput {
         FileAnalysisOutput::new(
+            path.to_string(),
             format!("{}:1:1:1", path),
             SemanticAnalysis {
                 functions: funcs
@@ -350,5 +351,37 @@ mod tests {
     fn test_bfs_symbol_not_found() {
         let graph = StructuralGraph::from_graph(DiGraph::new());
         assert!(graph.bfs_blast_radius("x", 3).is_empty());
+    }
+
+    #[test]
+    fn test_build_uses_explicit_path_field() {
+        // Regression test: ensure build_from_analysis uses entry.path,
+        // not the first line of formatted text, when they differ.
+        let mut entry = make_output("correct.rs", vec!["foo"], vec![], vec![], vec![]);
+        entry.formatted = "WRONG_PATH\nsome details".to_string();
+
+        let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+        // File node must use correct.rs
+        let file_paths: Vec<&str> = graph
+            .graph
+            .node_weights()
+            .filter_map(|n| match n {
+                Node::File { path } => Some(path.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(file_paths, vec!["correct.rs"]);
+
+        // Symbol node must use correct.rs
+        let symbol_file_paths: Vec<&str> = graph
+            .graph
+            .node_weights()
+            .filter_map(|n| match n {
+                Node::Symbol { file_path, .. } => Some(file_path.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(symbol_file_paths, vec!["correct.rs"]);
     }
 }
