@@ -16,6 +16,7 @@ Core library for code structure analysis using tree-sitter.
 - **Directory analysis** - File tree with LOC, function, and class counts
 - **File analysis** - Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions
 - **Symbol call graphs** - Callers and callees across a directory with configurable depth
+- **Knowledge graph** - `StructuralGraph` models files, symbols, and modules as nodes with `contains`/`calls`/`imports` edges; BFS blast-radius and subgraph queries; `GraphDiskStore` persists it to disk, keyed by blake3 content hashes with size-capped LRU eviction
 - **Module index** - Lightweight function and import index (~75% smaller than full file analysis); returns graceful fallback (empty index with note) for unsupported extensions
 - **Edit operations** - In-file edits: overwrite, exact-block replace
 - **In-memory analysis** - `analyze_str` parses source text directly without a file path; returns the same `FileAnalysisOutput` as `analyze_file`
