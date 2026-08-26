@@ -36,8 +36,12 @@ pub(crate) struct InternalFocusedParams {
     pub(crate) parse_timeout_micros: Option<u64>,
 }
 
-/// Type alias for analysis results: (`file_path`, `semantic_analysis`) pairs and impl-trait info.
-type FileAnalysisBatch = (Vec<(PathBuf, SemanticAnalysis)>, Vec<ImplTraitInfo>);
+/// Type alias for analysis results: (`file_path`, `semantic_analysis`) pairs, impl-trait info, and precomputed file hashes.
+type FileAnalysisBatch = (
+    Vec<(PathBuf, SemanticAnalysis)>,
+    Vec<ImplTraitInfo>,
+    Vec<(PathBuf, blake3::Hash)>,
+);
 
 /// Phase 1: Collect semantic analysis for all files in parallel.
 fn collect_file_analysis(
@@ -62,6 +66,9 @@ fn collect_file_analysis(
     // Collect per-file timeout events so they can be surfaced as AnalyzeError::ParseTimeout.
     let timed_out: std::sync::Mutex<Vec<(PathBuf, u64)>> = std::sync::Mutex::new(Vec::new());
 
+    // Collect content hashes from successful reads for cache-key computation
+    let hashes: std::sync::Mutex<Vec<(PathBuf, blake3::Hash)>> = std::sync::Mutex::new(Vec::new());
+
     let analysis_results: Vec<(PathBuf, SemanticAnalysis)> = file_entries
         .par_iter()
         .filter_map(|entry| {
@@ -84,6 +91,11 @@ fn collect_file_analysis(
                 progress.fetch_add(1, Ordering::Relaxed);
                 return None;
             };
+
+            // Record content hash (source.as_bytes() is byte-identical to raw file bytes for valid UTF-8)
+            if let Ok(mut h) = hashes.lock() {
+                h.push((entry.path.clone(), blake3::hash(source.as_bytes())));
+            }
 
             // Detect language and extract semantic information
             let language = if let Some(ext_str) = ext {
@@ -149,7 +161,10 @@ fn collect_file_analysis(
         .flat_map(|(_, sem)| sem.impl_traits.iter().cloned())
         .collect();
 
-    Ok((analysis_results, all_impl_traits))
+    // Extract precomputed hashes
+    let precomputed_hashes = hashes.into_inner().unwrap_or_default();
+
+    Ok((analysis_results, all_impl_traits, precomputed_hashes))
 }
 
 /// Phase 2: Build call graph from analysis results.
@@ -167,13 +182,29 @@ fn build_call_graph(
     .map_err(std::convert::Into::into)
 }
 
-/// Cache key from file content hashes. Returns None if any file cannot be read.
-fn compute_cache_key(root: &Path, entries: &[WalkEntry]) -> Option<String> {
+/// Cache key from file content hashes. Reuses precomputed hashes when available,
+/// falls back to reading unhashed files. Returns None if any unhashed file cannot be read.
+fn compute_cache_key(
+    root: &Path,
+    entries: &[WalkEntry],
+    precomputed: &[(PathBuf, blake3::Hash)],
+) -> Option<String> {
+    // Build a map for O(1) lookup of precomputed hashes
+    let mut hash_map = std::collections::HashMap::new();
+    for (path, hash) in precomputed {
+        hash_map.insert(path.as_path(), *hash);
+    }
+
     let mut hashes = Vec::new();
     for e in entries {
         if !e.is_dir && !e.is_symlink {
-            let bytes = std::fs::read(&e.path).ok()?;
-            let hash = blake3::hash(&bytes);
+            let hash = if let Some(h) = hash_map.get(e.path.as_path()) {
+                *h
+            } else {
+                // File was skipped or failed to read in collect_file_analysis; fall back to reading
+                let bytes = std::fs::read(&e.path).ok()?;
+                blake3::hash(&bytes)
+            };
             hashes.push((e.path.clone(), hash));
         }
     }
@@ -189,7 +220,11 @@ fn create_graph_store() -> GraphDiskStore {
     let base = std::env::var("APTU_CODER_DISK_CACHE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data_home.join("aptu-coder").join("analysis-cache"));
-    GraphDiskStore::new(base)
+    let max_bytes = std::env::var("APTU_CODER_DISK_CACHE_MAX_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(crate::graph::store::DEFAULT_MAX_DISK_CACHE_BYTES);
+    GraphDiskStore::new_with_max_bytes(base, max_bytes)
 }
 
 /// Phase 3: Resolve symbol and apply `impl_only` filter.
@@ -431,7 +466,7 @@ fn analyze_focused_with_progress_with_entries_internal(
     }
 
     // Phase 1: Collect file analysis
-    let (analysis_results, all_impl_traits) = collect_file_analysis(
+    let (analysis_results, all_impl_traits, precomputed_hashes) = collect_file_analysis(
         entries,
         progress,
         ct,
@@ -440,7 +475,7 @@ fn analyze_focused_with_progress_with_entries_internal(
     )?;
 
     // Compute cache key for structural graph store (best-effort, degrades silently)
-    let cache_key = compute_cache_key(root, entries);
+    let cache_key = compute_cache_key(root, entries, &precomputed_hashes);
 
     // Check for cancellation before building the call graph (phase 2)
     if ct.is_cancelled() {
@@ -1142,7 +1177,7 @@ mod tests {
         );
 
         // Check cache was populated by computing the key and verifying it exists
-        if let Some(key) = compute_cache_key(temp_dir.path(), &entries) {
+        if let Some(key) = compute_cache_key(temp_dir.path(), &entries, &[]) {
             assert!(
                 cache.get(&key).is_some(),
                 "structural graph cache should be populated after first call"
