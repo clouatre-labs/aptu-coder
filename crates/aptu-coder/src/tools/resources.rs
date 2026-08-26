@@ -20,6 +20,7 @@ use rmcp::model::{
     ResourceContents, ResourceTemplate,
 };
 use rmcp::service::RequestContext;
+use std::collections::HashMap;
 
 const PAGE_SIZE: usize = 50;
 
@@ -174,20 +175,52 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
     }
 }
 
-/// Resolve a query against a graph into a flat list of node JSON values.
+/// Resolve a query against a graph into a list of nodes and edges.
 ///
-/// Nodes whose serialization fails are silently dropped rather than failing the
-/// entire request; a malformed node in the graph should not prevent the client
-/// from receiving the rest of the result set.
-fn query_to_nodes(graph: &StructuralGraph, query: &GraphQuery) -> Vec<serde_json::Value> {
-    let indices = match query {
-        GraphQuery::BlastRadius { symbol, depth, .. } => graph.bfs_blast_radius(symbol, *depth),
-        GraphQuery::Subgraph { symbol, .. } => graph.bfs_blast_radius(symbol, 2),
+/// Returns a tuple of (nodes, edges) where:
+/// - nodes: Vec<serde_json::Value> of node JSON values, in order returned by the query
+/// - edges: Vec<(usize, usize, serde_json::Value)> where each tuple is (source_index, target_index, serialized_edge)
+///
+/// Nodes and edges whose serialization fails are silently dropped rather than failing the
+/// entire request; a malformed node or edge in the graph should not prevent the client
+/// from receiving the rest of the result set. Edges with endpoints missing from the node
+/// list (due to serialization failure) are also dropped.
+fn query_to_graph(
+    graph: &StructuralGraph,
+    query: &GraphQuery,
+) -> (
+    Vec<serde_json::Value>,
+    Vec<(usize, usize, serde_json::Value)>,
+) {
+    let (node_indices, edge_tuples) = match query {
+        GraphQuery::BlastRadius { symbol, depth, .. } => {
+            graph.blast_radius_subgraph(symbol, *depth)
+        }
+        GraphQuery::Subgraph { symbol, .. } => graph.blast_radius_subgraph(symbol, 2),
     };
-    indices
+
+    // Build a map from NodeIndex to its position in the returned node list
+    let mut index_to_position = HashMap::new();
+    let mut nodes = Vec::new();
+    for (pos, idx) in node_indices.iter().enumerate() {
+        if let Ok(node_json) = serde_json::to_value(&graph.graph[*idx]) {
+            index_to_position.insert(*idx, pos);
+            nodes.push(node_json);
+        }
+    }
+
+    // Filter and re-express edges as (source_position, target_position, serialized_edge)
+    let edges: Vec<(usize, usize, serde_json::Value)> = edge_tuples
         .into_iter()
-        .filter_map(|idx| serde_json::to_value(&graph.graph[idx]).ok())
-        .collect()
+        .filter_map(|(source_idx, target_idx, edge)| {
+            let source_pos = index_to_position.get(&source_idx).copied()?;
+            let target_pos = index_to_position.get(&target_idx).copied()?;
+            let edge_json = serde_json::to_value(&edge).ok()?;
+            Some((source_pos, target_pos, edge_json))
+        })
+        .collect();
+
+    (nodes, edges)
 }
 
 /// Decode a list-handler cursor (core base64-STANDARD encoding) to a page offset.
@@ -264,16 +297,37 @@ pub(crate) fn read_resource_impl(
         )
     })?;
 
-    let all_nodes = query_to_nodes(&graph, &query);
+    let (all_nodes, all_edges) = query_to_graph(&graph, &query);
     let total = all_nodes.len();
     let offset = query.cursor_offset();
 
-    let page: Vec<serde_json::Value> = all_nodes.into_iter().skip(offset).take(PAGE_SIZE).collect();
+    let page: Vec<serde_json::Value> = all_nodes
+        .into_iter()
+        .skip(offset)
+        .take(PAGE_SIZE)
+        .collect::<Vec<_>>();
+    let page_end = offset + page.len();
 
-    let next_cursor = (offset + PAGE_SIZE < total).then(|| encode_graph_cursor(offset + PAGE_SIZE));
+    // Filter edges to only those whose source and target both fall in [offset, page_end)
+    let page_edges: Vec<serde_json::Value> = all_edges
+        .into_iter()
+        .filter(|(src, tgt, _)| {
+            *src >= offset && *src < page_end && *tgt >= offset && *tgt < page_end
+        })
+        .map(|(src, tgt, edge_json)| {
+            serde_json::json!({
+                "source": src - offset,
+                "target": tgt - offset,
+                "kind": edge_json,
+            })
+        })
+        .collect();
+
+    let next_cursor = (page_end < total).then(|| encode_graph_cursor(page_end));
 
     let payload = serde_json::json!({
         "nodes": page,
+        "edges": page_edges,
         "next_cursor": next_cursor,
         "total": total,
     });
@@ -385,9 +439,9 @@ mod tests {
     }
 
     #[test]
-    fn test_query_to_nodes_found_symbol() {
-        // bfs_blast_radius returns neighbors of the start node, not the node itself.
-        // A Calls edge ensures the callee is returned.
+    fn test_query_to_graph_found_symbol() {
+        // blast_radius_subgraph includes the start node as the first element and edges.
+        // A Calls edge ensures the callee is returned and the Calls edge appears.
         let graph = make_graph_with_call("caller_func", "callee_func");
         let query = GraphQuery::BlastRadius {
             repo_hash: "x".to_string(),
@@ -395,7 +449,63 @@ mod tests {
             depth: 3,
             cursor_offset: 0,
         };
-        assert!(!query_to_nodes(&graph, &query).is_empty());
+        let (nodes, edges) = query_to_graph(&graph, &query);
+        assert!(!nodes.is_empty(), "nodes should be non-empty");
+        assert!(!edges.is_empty(), "edges should be non-empty");
+        // Check that at least one edge has kind equal to the string "Calls"
+        let has_calls_edge = edges
+            .iter()
+            .any(|(_, _, kind)| kind.as_str() == Some("Calls"));
+        assert!(has_calls_edge, "should have at least one Calls edge");
+    }
+
+    #[test]
+    fn test_query_to_graph_multiple_edges() {
+        // Test that multiple Calls edges are all captured in the result.
+        // Create a graph where one function calls two others.
+        let mut f1 = FunctionInfo::default();
+        f1.name = "main".to_string();
+        f1.line = 1;
+        f1.end_line = 5;
+
+        let mut f2 = FunctionInfo::default();
+        f2.name = "helper1".to_string();
+        f2.line = 10;
+        f2.end_line = 15;
+
+        let mut f3 = FunctionInfo::default();
+        f3.name = "helper2".to_string();
+        f3.line = 20;
+        f3.end_line = 25;
+
+        let call1: CallInfo =
+            serde_json::from_str(r#"{"caller":"main","callee":"helper1","line":2,"column":0}"#)
+                .expect("valid call JSON");
+        let call2: CallInfo =
+            serde_json::from_str(r#"{"caller":"main","callee":"helper2","line":3,"column":0}"#)
+                .expect("valid call JSON");
+
+        let analysis = SemanticAnalysis::new(
+            vec![f1, f2, f3],
+            vec![],
+            vec![],
+            vec![],
+            Default::default(),
+            vec![call1, call2],
+            vec![],
+        );
+        let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 30, None);
+        let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+        let query = GraphQuery::BlastRadius {
+            repo_hash: "x".to_string(),
+            symbol: "main".to_string(),
+            depth: 3,
+            cursor_offset: 0,
+        };
+        let (nodes, edges) = query_to_graph(&graph, &query);
+        assert_eq!(nodes.len(), 3, "should have 3 nodes (main + 2 helpers)");
+        assert_eq!(edges.len(), 2, "should have 2 Calls edges");
     }
 
     #[test]
@@ -484,9 +594,22 @@ mod tests {
             _ => panic!("expected text resource contents"),
         };
         let val1: serde_json::Value = serde_json::from_str(text1).expect("valid JSON payload");
-        assert_eq!(val1["nodes"].as_array().unwrap().len(), 50);
-        assert_eq!(val1["total"].as_u64().unwrap(), 60);
+        assert_eq!(
+            val1["nodes"].as_array().unwrap().len(),
+            50,
+            "first page should have 50 nodes"
+        );
+        assert_eq!(
+            val1["total"].as_u64().unwrap(),
+            61,
+            "total should be 61 (start + 60 callees)"
+        );
         assert!(val1["next_cursor"].as_str().is_some());
+        // First page should have edges (func_0 at position 0 has Calls edges to its 49 in-page callee neighbors)
+        assert!(
+            !val1["edges"].as_array().unwrap().is_empty(),
+            "first page should have edges"
+        );
 
         // Second page read using cursor token for offset 50
         let cursor_token = encode_graph_cursor(50);
@@ -503,9 +626,22 @@ mod tests {
             _ => panic!("expected text resource contents"),
         };
         let val2: serde_json::Value = serde_json::from_str(text2).expect("valid JSON payload");
-        assert_eq!(val2["nodes"].as_array().unwrap().len(), 10);
-        assert_eq!(val2["total"].as_u64().unwrap(), 60);
+        assert_eq!(
+            val2["nodes"].as_array().unwrap().len(),
+            11,
+            "second page should have 11 nodes"
+        );
+        assert_eq!(
+            val2["total"].as_u64().unwrap(),
+            61,
+            "total should be 61 (start + 60 callees)"
+        );
         assert!(val2["next_cursor"].is_null());
+        // Second page should have empty edges array (every edge touches func_0, which is not present on page two)
+        assert!(
+            val2["edges"].as_array().unwrap().is_empty(),
+            "second page should have no edges"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

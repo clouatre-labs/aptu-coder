@@ -9,12 +9,17 @@
 //! mirroring the `make_test_analyzer` harness pattern: initialize handshake,
 //! initialized notification, then the method call.
 
+use std::env;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as TokioMutex;
 
+use aptu_coder_core::analyze::FileAnalysisOutput;
+use aptu_coder_core::graph::{GraphDiskStore, StructuralGraph};
 use aptu_coder_core::pagination::{CursorData, PaginationMode, encode_cursor};
+use aptu_coder_core::types::{CallInfo, FunctionInfo, SemanticAnalysis};
 use serde_json::json;
+use serial_test::serial;
 
 fn make_analyzer() -> aptu_coder::CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
@@ -206,4 +211,110 @@ async fn test_list_resource_templates_out_of_range_cursor() {
         resp["result"].get("nextCursor").is_none(),
         "expected no nextCursor on the last page, got: {resp}"
     );
+}
+
+/// Integration test for the resources/read path asserting edges are present.
+#[tokio::test]
+#[serial]
+async fn test_resources_read_with_edges() {
+    let tmp = std::env::temp_dir().join("aptu-coder-test-resources-edges");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    // SAFETY: This test mutates process-wide environment state with set_var.
+    // The #[serial] attribute ensures this test runs in isolation.
+    unsafe {
+        env::set_var(
+            "APTU_CODER_DISK_CACHE_DIR",
+            tmp.to_string_lossy().into_owned(),
+        );
+    }
+
+    // Build a small graph with one function calling another (Calls edge) and containing it in a file (Contains edge).
+    let mut f1 = FunctionInfo::default();
+    f1.name = "caller".to_string();
+    f1.line = 1;
+    f1.end_line = 10;
+
+    let mut f2 = FunctionInfo::default();
+    f2.name = "callee".to_string();
+    f2.line = 20;
+    f2.end_line = 25;
+
+    let call: CallInfo =
+        serde_json::from_str(r#"{"caller":"caller","callee":"callee","line":1,"column":0}"#)
+            .expect("valid call JSON");
+
+    let analysis = SemanticAnalysis::new(
+        vec![f1, f2],
+        vec![],
+        vec![],
+        vec![],
+        Default::default(),
+        vec![call],
+        vec![],
+    );
+    let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 30, None);
+    let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+    // Write the graph to disk via GraphDiskStore
+    let repo_hash = "test-edges";
+    let store = GraphDiskStore::new(tmp.clone());
+    store.put(repo_hash, &graph);
+
+    // Send a resources/read request for the graph
+    let resp = send_request(
+        "resources/read",
+        json!({
+            "uri": format!("aptu-coder://graph/{repo_hash}/blast-radius/caller"),
+        }),
+    )
+    .await;
+
+    // Assert no error
+    assert!(
+        resp.get("error").is_none(),
+        "unexpected error response: {resp}"
+    );
+
+    // Extract and parse the result
+    let result = resp["result"]
+        .get("contents")
+        .and_then(|c| c.as_array().and_then(|arr| arr.first()))
+        .and_then(|c| c.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("expected text field in response");
+
+    let payload: serde_json::Value =
+        serde_json::from_str(result).expect("response text should be valid JSON");
+
+    // Assert edges array is present and contains at least one Calls edge
+    let edges = payload["edges"]
+        .as_array()
+        .expect("edges should be an array");
+    assert!(
+        !edges.is_empty(),
+        "edges array should be non-empty, got: {payload}"
+    );
+
+    // Check that we have at least one Calls edge (the caller -> callee call)
+    let has_calls_edge = edges
+        .iter()
+        .any(|e| e.get("kind").and_then(|k| k.as_str()) == Some("Calls"));
+    assert!(has_calls_edge, "should have at least one Calls edge");
+
+    // Verify that each edge has source, target, and kind fields
+    for edge in edges {
+        assert!(
+            edge.get("source").is_some(),
+            "edge should have source field"
+        );
+        assert!(
+            edge.get("target").is_some(),
+            "edge should have target field"
+        );
+        assert!(edge.get("kind").is_some(), "edge should have kind field");
+    }
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp);
 }
