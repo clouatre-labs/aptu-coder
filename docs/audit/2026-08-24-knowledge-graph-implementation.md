@@ -153,6 +153,7 @@ are not best practice.
 
 **Severity:** Medium
 **Category:** DESIGN
+**Tracking:** issue #1449
 
 `query_to_nodes` (`resources.rs:196-206`) returns a flat list of `serde_json::Value` node
 serializations. No edge information is included in the response payload. An MCP client
@@ -388,7 +389,7 @@ KG1 finding; see F8.
 | F1 | High | BUG | Import-closure MCP resource always returns empty -- `bfs_blast_radius` matches `Node::Symbol` only, never `Node::Module` |
 | F2 | Medium | BUG | Cross-file call edges silently dropped -- sequential `symbol_index` population misses callees in later-processed files |
 | F3 | Medium | DESIGN | 3 of 6 `Edge` variants (`Implements`, `HasMethod`, `Tests`) and 2 of 6 `SymbolKind` variants (`Trait`, `Impl`) never emitted by builder |
-| F4 | Medium | DESIGN | Resource payloads return nodes without edges -- clients cannot reconstruct subgraph structure |
+| F4 | Medium | DESIGN | Resource payloads return nodes without edges -- clients cannot reconstruct subgraph structure (issue #1449) |
 | F5 | Low | PERF | BFS start lookup is O(V) linear scan -- no retained symbol-to-NodeIndex index |
 | F6 | Low | ROBUST | mtime-based cache key, not content hashes -- can go stale in edge cases |
 | F7 | Info | ARCH | Two parallel graph representations (`StructuralGraph` petgraph vs `CallGraph` HashMap) -- justified by different workloads |
@@ -401,7 +402,7 @@ KG1 finding; see F8.
 | R1 | High | Neutral | Two-pass symbol index in `build_from_analysis` (fixes F2) |
 | R2 | High | -30 to -50 | Remove broken import-closure resource template (fixes F1) |
 | R3 | Medium | -10 to -15 | Remove dead Edge/SymbolKind variants, bump FORMAT_VERSION (fixes F3) |
-| R4 | Medium | +15 to +20 | Add edge context to resource payloads (fixes F4) |
+| R4 | Medium | +15 to +20 | Add edge context to resource payloads (fixes F4, issue #1449) |
 | R5 | Low | -4 net | Retain `symbol_index` on `StructuralGraph` for O(1) lookup (fixes F5) |
 | R6 | Info | 0 | Do not unify graph representations (addresses F7) |
 | R7 | N/A | None | Already resolved prior to this audit -- KG1 fix shipped as `#[serde(default)]`, issue #1361 closed |
