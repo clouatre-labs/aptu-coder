@@ -4,6 +4,7 @@
 
 use crate::analyze::FileAnalysisOutput;
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -132,10 +133,12 @@ impl StructuralGraph {
         }
     }
 
-    pub fn bfs_blast_radius(&self, symbol: &str, depth: usize) -> Vec<NodeIndex> {
-        let Some(start) = self.symbol_index.get(symbol).copied() else {
-            return vec![];
-        };
+    /// BFS traversal returning both the visited set (including start) and the tail
+    /// (neighbors discovered, excluding start).
+    ///
+    /// The visited set contains all nodes reached up to the specified depth.
+    /// The tail is the BFS-order sequence of nodes discovered, not including start.
+    fn bfs_frontier(&self, start: NodeIndex, depth: usize) -> (HashSet<NodeIndex>, Vec<NodeIndex>) {
         let mut visited = HashSet::new();
         let mut result = Vec::new();
         let mut frontier = vec![start];
@@ -155,7 +158,49 @@ impl StructuralGraph {
             }
             frontier = next;
         }
-        result
+        (visited, result)
+    }
+
+    pub fn bfs_blast_radius(&self, symbol: &str, depth: usize) -> Vec<NodeIndex> {
+        let Some(start) = self.symbol_index.get(symbol).copied() else {
+            return vec![];
+        };
+        self.bfs_frontier(start, depth).1
+    }
+
+    /// Blast-radius subgraph including both nodes and edges.
+    ///
+    /// Returns a tuple of (nodes, edges) where:
+    /// - nodes: Vec<NodeIndex> with the start symbol first, followed by all discovered nodes in BFS order
+    /// - edges: Vec<(NodeIndex, NodeIndex, Edge)> containing every edge whose source and target
+    ///   are both in the visited set (not just edges walked by the BFS tree), allowing clients
+    ///   to fully reconstruct the subgraph's connectivity
+    ///
+    /// If the symbol is not found, returns (vec![], vec![]).
+    pub fn blast_radius_subgraph(
+        &self,
+        symbol: &str,
+        depth: usize,
+    ) -> (Vec<NodeIndex>, Vec<(NodeIndex, NodeIndex, Edge)>) {
+        let Some(start) = self.symbol_index.get(symbol).copied() else {
+            return (vec![], vec![]);
+        };
+
+        let (visited, tail) = self.bfs_frontier(start, depth);
+
+        // Build node list: start first, then all discovered nodes in BFS order
+        let mut nodes = vec![start];
+        nodes.extend(tail);
+
+        // Collect all edges whose both source and target are in the visited set
+        let edges: Vec<(NodeIndex, NodeIndex, Edge)> = self
+            .graph
+            .edge_references()
+            .filter(|e| visited.contains(&e.source()) && visited.contains(&e.target()))
+            .map(|e| (e.source(), e.target(), e.weight().clone()))
+            .collect();
+
+        (nodes, edges)
     }
 }
 
