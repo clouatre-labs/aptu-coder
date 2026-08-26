@@ -256,8 +256,9 @@ The server's own instructions expose a 4-step recommended workflow for unknown r
 | Variable | Default | Description |
 |---|---|---|
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
-| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 on-disk call-graph cache used by `analyze_symbol`. Created automatically if it does not exist. |
-| `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 disk cache entirely. |
+| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory shared by the L2 call-graph cache and the structural-graph cache used by `analyze_symbol`. Created automatically if it does not exist. |
+| `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 call-graph disk cache entirely. |
+| `APTU_CODER_DISK_CACHE_MAX_BYTES` | `536870912` (512 MiB) | Max size in bytes for the structural-graph disk cache. LRU-by-mtime eviction runs when exceeded. |
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
 | `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |

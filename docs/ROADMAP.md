@@ -206,7 +206,7 @@ Hardcoded protocol version string replaced with `ProtocolVersion::LATEST`.
 
 ### [Complete] Knowledge Graph: structural module (#1367)
 
-Added `StructuralGraph` and `GraphDiskStore` in `crates/aptu-coder-core/src/graph/`. The structural graph models files, symbols, and modules as nodes with typed edges (contains, calls, imports, implements, etc.). The disk store persists the graph alongside the call-graph cache and degrades silently on I/O errors. Built as a side effect of the `analyze_symbol` cold-cache path.
+Added `StructuralGraph` and `GraphDiskStore` in `crates/aptu-coder-core/src/graph/`. The structural graph models files, symbols, and modules as nodes with typed edges (contains, calls, imports). The disk store persists the graph alongside the call-graph cache and degrades silently on I/O errors. Built as a side effect of the `analyze_symbol` cold-cache path.
 
 ### [Complete] Knowledge Graph: MCP resource surface (#1368)
 

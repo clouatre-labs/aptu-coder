@@ -36,7 +36,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `cache` | `crates/aptu-coder-core/src/cache.rs` | Two-tier caching: L1 in-memory LRU (`AnalysisCache`, `CallGraphCache`) with mtime invalidation and lock_or_recover pattern; L2 on-disk call-graph cache (`DiskCache`) keyed by canonical path + git HEAD SHA, configurable via `APTU_CODER_DISK_CACHE_DIR` and `APTU_CODER_DISK_CACHE_DISABLED` |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
 | `formatter` | `crates/aptu-coder-core/src/formatter/` (emit.rs, mod.rs, pagination.rs, render.rs, summary.rs) | Output formatting for all seven tools |
-| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | `CallGraph` and BFS traversal for symbol focus mode; `StructuralGraph` for knowledge-graph resource queries; `GraphDiskStore` for persistent graph cache |
+| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | `CallGraph` and BFS traversal for symbol focus mode; `StructuralGraph` for knowledge-graph resource queries; `GraphDiskStore` persists the structural graph, keyed by blake3 content hashes, with size-capped LRU-by-mtime eviction (`APTU_CODER_DISK_CACHE_MAX_BYTES`, default 512 MiB) |
 | `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
 | `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
 | `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
@@ -213,6 +213,6 @@ The server exposes MCP resource templates that surface the knowledge graph built
 
 **Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
 
-**Persistence:** `GraphDiskStore` persists the structural graph to disk. On restart the graph is reloaded if available; I/O errors degrade silently.
+**Persistence:** `GraphDiskStore` persists the structural graph to disk, keyed by blake3 content hashes of the analyzed files (not mtime). On restart the graph is reloaded if available; I/O errors degrade silently.
 
 **Warm-up requirement:** Resources return a cold-cache message if `analyze_symbol` has not been called on the directory first. The structural graph is built as a side effect of the `analyze_symbol` cold-cache path.
