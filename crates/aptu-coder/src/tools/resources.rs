@@ -199,12 +199,15 @@ fn query_to_graph(
         GraphQuery::Subgraph { symbol, .. } => graph.blast_radius_subgraph(symbol, 2),
     };
 
-    // Build a map from NodeIndex to its position in the returned node list
+    // Build a map from NodeIndex to its position in the returned node list. The position
+    // must track `nodes.len()` at push time, not the source index into `node_indices`:
+    // a dropped (unserializable) node would otherwise leave every later position off by
+    // the number of prior drops.
     let mut index_to_position = HashMap::new();
     let mut nodes = Vec::new();
-    for (pos, idx) in node_indices.iter().enumerate() {
+    for idx in &node_indices {
         if let Ok(node_json) = serde_json::to_value(&graph.graph[*idx]) {
-            index_to_position.insert(*idx, pos);
+            index_to_position.insert(*idx, nodes.len());
             nodes.push(node_json);
         }
     }
