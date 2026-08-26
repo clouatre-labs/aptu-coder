@@ -389,7 +389,7 @@ KG1 finding; see F8.
 | F1 | High | BUG | **RESOLVED** (issue #1434, PR #1436) -- Import-closure MCP resource always returned empty -- `bfs_blast_radius` matched `Node::Symbol` only, never `Node::Module` |
 | F2 | Medium | BUG | **RESOLVED** (issue #1434, PR #1436) -- Cross-file call edges were silently dropped -- sequential `symbol_index` population missed callees in later-processed files |
 | F3 | Medium | DESIGN | **RESOLVED** (issue #1435, PR #1438) -- 3 of 6 `Edge` variants (`Implements`, `HasMethod`, `Tests`) and 2 of 6 `SymbolKind` variants (`Trait`, `Impl`) were never emitted by builder |
-| F4 | Medium | DESIGN | **RESOLVED** (issue #1449) -- Resource payloads returned nodes without edges -- clients could not reconstruct subgraph structure |
+| F4 | Medium | DESIGN | **RESOLVED** (issue #1449, PR #1451) -- Resource payloads returned nodes without edges -- clients could not reconstruct subgraph structure |
 | F5 | Low | PERF | **RESOLVED** (issue #1435, PR #1438) -- BFS start lookup was O(V) linear scan -- no retained symbol-to-NodeIndex index |
 | F6 | Low | ROBUST | mtime-based cache key, not content hashes -- can go stale in edge cases |
 | F7 | Info | ARCH | Two parallel graph representations (`StructuralGraph` petgraph vs `CallGraph` HashMap) -- justified by different workloads |
@@ -402,12 +402,12 @@ KG1 finding; see F8.
 | R1 | High | Neutral | **DONE** (PR #1436) -- Two-pass symbol index in `build_from_analysis` (fixed F2) |
 | R2 | High | -30 to -50 | **DONE** (PR #1436) -- Removed broken import-closure resource template (fixed F1) |
 | R3 | Medium | -10 to -15 | **DONE** (PR #1438) -- Removed dead Edge/SymbolKind variants, bumped FORMAT_VERSION (fixed F3) |
-| R4 | Medium | +15 to +20 | **DONE** (issue #1449) -- Added edge context to resource payloads (fixed F4) |
+| R4 | Medium | +15 to +20 | **DONE** (issue #1449, PR #1451) -- Added edge context to resource payloads (fixed F4) |
 | R5 | Low | -4 net | **DONE** (PR #1438) -- Retained `symbol_index` on `StructuralGraph` for O(1) lookup (fixed F5) |
 | R6 | Info | 0 | Do not unify graph representations (addresses F7) |
 | R7 | N/A | None | Already resolved prior to this audit -- KG1 fix shipped as `#[serde(default)]`, issue #1361 closed |
 
-**Status as of this update:** R1 through R5 are now done (PRs #1436, #1438, issue #1449), confirmed by
+**Status as of this update:** R1 through R5 are now done (PRs #1436, #1438, #1451), confirmed by
 direct code inspection (no `ImportClosure` references remain; `build_from_analysis` is two-pass;
 `Edge`/`SymbolKind` carry only the 3/2 emitted variants; `StructuralGraph` retains a
 `symbol_index` field for O(1) lookup; resource payloads include edge context). This audit now has
