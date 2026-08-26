@@ -114,6 +114,12 @@ pub struct FileAnalysisOutput {
         schemars(description = "Formatted text representation of the analysis")
     )]
     pub formatted: String,
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(description = "File path of the analyzed file")
+    )]
+    pub path: String,
     #[cfg_attr(
         feature = "schemars",
         schemars(description = "Semantic analysis data including functions, classes, and imports")
@@ -150,12 +156,14 @@ impl FileAnalysisOutput {
     /// Create a new `FileAnalysisOutput`.
     #[must_use]
     pub fn new(
+        path: String,
         formatted: String,
         semantic: SemanticAnalysis,
         line_count: usize,
         next_cursor: Option<String>,
     ) -> Self {
         Self {
+            path,
             formatted,
             semantic,
             line_count,
@@ -409,7 +417,11 @@ pub fn analyze_file(
     tracing::debug!(path = %path, language = %ext, functions = semantic.functions.len(), classes = semantic.classes.len(), imports = semantic.imports.len(), duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX), "file analysis complete");
 
     Ok(FileAnalysisOutput::new(
-        formatted, semantic, line_count, None,
+        path.to_string(),
+        formatted,
+        semantic,
+        line_count,
+        None,
     ))
 }
 
@@ -471,7 +483,11 @@ pub fn analyze_str(
     let formatted = format_file_details("", &semantic, line_count, false, None);
 
     Ok(FileAnalysisOutput::new(
-        formatted, semantic, line_count, None,
+        String::new(),
+        formatted,
+        semantic,
+        line_count,
+        None,
     ))
 }
 

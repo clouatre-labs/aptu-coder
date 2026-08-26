@@ -502,7 +502,13 @@ fn analyze_focused_with_progress_with_entries_internal(
                 let sg_entries: Vec<FileAnalysisOutput> = analysis_results
                     .into_iter()
                     .map(|(p, s)| {
-                        FileAnalysisOutput::new(p.to_string_lossy().into_owned(), s, 0, None)
+                        FileAnalysisOutput::new(
+                            p.to_string_lossy().into_owned(),
+                            String::new(),
+                            s,
+                            0,
+                            None,
+                        )
                     })
                     .collect();
                 let graph = Arc::new(StructuralGraph::build_from_analysis(&sg_entries));

@@ -380,7 +380,13 @@ mod tests {
             vec![call],
             vec![],
         );
-        let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 15, None);
+        let entry = FileAnalysisOutput::new(
+            "test.rs".to_string(),
+            "test.rs:1:1:1".to_string(),
+            analysis,
+            15,
+            None,
+        );
         StructuralGraph::build_from_analysis(&[entry])
     }
 
@@ -497,7 +503,13 @@ mod tests {
             vec![call1, call2],
             vec![],
         );
-        let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 30, None);
+        let entry = FileAnalysisOutput::new(
+            "test.rs".to_string(),
+            "test.rs:1:1:1".to_string(),
+            analysis,
+            30,
+            None,
+        );
         let graph = StructuralGraph::build_from_analysis(&[entry]);
 
         let query = GraphQuery::BlastRadius {
@@ -577,7 +589,13 @@ mod tests {
             calls,
             vec![],
         );
-        let entry = FileAnalysisOutput::new("test.rs:1:1:1".to_string(), analysis, 650, None);
+        let entry = FileAnalysisOutput::new(
+            "test.rs".to_string(),
+            "test.rs:1:1:1".to_string(),
+            analysis,
+            650,
+            None,
+        );
         let graph = StructuralGraph::build_from_analysis(&[entry]);
 
         let repo_hash = "repo_test_pagination";
