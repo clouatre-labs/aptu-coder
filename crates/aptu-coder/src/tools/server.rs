@@ -101,8 +101,15 @@ pub(crate) fn build_analyzer(
     let graph_store_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| xdg_data_home.join("aptu-coder").join("analysis-cache"));
+    let graph_store_max_bytes = std::env::var("APTU_CODER_DISK_CACHE_MAX_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(aptu_coder_core::graph::store::DEFAULT_MAX_DISK_CACHE_BYTES);
     let graph_store =
-        std::sync::Arc::new(aptu_coder_core::graph::GraphDiskStore::new(graph_store_dir));
+        std::sync::Arc::new(aptu_coder_core::graph::GraphDiskStore::new_with_max_bytes(
+            graph_store_dir,
+            graph_store_max_bytes,
+        ));
 
     crate::CodeAnalyzer {
         tool_router: Arc::new(RwLock::new(crate::CodeAnalyzer::tool_router())),
