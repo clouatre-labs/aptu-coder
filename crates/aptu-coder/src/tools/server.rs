@@ -104,7 +104,7 @@ pub(crate) fn build_analyzer(
     let graph_store_max_bytes = std::env::var("APTU_CODER_DISK_CACHE_MAX_BYTES")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(512 * 1024 * 1024); // 512 MiB default, matching store.rs constant
+        .unwrap_or(aptu_coder_core::graph::store::DEFAULT_MAX_DISK_CACHE_BYTES);
     let graph_store =
         std::sync::Arc::new(aptu_coder_core::graph::GraphDiskStore::new_with_max_bytes(
             graph_store_dir,

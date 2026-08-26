@@ -261,37 +261,37 @@ mod tests {
     #[test]
     fn test_eviction_by_lru_mtime() {
         let tmp = TempDir::new().expect("temp dir");
-        // Use a small 1 KiB budget to easily trigger eviction
-        let store = GraphDiskStore::new_with_max_bytes(tmp.path().to_path_buf(), 1024);
         let graph = make_test_graph();
 
-        // Write multiple entries that will exceed the budget
+        // Measure one entry's on-disk size so the budget can be sized tightly
+        // enough to actually force eviction (a budget far above real entry
+        // sizes would let every entry survive, making the test vacuous).
+        let probe_store = GraphDiskStore::new(tmp.path().join("probe"));
+        probe_store.put("probe_key", &graph);
+        let entry_size = std::fs::metadata(probe_store.entry_path("probe_key"))
+            .expect("probe entry metadata")
+            .len();
+
+        // Budget fits exactly one entry, so each new put must evict the oldest.
+        let store = GraphDiskStore::new_with_max_bytes(tmp.path().join("cache"), entry_size + 1);
+
         store.put("aaa_key1", &graph);
+        std::thread::sleep(std::time::Duration::from_millis(20));
         store.put("aaa_key2", &graph);
+        std::thread::sleep(std::time::Duration::from_millis(20));
         store.put("aaa_key3", &graph);
 
-        // Check at least one entry was evicted (oldest should be gone)
-        // We can't guarantee which entries remain, but we know:
-        // 1. The total size should be <= budget
-        // 2. The oldest entries should be gone first
-        let dir = tmp.path().join("aa");
-        let total_size: u64 = std::fs::read_dir(&dir)
-            .ok()
-            .and_then(|entries| {
-                let size = entries
-                    .flatten()
-                    .filter(|e| e.path().extension().and_then(|ext| ext.to_str()) == Some("bin"))
-                    .filter_map(|e| e.metadata().ok())
-                    .map(|m| m.len())
-                    .sum::<u64>();
-                Some(size)
-            })
-            .unwrap_or(0);
-
         assert!(
-            total_size <= 1024,
-            "total size {} exceeds budget",
-            total_size
+            store.get("aaa_key1").is_none(),
+            "oldest entry should have been evicted"
+        );
+        assert!(
+            store.get("aaa_key2").is_none(),
+            "middle entry should have been evicted"
+        );
+        assert!(
+            store.get("aaa_key3").is_some(),
+            "newest entry should survive eviction"
         );
     }
 
