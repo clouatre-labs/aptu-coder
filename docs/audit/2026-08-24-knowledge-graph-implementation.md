@@ -180,19 +180,19 @@ applied to `StructuralGraph`.
 
 **Guard verification:** CONFIRMED. Linear scan at `structural.rs:109-113`.
 
-### F6: mtime-based cache key, not content hashes (LOW)
+### F6: Content-hash-based cache key (RESOLVED)
 
 **Severity:** Low
 **Category:** ROBUSTNESS
 **Tracking:** issue #1453
 
-`GraphDiskStore::cache_key` (`store.rs:66-76`) hashes the root path and sorted `(path, mtime)`
-pairs. Mtime granularity and filesystem behavior can permit stale cache reuse in unusual
-scenarios (e.g., rapid edits within the same mtime tick, copied files preserving mtime).
+`GraphDiskStore::cache_key` (`store.rs:66-76`) now hashes the root path and sorted `(path, content_hash)`
+pairs using blake3, eliminating stale cache reuse in edge cases (rapid edits within the same mtime tick,
+copied files preserving mtime, etc.). This change is resolved by issue #1453.
 
-The `CallGraphCacheKey` in `cache.rs` uses the same mtime-based approach. This is consistent
-within the codebase but is a known weakness vs. content-hash keys used by tools like Joern
-(sha256 of file content) and GitNexus (commit SHA).
+Note: The `CallGraphCacheKey` in `cache.rs` (L1 in-memory cache) remains mtime-based and was
+intentionally out of scope for this issue. The L2 disk cache (`GraphDiskStore::cache_key`) now uses
+content hashes and provides protection against the original mtime-based cache invalidation gaps.
 
 ### F7: Two parallel graph representations add complexity (INFO)
 
@@ -243,7 +243,7 @@ resolution).
 | Complete ontology: only emit edges backed by data | CodexGraph, Joern | 3 of 6 edge types emitted | F3 |
 | Two-pass construction: index all symbols before resolving calls | Research, CallGraph (internal) | Single-pass sequential processing | F2 |
 | Return edges in query results | CodexGraph, KGCompass | Nodes only | F4 |
-| Content-hash or revision-based cache key | Joern, GitNexus, KGCompass | mtime-based | F6 |
+| Content-hash or revision-based cache key | Joern, GitNexus, KGCompass | blake3 content-hash (L2 disk cache); mtime-based (L1 in-memory cache) | None |
 | Versioned serialization with migration | Research | FORMAT_VERSION=1 in store.rs | None |
 | Atomic writes with locking | Research | fs2 locks + NamedTempFile::persist | None |
 | Postcard for local Rust caches | Research, aptu#1432 | postcard | None |
@@ -392,7 +392,7 @@ KG1 finding; see F8.
 | F3 | Medium | DESIGN | **RESOLVED** (issue #1435, PR #1438) -- 3 of 6 `Edge` variants (`Implements`, `HasMethod`, `Tests`) and 2 of 6 `SymbolKind` variants (`Trait`, `Impl`) were never emitted by builder |
 | F4 | Medium | DESIGN | **RESOLVED** (issue #1449, PR #1451) -- Resource payloads returned nodes without edges -- clients could not reconstruct subgraph structure |
 | F5 | Low | PERF | **RESOLVED** (issue #1435, PR #1438) -- BFS start lookup was O(V) linear scan -- no retained symbol-to-NodeIndex index |
-| F6 | Low | ROBUSTNESS | **OPEN** (issue #1453) -- mtime-based cache key, not content hashes -- can go stale in edge cases |
+| F6 | Low | ROBUSTNESS | **RESOLVED** (issue #1453) -- mtime-based cache key, not content hashes -- now uses blake3 content hashes |
 | F7 | Info | ARCH | Two parallel graph representations (`StructuralGraph` petgraph vs `CallGraph` HashMap) -- justified by different workloads |
 | F8 | Info | STATUS | KG1 resolved (issue #1361 closed, `#[serde(default)]` fix already shipped); KG2-KG8 resolved |
 
@@ -408,13 +408,13 @@ KG1 finding; see F8.
 | R6 | Info | 0 | Do not unify graph representations (addresses F7) |
 | R7 | N/A | None | Already resolved prior to this audit -- KG1 fix shipped as `#[serde(default)]`, issue #1361 closed |
 
-**Status as of this update:** R1 through R5 are now done (PRs #1436, #1438, #1451), confirmed by
-direct code inspection (no `ImportClosure` references remain; `build_from_analysis` is two-pass;
-`Edge`/`SymbolKind` carry only the 3/2 emitted variants; `StructuralGraph` retains a
-`symbol_index` field for O(1) lookup; resource payloads include edge context). This audit now has
-zero open actionable findings besides F6 (mtime-based cache key, out of scope for issue #1449)
-and the Info/Status rows F7 and F8. R7 required no action -- it was already resolved before this
-audit.
+**Status as of this update:** R1 through R5 are now done (PRs #1436, #1438, #1451), and F6 is
+resolved (issue #1453). This is confirmed by direct code inspection (no `ImportClosure` references
+remain; `build_from_analysis` is two-pass; `Edge`/`SymbolKind` carry only the 3/2 emitted variants;
+`StructuralGraph` retains a `symbol_index` field for O(1) lookup; resource payloads include edge
+context; `GraphDiskStore::cache_key` uses blake3 content hashes). This audit now has zero open
+actionable findings besides the Info/Status rows F7 and F8. R7 required no action -- it was
+already resolved before this audit.
 
 **Recommended action order:**
 
