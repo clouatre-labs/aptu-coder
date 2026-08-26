@@ -153,6 +153,7 @@ are not best practice.
 
 **Severity:** Medium
 **Category:** DESIGN
+**Tracking:** issue #1449
 
 `query_to_nodes` (`resources.rs:196-206`) returns a flat list of `serde_json::Value` node
 serializations. No edge information is included in the response payload. An MCP client
@@ -385,11 +386,11 @@ KG1 finding; see F8.
 
 | ID | Severity | Category | Finding |
 |---|---|---|---|
-| F1 | High | BUG | Import-closure MCP resource always returns empty -- `bfs_blast_radius` matches `Node::Symbol` only, never `Node::Module` |
-| F2 | Medium | BUG | Cross-file call edges silently dropped -- sequential `symbol_index` population misses callees in later-processed files |
-| F3 | Medium | DESIGN | 3 of 6 `Edge` variants (`Implements`, `HasMethod`, `Tests`) and 2 of 6 `SymbolKind` variants (`Trait`, `Impl`) never emitted by builder |
-| F4 | Medium | DESIGN | Resource payloads return nodes without edges -- clients cannot reconstruct subgraph structure |
-| F5 | Low | PERF | BFS start lookup is O(V) linear scan -- no retained symbol-to-NodeIndex index |
+| F1 | High | BUG | **RESOLVED** (issue #1434, PR #1436) -- Import-closure MCP resource always returned empty -- `bfs_blast_radius` matched `Node::Symbol` only, never `Node::Module` |
+| F2 | Medium | BUG | **RESOLVED** (issue #1434, PR #1436) -- Cross-file call edges were silently dropped -- sequential `symbol_index` population missed callees in later-processed files |
+| F3 | Medium | DESIGN | **RESOLVED** (issue #1435, PR #1438) -- 3 of 6 `Edge` variants (`Implements`, `HasMethod`, `Tests`) and 2 of 6 `SymbolKind` variants (`Trait`, `Impl`) were never emitted by builder |
+| F4 | Medium | DESIGN | Resource payloads return nodes without edges -- clients cannot reconstruct subgraph structure (issue #1449) |
+| F5 | Low | PERF | **RESOLVED** (issue #1435, PR #1438) -- BFS start lookup was O(V) linear scan -- no retained symbol-to-NodeIndex index |
 | F6 | Low | ROBUST | mtime-based cache key, not content hashes -- can go stale in edge cases |
 | F7 | Info | ARCH | Two parallel graph representations (`StructuralGraph` petgraph vs `CallGraph` HashMap) -- justified by different workloads |
 | F8 | Info | STATUS | KG1 resolved (issue #1361 closed, `#[serde(default)]` fix already shipped); KG2-KG8 resolved |
@@ -398,18 +399,19 @@ KG1 finding; see F8.
 
 | ID | Priority | LoC Impact | Recommendation |
 |---|---|---|---|
-| R1 | High | Neutral | Two-pass symbol index in `build_from_analysis` (fixes F2) |
-| R2 | High | -30 to -50 | Remove broken import-closure resource template (fixes F1) |
-| R3 | Medium | -10 to -15 | Remove dead Edge/SymbolKind variants, bump FORMAT_VERSION (fixes F3) |
-| R4 | Medium | +15 to +20 | Add edge context to resource payloads (fixes F4) |
-| R5 | Low | -4 net | Retain `symbol_index` on `StructuralGraph` for O(1) lookup (fixes F5) |
+| R1 | High | Neutral | **DONE** (PR #1436) -- Two-pass symbol index in `build_from_analysis` (fixed F2) |
+| R2 | High | -30 to -50 | **DONE** (PR #1436) -- Removed broken import-closure resource template (fixed F1) |
+| R3 | Medium | -10 to -15 | **DONE** (PR #1438) -- Removed dead Edge/SymbolKind variants, bumped FORMAT_VERSION (fixed F3) |
+| R4 | Medium | +15 to +20 | Add edge context to resource payloads (fixes F4, issue #1449) |
+| R5 | Low | -4 net | **DONE** (PR #1438) -- Retained `symbol_index` on `StructuralGraph` for O(1) lookup (fixed F5) |
 | R6 | Info | 0 | Do not unify graph representations (addresses F7) |
 | R7 | N/A | None | Already resolved prior to this audit -- KG1 fix shipped as `#[serde(default)]`, issue #1361 closed |
 
-**Net LoC impact of the still-actionable recommendations (R1-R5):** -29 to -49 lines
-reduction, with improved correctness and robustness. The largest reduction comes from removing
-the broken import-closure feature (R2) and dead enum variants (R3). R7 is excluded from this
-total: it was already resolved before this audit and requires no further action.
+**Status as of this update:** R1, R2, R3, R5 are done (PRs #1436, #1438), confirmed by direct
+code inspection (no `ImportClosure` references remain; `build_from_analysis` is two-pass;
+`Edge`/`SymbolKind` carry only the 3/2 emitted variants; `StructuralGraph` retains a
+`symbol_index` field for O(1) lookup). R4 (issue #1449) is the only recommendation from this
+audit still open. R7 required no action -- it was already resolved before this audit.
 
 **Recommended action order:**
 
