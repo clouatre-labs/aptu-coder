@@ -229,7 +229,10 @@ async fn test_resources_read_with_edges() {
         );
     }
 
-    // Build a small graph with one function calling another (Calls edge) and containing it in a file (Contains edge).
+    // Build a small graph with one function calling another (Calls edge). The graph also
+    // gets File --Contains--> Symbol edges from build_from_analysis, but BFS from a symbol
+    // only follows outgoing edges, so the containing file is never visited and no Contains
+    // edge can appear in a blast-radius/subgraph result rooted at a symbol.
     let mut f1 = FunctionInfo::default();
     f1.name = "caller".to_string();
     f1.line = 1;
