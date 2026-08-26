@@ -184,6 +184,7 @@ applied to `StructuralGraph`.
 
 **Severity:** Low
 **Category:** ROBUSTNESS
+**Tracking:** issue #1453
 
 `GraphDiskStore::cache_key` (`store.rs:66-76`) hashes the root path and sorted `(path, mtime)`
 pairs. Mtime granularity and filesystem behavior can permit stale cache reuse in unusual
@@ -391,7 +392,7 @@ KG1 finding; see F8.
 | F3 | Medium | DESIGN | **RESOLVED** (issue #1435, PR #1438) -- 3 of 6 `Edge` variants (`Implements`, `HasMethod`, `Tests`) and 2 of 6 `SymbolKind` variants (`Trait`, `Impl`) were never emitted by builder |
 | F4 | Medium | DESIGN | **RESOLVED** (issue #1449, PR #1451) -- Resource payloads returned nodes without edges -- clients could not reconstruct subgraph structure |
 | F5 | Low | PERF | **RESOLVED** (issue #1435, PR #1438) -- BFS start lookup was O(V) linear scan -- no retained symbol-to-NodeIndex index |
-| F6 | Low | ROBUST | mtime-based cache key, not content hashes -- can go stale in edge cases |
+| F6 | Low | ROBUSTNESS | **OPEN** (issue #1453) -- mtime-based cache key, not content hashes -- can go stale in edge cases |
 | F7 | Info | ARCH | Two parallel graph representations (`StructuralGraph` petgraph vs `CallGraph` HashMap) -- justified by different workloads |
 | F8 | Info | STATUS | KG1 resolved (issue #1361 closed, `#[serde(default)]` fix already shipped); KG2-KG8 resolved |
 
