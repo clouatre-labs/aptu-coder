@@ -63,14 +63,14 @@ impl GraphDiskStore {
         GraphDiskStore { base_dir }
     }
 
-    pub fn cache_key(root: &Path, file_mtimes: &[(PathBuf, u64)]) -> String {
+    pub fn cache_key(root: &Path, file_hashes: &[(PathBuf, blake3::Hash)]) -> String {
         let mut hasher = blake3::Hasher::new();
         hasher.update(root.to_string_lossy().as_bytes());
-        let mut sorted: Vec<&(PathBuf, u64)> = file_mtimes.iter().collect();
+        let mut sorted: Vec<&(PathBuf, blake3::Hash)> = file_hashes.iter().collect();
         sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        for (path, mtime) in &sorted {
+        for (path, hash) in &sorted {
             hasher.update(path.to_string_lossy().as_bytes());
-            hasher.update(&mtime.to_le_bytes());
+            hasher.update(hash.as_bytes());
         }
         hasher.finalize().to_string()
     }

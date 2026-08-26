@@ -20,7 +20,6 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
@@ -168,20 +167,17 @@ fn build_call_graph(
     .map_err(std::convert::Into::into)
 }
 
-/// Cache key from file mtimes. Returns None when no mtime data is available.
+/// Cache key from file content hashes. Returns None if any file cannot be read.
 fn compute_cache_key(root: &Path, entries: &[WalkEntry]) -> Option<String> {
-    let mut mtimes = Vec::new();
+    let mut hashes = Vec::new();
     for e in entries {
         if !e.is_dir && !e.is_symlink {
-            let m = e
-                .mtime?
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .ok()?
-                .as_millis() as u64;
-            mtimes.push((e.path.clone(), m));
+            let bytes = std::fs::read(&e.path).ok()?;
+            let hash = blake3::hash(&bytes);
+            hashes.push((e.path.clone(), hash));
         }
     }
-    Some(GraphDiskStore::cache_key(root, &mtimes))
+    Some(GraphDiskStore::cache_key(root, &hashes))
 }
 
 /// Create a GraphDiskStore from env var or XDG data home default.
