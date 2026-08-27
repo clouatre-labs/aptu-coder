@@ -215,4 +215,6 @@ The server exposes MCP resource templates that surface the knowledge graph built
 
 **Persistence:** `GraphDiskStore` persists the structural graph to disk, keyed by blake3 content hashes of the analyzed files (not mtime). On restart the graph is reloaded if available; I/O errors degrade silently.
 
+**Cross-file symbol disambiguation:** `StructuralGraph::build_from_analysis` (`structural.rs`) resolves `Calls` edges through a symbol index keyed by name (`HashMap<String, Vec<NodeIndex>>`) that tracks every candidate definition, then `resolve_candidate()` disambiguates caller and callee resolution via staged heuristics: same-file preference, then line-proximity, then arg-count match, then first-definition fallback. This is distinct from `analyze_symbol`'s `CallGraph` BFS (see [Call Graph Design](#call-graph-design)), which resolves by name only and can still produce a cross-file edge between two same-named functions in different files. Merged in `43812d7` (#1461/#1463); not yet in a tagged release as of `v0.31.0`.
+
 **Warm-up requirement:** Resources return a cold-cache message if `analyze_symbol` has not been called on the directory first. The structural graph is built as a side effect of the `analyze_symbol` cold-cache path.
