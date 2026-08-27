@@ -8,12 +8,14 @@
   <a href="https://www.bestpractices.dev/projects/12275"><img alt="OpenSSF Best Practices" src="https://img.shields.io/cii/level/12275?style=for-the-badge" height="20"></a>
 </p>
 
-<p align="center">Standalone MCP server for code structure analysis using tree-sitter. OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
+<p align="center">A Model Context Protocol (MCP) code-intelligence server that gives AI coding agents pre-parsed symbol tables and call graphs instead of raw file bytes, cutting token usage by up to 59% (see <a href="#benchmarks">Benchmarks</a>). OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
 
 <!-- mcp-name: io.github.clouatre-labs/aptu-coder -->
 
 > [!NOTE]
-> Native agent tools (regex search, path matching, file reading) handle targeted lookups well. `aptu-coder` handles the mechanical, non-AI work: mapping directory structure, extracting symbols, and tracing call graphs. Offloading this to a dedicated tool reduces token usage and speeds up coding with better accuracy.
+> Native agent tools (regex search, path matching, file reading) handle targeted lookups well. `aptu-coder` handles the mechanical, non-AI work: mapping directory structure, extracting symbols, and tracing call graphs, so a coding agent's context window is spent reasoning instead of re-deriving structure on every call.
+
+Most code-intelligence tooling for AI agents indexes a codebase into a cloud embedding or vector store and retrieves by similarity search. aptu-coder instead parses the codebase into a structural graph on-device with tree-sitter and serves it locally over MCP: no source code leaves the machine, and retrieval is exact (symbol tables and call graphs) rather than approximate (nearest-neighbor similarity).
 
 ## Benchmarks
 
@@ -35,7 +37,11 @@ AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.
 
 ## Overview
 
-aptu-coder is a Model Context Protocol server that gives AI agents precise structural context about a codebase: directory trees, symbol definitions, and call graphs, without reading raw files. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
+aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and call graphs, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
+
+Structural context is built once and reused: an on-disk cache keyed by blake3 content hashes keeps results correct across concurrent writes. The same structural graph backs the [Knowledge Graph](#knowledge-graph) resource surface below. For consumers that hold source text without an on-disk path, `aptu-coder-core` also exposes `analyze_str` as a public Rust library API (see [ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)).
+
+Further reading on the design philosophy: [The Agentic SDLC Governance Stack](https://clouatre.ca/blog/ai-sdlc-governance-stack/), [Context Engineering for Multi-Agent Reliability](https://clouatre.ca/blog/context-engineering-multi-agent-reliability/), and [Orchestrating AI Agents: Subagent Architecture](https://clouatre.ca/blog/orchestrating-ai-agents-subagent-architecture/).
 
 ## Supported Languages
 
@@ -178,9 +184,9 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
-## MCP Resources
+## Knowledge Graph
 
-The knowledge graph feature exposes MCP resource templates for navigating the structural graph built during `analyze_symbol` calls. Resources are URI-addressed; use `resources/templates/list` to discover available templates.
+`analyze_symbol` builds a structural graph of the codebase as a side effect: files, symbols, and modules as nodes, connected by typed edges (`contains`, `calls`, `imports`). That graph is exposed to agents as MCP resource templates for navigating relationships beyond a single symbol's immediate call graph. Resources are URI-addressed; use `resources/templates/list` to discover available templates.
 
 | URI Template | Description |
 |---|---|
