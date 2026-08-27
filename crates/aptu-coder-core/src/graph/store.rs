@@ -4,6 +4,8 @@
 //! per-shard locking, atomic writes via NamedTempFile::persist, and size-capped
 //! LRU eviction by file mtime. All I/O errors degrade silently via tracing::warn!.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use super::structural::StructuralGraph;
 use blake3;
 use fs2::FileExt;
