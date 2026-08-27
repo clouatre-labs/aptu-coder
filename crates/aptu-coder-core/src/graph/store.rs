@@ -3,23 +3,36 @@
 //! Disk-backed structural graph cache with versioned postcard encoding, fs2
 //! per-shard locking, atomic writes via NamedTempFile::persist, and size-capped
 //! LRU eviction by file mtime. All I/O errors degrade silently via tracing::warn!.
+//!
+//! `GraphDiskStore` itself and its public API compile on every target,
+//! including `wasm32-unknown-unknown`, so callers never need their own
+//! `cfg` gates. Only the actual disk I/O (which depends on `fs2` and
+//! `tempfile`, neither WASM-safe) is gated: on `wasm32`, `get` always misses
+//! and `put` is a no-op, matching aptu's `cache.rs` WASM stub pattern.
 
 use super::structural::StructuralGraph;
 use blake3;
+#[cfg(not(target_arch = "wasm32"))]
 use fs2::FileExt;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use tempfile::NamedTempFile;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::warn;
 
+#[cfg(not(target_arch = "wasm32"))]
 const FORMAT_VERSION: u32 = 2;
 pub const DEFAULT_MAX_DISK_CACHE_BYTES: u64 = 512 * 1024 * 1024;
 
+#[cfg(not(target_arch = "wasm32"))]
 struct ShardLockGuard {
     _file: std::fs::File,
 }
 /// `.lock` files are 0-byte advisory control files, never written to.
 /// Shard count is bounded at 256 by the 2-hex-char blake3 key prefix (`&key[..2]`).
+#[cfg(not(target_arch = "wasm32"))]
 fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
     let lock_path = shard_dir.join(".lock");
     let file = std::fs::OpenOptions::new()
@@ -36,6 +49,7 @@ fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
 
 /// `.lock` files are 0-byte advisory control files, never written to.
 /// Shard count is bounded at 256 by the 2-hex-char blake3 key prefix (`&key[..2]`).
+#[cfg(not(target_arch = "wasm32"))]
 fn lock_shard_exclusive(shard_dir: &Path) -> Result<ShardLockGuard, std::io::Error> {
     let lock_path = shard_dir.join(".lock");
     let file = std::fs::OpenOptions::new()
@@ -47,6 +61,7 @@ fn lock_shard_exclusive(shard_dir: &Path) -> Result<ShardLockGuard, std::io::Err
     Ok(ShardLockGuard { _file: file })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn write_entry_atomically(dir: &Path, path: &Path, data: &[u8]) -> Result<(), std::io::Error> {
     let _lock = lock_shard_exclusive(dir)?;
     let mut tmp = NamedTempFile::new_in(dir)?;
@@ -54,6 +69,7 @@ fn write_entry_atomically(dir: &Path, path: &Path, data: &[u8]) -> Result<(), st
     tmp.persist(path).map(|_| ()).map_err(|e| e.error)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn evict_lru_if_over_budget(base_dir: &Path, max_bytes: u64) {
     // List all .bin files in all shard subdirectories
     let mut entries = Vec::new();
@@ -130,7 +146,9 @@ fn evict_lru_if_over_budget(base_dir: &Path, max_bytes: u64) {
 }
 
 pub struct GraphDiskStore {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     base_dir: PathBuf,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     max_bytes: u64,
 }
 
@@ -139,10 +157,20 @@ impl GraphDiskStore {
         Self::new_with_max_bytes(base_dir, DEFAULT_MAX_DISK_CACHE_BYTES)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_with_max_bytes(base_dir: PathBuf, max_bytes: u64) -> Self {
         if let Err(e) = std::fs::create_dir_all(&base_dir) {
             warn!(path = %base_dir.display(), error = %e, "graph store: failed to create base dir");
         }
+        GraphDiskStore {
+            base_dir,
+            max_bytes,
+        }
+    }
+
+    /// WASM stub: no directory creation, no disk I/O.
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_with_max_bytes(base_dir: PathBuf, max_bytes: u64) -> Self {
         GraphDiskStore {
             base_dir,
             max_bytes,
@@ -161,9 +189,12 @@ impl GraphDiskStore {
         hasher.finalize().to_string()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn entry_path(&self, key: &str) -> PathBuf {
         self.base_dir.join(&key[..2]).join(format!("{}.bin", key))
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get(&self, key: &str) -> Option<StructuralGraph> {
         let path = self.entry_path(key);
         let dir = path.parent()?;
@@ -190,6 +221,13 @@ impl GraphDiskStore {
         Some(graph)
     }
 
+    /// WASM stub: the cache always misses, no disk I/O.
+    #[cfg(target_arch = "wasm32")]
+    pub fn get(&self, _key: &str) -> Option<StructuralGraph> {
+        None
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn put(&self, key: &str, graph: &StructuralGraph) {
         let payload = match postcard::to_allocvec(graph) {
             Ok(p) => p,
@@ -217,6 +255,10 @@ impl GraphDiskStore {
         // Evict old entries if over budget (after successful write)
         evict_lru_if_over_budget(&self.base_dir, self.max_bytes);
     }
+
+    /// WASM stub: no-op, no disk I/O.
+    #[cfg(target_arch = "wasm32")]
+    pub fn put(&self, _key: &str, _graph: &StructuralGraph) {}
 }
 
 #[cfg(test)]

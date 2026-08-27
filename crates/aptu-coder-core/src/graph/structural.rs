@@ -4,11 +4,11 @@
 
 use crate::analyze::FileAnalysisOutput;
 use crate::graph::call_graph::CallGraph;
+use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SymbolKind {
@@ -388,6 +388,199 @@ impl StructuralGraph {
             .collect();
 
         (nodes, edges)
+    }
+
+    /// Renders a subgraph defined by `nodes` into a prompt-ready string representation.
+    ///
+    /// Formats function symbols grouped by file path:
+    /// ```text
+    /// // path/to/file.rs
+    /// fn name [calls: a, b] [callers: c]
+    /// ```
+    ///
+    /// Files are sorted lexicographically, functions within files are sorted by name.
+    /// Non-`Symbol` nodes and non-`Function` `SymbolKind`s are skipped.
+    pub fn render_subgraph_text(&self, nodes: &[NodeIndex]) -> String {
+        let node_set: HashSet<NodeIndex> = nodes.iter().copied().collect();
+
+        // Adjacency maps for Calls edges within the given node set
+        let mut calls_map: HashMap<NodeIndex, Vec<String>> = HashMap::new();
+        let mut callers_map: HashMap<NodeIndex, Vec<String>> = HashMap::new();
+
+        for &idx in &node_set {
+            if idx.index() >= self.graph.node_count() {
+                continue;
+            }
+
+            // Outgoing Calls edges -> callees
+            for edge in self.graph.edges_directed(idx, Direction::Outgoing) {
+                if *edge.weight() == Edge::Calls
+                    && node_set.contains(&edge.target())
+                    && let Node::Symbol { name, .. } = &self.graph[edge.target()]
+                {
+                    calls_map.entry(idx).or_default().push(name.clone());
+                }
+            }
+
+            // Incoming Calls edges -> callers
+            for edge in self.graph.edges_directed(idx, Direction::Incoming) {
+                if *edge.weight() == Edge::Calls
+                    && node_set.contains(&edge.source())
+                    && let Node::Symbol { name, .. } = &self.graph[edge.source()]
+                {
+                    callers_map.entry(idx).or_default().push(name.clone());
+                }
+            }
+        }
+
+        // Group function symbols by file path (BTreeMap for deterministic file order)
+        let mut file_groups: BTreeMap<String, Vec<(String, NodeIndex)>> = BTreeMap::new();
+        for &idx in &node_set {
+            if idx.index() >= self.graph.node_count() {
+                continue;
+            }
+            if let Node::Symbol {
+                name,
+                kind: SymbolKind::Function,
+                file_path,
+                ..
+            } = &self.graph[idx]
+            {
+                file_groups
+                    .entry(file_path.clone())
+                    .or_default()
+                    .push((name.clone(), idx));
+            }
+        }
+
+        let mut output = String::new();
+        for (file_path, mut funcs) in file_groups {
+            funcs.sort_by(|a, b| a.0.cmp(&b.0));
+            funcs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&format!("// {}\n", file_path));
+
+            for (name, idx) in funcs {
+                let mut line = format!("fn {}", name);
+
+                if let Some(mut callees) = calls_map.remove(&idx) {
+                    callees.sort();
+                    callees.dedup();
+                    if !callees.is_empty() {
+                        line.push_str(&format!(" [calls: {}]", callees.join(", ")));
+                    }
+                }
+
+                if let Some(mut callers) = callers_map.remove(&idx) {
+                    callers.sort();
+                    callers.dedup();
+                    if !callers.is_empty() {
+                        line.push_str(&format!(" [callers: {}]", callers.join(", ")));
+                    }
+                }
+
+                output.push_str(&line);
+                output.push('\n');
+            }
+        }
+
+        output
+    }
+
+    /// Resolves multiple symbol names to their first matching `NodeIndex` in the symbol index.
+    pub fn find_symbols(&self, names: &[&str]) -> Vec<NodeIndex> {
+        let mut indices = Vec::new();
+        for name in names {
+            if let Some(first) = self
+                .symbol_index
+                .get(*name)
+                .and_then(|v| v.first().copied())
+            {
+                indices.push(first);
+            }
+        }
+        indices
+    }
+
+    /// Bidirectional blast-radius traversal discovering both callers and callees.
+    ///
+    /// Walks both `Direction::Incoming` and `Direction::Outgoing` edges filtered to `Edge::Calls`.
+    /// Caps the visited set at `max_nodes` and traversal depth at `max_depth`.
+    /// Returns `(nodes, edges)` for the induced subgraph where all edges between visited nodes
+    /// are included.
+    pub fn blast_radius_bidirectional(
+        &self,
+        seeds: &[NodeIndex],
+        max_nodes: usize,
+        max_depth: usize,
+    ) -> (Vec<NodeIndex>, Vec<(NodeIndex, NodeIndex, Edge)>) {
+        if seeds.is_empty() || max_nodes == 0 || max_depth == 0 {
+            return (vec![], vec![]);
+        }
+
+        let mut visited: HashSet<NodeIndex> = HashSet::new();
+        let mut result: Vec<NodeIndex> = Vec::new();
+        let mut frontier: Vec<NodeIndex> = Vec::new();
+
+        // Initialize with valid seeds up to max_nodes
+        for &seed in seeds {
+            if seed.index() < self.graph.node_count() && visited.insert(seed) {
+                result.push(seed);
+                frontier.push(seed);
+                if result.len() >= max_nodes {
+                    break;
+                }
+            }
+        }
+
+        let mut depth = 0;
+        while depth < max_depth && !frontier.is_empty() && result.len() < max_nodes {
+            depth += 1;
+
+            // Collect this level's candidates first and sort by NodeIndex so
+            // traversal order (and therefore truncation on max_nodes) is
+            // deterministic regardless of the graph's internal edge order.
+            let mut candidates: Vec<NodeIndex> = Vec::new();
+            for &node in &frontier {
+                for edge in self.graph.edges_directed(node, Direction::Outgoing) {
+                    if *edge.weight() == Edge::Calls && !visited.contains(&edge.target()) {
+                        candidates.push(edge.target());
+                    }
+                }
+                for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                    if *edge.weight() == Edge::Calls && !visited.contains(&edge.source()) {
+                        candidates.push(edge.source());
+                    }
+                }
+            }
+            candidates.sort_by_key(|n| n.index());
+            candidates.dedup();
+
+            let mut next = Vec::new();
+            for candidate in candidates {
+                if visited.insert(candidate) {
+                    result.push(candidate);
+                    next.push(candidate);
+                    if result.len() >= max_nodes {
+                        break;
+                    }
+                }
+            }
+            frontier = next;
+        }
+
+        // Collect induced subgraph edges (all edges where both endpoints are in visited)
+        let edges: Vec<(NodeIndex, NodeIndex, Edge)> = self
+            .graph
+            .edge_references()
+            .filter(|e| visited.contains(&e.source()) && visited.contains(&e.target()))
+            .map(|e| (e.source(), e.target(), e.weight().clone()))
+            .collect();
+
+        (result, edges)
     }
 }
 
@@ -882,5 +1075,168 @@ mod tests {
             "from_call_graph lacks arg_count on CallEdge, so on a line-proximity tie it falls \
              back to first-definition-wins instead of matching the call's arg count"
         );
+    }
+
+    #[test]
+    fn test_render_subgraph_text_basic() {
+        // Arrange
+        let f1 = make_output(
+            "src/a.rs",
+            vec!["caller_fn", "callee_fn"],
+            vec![],
+            vec![],
+            vec![("caller_fn", "callee_fn")],
+        );
+        let f2 = make_output(
+            "src/b.rs",
+            vec!["other_fn"],
+            vec![],
+            vec![],
+            vec![("other_fn", "caller_fn")],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f1, f2]);
+        let nodes = g.find_symbols(&["caller_fn", "callee_fn", "other_fn"]);
+
+        // Act
+        let rendered = g.render_subgraph_text(&nodes);
+
+        // Assert
+        let expected = "// src/a.rs\nfn callee_fn [callers: caller_fn]\nfn caller_fn [calls: callee_fn] [callers: other_fn]\n\n// src/b.rs\nfn other_fn [calls: caller_fn]\n";
+        assert_eq!(rendered, expected);
+    }
+
+    #[test]
+    fn test_render_subgraph_text_empty_and_non_function() {
+        // Arrange
+        let f1 = make_output("src/a.rs", vec!["fn_a"], vec!["ClassA"], vec![], vec![]);
+        let g = StructuralGraph::build_from_analysis(&[f1]);
+
+        // Act & Assert: empty nodes returns empty string
+        assert_eq!(g.render_subgraph_text(&[]), "");
+
+        // Act & Assert: Class symbol is skipped, only functions rendered
+        let class_nodes = g.find_symbols(&["ClassA"]);
+        assert_eq!(g.render_subgraph_text(&class_nodes), "");
+    }
+
+    #[test]
+    fn test_blast_radius_bidirectional_includes_callers() {
+        // Arrange: A calls B calls C
+        let f = make_output(
+            "src/lib.rs",
+            vec!["fn_a", "fn_b", "fn_c"],
+            vec![],
+            vec![],
+            vec![("fn_a", "fn_b"), ("fn_b", "fn_c")],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let b_nodes = g.find_symbols(&["fn_b"]);
+        assert_eq!(b_nodes.len(), 1);
+
+        // Act: BFS from fn_b with depth 1
+        let (nodes, edges) = g.blast_radius_bidirectional(&b_nodes, 10, 1);
+
+        // Assert: should discover fn_b (seed), fn_c (callee / outgoing), and fn_a (caller / incoming)
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0], b_nodes[0]); // seed first
+
+        // Edges should include both (fn_a -> fn_b) and (fn_b -> fn_c)
+        assert_eq!(edges.len(), 2);
+    }
+
+    #[test]
+    fn test_blast_radius_bidirectional_max_nodes_cap() {
+        // Arrange: A calls B calls C calls D
+        let f = make_output(
+            "src/lib.rs",
+            vec!["fn_a", "fn_b", "fn_c", "fn_d"],
+            vec![],
+            vec![],
+            vec![("fn_a", "fn_b"), ("fn_b", "fn_c"), ("fn_c", "fn_d")],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let a_nodes = g.find_symbols(&["fn_a"]);
+
+        // Act: cap at 2 nodes
+        let (nodes, edges) = g.blast_radius_bidirectional(&a_nodes, 2, 5);
+
+        // Assert
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(edges.len(), 1);
+    }
+
+    #[test]
+    fn test_blast_radius_bidirectional_multi_seed() {
+        // Arrange: A calls B, C calls D
+        let f = make_output(
+            "src/lib.rs",
+            vec!["fn_a", "fn_b", "fn_c", "fn_d"],
+            vec![],
+            vec![],
+            vec![("fn_a", "fn_b"), ("fn_c", "fn_d")],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let seeds = g.find_symbols(&["fn_a", "fn_c"]);
+        assert_eq!(seeds.len(), 2);
+
+        // Act
+        let (nodes, edges) = g.blast_radius_bidirectional(&seeds, 10, 1);
+
+        // Assert: should discover all 4 nodes
+        assert_eq!(nodes.len(), 4);
+        assert_eq!(edges.len(), 2);
+    }
+
+    #[test]
+    fn test_blast_radius_bidirectional_deterministic_order() {
+        // Arrange: fn_root calls three siblings at the same BFS depth
+        let f = make_output(
+            "src/lib.rs",
+            vec!["fn_root", "fn_z", "fn_y", "fn_x"],
+            vec![],
+            vec![],
+            vec![
+                ("fn_root", "fn_z"),
+                ("fn_root", "fn_y"),
+                ("fn_root", "fn_x"),
+            ],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let seeds = g.find_symbols(&["fn_root"]);
+
+        // Act: run twice to confirm the traversal is stable, not just non-empty
+        let (nodes_a, _) = g.blast_radius_bidirectional(&seeds, 10, 1);
+        let (nodes_b, _) = g.blast_radius_bidirectional(&seeds, 10, 1);
+
+        // Assert: same-depth siblings come back in NodeIndex order, every run
+        assert_eq!(nodes_a, nodes_b);
+        assert_eq!(nodes_a[0], seeds[0]);
+        let siblings = &nodes_a[1..];
+        let mut sorted_siblings = siblings.to_vec();
+        sorted_siblings.sort_by_key(|n| n.index());
+        assert_eq!(siblings, sorted_siblings);
+    }
+
+    #[test]
+    fn test_blast_radius_bidirectional_empty_seeds_or_zero_limits() {
+        // Arrange
+        let f = make_output("src/lib.rs", vec!["fn_a"], vec![], vec![], vec![]);
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let seeds = g.find_symbols(&["fn_a"]);
+
+        // Act & Assert: empty seeds
+        let (nodes, edges) = g.blast_radius_bidirectional(&[], 10, 2);
+        assert!(nodes.is_empty());
+        assert!(edges.is_empty());
+
+        // Act & Assert: max_nodes = 0
+        let (nodes, edges) = g.blast_radius_bidirectional(&seeds, 0, 2);
+        assert!(nodes.is_empty());
+        assert!(edges.is_empty());
+
+        // Act & Assert: max_depth = 0
+        let (nodes, edges) = g.blast_radius_bidirectional(&seeds, 10, 0);
+        assert!(nodes.is_empty());
+        assert!(edges.is_empty());
     }
 }
