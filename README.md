@@ -190,8 +190,8 @@ Tool parameters, constraints, and examples are available via your MCP client's t
 
 | URI Template | Description |
 |---|---|
-| `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward to configurable depth (default: 3). Returns caller/callee chains in a radial layout. |
-| `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` | The full subgraph (callers, callees, and their connections) for a single symbol. |
+| `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}&format={format}` | BFS traversal from a symbol outward to configurable depth (default: 3). Returns caller/callee chains in a radial layout. |
+| `aptu-coder://graph/{repo_hash}/subgraph/{symbol}?format={format}` | The full subgraph (callers, callees, and their connections) for a single symbol. |
 | `aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}` | Bidirectional BFS from one or more comma-separated seed symbols walking both callers and callees. |
 
 **Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.

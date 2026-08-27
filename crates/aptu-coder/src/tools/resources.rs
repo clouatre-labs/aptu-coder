@@ -363,16 +363,18 @@ pub(crate) fn list_resource_templates_impl(
 ) -> Result<ListResourceTemplatesResult, ErrorData> {
     let templates = vec![
         ResourceTemplate::new(
-            "aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}",
+            "aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}&format={format}",
             "graph-blast-radius",
         )
-        .with_description("BFS blast-radius traversal from a symbol (depth 1-5, default 3)")
+        .with_description(
+            "BFS blast-radius traversal from a symbol (depth 1-5, default 3; format: text or json default json)",
+        )
         .with_mime_type("application/json"),
         ResourceTemplate::new(
-            "aptu-coder://graph/{repo_hash}/subgraph/{symbol}",
+            "aptu-coder://graph/{repo_hash}/subgraph/{symbol}?format={format}",
             "graph-subgraph",
         )
-        .with_description("Subgraph centered on a symbol")
+        .with_description("Subgraph centered on a symbol (format: text or json default json)")
         .with_mime_type("application/json"),
         ResourceTemplate::new(
             "aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}",
@@ -391,7 +393,9 @@ pub(crate) fn list_resource_templates_impl(
     .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, e.to_string(), None))?;
     let mut result = ListResourceTemplatesResult::with_all_items(paginated.items);
     result.next_cursor = paginated.next_cursor;
-    Ok(result)
+    Ok(result
+        .with_ttl_ms(3_600_000)
+        .with_cache_scope(CacheScope::Public))
 }
 
 /// Read a graph resource identified by URI.
@@ -439,9 +443,11 @@ pub(crate) fn read_resource_impl(
 
         let text = graph.render_subgraph_text(&node_indices);
         let contents = ResourceContents::text(text, &request.uri).with_mime_type("text/plain");
-        return Ok(ReadResourceResponse::Complete(ReadResourceResult::new(
-            vec![contents],
-        )));
+        return Ok(ReadResourceResponse::Complete(
+            ReadResourceResult::new(vec![contents])
+                .with_ttl_ms(3_600_000)
+                .with_cache_scope(CacheScope::Public),
+        ));
     }
 
     let (all_nodes, all_edges) = query_to_graph(&graph, &query);
@@ -488,9 +494,11 @@ pub(crate) fn read_resource_impl(
     })?;
 
     let contents = ResourceContents::text(text, &request.uri).with_mime_type("application/json");
-    Ok(ReadResourceResponse::Complete(ReadResourceResult::new(
-        vec![contents],
-    )))
+    Ok(ReadResourceResponse::Complete(
+        ReadResourceResult::new(vec![contents])
+            .with_ttl_ms(3_600_000)
+            .with_cache_scope(CacheScope::Public),
+    ))
 }
 
 #[cfg(test)]
