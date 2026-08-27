@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::process::Stdio;
 use std::thread;
 use std::time::Duration;
@@ -67,10 +67,9 @@ fn test_mcp_server_responds_to_tools_call() {
 
     let (tx, rx) = std::sync::mpsc::channel();
     let reader_thread = thread::spawn(move || {
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                let _ = tx.send(line);
-            }
+        use std::io::BufRead;
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = tx.send(line);
         }
     });
 
@@ -176,7 +175,7 @@ fn test_mcp_server_recovers_after_tool_error() {
     let (tx, rx) = std::sync::mpsc::channel();
     let reader_thread = thread::spawn(move || {
         use std::io::BufRead;
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             let _ = tx.send(line);
         }
     });
@@ -297,7 +296,8 @@ fn test_mcp_server_exec_command() {
     let reader = BufReader::new(stdout);
     let (tx, rx) = std::sync::mpsc::channel();
     let reader_thread = thread::spawn(move || {
-        for line in reader.lines().flatten() {
+        use std::io::BufRead;
+        for line in reader.lines().map_while(Result::ok) {
             let _ = tx.send(line);
         }
     });
@@ -332,19 +332,18 @@ fn test_mcp_server_exec_command() {
                         );
                         // Optionally verify content contains smoke_test or exit_code is 0
                         let content = json["result"]["content"].as_array();
-                        if let Some(content_arr) = content {
-                            if let Some(first) = content_arr.first() {
-                                if let Some(text) = first.get("text") {
-                                    let text_str = text.as_str().unwrap_or("");
-                                    assert!(
-                                        text_str.contains("smoke_test")
-                                            || text_str.contains("exit_code")
-                                            || text_str.contains("0"),
-                                        "content should contain smoke_test or exit info: {}",
-                                        text_str
-                                    );
-                                }
-                            }
+                        if let Some(content_arr) = content
+                            && let Some(first) = content_arr.first()
+                            && let Some(text) = first.get("text")
+                        {
+                            let text_str = text.as_str().unwrap_or("");
+                            assert!(
+                                text_str.contains("smoke_test")
+                                    || text_str.contains("exit_code")
+                                    || text_str.contains("0"),
+                                "content should contain smoke_test or exit info: {}",
+                                text_str
+                            );
                         }
                         found_exec_command_response = true;
                         break;

@@ -184,7 +184,7 @@ fn test_complex_params_have_examples() {
             .unwrap_or_else(|| panic!("tool '{}' has no parameter '{}'", tool_name, param_name));
         let examples = param.get("examples").and_then(Value::as_array);
         assert!(
-            examples.map_or(false, |arr| !arr.is_empty()),
+            examples.is_some_and(|arr| !arr.is_empty()),
             "tool '{}' parameter '{}' is missing a JSON Schema 'examples' array",
             tool_name,
             param_name

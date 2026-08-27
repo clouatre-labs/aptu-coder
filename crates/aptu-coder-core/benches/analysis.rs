@@ -4,7 +4,6 @@
 use aptu_coder_core::cache::{CallGraphCache, CallGraphCacheKey};
 use aptu_coder_core::graph::StructuralGraph;
 use aptu_coder_core::types::SymbolMatchMode;
-use blake3;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::path::Path;
 use std::sync::Arc;
@@ -379,11 +378,12 @@ fn structural_graph_benchmark(c: &mut Criterion) {
     // Compute cache key from content hashes
     let mut hashes = Vec::new();
     for e in &entries {
-        if !e.is_dir && !e.is_symlink {
-            if let Ok(bytes) = std::fs::read(&e.path) {
-                let hash = blake3::hash(&bytes);
-                hashes.push((e.path.clone(), hash));
-            }
+        if !e.is_dir
+            && !e.is_symlink
+            && let Ok(bytes) = std::fs::read(&e.path)
+        {
+            let hash = blake3::hash(&bytes);
+            hashes.push((e.path.clone(), hash));
         }
     }
     let cache_key = aptu_coder_core::graph::GraphDiskStore::cache_key(root, &hashes);
