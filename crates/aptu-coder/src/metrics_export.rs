@@ -464,15 +464,13 @@ fn migrate_legacy_metrics_dir_impl(home: &str) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
 
     /// Serializes tests that mutate `APTU_CODER_METRICS_EXPORT_FILE` to prevent parallel
-    /// pollution. Recovers from poison caused by panicking tests.
-    fn metrics_export_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let m = LOCK.get_or_init(|| Mutex::new(()));
-        m.lock().unwrap_or_else(|e| e.into_inner())
+    /// pollution.
+    async fn metrics_export_lock() -> tokio::sync::MutexGuard<'static, ()> {
+        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        LOCK.lock().await
     }
 
     #[test]
@@ -582,12 +580,12 @@ mod tests {
         assert_eq!(s.as_bytes()[4], b'-');
         assert_eq!(s.as_bytes()[7], b'-');
         let year: u32 = s[0..4].parse().expect("year must be numeric");
-        assert!(year >= 2020 && year <= 2100);
+        assert!((2020..=2100).contains(&year));
     }
 
     #[tokio::test]
     async fn test_metrics_writer_batching() {
-        let _guard = metrics_export_lock();
+        let _guard = metrics_export_lock().await;
         let dir = TempDir::new().unwrap();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
@@ -637,7 +635,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_old_files_deletes_old_keeps_recent() {
-        let _guard = metrics_export_lock();
+        let _guard = metrics_export_lock().await;
         let dir = TempDir::new().unwrap();
         let old_file = dir.path().join("metrics-1970-01-01.jsonl");
         let today = current_date_str();
@@ -699,7 +697,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_export_file_created() {
-        let _guard = metrics_export_lock();
+        let _guard = metrics_export_lock().await;
         // Arrange: create temp dir and set export env var
         let dir = TempDir::new().unwrap();
         let export_file = dir.path().join("metrics_export.json");
@@ -761,7 +759,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_export_env_var_unset() {
-        let _guard = metrics_export_lock();
+        let _guard = metrics_export_lock().await;
         // Edge case: no APTU_CODER_METRICS_EXPORT_FILE -> no export file written
         let dir = TempDir::new().unwrap();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
@@ -811,7 +809,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_export_relative_path_rejected() {
-        let _guard = metrics_export_lock();
+        let _guard = metrics_export_lock().await;
         // Edge case: relative path in APTU_CODER_METRICS_EXPORT_FILE -> warning, no file
         let dir = TempDir::new().unwrap();
         unsafe {
@@ -874,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lock_file_created() {
-        let _guard = metrics_export_lock();
+        let _guard = metrics_export_lock().await;
         // Assert: lock file is created next to JSONL file with deterministic name
         let dir = TempDir::new().unwrap();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();

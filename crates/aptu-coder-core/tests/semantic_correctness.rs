@@ -41,7 +41,6 @@ pub fn calculate(a: i32, b: i32) -> i32 { a + b }
     );
 }
 
-#[cfg(feature = "lang-python")]
 #[test]
 fn test_python_semantic_correctness() {
     let temp_dir = TempDir::new().expect("failed to create temp dir");
@@ -85,7 +84,6 @@ class MyClass:
     );
 }
 
-#[cfg(feature = "lang-typescript")]
 #[test]
 fn test_typescript_semantic_correctness() {
     let temp_dir = TempDir::new().expect("failed to create temp dir");
@@ -114,7 +112,7 @@ class MyClass {
     let output = analyze::analyze_file(ts_file.to_str().unwrap(), None).expect("analysis failed");
 
     assert!(
-        output.semantic.functions.len() >= 1,
+        !output.semantic.functions.is_empty(),
         "Expected at least 1 function"
     );
     assert!(
@@ -128,7 +126,6 @@ class MyClass {
     );
 }
 
-#[cfg(feature = "lang-go")]
 #[test]
 fn test_go_semantic_correctness() {
     let temp_dir = TempDir::new().expect("failed to create temp dir");
@@ -166,7 +163,7 @@ type MyInterface interface {
     let output = analyze::analyze_file(go_file.to_str().unwrap(), None).expect("analysis failed");
 
     assert!(
-        output.semantic.functions.len() >= 1,
+        !output.semantic.functions.is_empty(),
         "Expected at least 1 function"
     );
     assert!(
@@ -180,7 +177,6 @@ type MyInterface interface {
     );
 }
 
-#[cfg(feature = "lang-java")]
 #[test]
 fn test_java_semantic_correctness() {
     let temp_dir = TempDir::new().expect("failed to create temp dir");
@@ -203,11 +199,11 @@ public class Test {
     let output = analyze::analyze_file(java_file.to_str().unwrap(), None).expect("analysis failed");
 
     assert!(
-        output.semantic.functions.len() >= 1,
+        !output.semantic.functions.is_empty(),
         "Expected at least 1 function (method)"
     );
     assert!(
-        output.semantic.classes.len() >= 1,
+        !output.semantic.classes.is_empty(),
         "Expected at least 1 class (Test)"
     );
     assert_eq!(
@@ -217,7 +213,6 @@ public class Test {
     );
 }
 
-#[cfg(feature = "lang-csharp")]
 #[test]
 fn test_csharp_semantic_correctness() {
     let temp_dir = TempDir::new().expect("failed to create temp dir");

@@ -261,8 +261,8 @@ async fn test_handler_nonzero_exit() {
 async fn test_handler_shell_preference() {
     // Serialize all tests that mutate APTU_SHELL to prevent races when the
     // test suite runs in parallel (tokio::test spawns concurrent tasks).
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = ENV_LOCK.lock().unwrap();
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = ENV_LOCK.lock().await;
 
     // SAFETY: the static mutex above ensures no other test reads or writes
     // APTU_SHELL while we hold the guard.

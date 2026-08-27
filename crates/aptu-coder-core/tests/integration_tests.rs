@@ -494,7 +494,7 @@ import {x} from 'module';
     );
     assert_eq!(output.semantic.classes.len(), 1);
     // Verify ES imports are captured
-    assert!(output.semantic.imports.len() >= 1);
+    assert!(!output.semantic.imports.is_empty());
 }
 
 #[test]
@@ -4534,7 +4534,7 @@ use std::io;
     assert_eq!(result.functions[1].name, "world");
 
     // Verify imports are extracted (may be separate entries for each use statement)
-    assert!(result.imports.len() >= 1);
+    assert!(!result.imports.is_empty());
     let all_modules: Vec<&str> = result.imports.iter().map(|i| i.module.as_str()).collect();
     assert!(all_modules.contains(&"std"));
 
@@ -4567,7 +4567,7 @@ def farewell():
     assert_eq!(result.functions[1].name, "farewell");
 
     // Verify imports are extracted (os and pathlib)
-    assert!(result.imports.len() >= 1);
+    assert!(!result.imports.is_empty());
     let modules: Vec<&str> = result.imports.iter().map(|i| i.module.as_str()).collect();
     assert!(modules.contains(&"os") || modules.contains(&"pathlib"));
 

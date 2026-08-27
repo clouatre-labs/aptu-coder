@@ -15,7 +15,7 @@ async fn test_analyze_symbol_file_path_error_metrics() {
     // Arrange: create a temp file inside CWD so validate_path accepts it
     let cwd = std::env::current_dir().unwrap();
     let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
-    write!(f, "fn foo() {{}}\n").unwrap();
+    writeln!(f, "fn foo() {{}}").unwrap();
     f.flush().unwrap();
 
     // Act: call analyze_symbol with file path
@@ -28,9 +28,8 @@ async fn test_analyze_symbol_file_path_error_metrics() {
 
     // Assert: error response with invalid_params
     let result = response.get("result").unwrap();
-    assert_eq!(
+    assert!(
         result.get("isError").unwrap().as_bool().unwrap(),
-        true,
         "expected isError=true"
     );
     let content = result.get("content").unwrap().as_array().unwrap();
@@ -64,9 +63,8 @@ async fn test_analyze_symbol_import_lookup_def_use_conflict_error_metrics() {
 
     // Assert: error response with invalid_params
     let result = response.get("result").unwrap();
-    assert_eq!(
+    assert!(
         result.get("isError").unwrap().as_bool().unwrap(),
-        true,
         "expected isError=true"
     );
     let content = result.get("content").unwrap().as_array().unwrap();
@@ -100,9 +98,8 @@ async fn test_analyze_symbol_summary_cursor_conflict_error_metrics() {
 
     // Assert: error response with invalid_params
     let result = response.get("result").unwrap();
-    assert_eq!(
+    assert!(
         result.get("isError").unwrap().as_bool().unwrap(),
-        true,
         "expected isError=true"
     );
     let content = result.get("content").unwrap().as_array().unwrap();
@@ -135,9 +132,8 @@ async fn test_analyze_symbol_import_lookup_empty_symbol_error_metrics() {
 
     // Assert: error response with invalid_params
     let result = response.get("result").unwrap();
-    assert_eq!(
+    assert!(
         result.get("isError").unwrap().as_bool().unwrap(),
-        true,
         "expected isError=true"
     );
     let content = result.get("content").unwrap().as_array().unwrap();

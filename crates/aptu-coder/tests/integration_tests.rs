@@ -565,10 +565,10 @@ fn collect_forbidden_formats(
     let serde_json::Value::Object(map) = val else {
         return;
     };
-    if let Some(fmt) = map.get("format").and_then(|v| v.as_str()) {
-        if forbidden.contains(&fmt) {
-            found.push(format!("{path}: format={fmt}"));
-        }
+    if let Some(fmt) = map.get("format").and_then(|v| v.as_str())
+        && forbidden.contains(&fmt)
+    {
+        found.push(format!("{path}: format={fmt}"));
     }
     for (key, child) in map {
         let child_path = if path.is_empty() {
@@ -602,10 +602,8 @@ fn collect_forbidden_formats(
                 }
             }
             "items" => collect_forbidden_formats(child, forbidden, &child_path, found),
-            "additionalProperties" => {
-                if child.is_object() {
-                    collect_forbidden_formats(child, forbidden, &child_path, found);
-                }
+            "additionalProperties" if child.is_object() => {
+                collect_forbidden_formats(child, forbidden, &child_path, found);
             }
             _ => {}
         }
