@@ -987,7 +987,7 @@ mod tests_python {
         assert!(result.is_ok(), "extract with deadline=None should succeed");
         let analysis = result.unwrap();
         assert!(
-            analysis.functions.len() >= 1,
+            !analysis.functions.is_empty(),
             "should find at least one function"
         );
     }

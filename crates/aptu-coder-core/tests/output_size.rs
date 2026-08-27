@@ -10,7 +10,7 @@ fn test_overview_output_size() {
 
     println!("Overview output size: {} chars", char_count);
     assert!(
-        char_count >= 500 && char_count <= 50000,
+        (500..=50000).contains(&char_count),
         "Overview output size {} out of range [500, 50000]",
         char_count
     );
@@ -25,7 +25,7 @@ fn test_file_details_output_size() {
 
     println!("File details output size: {} chars", char_count);
     assert!(
-        char_count >= 500 && char_count <= 30000,
+        (500..=30000).contains(&char_count),
         "File details output size {} out of range [500, 30000]",
         char_count
     );
@@ -39,7 +39,7 @@ fn test_symbol_focus_output_size() {
 
     println!("Symbol focus output size: {} chars", char_count);
     assert!(
-        char_count >= 100 && char_count <= 10000,
+        (100..=10000).contains(&char_count),
         "Symbol focus output size {} out of range [100, 10000]",
         char_count
     );

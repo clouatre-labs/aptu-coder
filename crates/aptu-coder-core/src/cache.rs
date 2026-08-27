@@ -478,6 +478,8 @@ impl Clone for AnalysisCache {
     }
 }
 
+pub use crate::cache_disk::DiskCache;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,5 +791,3 @@ mod tests {
         assert_eq!(cache2.eviction_count(), 1);
     }
 }
-
-pub use crate::cache_disk::DiskCache;

@@ -3,11 +3,11 @@
 
 //! Integration test: verify that git pull on a 50-commit synthetic repo produces < 2000 chars.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Create a bare "remote" repo with 50 commits, each touching a unique file.
-fn setup_remote(base: &PathBuf) -> PathBuf {
+fn setup_remote(base: &Path) -> PathBuf {
     let remote = base.join("remote.git");
     std::fs::create_dir_all(&remote).expect("create remote dir");
 
@@ -70,7 +70,7 @@ fn setup_remote(base: &PathBuf) -> PathBuf {
 }
 
 /// Create a local clone of the remote with 1 commit, so pull has 49 commits to fetch.
-fn setup_local(base: &PathBuf, remote: &PathBuf) -> PathBuf {
+fn setup_local(base: &Path, remote: &Path) -> PathBuf {
     let local = base.join("local");
 
     let remote_str = remote.to_string_lossy().into_owned();
@@ -158,8 +158,8 @@ fn test_exec_git_pull_volume_guard() {
         combined_len,
         stdout.len(),
         stderr.len(),
-        &stdout,
-        &stderr,
+        stdout,
+        stderr,
     );
 
     // Cleanup

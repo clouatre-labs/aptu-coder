@@ -463,9 +463,7 @@ fn test_line_cap_fires_before_byte_cap() {
     // Edge case: 2500 lines x 5 chars each = 12500 bytes (under 30k byte cap)
     // Line cap (2000) should fire; returned content has ~50 lines (OVERFLOW_PREVIEW_LINES)
     let line = "abcde";
-    let stdout: String = std::iter::repeat(format!("{}\n", line))
-        .take(2500)
-        .collect();
+    let stdout: String = format!("{}\n", line).repeat(2500);
     assert_eq!(stdout.lines().count(), 2500, "should have 2500 lines");
     assert!(stdout.len() < 30_000, "should be under byte cap");
 

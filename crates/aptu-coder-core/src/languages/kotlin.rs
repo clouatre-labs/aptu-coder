@@ -207,10 +207,10 @@ mod tests {
             for capture in mat.captures {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
-                if name == "function" {
-                    if let Some(n) = node.child_by_field_name("name") {
-                        captured_functions.push(src[n.start_byte()..n.end_byte()].to_string());
-                    }
+                if name == "function"
+                    && let Some(n) = node.child_by_field_name("name")
+                {
+                    captured_functions.push(src[n.start_byte()..n.end_byte()].to_string());
                 }
             }
         }
@@ -321,10 +321,10 @@ mod tests {
             for capture in mat.captures {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
-                if name == "class" {
-                    if let Some(n) = node.child_by_field_name("name") {
-                        captured_classes.push(src[n.start_byte()..n.end_byte()].to_string());
-                    }
+                if name == "class"
+                    && let Some(n) = node.child_by_field_name("name")
+                {
+                    captured_classes.push(src[n.start_byte()..n.end_byte()].to_string());
                 }
             }
         }

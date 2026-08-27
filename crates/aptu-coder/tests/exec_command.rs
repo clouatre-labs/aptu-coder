@@ -381,13 +381,13 @@ async fn test_exec_command_slot_isolation() {
         .await;
 
         let sc = &resp["result"]["structuredContent"];
-        if let Some(path_str) = sc["stdout_path"].as_str() {
-            if let Some(slot_start) = path_str.find("slot-") {
-                let rest = &path_str[slot_start..];
-                let slot_end = rest.find('/').unwrap_or(rest.len());
-                let slot_id = &rest[..slot_end];
-                slot_ids.insert(slot_id.to_string());
-            }
+        if let Some(path_str) = sc["stdout_path"].as_str()
+            && let Some(slot_start) = path_str.find("slot-")
+        {
+            let rest = &path_str[slot_start..];
+            let slot_end = rest.find('/').unwrap_or(rest.len());
+            let slot_id = &rest[..slot_end];
+            slot_ids.insert(slot_id.to_string());
         }
     }
 

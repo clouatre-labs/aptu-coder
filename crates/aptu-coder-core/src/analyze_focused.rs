@@ -1160,7 +1160,7 @@ mod tests {
         // Create temp dir and a test file
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let test_file = tempfile::NamedTempFile::new_in(temp_dir.path()).expect("tempfile");
-        std::fs::write(&test_file.path(), "fn main() {}").expect("write");
+        std::fs::write(test_file.path(), "fn main() {}").expect("write");
 
         // Walk the directory to get entries
         let entries = walk_directory(temp_dir.path(), None).expect("walk");

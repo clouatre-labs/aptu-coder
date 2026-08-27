@@ -980,8 +980,7 @@ fn caller_c() { target(); }
                 line.split(',')
                     .find(|part| part.contains("callers"))
                     .and_then(|part| {
-                        part.trim()
-                            .split_whitespace()
+                        part.split_whitespace()
                             .next()
                             .and_then(|s| s.parse::<usize>().ok())
                     })
@@ -1071,13 +1070,5 @@ fn caller_c() { target(); }
             output.formatted.contains("DEF-USE SITES"),
             "formatted output should contain DEF-USE SITES"
         );
-    }
-
-    fn make_temp_file(content: &str) -> tempfile::NamedTempFile {
-        let mut f = tempfile::NamedTempFile::new().unwrap();
-        use std::io::Write;
-        f.write_all(content.as_bytes()).unwrap();
-        f.flush().unwrap();
-        f
     }
 }
