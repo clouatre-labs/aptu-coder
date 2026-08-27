@@ -3,6 +3,7 @@
 //! Structural knowledge graph over petgraph DiGraph with BFS blast-radius traversal.
 
 use crate::analyze::FileAnalysisOutput;
+use crate::graph::call_graph::CallGraph;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,13 @@ pub struct StructuralGraph {
     #[serde(skip)]
     symbol_index: HashMap<String, Vec<NodeIndex>>,
 }
+
+type BuildNodesResult = (
+    DiGraph<Node, Edge>,
+    HashSet<(NodeIndex, NodeIndex)>,
+    HashMap<String, Vec<NodeIndex>>,
+    HashMap<NodeIndex, usize>,
+);
 
 impl StructuralGraph {
     fn build_symbol_index(graph: &DiGraph<Node, Edge>) -> HashMap<String, Vec<NodeIndex>> {
@@ -149,13 +157,12 @@ impl StructuralGraph {
         pool.first().copied()
     }
 
-    pub fn build_from_analysis(entries: &[FileAnalysisOutput]) -> Self {
+    fn build_nodes(entries: &[FileAnalysisOutput]) -> BuildNodesResult {
         let mut graph = DiGraph::new();
         let mut seen: HashSet<(NodeIndex, NodeIndex)> = HashSet::new();
         let mut symbol_index: HashMap<String, Vec<NodeIndex>> = HashMap::new();
         let mut param_counts: HashMap<NodeIndex, usize> = HashMap::new();
 
-        // Pass 1: Add all File, Symbol, and Module nodes; populate symbol_index and param_counts.
         for entry in entries {
             let fp = &entry.path;
             let file = graph.add_node(Node::File {
@@ -199,6 +206,12 @@ impl StructuralGraph {
             }
         }
 
+        (graph, seen, symbol_index, param_counts)
+    }
+
+    pub fn build_from_analysis(entries: &[FileAnalysisOutput]) -> Self {
+        let (mut graph, mut seen, symbol_index, param_counts) = Self::build_nodes(entries);
+
         // Pass 2: Resolve call edges against the now-complete symbol_index using disambiguation.
         for entry in entries {
             for cl in &entry.semantic.calls {
@@ -225,6 +238,61 @@ impl StructuralGraph {
                     entry.path.as_str(),
                     cl.line,
                     cl.arg_count,
+                    &param_counts,
+                );
+
+                if let (Some(c), Some(e)) = (caller, callee)
+                    && seen.insert((c, e))
+                {
+                    graph.add_edge(c, e, Edge::Calls);
+                }
+            }
+        }
+
+        StructuralGraph {
+            graph,
+            symbol_index,
+        }
+    }
+
+    /// Build a StructuralGraph from an already-built CallGraph plus the same entries used to
+    /// build it. Reuses CallGraph::callees (already-resolved caller/callee names, including
+    /// scope-prefix stripping) instead of re-deriving Calls edges from entry.semantic.calls, so
+    /// the expensive edge-resolution pass runs exactly once across both graphs. Node/symbol_index
+    /// construction (Pass 1) is unavoidable since CallGraph does not track SymbolKind or imports.
+    /// Note: unlike build_from_analysis, this does not have per-call arg_count available (CallEdge
+    /// does not carry it), so candidate disambiguation falls back to same-file preference and line
+    /// proximity only, without the arg-count tie-break stage.
+    pub fn from_call_graph(entries: &[FileAnalysisOutput], call_graph: &CallGraph) -> Self {
+        let (mut graph, mut seen, symbol_index, param_counts) = Self::build_nodes(entries);
+
+        for (caller_name, edges) in &call_graph.callees {
+            let caller_candidates = symbol_index
+                .get(caller_name)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+
+            for edge in edges {
+                let callee_candidates = symbol_index
+                    .get(&edge.neighbor_name)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let call_file = edge.path.to_string_lossy();
+
+                let caller = Self::resolve_candidate(
+                    caller_candidates,
+                    &graph,
+                    &call_file,
+                    edge.line,
+                    None,
+                    &param_counts,
+                );
+                let callee = Self::resolve_candidate(
+                    callee_candidates,
+                    &graph,
+                    &call_file,
+                    edge.line,
+                    None,
                     &param_counts,
                 );
 

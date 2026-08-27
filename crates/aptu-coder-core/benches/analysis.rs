@@ -404,6 +404,29 @@ fn structural_graph_benchmark(c: &mut Criterion) {
         b.iter(|| sg_cache.get(std::hint::black_box(&cache_key)));
     });
 
+    let call_graph = aptu_coder_core::graph::CallGraph::build_from_results(
+        file_outputs
+            .iter()
+            .map(|e| (std::path::PathBuf::from(&e.path), e.semantic.clone()))
+            .collect(),
+        &[],
+        false,
+    )
+    .unwrap();
+
+    group.bench_function("cache_miss_old_independent_rebuild", |b| {
+        b.iter(|| StructuralGraph::build_from_analysis(std::hint::black_box(&file_outputs)));
+    });
+
+    group.bench_function("cache_miss_collapsed_from_call_graph", |b| {
+        b.iter(|| {
+            StructuralGraph::from_call_graph(
+                std::hint::black_box(&file_outputs),
+                std::hint::black_box(&call_graph),
+            )
+        });
+    });
+
     group.finish();
 }
 
