@@ -146,7 +146,7 @@ async fn test_list_resources_no_cursor() {
     );
 }
 
-/// Happy path: resources/templates/list without a cursor returns both
+/// Happy path: resources/templates/list without a cursor returns all three
 /// templates and no nextCursor.
 #[tokio::test]
 async fn test_list_resource_templates_no_cursor() {
@@ -160,8 +160,8 @@ async fn test_list_resource_templates_no_cursor() {
         .unwrap_or_else(|| panic!("expected resourceTemplates array, got: {resp}"));
     assert_eq!(
         templates.len(),
-        2,
-        "expected two advertised templates, got: {resp}"
+        3,
+        "expected three advertised templates, got: {resp}"
     );
     assert!(
         resp["result"].get("nextCursor").is_none(),
@@ -323,6 +323,316 @@ async fn test_resources_read_with_edges() {
         );
         assert!(edge.get("kind").is_some(), "edge should have kind field");
     }
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Integration test for bidirectional blast-radius with multiple seed symbols.
+#[tokio::test]
+#[serial]
+async fn test_resources_read_bidirectional_multi_seed() {
+    let tmp = std::env::temp_dir().join("aptu-coder-test-bidirectional-multi");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    // SAFETY: This test mutates process-wide environment state with set_var.
+    // The #[serial] attribute ensures this test runs in isolation.
+    unsafe {
+        env::set_var(
+            "APTU_CODER_DISK_CACHE_DIR",
+            tmp.to_string_lossy().into_owned(),
+        );
+    }
+
+    // Build a 3-function chain: a calls b, b calls c
+    let mut fa = FunctionInfo::default();
+    fa.name = "a".to_string();
+    fa.line = 1;
+    fa.end_line = 5;
+
+    let mut fb = FunctionInfo::default();
+    fb.name = "b".to_string();
+    fb.line = 10;
+    fb.end_line = 15;
+
+    let mut fc = FunctionInfo::default();
+    fc.name = "c".to_string();
+    fc.line = 20;
+    fc.end_line = 25;
+
+    let call_ab: CallInfo =
+        serde_json::from_str(r#"{"caller":"a","callee":"b","line":2,"column":0}"#)
+            .expect("valid call JSON");
+    let call_bc: CallInfo =
+        serde_json::from_str(r#"{"caller":"b","callee":"c","line":11,"column":0}"#)
+            .expect("valid call JSON");
+
+    let analysis = SemanticAnalysis::new(
+        vec![fa, fb, fc],
+        vec![],
+        vec![],
+        vec![],
+        Default::default(),
+        vec![call_ab, call_bc],
+        vec![],
+    );
+    let entry = FileAnalysisOutput::new(
+        "test.rs".to_string(),
+        "test.rs:1:1:1".to_string(),
+        analysis,
+        30,
+        None,
+    );
+    let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+    let repo_hash = "test-bidirectional-multi";
+    let store = GraphDiskStore::new(tmp.clone());
+    store.put(repo_hash, &graph);
+
+    // Query with bidirectional BFS from a,c (endpoints of the chain)
+    let resp = send_request(
+        "resources/read",
+        json!({
+            "uri": format!("aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/a,c?depth=3"),
+        }),
+    )
+    .await;
+
+    // Assert no error
+    assert!(
+        resp.get("error").is_none(),
+        "unexpected error response: {resp}"
+    );
+
+    // Extract and parse the result
+    let result = resp["result"]
+        .get("contents")
+        .and_then(|c| c.as_array().and_then(|arr| arr.first()))
+        .and_then(|c| c.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("expected text field in response");
+
+    let payload: serde_json::Value =
+        serde_json::from_str(result).expect("response text should be valid JSON");
+
+    let nodes = payload["nodes"]
+        .as_array()
+        .expect("nodes should be an array");
+
+    // Should find three nodes (a, b, c)
+    assert!(!nodes.is_empty(), "should have returned nodes");
+    assert_eq!(payload["total"].as_u64().unwrap(), 3, "total should be 3");
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Integration test for bidirectional blast-radius max_nodes cap.
+#[tokio::test]
+#[serial]
+async fn test_resources_read_bidirectional_max_nodes_cap() {
+    let tmp = std::env::temp_dir().join("aptu-coder-test-bidirectional-maxnodes");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    // SAFETY: This test mutates process-wide environment state with set_var.
+    // The #[serial] attribute ensures this test runs in isolation.
+    unsafe {
+        env::set_var(
+            "APTU_CODER_DISK_CACHE_DIR",
+            tmp.to_string_lossy().into_owned(),
+        );
+    }
+
+    // Build a star graph: func_0 calls func_1..func_10 (10 callees)
+    let mut functions = Vec::with_capacity(11);
+    let mut calls = Vec::with_capacity(10);
+
+    let mut f0 = FunctionInfo::default();
+    f0.name = "func_0".to_string();
+    f0.line = 1;
+    f0.end_line = 5;
+    functions.push(f0);
+
+    for i in 1..=10 {
+        let callee_name = format!("func_{i}");
+        let mut f = FunctionInfo::default();
+        f.name = callee_name.clone();
+        f.line = i * 10;
+        f.end_line = i * 10 + 5;
+        functions.push(f);
+
+        let call: CallInfo = serde_json::from_str(&format!(
+            r#"{{"caller":"func_0","callee":"{callee_name}","line":1,"column":0}}"#
+        ))
+        .expect("valid call JSON");
+        calls.push(call);
+    }
+
+    let analysis = SemanticAnalysis::new(
+        functions,
+        vec![],
+        vec![],
+        vec![],
+        Default::default(),
+        calls,
+        vec![],
+    );
+    let entry = FileAnalysisOutput::new(
+        "test.rs".to_string(),
+        "test.rs:1:1:1".to_string(),
+        analysis,
+        150,
+        None,
+    );
+    let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+    let repo_hash = "test-bidirectional-maxnodes";
+    let store = GraphDiskStore::new(tmp.clone());
+    store.put(repo_hash, &graph);
+
+    // Query with max_nodes=3 cap
+    let resp = send_request(
+        "resources/read",
+        json!({
+            "uri": format!("aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/func_0?max_nodes=3&depth=2"),
+        }),
+    )
+    .await;
+
+    // Assert no error
+    assert!(
+        resp.get("error").is_none(),
+        "unexpected error response: {resp}"
+    );
+
+    // Extract and parse the result
+    let result = resp["result"]
+        .get("contents")
+        .and_then(|c| c.as_array().and_then(|arr| arr.first()))
+        .and_then(|c| c.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("expected text field in response");
+
+    let payload: serde_json::Value =
+        serde_json::from_str(result).expect("response text should be valid JSON");
+
+    let total = payload["total"].as_u64().unwrap();
+    assert_eq!(
+        total, 3,
+        "total should be capped at max_nodes=3, got: {total}"
+    );
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Integration test for text format output on bidirectional query.
+#[tokio::test]
+#[serial]
+async fn test_resources_read_bidirectional_format_text() {
+    let tmp = std::env::temp_dir().join("aptu-coder-test-bidirectional-text");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    // SAFETY: This test mutates process-wide environment state with set_var.
+    // The #[serial] attribute ensures this test runs in isolation.
+    unsafe {
+        env::set_var(
+            "APTU_CODER_DISK_CACHE_DIR",
+            tmp.to_string_lossy().into_owned(),
+        );
+    }
+
+    // Build a 3-function chain: a calls b, b calls c
+    let mut fa = FunctionInfo::default();
+    fa.name = "a".to_string();
+    fa.line = 1;
+    fa.end_line = 5;
+
+    let mut fb = FunctionInfo::default();
+    fb.name = "b".to_string();
+    fb.line = 10;
+    fb.end_line = 15;
+
+    let mut fc = FunctionInfo::default();
+    fc.name = "c".to_string();
+    fc.line = 20;
+    fc.end_line = 25;
+
+    let call_ab: CallInfo =
+        serde_json::from_str(r#"{"caller":"a","callee":"b","line":2,"column":0}"#)
+            .expect("valid call JSON");
+    let call_bc: CallInfo =
+        serde_json::from_str(r#"{"caller":"b","callee":"c","line":11,"column":0}"#)
+            .expect("valid call JSON");
+
+    let analysis = SemanticAnalysis::new(
+        vec![fa, fb, fc],
+        vec![],
+        vec![],
+        vec![],
+        Default::default(),
+        vec![call_ab, call_bc],
+        vec![],
+    );
+    let entry = FileAnalysisOutput::new(
+        "test.rs".to_string(),
+        "test.rs:1:1:1".to_string(),
+        analysis,
+        30,
+        None,
+    );
+    let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+    let repo_hash = "test-bidirectional-text";
+    let store = GraphDiskStore::new(tmp.clone());
+    store.put(repo_hash, &graph);
+
+    // Query with format=text
+    let resp = send_request(
+        "resources/read",
+        json!({
+            "uri": format!("aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/a,c?depth=3&format=text"),
+        }),
+    )
+    .await;
+
+    // Assert no error
+    assert!(
+        resp.get("error").is_none(),
+        "unexpected error response: {resp}"
+    );
+
+    // Extract the raw response to check mimeType directly
+    let contents = resp["result"]
+        .get("contents")
+        .and_then(|c| c.as_array().and_then(|arr| arr.first()))
+        .expect("expected contents array");
+
+    let mime_type = contents
+        .get("mimeType")
+        .and_then(|mt| mt.as_str())
+        .expect("expected mimeType field");
+
+    assert_eq!(
+        mime_type, "text/plain",
+        "expected text/plain mime type, got: {mime_type}"
+    );
+
+    // Get the text content
+    let text = contents
+        .get("text")
+        .and_then(|t| t.as_str())
+        .expect("expected text field");
+
+    // Should contain function definitions
+    assert!(
+        text.contains("fn a"),
+        "text output should contain 'fn a', got: {text}"
+    );
+    assert!(
+        text.contains("fn c"),
+        "text output should contain 'fn c', got: {text}"
+    );
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp);
