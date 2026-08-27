@@ -265,10 +265,10 @@ mod tests {
         while let Some((m, _)) = iter.next() {
             for c in m.captures {
                 let name = query.capture_names()[c.index as usize];
-                if name == "func_name" {
-                    if let Ok(text) = c.node.utf8_text(source.as_bytes()) {
-                        func_names.push(text.to_string());
-                    }
+                if name == "func_name"
+                    && let Ok(text) = c.node.utf8_text(source.as_bytes())
+                {
+                    func_names.push(text.to_string());
                 }
             }
         }

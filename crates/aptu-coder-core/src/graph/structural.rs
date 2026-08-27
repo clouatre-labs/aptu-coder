@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(calls_edges.len(), 1);
 
         // Extract source and target
-        let (source, target) = g.graph.edge_endpoints(calls_edges[0]).unwrap();
+        let (_source, target) = g.graph.edge_endpoints(calls_edges[0]).unwrap();
         let target_file = match &g.graph[target] {
             Node::Symbol { file_path, .. } => file_path,
             _ => panic!("target must be Symbol"),

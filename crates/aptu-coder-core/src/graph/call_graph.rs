@@ -690,11 +690,7 @@ mod tests {
         // Check that helper has a caller from a.rs
         assert!(graph.callers.contains_key("helper"));
         let helper_callers = &graph.callers["helper"];
-        assert!(
-            helper_callers
-                .iter()
-                .any(|e| e.path == PathBuf::from("a.rs"))
-        );
+        assert!(helper_callers.iter().any(|e| e.path == Path::new("a.rs")));
     }
 
     #[test]
@@ -786,7 +782,7 @@ mod tests {
         assert!(
             helper_callers
                 .iter()
-                .any(|e| e.path == PathBuf::from("a.rs") && e.neighbor_name == "main")
+                .any(|e| e.path == Path::new("a.rs") && e.neighbor_name == "main")
         );
     }
 

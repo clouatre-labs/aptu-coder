@@ -321,9 +321,8 @@ mod tests {
             .and_then(|m| m.modified().ok());
 
         // New mtime should be >= initial mtime (should be newer due to touch)
-        match (initial_mtime, new_mtime) {
-            (Some(im), Some(nm)) => assert!(nm >= im, "mtime should advance or stay same on read"),
-            _ => {} // Can't test if metadata fails
-        }
+        if let (Some(im), Some(nm)) = (initial_mtime, new_mtime) {
+            assert!(nm >= im, "mtime should advance or stay same on read");
+        } // Can't test if metadata fails
     }
 }

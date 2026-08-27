@@ -305,7 +305,6 @@ struct ShardLockGuard(
 #[cfg(test)]
 mod disk_cache_tests {
     use super::*;
-    use std::io::Read;
     use tempfile::TempDir;
 
     #[test]

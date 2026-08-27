@@ -274,10 +274,10 @@ mod tests {
         let mut methods: Vec<String> = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
-            if node.kind() == "method_declaration" {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    methods.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
-                }
+            if node.kind() == "method_declaration"
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                methods.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
                 if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
@@ -302,10 +302,10 @@ mod tests {
         let mut ctors: Vec<String> = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
-            if node.kind() == "constructor_declaration" {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    ctors.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
-                }
+            if node.kind() == "constructor_declaration"
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                ctors.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
                 if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
@@ -329,10 +329,10 @@ mod tests {
         let mut interfaces: Vec<String> = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
-            if node.kind() == "interface_declaration" {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    interfaces.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
-                }
+            if node.kind() == "interface_declaration"
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                interfaces.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
                 if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
@@ -381,10 +381,10 @@ mod tests {
         let mut methods: Vec<String> = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
-            if node.kind() == "method_declaration" {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    methods.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
-                }
+            if node.kind() == "method_declaration"
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                methods.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
                 if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
@@ -408,10 +408,10 @@ mod tests {
         let mut classes: Vec<String> = Vec::new();
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
-            if node.kind() == "class_declaration" {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    classes.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
-                }
+            if node.kind() == "class_declaration"
+                && let Some(name_node) = node.child_by_field_name("name")
+            {
+                classes.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
                 if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
