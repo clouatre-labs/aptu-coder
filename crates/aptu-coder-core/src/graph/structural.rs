@@ -395,6 +395,7 @@ impl StructuralGraph {
 mod tests {
     use super::*;
     use crate::types::{CallInfo, ClassInfo, FunctionInfo, ImportInfo, SemanticAnalysis};
+    use std::path::PathBuf;
 
     fn make_output(
         path: &str,
@@ -822,5 +823,64 @@ mod tests {
             }
             _ => panic!("target must be Symbol"),
         }
+    }
+
+    #[test]
+    /// Documents the accepted divergence between `build_from_analysis()` and
+    /// `from_call_graph()` on ambiguous (same-name, differing-param-count) symbols:
+    /// `from_call_graph()`'s fast path reuses `CallGraph::callees`, whose `CallEdge` does not
+    /// carry `arg_count` (see the comment on `from_call_graph`), so it cannot apply the
+    /// arg-count tie-break stage that `build_from_analysis()`'s `resolve_candidate()` uses.
+    /// When line-proximity also ties (as in this fixture), the two builders resolve to
+    /// different candidates: `build_from_analysis` picks the arg-count match, while
+    /// `from_call_graph` falls back to first-definition-wins.
+    fn test_from_call_graph_diverges_from_build_from_analysis_on_arg_count_tie() {
+        // helper_v1 (1 param, line 5) and helper_v2 (2 params, line 15) are equidistant
+        // (5 lines) from the call at line 10, so line-proximity alone can't disambiguate.
+        let entry = make_output_custom(
+            "src/a.rs",
+            vec![
+                make_function("main", 1, 0),
+                make_function("helper", 5, 1),
+                make_function("helper", 15, 2),
+            ],
+            vec![make_call("main", "helper", 10, Some(2))],
+        );
+
+        fn calls_target_line(g: &StructuralGraph) -> usize {
+            let calls: Vec<_> = g
+                .graph
+                .edge_indices()
+                .filter(|i| g.graph[*i] == Edge::Calls)
+                .collect();
+            assert_eq!(calls.len(), 1);
+            let (_, target) = g.graph.edge_endpoints(calls[0]).unwrap();
+            match &g.graph[target] {
+                Node::Symbol { line, .. } => *line,
+                _ => panic!("target must be Symbol"),
+            }
+        }
+
+        let full = StructuralGraph::build_from_analysis(std::slice::from_ref(&entry));
+        assert_eq!(
+            calls_target_line(&full),
+            15,
+            "build_from_analysis should use arg-count to pick the 2-param overload"
+        );
+
+        let call_graph = CallGraph::build_from_results(
+            vec![(PathBuf::from("src/a.rs"), entry.semantic.clone())],
+            &[],
+            false,
+        )
+        .expect("call graph build should succeed for this fixture");
+
+        let fast = StructuralGraph::from_call_graph(std::slice::from_ref(&entry), &call_graph);
+        assert_eq!(
+            calls_target_line(&fast),
+            5,
+            "from_call_graph lacks arg_count on CallEdge, so on a line-proximity tie it falls \
+             back to first-definition-wins instead of matching the call's arg count"
+        );
     }
 }
