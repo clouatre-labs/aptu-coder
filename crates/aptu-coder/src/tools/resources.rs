@@ -4,8 +4,8 @@
 //! MCP Resource surface for the structural knowledge graph.
 //!
 //! Implements `list_resources`, `list_resource_templates`, and `read_resource`
-//! for the `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...` URI scheme.
-//! Two resource templates are advertised: blast-radius, subgraph.
+//! for the `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...&max_nodes=...&depth=...&format=...` URI scheme.
+//! Three resource templates are advertised: blast-radius, subgraph, blast-radius-bidirectional.
 
 use aptu_coder_core::graph::{GraphDiskStore, StructuralGraph};
 use aptu_coder_core::pagination::{
@@ -34,6 +34,16 @@ const PAGE_SIZE: usize = 50;
 /// default: 1). Traversal cost is sub-40us at all depths measured. Default remains 3.
 const MAX_GRAPH_DEPTH: usize = 5;
 
+/// Default node cap for bidirectional blast-radius traversal when not supplied in the URI.
+const DEFAULT_MAX_NODES: usize = 50;
+
+/// Output format for graph queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputFormat {
+    Json,
+    Text,
+}
+
 /// Graph query variants parsed from resource URIs.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum GraphQuery {
@@ -48,6 +58,13 @@ pub(crate) enum GraphQuery {
         symbol: String,
         cursor_offset: usize,
     },
+    BidirectionalBlastRadius {
+        repo_hash: String,
+        symbols: Vec<String>,
+        max_nodes: usize,
+        depth: usize,
+        cursor_offset: usize,
+    },
 }
 
 impl GraphQuery {
@@ -55,6 +72,7 @@ impl GraphQuery {
         match self {
             Self::BlastRadius { repo_hash, .. } => repo_hash,
             Self::Subgraph { repo_hash, .. } => repo_hash,
+            Self::BidirectionalBlastRadius { repo_hash, .. } => repo_hash,
         }
     }
 
@@ -62,6 +80,7 @@ impl GraphQuery {
         match self {
             Self::BlastRadius { cursor_offset, .. } => *cursor_offset,
             Self::Subgraph { cursor_offset, .. } => *cursor_offset,
+            Self::BidirectionalBlastRadius { cursor_offset, .. } => *cursor_offset,
         }
     }
 }
@@ -84,13 +103,13 @@ fn decode_graph_cursor(s: &str) -> Option<usize> {
     value.get("g")?.as_u64().map(|n| n as usize)
 }
 
-/// Parse a `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...&depth=N` URI.
+/// Parse a `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...&depth=N&max_nodes=M&format=...` URI.
 ///
 /// Validates scheme, path structure, and query type. The `repo_hash` is carried
 /// inside the returned `GraphQuery` and used as the `GraphDiskStore` lookup key
 /// in `read_resource_impl`; a stale hash causes `get` to return `None` which
 /// triggers the cold-cache error.
-fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
+fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
     let rest = uri.strip_prefix("aptu-coder://").ok_or_else(|| {
         ErrorData::new(
             ErrorCode::INVALID_PARAMS,
@@ -105,9 +124,11 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
         None => (rest, None),
     };
 
-    // Parse query-string params: cursor=<token>&depth=<N>
+    // Parse query-string params: cursor=<token>&depth=<N>&max_nodes=<M>&format=<format>
     let mut cursor_offset: usize = 0;
     let mut depth: usize = 3;
+    let mut max_nodes: usize = DEFAULT_MAX_NODES;
+    let mut format: OutputFormat = OutputFormat::Json;
     if let Some(qs) = qs {
         for kv in qs.split('&') {
             if let Some(token) = kv.strip_prefix("cursor=") {
@@ -126,6 +147,26 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
                         None,
                     )
                 })?;
+            } else if let Some(m) = kv.strip_prefix("max_nodes=") {
+                max_nodes = m.parse::<usize>().map_err(|_| {
+                    ErrorData::new(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("invalid max_nodes parameter: {m}"),
+                        None,
+                    )
+                })?;
+            } else if let Some(fmt) = kv.strip_prefix("format=") {
+                format = match fmt {
+                    "text" => OutputFormat::Text,
+                    "json" => OutputFormat::Json,
+                    _ => {
+                        return Err(ErrorData::new(
+                            ErrorCode::INVALID_PARAMS,
+                            format!("invalid format parameter: expected text or json, got {fmt}"),
+                            None,
+                        ));
+                    }
+                };
             }
         }
     }
@@ -155,21 +196,76 @@ fn parse_graph_uri(uri: &str) -> Result<GraphQuery, ErrorData> {
                     None,
                 ));
             }
-            Ok(GraphQuery::BlastRadius {
+            Ok((
+                GraphQuery::BlastRadius {
+                    repo_hash,
+                    symbol: arg,
+                    depth,
+                    cursor_offset,
+                },
+                format,
+            ))
+        }
+        "subgraph" => Ok((
+            GraphQuery::Subgraph {
                 repo_hash,
                 symbol: arg,
-                depth,
                 cursor_offset,
-            })
+            },
+            format,
+        )),
+        "blast-radius-bidirectional" => {
+            let symbols: Vec<String> = arg
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            if symbols.is_empty() {
+                return Err(ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    "blast-radius-bidirectional requires at least one non-empty symbol name"
+                        .to_string(),
+                    None,
+                ));
+            }
+            if depth < 1 {
+                return Err(ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    "depth parameter must be at least 1".to_string(),
+                    None,
+                ));
+            }
+            if depth > MAX_GRAPH_DEPTH {
+                return Err(ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("depth parameter exceeds maximum ({MAX_GRAPH_DEPTH}): got {depth}"),
+                    None,
+                ));
+            }
+            if max_nodes < 1 {
+                return Err(ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    "max_nodes parameter must be at least 1".to_string(),
+                    None,
+                ));
+            }
+            Ok((
+                GraphQuery::BidirectionalBlastRadius {
+                    repo_hash,
+                    symbols,
+                    max_nodes,
+                    depth,
+                    cursor_offset,
+                },
+                format,
+            ))
         }
-        "subgraph" => Ok(GraphQuery::Subgraph {
-            repo_hash,
-            symbol: arg,
-            cursor_offset,
-        }),
         _ => Err(ErrorData::new(
             ErrorCode::INVALID_PARAMS,
-            format!("unknown query type '{query_type}': expected blast-radius or subgraph"),
+            format!(
+                "unknown query type '{query_type}': expected blast-radius, subgraph, or blast-radius-bidirectional"
+            ),
             None,
         )),
     }
@@ -197,6 +293,16 @@ fn query_to_graph(
             graph.blast_radius_subgraph(symbol, *depth)
         }
         GraphQuery::Subgraph { symbol, .. } => graph.blast_radius_subgraph(symbol, 2),
+        GraphQuery::BidirectionalBlastRadius {
+            symbols,
+            max_nodes,
+            depth,
+            ..
+        } => {
+            let symbol_refs: Vec<&str> = symbols.iter().map(|s| s.as_str()).collect();
+            let seeds = graph.find_symbols(&symbol_refs);
+            graph.blast_radius_bidirectional(&seeds, *max_nodes, *depth)
+        }
     };
 
     // Build a map from NodeIndex to its position in the returned node list. The position
@@ -250,23 +356,31 @@ pub(crate) fn list_resources_impl(
         .with_cache_scope(CacheScope::Public))
 }
 
-/// Return two ResourceTemplate entries for the graph URI scheme.
+/// Return three ResourceTemplate entries for the graph URI scheme.
 pub(crate) fn list_resource_templates_impl(
     params: Option<PaginatedRequestParams>,
     _context: &RequestContext<RoleServer>,
 ) -> Result<ListResourceTemplatesResult, ErrorData> {
     let templates = vec![
         ResourceTemplate::new(
-            "aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}",
+            "aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}&format={format}",
             "graph-blast-radius",
         )
-        .with_description("BFS blast-radius traversal from a symbol (depth 1-5, default 3)")
+        .with_description(
+            "BFS blast-radius traversal from a symbol (depth 1-5, default 3; format: text or json default json)",
+        )
         .with_mime_type("application/json"),
         ResourceTemplate::new(
-            "aptu-coder://graph/{repo_hash}/subgraph/{symbol}",
+            "aptu-coder://graph/{repo_hash}/subgraph/{symbol}?format={format}",
             "graph-subgraph",
         )
-        .with_description("Subgraph centered on a symbol")
+        .with_description("Subgraph centered on a symbol (format: text or json default json)")
+        .with_mime_type("application/json"),
+        ResourceTemplate::new(
+            "aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}",
+            "graph-blast-radius-bidirectional",
+        )
+        .with_description("Bidirectional BFS from one or more comma-separated seed symbols (max_nodes: 1-∞ default 50, depth: 1-5 default 3, format: text or json default json)")
         .with_mime_type("application/json"),
     ];
     let offset = cursor_to_offset(params)?;
@@ -279,18 +393,21 @@ pub(crate) fn list_resource_templates_impl(
     .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, e.to_string(), None))?;
     let mut result = ListResourceTemplatesResult::with_all_items(paginated.items);
     result.next_cursor = paginated.next_cursor;
-    Ok(result)
+    Ok(result
+        .with_ttl_ms(3_600_000)
+        .with_cache_scope(CacheScope::Public))
 }
 
 /// Read a graph resource identified by URI.
 ///
 /// Parses the URI, loads the graph from disk store, dispatches to the query
-/// helper, paginates, and returns a `ReadResourceResponse::Complete`.
+/// helper, and either returns text output (if format=text) or paginates
+/// and returns JSON, then `ReadResourceResponse::Complete`.
 pub(crate) fn read_resource_impl(
     request: ReadResourceRequestParams,
     graph_store: &GraphDiskStore,
 ) -> Result<ReadResourceResponse, ErrorData> {
-    let query = parse_graph_uri(&request.uri)?;
+    let (query, format) = parse_graph_uri(&request.uri)?;
 
     let graph = graph_store.get(query.repo_hash()).ok_or_else(|| {
         ErrorData::new(
@@ -299,6 +416,39 @@ pub(crate) fn read_resource_impl(
             None,
         )
     })?;
+
+    // Handle text format output separately, bypassing pagination
+    if format == OutputFormat::Text {
+        // This match intentionally mirrors query_to_graph's match rather than sharing a helper function,
+        // because sharing one would require naming petgraph::graph::NodeIndex explicitly and adding petgraph
+        // as a new direct dependency of this crate just for a 3-arm match.
+        let node_indices = match &query {
+            GraphQuery::BlastRadius { symbol, depth, .. } => {
+                graph.blast_radius_subgraph(symbol, *depth).0
+            }
+            GraphQuery::Subgraph { symbol, .. } => graph.blast_radius_subgraph(symbol, 2).0,
+            GraphQuery::BidirectionalBlastRadius {
+                symbols,
+                max_nodes,
+                depth,
+                ..
+            } => {
+                let symbol_refs: Vec<&str> = symbols.iter().map(|s| s.as_str()).collect();
+                let seeds = graph.find_symbols(&symbol_refs);
+                graph
+                    .blast_radius_bidirectional(&seeds, *max_nodes, *depth)
+                    .0
+            }
+        };
+
+        let text = graph.render_subgraph_text(&node_indices);
+        let contents = ResourceContents::text(text, &request.uri).with_mime_type("text/plain");
+        return Ok(ReadResourceResponse::Complete(
+            ReadResourceResult::new(vec![contents])
+                .with_ttl_ms(3_600_000)
+                .with_cache_scope(CacheScope::Public),
+        ));
+    }
 
     let (all_nodes, all_edges) = query_to_graph(&graph, &query);
     let total = all_nodes.len();
@@ -344,9 +494,11 @@ pub(crate) fn read_resource_impl(
     })?;
 
     let contents = ResourceContents::text(text, &request.uri).with_mime_type("application/json");
-    Ok(ReadResourceResponse::Complete(ReadResourceResult::new(
-        vec![contents],
-    )))
+    Ok(ReadResourceResponse::Complete(
+        ReadResourceResult::new(vec![contents])
+            .with_ttl_ms(3_600_000)
+            .with_cache_scope(CacheScope::Public),
+    ))
 }
 
 #[cfg(test)]
@@ -393,7 +545,7 @@ mod tests {
     #[test]
     fn test_parse_graph_uri_blast_radius_happy_path() {
         let uri = "aptu-coder://graph/abc123/blast-radius/my_func";
-        let query = parse_graph_uri(uri).unwrap();
+        let (query, format) = parse_graph_uri(uri).unwrap();
         assert_eq!(
             query,
             GraphQuery::BlastRadius {
@@ -403,6 +555,7 @@ mod tests {
                 cursor_offset: 0,
             }
         );
+        assert_eq!(format, OutputFormat::Json);
     }
 
     #[test]
@@ -429,7 +582,7 @@ mod tests {
     fn test_parse_graph_uri_with_cursor() {
         let token = encode_graph_cursor(50);
         let uri = format!("aptu-coder://graph/abc123/blast-radius/my_func?cursor={token}");
-        let query = parse_graph_uri(&uri).unwrap();
+        let (query, _format) = parse_graph_uri(&uri).unwrap();
         assert_eq!(
             query,
             GraphQuery::BlastRadius {
@@ -526,7 +679,7 @@ mod tests {
     #[test]
     fn test_parse_graph_uri_depth_at_max_accepted() {
         let uri = "aptu-coder://graph/abc123/blast-radius/my_func?depth=5";
-        let query = parse_graph_uri(uri).unwrap();
+        let (query, _format) = parse_graph_uri(uri).unwrap();
         assert_eq!(
             query,
             GraphQuery::BlastRadius {
@@ -682,5 +835,105 @@ mod tests {
             "unexpected error: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn test_parse_graph_uri_bidirectional_happy_path() {
+        let uri =
+            "aptu-coder://graph/abc123/blast-radius-bidirectional/foo,bar?max_nodes=10&depth=2";
+        let (query, format) = parse_graph_uri(uri).unwrap();
+        assert_eq!(
+            query,
+            GraphQuery::BidirectionalBlastRadius {
+                repo_hash: "abc123".to_string(),
+                symbols: vec!["foo".to_string(), "bar".to_string()],
+                max_nodes: 10,
+                depth: 2,
+                cursor_offset: 0,
+            }
+        );
+        assert_eq!(format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn test_parse_graph_uri_bidirectional_empty_symbols_rejected() {
+        let uri = "aptu-coder://graph/abc123/blast-radius-bidirectional/?depth=3";
+        let err = parse_graph_uri(uri).unwrap_err();
+        assert!(err.message.contains("at least one"));
+    }
+
+    #[test]
+    fn test_parse_graph_uri_format_text() {
+        let uri = "aptu-coder://graph/abc123/blast-radius/my_func?format=text";
+        let (_query, format) = parse_graph_uri(uri).unwrap();
+        assert_eq!(format, OutputFormat::Text);
+    }
+
+    #[test]
+    fn test_parse_graph_uri_format_invalid_rejected() {
+        let uri = "aptu-coder://graph/abc123/blast-radius/my_func?format=xml";
+        let err = parse_graph_uri(uri).unwrap_err();
+        assert!(err.message.contains("invalid format parameter"));
+    }
+
+    #[test]
+    fn test_query_to_graph_bidirectional() {
+        // Build a 3-function chain: a calls b, b calls c
+        let mut fa = FunctionInfo::default();
+        fa.name = "a".to_string();
+        fa.line = 1;
+        fa.end_line = 5;
+
+        let mut fb = FunctionInfo::default();
+        fb.name = "b".to_string();
+        fb.line = 10;
+        fb.end_line = 15;
+
+        let mut fc = FunctionInfo::default();
+        fc.name = "c".to_string();
+        fc.line = 20;
+        fc.end_line = 25;
+
+        let call_ab: CallInfo =
+            serde_json::from_str(r#"{"caller":"a","callee":"b","line":2,"column":0}"#)
+                .expect("valid call JSON");
+        let call_bc: CallInfo =
+            serde_json::from_str(r#"{"caller":"b","callee":"c","line":11,"column":0}"#)
+                .expect("valid call JSON");
+
+        let analysis = SemanticAnalysis::new(
+            vec![fa, fb, fc],
+            vec![],
+            vec![],
+            vec![],
+            Default::default(),
+            vec![call_ab, call_bc],
+            vec![],
+        );
+        let entry = FileAnalysisOutput::new(
+            "test.rs".to_string(),
+            "test.rs:1:1:1".to_string(),
+            analysis,
+            30,
+            None,
+        );
+        let graph = StructuralGraph::build_from_analysis(&[entry]);
+
+        let query = GraphQuery::BidirectionalBlastRadius {
+            repo_hash: "x".to_string(),
+            symbols: vec!["b".to_string()],
+            max_nodes: 50,
+            depth: 3,
+            cursor_offset: 0,
+        };
+        let (nodes, edges) = query_to_graph(&graph, &query);
+        // Starting from b, bidirectional BFS should find a (caller), b (start), and c (callee)
+        assert!(
+            !nodes.is_empty(),
+            "should have at least the start node, got {} nodes",
+            nodes.len()
+        );
+        // Bidirectional search should return edges connecting the symbols
+        assert!(!edges.is_empty(), "bidirectional search should have edges");
     }
 }
