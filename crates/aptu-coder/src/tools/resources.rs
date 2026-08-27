@@ -13,6 +13,7 @@ use aptu_coder_core::pagination::{
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use percent_encoding::percent_decode_str;
 use rmcp::RoleServer;
 use rmcp::model::{
     CacheScope, ErrorCode, ErrorData, ListResourceTemplatesResult, ListResourcesResult,
@@ -103,6 +104,25 @@ fn decode_graph_cursor(s: &str) -> Option<usize> {
     value.get("g")?.as_u64().map(|n| n as usize)
 }
 
+/// Percent-decode a URI component, returning an error on invalid UTF-8.
+///
+/// RFC 6570 simple-string expansion percent-encodes characters outside the
+/// RFC 3986 unreserved set, including non-ASCII UTF-8 bytes. This helper
+/// reverses that encoding so that symbol names containing Unicode identifiers
+/// (e.g. `café`, `naïve`) resolve correctly against the graph's symbol index.
+fn percent_decode_uri_component(s: &str) -> Result<String, ErrorData> {
+    percent_decode_str(s)
+        .decode_utf8()
+        .map_err(|_| {
+            ErrorData::new(
+                ErrorCode::INVALID_PARAMS,
+                format!("invalid percent-encoding in URI: {s}"),
+                None,
+            )
+        })
+        .map(|cow| cow.into_owned())
+}
+
 /// Parse a `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...&depth=N&max_nodes=M&format=...` URI.
 ///
 /// Validates scheme, path structure, and query type. The `repo_hash` is carried
@@ -132,7 +152,8 @@ fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
     if let Some(qs) = qs {
         for kv in qs.split('&') {
             if let Some(token) = kv.strip_prefix("cursor=") {
-                cursor_offset = decode_graph_cursor(token).ok_or_else(|| {
+                let token = percent_decode_uri_component(token)?;
+                cursor_offset = decode_graph_cursor(&token).ok_or_else(|| {
                     ErrorData::new(
                         ErrorCode::INVALID_PARAMS,
                         format!("invalid graph cursor token: {token}"),
@@ -140,6 +161,7 @@ fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
                     )
                 })?;
             } else if let Some(d) = kv.strip_prefix("depth=") {
+                let d = percent_decode_uri_component(d)?;
                 depth = d.parse::<usize>().map_err(|_| {
                     ErrorData::new(
                         ErrorCode::INVALID_PARAMS,
@@ -148,6 +170,7 @@ fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
                     )
                 })?;
             } else if let Some(m) = kv.strip_prefix("max_nodes=") {
+                let m = percent_decode_uri_component(m)?;
                 max_nodes = m.parse::<usize>().map_err(|_| {
                     ErrorData::new(
                         ErrorCode::INVALID_PARAMS,
@@ -156,7 +179,8 @@ fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
                     )
                 })?;
             } else if let Some(fmt) = kv.strip_prefix("format=") {
-                format = match fmt {
+                let fmt = percent_decode_uri_component(fmt)?;
+                format = match fmt.as_str() {
                     "text" => OutputFormat::Text,
                     "json" => OutputFormat::Json,
                     _ => {
@@ -185,7 +209,7 @@ fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
 
     let repo_hash = segments[1].to_string();
     let query_type = segments[2];
-    let arg = segments[3..].join("/");
+    let arg = percent_decode_uri_component(&segments[3..].join("/"))?;
 
     match query_type {
         "blast-radius" => {
@@ -700,6 +724,81 @@ mod tests {
             "unexpected error message: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn test_parse_graph_uri_percent_encoded_non_ascii_blast_radius() {
+        // "café" percent-encoded as "caf%C3%A9" (UTF-8 for é is C3 A9)
+        let uri = "aptu-coder://graph/abc123/blast-radius/caf%C3%A9";
+        let (query, _format) = parse_graph_uri(uri).unwrap();
+        assert_eq!(
+            query,
+            GraphQuery::BlastRadius {
+                repo_hash: "abc123".to_string(),
+                symbol: "café".to_string(),
+                depth: 3,
+                cursor_offset: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_graph_uri_percent_encoded_non_ascii_subgraph() {
+        // "naïve" percent-encoded as "na%C3%AFve" (UTF-8 for ï is C3 AF)
+        let uri = "aptu-coder://graph/abc123/subgraph/na%C3%AFve";
+        let (query, _format) = parse_graph_uri(uri).unwrap();
+        assert_eq!(
+            query,
+            GraphQuery::Subgraph {
+                repo_hash: "abc123".to_string(),
+                symbol: "naïve".to_string(),
+                cursor_offset: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_graph_uri_percent_encoded_non_ascii_bidirectional() {
+        // "café,naïve" percent-encoded: caf%C3%A9,na%C3%AFve
+        let uri = "aptu-coder://graph/abc123/blast-radius-bidirectional/caf%C3%A9,na%C3%AFve";
+        let (query, _format) = parse_graph_uri(uri).unwrap();
+        assert_eq!(
+            query,
+            GraphQuery::BidirectionalBlastRadius {
+                repo_hash: "abc123".to_string(),
+                symbols: vec!["café".to_string(), "naïve".to_string()],
+                max_nodes: 50,
+                depth: 3,
+                cursor_offset: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_query_to_graph_non_ascii_symbol_roundtrip() {
+        // Build a graph with non-ASCII function names and verify query resolution.
+        let graph = make_graph_with_call("café", "naïve");
+        let query = GraphQuery::BlastRadius {
+            repo_hash: "x".to_string(),
+            symbol: "café".to_string(),
+            depth: 3,
+            cursor_offset: 0,
+        };
+        let (nodes, edges) = query_to_graph(&graph, &query);
+        assert!(!nodes.is_empty(), "nodes should be non-empty");
+        assert!(!edges.is_empty(), "edges should be non-empty");
+    }
+
+    #[test]
+    fn test_parse_graph_uri_percent_encoded_query_param() {
+        // Percent-encoded format value "text" -> "t%65xt"
+        let uri = "aptu-coder://graph/abc123/blast-radius/my_func?format=t%65xt";
+        let (query, format) = parse_graph_uri(uri).unwrap();
+        assert_eq!(format, OutputFormat::Text);
+        match query {
+            GraphQuery::BlastRadius { symbol, .. } => assert_eq!(symbol, "my_func"),
+            _ => panic!("expected BlastRadius query"),
+        }
     }
 
     #[test]
