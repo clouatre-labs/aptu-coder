@@ -24,6 +24,7 @@ pub enum Node {
         name: String,
         kind: SymbolKind,
         file_path: String,
+        line: usize,
     },
     Module {
         path: String,
@@ -41,15 +42,15 @@ pub enum Edge {
 pub struct StructuralGraph {
     pub graph: DiGraph<Node, Edge>,
     #[serde(skip)]
-    symbol_index: HashMap<String, NodeIndex>,
+    symbol_index: HashMap<String, Vec<NodeIndex>>,
 }
 
 impl StructuralGraph {
-    fn build_symbol_index(graph: &DiGraph<Node, Edge>) -> HashMap<String, NodeIndex> {
-        let mut index = HashMap::new();
+    fn build_symbol_index(graph: &DiGraph<Node, Edge>) -> HashMap<String, Vec<NodeIndex>> {
+        let mut index: HashMap<String, Vec<NodeIndex>> = HashMap::new();
         for idx in graph.node_indices() {
             if let Node::Symbol { name, .. } = &graph[idx] {
-                index.entry(name.clone()).or_insert(idx);
+                index.entry(name.clone()).or_default().push(idx);
             }
         }
         index
@@ -67,12 +68,94 @@ impl StructuralGraph {
         self.symbol_index = Self::build_symbol_index(&self.graph);
     }
 
+    /// Disambiguate a list of candidate nodes for a symbol using the heuristic:
+    /// a. Return immediately if 0 or 1 candidates.
+    /// b. Same-file preference: filter to candidates in call_file; if non-empty, use that pool.
+    /// c. Line-proximity: keep only the candidate(s) with minimum distance to call_line.
+    /// d. Arg-count match: if call_arg_count is Some(n), prefer a candidate matching that param count.
+    /// e. Fallback: return first candidate (first-definition-wins).
+    fn resolve_candidate(
+        candidates: &[NodeIndex],
+        graph: &DiGraph<Node, Edge>,
+        call_file: &str,
+        call_line: usize,
+        call_arg_count: Option<usize>,
+        param_counts: &HashMap<NodeIndex, usize>,
+    ) -> Option<NodeIndex> {
+        if candidates.is_empty() {
+            return None;
+        }
+        if candidates.len() == 1 {
+            return candidates.first().copied();
+        }
+
+        // Stage b: Same-file preference
+        let same_file: Vec<NodeIndex> = candidates
+            .iter()
+            .filter(|idx| {
+                if let Node::Symbol { file_path, .. } = &graph[**idx] {
+                    file_path == call_file
+                } else {
+                    false
+                }
+            })
+            .copied()
+            .collect();
+
+        let mut pool: Vec<NodeIndex> = if same_file.is_empty() {
+            candidates.to_vec()
+        } else {
+            same_file
+        };
+
+        if pool.len() == 1 {
+            return pool.first().copied();
+        }
+
+        // Stage c: Line-proximity
+        let min_line_distance = pool
+            .iter()
+            .filter_map(|idx| {
+                if let Node::Symbol { line, .. } = &graph[*idx] {
+                    Some(line.abs_diff(call_line))
+                } else {
+                    None
+                }
+            })
+            .min()?;
+
+        pool.retain(|idx| {
+            if let Node::Symbol { line, .. } = &graph[*idx] {
+                line.abs_diff(call_line) == min_line_distance
+            } else {
+                false
+            }
+        });
+
+        if pool.len() == 1 {
+            return pool.first().copied();
+        }
+
+        // Stage d: Arg-count match
+        if let Some(arg_count) = call_arg_count
+            && let Some(matching) = pool
+                .iter()
+                .find(|idx| param_counts.get(idx) == Some(&arg_count))
+        {
+            return Some(*matching);
+        }
+
+        // Stage e: Fallback (first-definition-wins)
+        pool.first().copied()
+    }
+
     pub fn build_from_analysis(entries: &[FileAnalysisOutput]) -> Self {
         let mut graph = DiGraph::new();
         let mut seen: HashSet<(NodeIndex, NodeIndex)> = HashSet::new();
-        let mut symbol_index: HashMap<String, NodeIndex> = HashMap::new();
+        let mut symbol_index: HashMap<String, Vec<NodeIndex>> = HashMap::new();
+        let mut param_counts: HashMap<NodeIndex, usize> = HashMap::new();
 
-        // Pass 1: Add all File, Symbol, and Module nodes; populate symbol_index.
+        // Pass 1: Add all File, Symbol, and Module nodes; populate symbol_index and param_counts.
         for entry in entries {
             let fp = &entry.path;
             let file = graph.add_node(Node::File {
@@ -84,22 +167,25 @@ impl StructuralGraph {
                     name: f.name.clone(),
                     kind: SymbolKind::Function,
                     file_path: fp.to_string(),
+                    line: f.line,
                 });
                 if seen.insert((file, n)) {
                     graph.add_edge(file, n, Edge::Contains);
                 }
-                symbol_index.entry(f.name.clone()).or_insert(n);
+                symbol_index.entry(f.name.clone()).or_default().push(n);
+                param_counts.insert(n, f.parameters.len());
             }
             for c in &entry.semantic.classes {
                 let n = graph.add_node(Node::Symbol {
                     name: c.name.clone(),
                     kind: SymbolKind::Class,
                     file_path: fp.to_string(),
+                    line: c.line,
                 });
                 if seen.insert((file, n)) {
                     graph.add_edge(file, n, Edge::Contains);
                 }
-                symbol_index.entry(c.name.clone()).or_insert(n);
+                symbol_index.entry(c.name.clone()).or_default().push(n);
             }
             for im in &entry.semantic.imports {
                 if !im.module.is_empty() {
@@ -113,12 +199,35 @@ impl StructuralGraph {
             }
         }
 
-        // Pass 2: Resolve call edges against the now-complete symbol_index.
+        // Pass 2: Resolve call edges against the now-complete symbol_index using disambiguation.
         for entry in entries {
             for cl in &entry.semantic.calls {
-                // Name-only keying preserves the prior first-definition-wins semantics: the first node inserted for a given name wins.
-                let caller = symbol_index.get(&cl.caller).copied();
-                let callee = symbol_index.get(&cl.callee).copied();
+                let caller_candidates = symbol_index
+                    .get(&cl.caller)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let callee_candidates = symbol_index
+                    .get(&cl.callee)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+
+                let caller = Self::resolve_candidate(
+                    caller_candidates,
+                    &graph,
+                    entry.path.as_str(),
+                    cl.line,
+                    None,
+                    &param_counts,
+                );
+                let callee = Self::resolve_candidate(
+                    callee_candidates,
+                    &graph,
+                    entry.path.as_str(),
+                    cl.line,
+                    cl.arg_count,
+                    &param_counts,
+                );
+
                 if let (Some(c), Some(e)) = (caller, callee)
                     && seen.insert((c, e))
                 {
@@ -162,7 +271,12 @@ impl StructuralGraph {
     }
 
     pub fn bfs_blast_radius(&self, symbol: &str, depth: usize) -> Vec<NodeIndex> {
-        let Some(start) = self.symbol_index.get(symbol).copied() else {
+        let Some(start) = self
+            .symbol_index
+            .get(symbol)
+            .and_then(|v| v.first())
+            .copied()
+        else {
             return vec![];
         };
         self.bfs_frontier(start, depth).1
@@ -182,7 +296,12 @@ impl StructuralGraph {
         symbol: &str,
         depth: usize,
     ) -> (Vec<NodeIndex>, Vec<(NodeIndex, NodeIndex, Edge)>) {
-        let Some(start) = self.symbol_index.get(symbol).copied() else {
+        let Some(start) = self
+            .symbol_index
+            .get(symbol)
+            .and_then(|v| v.first())
+            .copied()
+        else {
             return (vec![], vec![]);
         };
 
@@ -269,6 +388,57 @@ mod tests {
         )
     }
 
+    /// Test helper for creating custom FunctionInfo with explicit line numbers and parameters.
+    fn make_function(name: &str, line: usize, param_count: usize) -> FunctionInfo {
+        FunctionInfo {
+            name: name.to_string(),
+            line,
+            end_line: line + 5,
+            parameters: (0..param_count).map(|i| format!("p{}", i)).collect(),
+            return_type: None,
+        }
+    }
+
+    /// Test helper for creating custom CallInfo with explicit call and definition lines and arg count.
+    fn make_call(
+        caller: &str,
+        callee: &str,
+        call_line: usize,
+        arg_count: Option<usize>,
+    ) -> CallInfo {
+        CallInfo {
+            caller: caller.to_string(),
+            callee: callee.to_string(),
+            line: call_line,
+            column: 0,
+            arg_count,
+        }
+    }
+
+    /// Test helper for building a FileAnalysisOutput with custom FunctionInfo and CallInfo.
+    fn make_output_custom(
+        path: &str,
+        functions: Vec<FunctionInfo>,
+        calls: Vec<CallInfo>,
+    ) -> FileAnalysisOutput {
+        FileAnalysisOutput::new(
+            path.to_string(),
+            format!("{}:1:1:1", path),
+            SemanticAnalysis {
+                functions,
+                classes: vec![],
+                imports: vec![],
+                references: vec![],
+                call_frequency: Default::default(),
+                calls,
+                impl_traits: vec![],
+                def_use_sites: vec![],
+            },
+            10,
+            None,
+        )
+    }
+
     #[test]
     fn test_build_happy_path() {
         let e = make_output(
@@ -293,10 +463,10 @@ mod tests {
     }
 
     #[test]
-    /// Two files with the same call edge produce exactly 1 Calls edge because the
-    /// HashMap index resolves both callers to the same first-definition node, and
-    /// the `seen` HashSet deduplicates the edge.
-    fn test_build_dedup_edges() {
+    /// Two files with the same call edge now produce 2 Calls edges because
+    /// same-file preference resolves each file's "main -> helper" call within its own file.
+    /// This test verifies that no edge crosses from one file's main to the other file's helper.
+    fn test_build_no_cross_file_collision() {
         let e1 = make_output(
             "src/a.rs",
             vec!["main", "helper"],
@@ -312,16 +482,35 @@ mod tests {
             vec![("main", "helper")],
         );
         let g = StructuralGraph::build_from_analysis(&[e1, e2]);
-        let n = g
+        let calls_edges: Vec<_> = g
             .graph
             .edge_indices()
             .filter(|i| g.graph[*i] == Edge::Calls)
-            .count();
+            .collect();
         assert_eq!(
-            n, 1,
-            "expected 1 Calls edge (first-definition-wins), got {}",
-            n
+            calls_edges.len(),
+            2,
+            "expected 2 Calls edges (same-file preference), got {}",
+            calls_edges.len()
         );
+
+        // Verify that each edge's source and target are from the same file
+        for edge_idx in calls_edges {
+            let (source, target) = g.graph.edge_endpoints(edge_idx).unwrap();
+            let source_file = match &g.graph[source] {
+                Node::Symbol { file_path, .. } => file_path,
+                _ => panic!("source must be Symbol"),
+            };
+            let target_file = match &g.graph[target] {
+                Node::Symbol { file_path, .. } => file_path,
+                _ => panic!("target must be Symbol"),
+            };
+            assert_eq!(
+                source_file, target_file,
+                "call edge must not cross files: {} -> {}",
+                source_file, target_file
+            );
+        }
     }
 
     #[test]
@@ -332,6 +521,7 @@ mod tests {
                 name: n.into(),
                 kind: SymbolKind::Function,
                 file_path: "t.rs".into(),
+                line: 1,
             })
         };
         let a = sym("A");
@@ -383,5 +573,186 @@ mod tests {
             })
             .collect();
         assert_eq!(symbol_file_paths, vec!["correct.rs"]);
+    }
+
+    #[test]
+    /// A single file with two identical (caller, callee) entries in the calls list
+    /// must still collapse to exactly 1 Calls edge due to the `seen` HashSet.
+    fn test_build_dedup_identical_call_within_one_file() {
+        let e = make_output(
+            "src/a.rs",
+            vec!["main", "helper"],
+            vec![],
+            vec![],
+            vec![("main", "helper"), ("main", "helper")], // duplicate call
+        );
+        let g = StructuralGraph::build_from_analysis(&[e]);
+        let n = g
+            .graph
+            .edge_indices()
+            .filter(|i| g.graph[*i] == Edge::Calls)
+            .count();
+        assert_eq!(
+            n, 1,
+            "expected 1 Calls edge (dedup identical calls), got {}",
+            n
+        );
+    }
+
+    #[test]
+    /// Test same-file preference: when two files each define a same-named callee
+    /// at the same line (so line-proximity doesn't break the tie), the caller's own
+    /// file is preferred. This isolates the same-file-preference stage.
+    fn test_resolve_same_file_preference() {
+        // File a.rs defines helper at line 50
+        // File b.rs defines helper at line 50 (same line distance to call at line 50)
+        // Call in a.rs at line 50 should resolve to a.rs's helper (same file), not b.rs's
+        let e_a = make_output_custom(
+            "src/a.rs",
+            vec![make_function("main", 1, 0), make_function("helper", 50, 0)],
+            vec![make_call("main", "helper", 50, None)],
+        );
+        let e_b = make_output_custom("src/b.rs", vec![make_function("helper", 50, 0)], vec![]);
+
+        let g = StructuralGraph::build_from_analysis(&[e_a, e_b]);
+
+        // Find the Calls edge
+        let calls_edges: Vec<_> = g
+            .graph
+            .edge_indices()
+            .filter(|i| g.graph[*i] == Edge::Calls)
+            .collect();
+        assert_eq!(calls_edges.len(), 1);
+
+        // Extract source and target
+        let (source, target) = g.graph.edge_endpoints(calls_edges[0]).unwrap();
+        let target_file = match &g.graph[target] {
+            Node::Symbol { file_path, .. } => file_path,
+            _ => panic!("target must be Symbol"),
+        };
+        assert_eq!(
+            target_file, "src/a.rs",
+            "call should resolve to helper in same file"
+        );
+    }
+
+    #[test]
+    /// Test line-proximity fallback: when same-file preference doesn't narrow to one
+    /// candidate, the candidate whose definition line is closest to the call line wins.
+    /// This test puts the call in a third file so same-file preference does not apply.
+    fn test_resolve_line_proximity_fallback() {
+        // File a.rs defines helper at line 45 (5 away from call at line 50)
+        // File b.rs defines helper at line 30 (20 away from call at line 50)
+        // Call in c.rs (neutral file) should prefer a.rs based on line proximity alone
+        let e_a = make_output_custom("src/a.rs", vec![make_function("helper", 45, 0)], vec![]);
+        let e_b = make_output_custom("src/b.rs", vec![make_function("helper", 30, 0)], vec![]);
+        let e_c = make_output_custom(
+            "src/c.rs",
+            vec![make_function("caller", 1, 0)],
+            vec![make_call("caller", "helper", 50, None)],
+        );
+
+        let g = StructuralGraph::build_from_analysis(&[e_a, e_b, e_c]);
+
+        // Find the Calls edge
+        let calls_edges: Vec<_> = g
+            .graph
+            .edge_indices()
+            .filter(|i| g.graph[*i] == Edge::Calls)
+            .collect();
+        assert_eq!(calls_edges.len(), 1);
+
+        let (_, target) = g.graph.edge_endpoints(calls_edges[0]).unwrap();
+        let target_line = match &g.graph[target] {
+            Node::Symbol { line, .. } => *line,
+            _ => panic!("target must be Symbol"),
+        };
+        assert_eq!(
+            target_line, 45,
+            "call should resolve to closest definition line"
+        );
+    }
+
+    #[test]
+    /// Test arg-count fallback: when same-file preference doesn't reduce to one
+    /// candidate and line-proximity produces a tie (equal distances), the candidate
+    /// whose parameter count matches the call's arg_count is preferred.
+    fn test_resolve_arg_count_fallback() {
+        // File a.rs defines two overloads of "helper":
+        // - helper_v1 at line 5 with 1 param (distance 5 from call at line 10)
+        // - helper_v2 at line 15 with 2 params (distance 5 from call at line 10)
+        // Call at line 10 with 2 args should prefer helper_v2 (param count match)
+        // even though both are equidistant via line-proximity
+        let e_a = make_output_custom(
+            "src/a.rs",
+            vec![
+                make_function("main", 1, 0),
+                make_function("helper", 5, 1), // 1-param version at line 5
+                make_function("helper", 15, 2), // 2-param version at line 15
+            ],
+            vec![make_call("main", "helper", 10, Some(2))],
+        );
+
+        let g = StructuralGraph::build_from_analysis(&[e_a]);
+
+        let calls_edges: Vec<_> = g
+            .graph
+            .edge_indices()
+            .filter(|i| g.graph[*i] == Edge::Calls)
+            .collect();
+        assert_eq!(calls_edges.len(), 1);
+
+        let (_, target) = g.graph.edge_endpoints(calls_edges[0]).unwrap();
+        let target_line = match &g.graph[target] {
+            Node::Symbol { line, .. } => *line,
+            _ => panic!("target must be Symbol"),
+        };
+        assert_eq!(
+            target_line, 15,
+            "call should resolve to 2-param version (line 15) via arg-count match"
+        );
+    }
+
+    #[test]
+    /// Test fallback to first-definition-wins: when all disambiguation heuristics
+    /// fail to narrow down to one candidate, the first candidate in insertion order
+    /// (first NodeIndex added to the symbol_index vector) wins.
+    fn test_resolve_true_ambiguity_first_definition_wins() {
+        // File a.rs defines two overloads of helper at the same line and with the same param count:
+        // - helper_first at line 20 with 0 params (inserted first)
+        // - helper_second at line 20 with 0 params (inserted second)
+        // Call at line 20 with no arg_count matches both equally.
+        // Same-file and line-proximity don't narrow it down.
+        // Arg-count doesn't apply (no match criteria or both match).
+        // First-definition-wins: the first-inserted wins.
+        let e_a = make_output_custom(
+            "src/a.rs",
+            vec![
+                make_function("main", 1, 0),
+                make_function("helper", 20, 0), // inserted first
+                make_function("helper", 20, 0), // inserted second
+            ],
+            vec![make_call("main", "helper", 20, None)],
+        );
+
+        let g = StructuralGraph::build_from_analysis(&[e_a]);
+
+        let calls_edges: Vec<_> = g
+            .graph
+            .edge_indices()
+            .filter(|i| g.graph[*i] == Edge::Calls)
+            .collect();
+        assert_eq!(calls_edges.len(), 1);
+
+        // Both candidates are identical in all observable ways (line, file, param count)
+        // so we can't directly distinguish which was picked from the graph alone.
+        // Just verify that a call edge was created (the resolver didn't fail).
+        let (_, target) = g.graph.edge_endpoints(calls_edges[0]).unwrap();
+        match &g.graph[target] {
+            Node::Symbol { name, .. } => {
+                assert_eq!(name, "helper", "call should resolve to a helper symbol");
+            }
+            _ => panic!("target must be Symbol"),
+        }
     }
 }
