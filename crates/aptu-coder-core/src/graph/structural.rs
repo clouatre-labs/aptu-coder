@@ -539,33 +539,33 @@ impl StructuralGraph {
         let mut depth = 0;
         while depth < max_depth && !frontier.is_empty() && result.len() < max_nodes {
             depth += 1;
-            let mut next = Vec::new();
-            'outer: for node in frontier {
-                // Walk outgoing Calls edges
+
+            // Collect this level's candidates first and sort by NodeIndex so
+            // traversal order (and therefore truncation on max_nodes) is
+            // deterministic regardless of the graph's internal edge order.
+            let mut candidates: Vec<NodeIndex> = Vec::new();
+            for &node in &frontier {
                 for edge in self.graph.edges_directed(node, Direction::Outgoing) {
-                    if *edge.weight() == Edge::Calls {
-                        let target = edge.target();
-                        if visited.insert(target) {
-                            result.push(target);
-                            next.push(target);
-                            if result.len() >= max_nodes {
-                                break 'outer;
-                            }
-                        }
+                    if *edge.weight() == Edge::Calls && !visited.contains(&edge.target()) {
+                        candidates.push(edge.target());
                     }
                 }
-
-                // Walk incoming Calls edges
                 for edge in self.graph.edges_directed(node, Direction::Incoming) {
-                    if *edge.weight() == Edge::Calls {
-                        let source = edge.source();
-                        if visited.insert(source) {
-                            result.push(source);
-                            next.push(source);
-                            if result.len() >= max_nodes {
-                                break 'outer;
-                            }
-                        }
+                    if *edge.weight() == Edge::Calls && !visited.contains(&edge.source()) {
+                        candidates.push(edge.source());
+                    }
+                }
+            }
+            candidates.sort_by_key(|n| n.index());
+            candidates.dedup();
+
+            let mut next = Vec::new();
+            for candidate in candidates {
+                if visited.insert(candidate) {
+                    result.push(candidate);
+                    next.push(candidate);
+                    if result.len() >= max_nodes {
+                        break;
                     }
                 }
             }
@@ -1185,6 +1185,36 @@ mod tests {
         // Assert: should discover all 4 nodes
         assert_eq!(nodes.len(), 4);
         assert_eq!(edges.len(), 2);
+    }
+
+    #[test]
+    fn test_blast_radius_bidirectional_deterministic_order() {
+        // Arrange: fn_root calls three siblings at the same BFS depth
+        let f = make_output(
+            "src/lib.rs",
+            vec!["fn_root", "fn_z", "fn_y", "fn_x"],
+            vec![],
+            vec![],
+            vec![
+                ("fn_root", "fn_z"),
+                ("fn_root", "fn_y"),
+                ("fn_root", "fn_x"),
+            ],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let seeds = g.find_symbols(&["fn_root"]);
+
+        // Act: run twice to confirm the traversal is stable, not just non-empty
+        let (nodes_a, _) = g.blast_radius_bidirectional(&seeds, 10, 1);
+        let (nodes_b, _) = g.blast_radius_bidirectional(&seeds, 10, 1);
+
+        // Assert: same-depth siblings come back in NodeIndex order, every run
+        assert_eq!(nodes_a, nodes_b);
+        assert_eq!(nodes_a[0], seeds[0]);
+        let siblings = &nodes_a[1..];
+        let mut sorted_siblings = siblings.to_vec();
+        sorted_siblings.sort_by_key(|n| n.index());
+        assert_eq!(siblings, sorted_siblings);
     }
 
     #[test]
