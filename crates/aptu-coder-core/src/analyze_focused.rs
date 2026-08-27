@@ -482,43 +482,52 @@ fn analyze_focused_with_progress_with_entries_internal(
         return Err(AnalyzeError::Cancelled);
     }
 
-    // Phase 2: Build call graph (clone analysis_results for structural graph storage)
-    let mut graph = build_call_graph(analysis_results.clone(), &all_impl_traits)?;
-
-    // Best-effort: warm L1 cache hit, warm L2 disk cache hit, or cold miss build+persist.
-    // On L1 hit: skip rebuild. On L2 hit: build L1 entry from L2. On miss: build both.
-    // I/O errors degrade silently; the focused call-graph result is unaffected.
-    if let Some(key) = &cache_key {
-        if let Some(_graph) = structural_graph_cache.and_then(|c| c.get(key)) {
-            tracing::debug!(key, "structural graph cache hit (warm L1)");
-        } else {
-            let store = create_graph_store();
-            if let Some(graph) = store.get(key) {
-                tracing::debug!(key, "structural graph cache hit (warm L2)");
-                if let Some(cache) = structural_graph_cache {
-                    cache.put(key.clone(), Arc::new(graph));
-                }
+    // Determine the structural-graph cache tier before building the call graph, so the
+    // analysis_results.clone() below is paid only on an actual cache miss (not on every call).
+    // On L1 hit: nothing to do. On L2 hit: warm the L1 entry from disk. On miss: keep the store
+    // handle so Phase 2 can build+persist a StructuralGraph from the CallGraph it builds anyway.
+    let sg_store_for_miss: Option<GraphDiskStore> = match &cache_key {
+        Some(key) => {
+            if structural_graph_cache.and_then(|c| c.get(key)).is_some() {
+                tracing::debug!(key, "structural graph cache hit (warm L1)");
+                None
             } else {
-                let sg_entries: Vec<FileAnalysisOutput> = analysis_results
-                    .into_iter()
-                    .map(|(p, s)| {
-                        FileAnalysisOutput::new(
-                            p.to_string_lossy().into_owned(),
-                            String::new(),
-                            s,
-                            0,
-                            None,
-                        )
-                    })
-                    .collect();
-                let graph = Arc::new(StructuralGraph::build_from_analysis(&sg_entries));
-                store.put(key, &graph);
-                if let Some(cache) = structural_graph_cache {
-                    cache.put(key.clone(), graph);
+                let store = create_graph_store();
+                if let Some(graph) = store.get(key) {
+                    tracing::debug!(key, "structural graph cache hit (warm L2)");
+                    if let Some(cache) = structural_graph_cache {
+                        cache.put(key.clone(), Arc::new(graph));
+                    }
+                    None
+                } else {
+                    Some(store)
                 }
             }
         }
-    }
+        None => None,
+    };
+
+    // Phase 2: Build call graph. Only clone analysis_results when the structural graph still
+    // needs to be built (cache miss); otherwise move it directly into build_call_graph.
+    let mut graph = if let Some(store) = sg_store_for_miss {
+        let call_graph = build_call_graph(analysis_results.clone(), &all_impl_traits)?;
+        let sg_entries: Vec<FileAnalysisOutput> = analysis_results
+            .into_iter()
+            .map(|(p, s)| {
+                FileAnalysisOutput::new(p.to_string_lossy().into_owned(), String::new(), s, 0, None)
+            })
+            .collect();
+        let sg = Arc::new(StructuralGraph::from_call_graph(&sg_entries, &call_graph));
+        if let Some(key) = &cache_key {
+            store.put(key, &sg);
+            if let Some(cache) = structural_graph_cache {
+                cache.put(key.clone(), sg);
+            }
+        }
+        call_graph
+    } else {
+        build_call_graph(analysis_results, &all_impl_traits)?
+    };
 
     // Check for cancellation before resolving the symbol (phase 3)
     if ct.is_cancelled() {
