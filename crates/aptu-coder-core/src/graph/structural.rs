@@ -847,20 +847,24 @@ mod tests {
             vec![make_call("main", "helper", 10, Some(2))],
         );
 
+        fn calls_target_line(g: &StructuralGraph) -> usize {
+            let calls: Vec<_> = g
+                .graph
+                .edge_indices()
+                .filter(|i| g.graph[*i] == Edge::Calls)
+                .collect();
+            assert_eq!(calls.len(), 1);
+            let (_, target) = g.graph.edge_endpoints(calls[0]).unwrap();
+            match &g.graph[target] {
+                Node::Symbol { line, .. } => *line,
+                _ => panic!("target must be Symbol"),
+            }
+        }
+
         let full = StructuralGraph::build_from_analysis(std::slice::from_ref(&entry));
-        let full_calls: Vec<_> = full
-            .graph
-            .edge_indices()
-            .filter(|i| full.graph[*i] == Edge::Calls)
-            .collect();
-        assert_eq!(full_calls.len(), 1);
-        let (_, full_target) = full.graph.edge_endpoints(full_calls[0]).unwrap();
-        let full_line = match &full.graph[full_target] {
-            Node::Symbol { line, .. } => *line,
-            _ => panic!("target must be Symbol"),
-        };
         assert_eq!(
-            full_line, 15,
+            calls_target_line(&full),
+            15,
             "build_from_analysis should use arg-count to pick the 2-param overload"
         );
 
@@ -872,28 +876,11 @@ mod tests {
         .expect("call graph build should succeed for this fixture");
 
         let fast = StructuralGraph::from_call_graph(std::slice::from_ref(&entry), &call_graph);
-        let fast_calls: Vec<_> = fast
-            .graph
-            .edge_indices()
-            .filter(|i| fast.graph[*i] == Edge::Calls)
-            .collect();
-        assert_eq!(fast_calls.len(), 1);
-        let (_, fast_target) = fast.graph.edge_endpoints(fast_calls[0]).unwrap();
-        let fast_line = match &fast.graph[fast_target] {
-            Node::Symbol { line, .. } => *line,
-            _ => panic!("target must be Symbol"),
-        };
         assert_eq!(
-            fast_line, 5,
+            calls_target_line(&fast),
+            5,
             "from_call_graph lacks arg_count on CallEdge, so on a line-proximity tie it falls \
              back to first-definition-wins instead of matching the call's arg count"
-        );
-
-        assert_ne!(
-            full_line, fast_line,
-            "this test locks in an accepted divergence; if it now fails because the lines \
-             match, from_call_graph gained arg-count awareness and this test should be updated \
-             to assert equivalence instead"
         );
     }
 }
