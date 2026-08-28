@@ -72,7 +72,12 @@ impl StructuralGraph {
         }
     }
 
-    pub(crate) fn rebuild_symbol_index(&mut self) {
+    /// Rebuilds `symbol_index` from `graph`. `symbol_index` is `#[serde(skip)]`, so a
+    /// `StructuralGraph` obtained via `postcard`/`serde` deserialization has an empty
+    /// index until this is called; callers that decode a graph outside of
+    /// `GraphDiskStore::get` (which already calls this) must call it before querying
+    /// `find_symbols`/`find_symbols_all`.
+    pub fn rebuild_symbol_index(&mut self) {
         self.symbol_index = Self::build_symbol_index(&self.graph);
     }
 
@@ -1293,6 +1298,36 @@ mod tests {
         assert!(
             all_shared.contains(&first_shared[0]),
             "find_symbols result should be a subset of find_symbols_all"
+        );
+    }
+
+    #[test]
+    fn test_postcard_roundtrip_preserves_symbol_index() {
+        // Arrange: a graph with a known symbol "foo"
+        let f = make_output("src/a.rs", vec!["foo"], vec![], vec![], vec![]);
+        let g = StructuralGraph::build_from_analysis(&[f]);
+        let before = g.find_symbols_all(&["foo"]);
+        assert_eq!(before.len(), 1, "original graph should resolve 'foo'");
+
+        // Act: serialize and deserialize via postcard, without rebuilding
+        let bytes = postcard::to_allocvec(&g).expect("serialize");
+        let decoded: StructuralGraph = postcard::from_bytes(&bytes).expect("deserialize");
+
+        // Assert: symbol_index is not carried over serde(skip), so a bare decode loses seeds
+        assert!(
+            decoded.find_symbols_all(&["foo"]).is_empty(),
+            "decoded graph should have an empty symbol_index before rebuild_symbol_index"
+        );
+
+        // Act: rebuild_symbol_index restores queryability
+        let mut decoded = decoded;
+        decoded.rebuild_symbol_index();
+
+        // Assert: find_symbols_all now matches the original graph's result
+        assert_eq!(
+            decoded.find_symbols_all(&["foo"]),
+            before,
+            "rebuild_symbol_index should restore find_symbols_all seeds after a postcard roundtrip"
         );
     }
 }
