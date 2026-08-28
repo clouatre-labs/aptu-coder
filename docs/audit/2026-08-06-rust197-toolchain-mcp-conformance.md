@@ -208,6 +208,8 @@ The knowledge graph MCP resources were not present at the time of the prior audi
 
 #### CB-1 -- Test gap (medium): Knowledge graph MCP resources have no integration-test coverage
 
+*(Note: As of audit date; integration coverage for MCP resource surface was subsequently implemented and tested in `crates/aptu-coder/src/tools/resources.rs` and related suites).*
+
 **File**: `crates/aptu-coder/src/tools/resources.rs`
 
 The MCP resource surface (`list_resources_impl`, `list_resource_templates_impl`, `read_resource_impl`) added in #1367/#1368 is only exercised by unit tests inside `resources.rs` itself (`test_parse_graph_uri_*`, `test_read_resource_impl_cold_cache_miss`, etc.). No file under `crates/aptu-coder/tests/` exercises these functions through the real MCP protocol handshake using `make_test_analyzer()` / `call_tool_raw`.

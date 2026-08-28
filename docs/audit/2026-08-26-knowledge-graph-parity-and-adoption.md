@@ -1,5 +1,7 @@
 # Audit: Knowledge Graph Parity Verification and Adoption Guide
 
+> **Status: Superseded.** Recommendations implemented across PRs #1473, #1476, #1478, and #1481 in aptu-coder and PRs #1544, #1551, #1553, and #1554 in aptu.
+
 Date: 2026-08-26
 Commits: aptu-coder `9a54143` (origin/main), aptu `d5e74e2` (origin/main)
 Toolchain: Rust 1.98.0, petgraph 0.8.3

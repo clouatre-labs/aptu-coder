@@ -241,7 +241,7 @@ The script exposes tool call volume, cache health, session patterns, and daily t
 
 - **No tool is a removal candidate.** All 7 tools were called within the 31-day window. `analyze_symbol` is the lowest volume (223 calls) but architecturally distinct with no substitute.
 - All 20 fields defined in `docs/METRICS.md` are present in actual JSONL files. Schema is current.
-- `graph.rs` (1,185 LOC, 40 functions), `types.rs` (934 LOC), `lib.rs` (865 LOC, shim-only), `languages/kotlin.rs` (616 LOC), `languages/csharp.rs` (510 LOC) — not recommended for splitting; each is internally cohesive or constrained by role.
+- `graph.rs` (1,185 LOC, 40 functions; dated size snapshot prior to splitting under `crates/aptu-coder-core/src/graph/`), `types.rs` (934 LOC), `lib.rs` (865 LOC, shim-only), `languages/kotlin.rs` (616 LOC), `languages/csharp.rs` (510 LOC) — not recommended for splitting; each is internally cohesive or constrained by role.
 
 ---
 

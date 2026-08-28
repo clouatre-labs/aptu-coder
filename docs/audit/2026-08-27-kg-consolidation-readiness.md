@@ -1,5 +1,7 @@
 # KG Consolidation Readiness Audit
 
+> **Status: Superseded.** Recommendations implemented across PRs #1473, #1476, #1478, and #1481 in aptu-coder and PRs #1544, #1551, #1553, and #1554 in aptu.
+
 Date: 2026-08-27
 Related: clouatre-labs/aptu#1510, #1525, #1528, #1532, #1533
 Issue: #1472

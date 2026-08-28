@@ -1,5 +1,7 @@
 # Audit: Knowledge Graph Feature Gap
 
+> **Status: Superseded.** Historical design audit. Knowledge graph capability implemented in `crates/aptu-coder-core/src/graph/` across PRs #1367, #1368, #1473, #1476, #1478, and #1481.
+
 Date: 2026-08-03
 Commit: b31dce9
 Version: v0.26.2
