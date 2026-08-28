@@ -505,6 +505,17 @@ impl StructuralGraph {
         indices
     }
 
+    /// Resolves symbol names to every matching `NodeIndex` in the symbol index.
+    pub fn find_symbols_all(&self, names: &[&str]) -> Vec<NodeIndex> {
+        let mut indices = Vec::new();
+        for name in names {
+            if let Some(bucket) = self.symbol_index.get(*name) {
+                indices.extend(bucket.iter().copied());
+            }
+        }
+        indices
+    }
+
     /// Bidirectional blast-radius traversal discovering both callers and callees.
     ///
     /// Walks both `Direction::Incoming` and `Direction::Outgoing` edges filtered to `Edge::Calls`.
@@ -1238,5 +1249,50 @@ mod tests {
         let (nodes, edges) = g.blast_radius_bidirectional(&seeds, 10, 0);
         assert!(nodes.is_empty());
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_find_symbols_all_multiple_matches() {
+        // Arrange: two files, each with a function named "shared" plus another function
+        let f1 = make_output(
+            "src/a.rs",
+            vec!["shared", "helper_a"],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let f2 = make_output(
+            "src/b.rs",
+            vec!["shared", "helper_b"],
+            vec![],
+            vec![],
+            vec![],
+        );
+        let g = StructuralGraph::build_from_analysis(&[f1, f2]);
+
+        // Act: find_symbols_all should return all "shared" symbols
+        let all_shared = g.find_symbols_all(&["shared"]);
+        // Act: find_symbols should return only the first "shared" symbol
+        let first_shared = g.find_symbols(&["shared"]);
+
+        // Assert: find_symbols_all returns both matches
+        assert_eq!(
+            all_shared.len(),
+            2,
+            "find_symbols_all should return 2 'shared' symbols from 2 files"
+        );
+
+        // Assert: find_symbols returns only 1 match (the first)
+        assert_eq!(
+            first_shared.len(),
+            1,
+            "find_symbols should return 1 'shared' symbol (first only)"
+        );
+
+        // Assert: the single match from find_symbols is included in find_symbols_all
+        assert!(
+            all_shared.contains(&first_shared[0]),
+            "find_symbols result should be a subset of find_symbols_all"
+        );
     }
 }
