@@ -2,6 +2,8 @@
 
 We welcome contributions! This document covers the essentials.
 
+New to the project? Look for issues tagged [`good first issue`](https://github.com/clouatre-labs/aptu-coder/issues?q=is%3Aopen+label%3A%22good+first+issue%22).
+
 ## Quick Start
 
 ```bash
