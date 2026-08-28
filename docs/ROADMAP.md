@@ -208,11 +208,12 @@ Hardcoded protocol version string replaced with `ProtocolVersion::LATEST`.
 
 Added `StructuralGraph` and `GraphDiskStore` in `crates/aptu-coder-core/src/graph/`. The structural graph models files, symbols, and modules as nodes with typed edges (contains, calls, imports). The disk store persists the graph alongside the call-graph cache and degrades silently on I/O errors. Built as a side effect of the `analyze_symbol` cold-cache path.
 
-### [Complete] Knowledge Graph: MCP resource surface (#1368)
+### [Complete] Knowledge Graph: MCP resource surface (#1368, #1473, #1476, #1478, #1481)
 
 MCP resource templates added in `crates/aptu-coder/src/tools/resources.rs`:
-- `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}` -- BFS traversal, default depth=3, max 5
-- `aptu-coder://graph/{repo_hash}/subgraph/{symbol}` -- full subgraph for a symbol
+- `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}&format={format}` -- BFS traversal, default depth=3, max 5
+- `aptu-coder://graph/{repo_hash}/subgraph/{symbol}?format={format}` -- full subgraph for a symbol
+- `aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}` -- bidirectional BFS from multi-symbol seeds (`find_symbols_all`) with `max_nodes` traversal cap (default 50) and plain-text output format (`render_subgraph_text`)
 
 Results are paginated via an opaque cursor. Cold cache returns a message recommending `analyze_symbol` first. No new MCP tools.
 
