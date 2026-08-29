@@ -1,22 +1,15 @@
 # Audit: Performance and Token Efficiency, August 2026 (Re-run)
 
-Date: 2026-08-23
-Commit: 175f0ad
-Version: v0.29.2
+Date: 2026-08-23  
+Commit: 175f0ad  
+Version: v0.29.2  
 Toolchain: Rust / rmcp 3.1.4 / tokio async
 
 ## Purpose
 
-Re-run of [2026-06-performance-token-efficiency.md](2026-06-performance-token-efficiency.md) to
-measure how `aptu-coder` has evolved since June and to find further optimization opportunities.
-All eight tracked findings from that audit (F1-F8, issues #1039-#1046) are closed. Since then the
-project shipped MCP 2026-07-28 spec alignment, a structural knowledge-graph module with an MCP
-Resource surface, cursor-aware `list_resources`/`list_resource_templates` pagination, and an L2
-disk-cache fix for `FocusedAnalysisOutput` chain fields -- none of which had a token/latency
-baseline before this audit.
+Re-run of [2026-06-performance-token-efficiency.md](2026-06-performance-token-efficiency.md) to measure how `aptu-coder` has evolved since June and to find further optimization opportunities. All eight tracked findings from that audit (F1-F8, issues #1039-#1046) are closed. Since then the project shipped MCP 2026-07-28 spec alignment, a structural knowledge-graph module with an MCP Resource surface, cursor-aware `list_resources`/`list_resource_templates` pagination, and an L2 disk-cache fix for `FocusedAnalysisOutput` chain fields -- none of which had a token/latency baseline before this audit.
 
-This is a research-only audit. No `aptu-coder` source was modified; a defect was found and filed
-against the separate `scripts/mcp-metrics.py` observability tool (G4, below).
+This is a research-only audit. No `aptu-coder` source was modified; a defect was found and filed against the separate `scripts/mcp-metrics.py` observability tool (G4, below).
 
 ## Scope
 
@@ -59,11 +52,7 @@ Four passes, three of them corrections.
    Filed as **G4** (#1410). Every number below is recomputed directly from the JSONL, filtering
    `result == "received"`, rather than trusting the script's aggregate.
 
-Net effect of steps 3 and 4 together: real August sample sizes are larger than the flawed first
-draft reported, but noticeably smaller than the raw per-file line counts suggest, because roughly
-half of every file is a marker row, not a call. Cache hit rates are real and lower than June's
-across every per-file/per-directory tool -- less dramatically than the buggy script first
-suggested, but still a genuine decline, with a partial source-level explanation (G3).
+Net effect of steps 3 and 4 together: real August sample sizes are larger than the flawed first draft reported, but noticeably smaller than the raw per-file line counts suggest, because roughly half of every file is a marker row, not a call. Cache hit rates are real and lower than June's across every per-file/per-directory tool -- less dramatically than the buggy script first suggested, but still a genuine decline, with a partial source-level explanation (G3).
 
 ## Metrics Snapshot
 
@@ -81,14 +70,9 @@ suggested, but still a genuine decline, with a partial source-level explanation 
 | `analyze_directory` | 40 | 36 | 404 | 430 | 3,708 | 10.00% (4/40) | 0.0% |
 | `analyze_symbol` | 2 | 66 | 66 | 66 | 42 | 0.0% (0/1 checked) | 0.0% |
 
-`analyze_module`'s hit-rate denominator is 67, not 82: 15 completed calls carry `cache_hit: null`
-with no other distinguishing field set, most likely from an earlier point in the retention window
-before a metrics field was added -- a schema-vintage artifact, not a new gap. `analyze_symbol` has
-only 2 completed calls total (1 `ok`, 1 `error`); the `error` call never reaches the cache check
-by design, leaving a single checkable sample -- too small to conclude anything.
+`analyze_module`'s hit-rate denominator is 67, not 82: 15 completed calls carry `cache_hit: null` with no other distinguishing field set, most likely from an earlier point in the retention window before a metrics field was added -- a schema-vintage artifact, not a new gap. `analyze_symbol` has only 2 completed calls total (1 `ok`, 1 `error`); the `error` call never reaches the cache check by design, leaving a single checkable sample -- too small to conclude anything.
 
-`exec_command` reliability over the same window: 116 errors (2.68%), 1 timeout. The long tail is
-real, not corpus noise: 17 calls exceeded 60 seconds, including three near 180 seconds.
+`exec_command` reliability over the same window: 116 errors (2.68%), 1 timeout. The long tail is real, not corpus noise: 17 calls exceeded 60 seconds, including three near 180 seconds.
 
 *Table 2: June 2026 tool metrics, reproduced from the prior audit for reference.*
 
@@ -102,18 +86,11 @@ real, not corpus noise: 17 calls exceeded 60 seconds, including three near 180 s
 | `analyze_module` | 269 | 5 | 452 | 514 | 6,442 | 55.92% | 0.0% |
 | `analyze_symbol` | 39 | 208 | 534 | 620 | 796 | 0.0% | 0.0% |
 
-It is unknown whether June's own numbers already excluded `"received"` rows -- the June audit
-document doesn't say, and G4 shows the standard script wouldn't have excluded them on its own.
-If June's figures also include marker rows, the true June baseline was even better than reported
-and today's tools improved on a stronger baseline than Table 3 credits; if June counted correctly,
-Table 3 is directly comparable. This is unresolved and worth settling before the next re-run
-(see Remaining Opportunities).
+It is unknown whether June's own numbers already excluded `"received"` rows -- the June audit document doesn't say, and G4 shows the standard script wouldn't have excluded them on its own. If June's figures also include marker rows, the true June baseline was even better than reported and today's tools improved on a stronger baseline than Table 3 credits; if June counted correctly, Table 3 is directly comparable. This is unresolved and worth settling before the next re-run (see Remaining Opportunities).
 
 ### Comparison validity
 
-With both the corpus scope and the `"received"`-row contamination corrected, sample sizes for
-`analyze_directory` (40), `analyze_file` (78), and `analyze_module` (82) are smaller than June's
-but large enough for percentile claims. `analyze_symbol` (n=1 checkable) is not.
+With both the corpus scope and the `"received"`-row contamination corrected, sample sizes for `analyze_directory` (40), `analyze_file` (78), and `analyze_module` (82) are smaller than June's but large enough for percentile claims. `analyze_symbol` (n=1 checkable) is not.
 
 *Table 3: Validity of each before/after delta, corrected corpus.*
 
@@ -132,9 +109,7 @@ but large enough for percentile claims. `analyze_symbol` (n=1 checkable) is not.
 | `analyze_directory` cache hit rate | 30.31% | 10.00% | Real decline (~67% relative) -- root cause identified, see G3 |
 | `analyze_symbol` cache hit rate | 0.0% | 0.0% (n=1) | Consistent; still no sample large enough to exercise the cache |
 
-Latency improved across every tool with a usable sample. Cache hit rates fell across every
-per-file and per-directory tool; the decline is smaller than the pre-G4-fix numbers suggested, but
-still real and, for `analyze_directory`, the largest relative drop of the three.
+Latency improved across every tool with a usable sample. Cache hit rates fell across every per-file and per-directory tool; the decline is smaller than the pre-G4-fix numbers suggested, but still real and, for `analyze_directory`, the largest relative drop of the three.
 
 ## Summary
 
@@ -157,8 +132,7 @@ still real and, for `analyze_directory`, the largest relative drop of the three.
 
 ## F1-F8: Verification Against Current Source
 
-All eight fixes are confirmed present and correct in source, independent of the corpus and
-tooling corrections above:
+All eight fixes are confirmed present and correct in source, independent of the corpus and tooling corrections above:
 
 - **F1** -- `crates/aptu-coder/src/tools/exec_command.rs` has no cache lookup path; metrics report
   a consistent 0.0% hit rate across 4,330 completed calls; tool description no longer advertises
@@ -387,9 +361,4 @@ This audit went through three corrections after its first draft, in the same ses
    half of every corpus file is a `"received"` placeholder row the script never filters out,
    deflating every cache-hit-rate and latency-percentile figure it has ever produced.
 
-The common thread: the guard's adversarial pass checked the scout's *claims* against source, but
-never checked the scout's *inputs* -- neither the corpus scope nor the tooling computing the
-numbers. Both defects were caught by a human asking "are we sure about this number?", not by
-either delegate. Future audit re-runs delegated this way should have an explicit step -- guard or
-otherwise -- that verifies the measurement tool itself against a hand-computed sample before any
-of its output is trusted, not just that the tool's claims are internally consistent.
+The common thread: the guard's adversarial pass checked the scout's *claims* against source, but never checked the scout's *inputs* -- neither the corpus scope nor the tooling computing the numbers. Both defects were caught by a human asking "are we sure about this number?", not by either delegate. Future audit re-runs delegated this way should have an explicit step -- guard or otherwise -- that verifies the measurement tool itself against a hand-computed sample before any of its output is trusted, not just that the tool's claims are internally consistent.

@@ -1,8 +1,8 @@
 # Audit: Usage, Observability, and Code Size — July 2026
 
-Date: 2026-07-05
-Data: 31 days (2026-06-05 to 2026-07-05), 118,113 JSONL calls
-Method: `scripts/mcp-metrics.py`, validated jq one-liners, `analyze_directory` / `analyze_file`
+Date: 2026-07-05  
+Data: 31 days (2026-06-05 to 2026-07-05), 118,113 JSONL calls  
+Method: `scripts/mcp-metrics.py`, validated jq one-liners, `analyze_directory` / `analyze_file`  
 Guard verdict: PASS_WITH_NOTES — all critical claims confirmed
 
 ## Purpose
@@ -65,8 +65,8 @@ Cache hit rate was below 3% until 2026-06-14, then stabilized in the 40–80% ra
 
 ### O1 — `analyze_symbol` emits no error metrics
 
-**Severity:** High
-**File:** `crates/aptu-coder/src/tools/analyze_symbol.rs`
+**Severity:** High  
+**File:** `crates/aptu-coder/src/tools/analyze_symbol.rs`  
 **Guard verdict:** CONFIRMED
 
 All three `metrics_tx.send` calls in `analyze_symbol.rs` use `result="ok"`. Error paths (`invalid_params`, validation failures, analysis errors) record on the tracing span only (`span.record("error", true)`). No `result="error"` entry appears in JSONL across 225 observed calls.
@@ -81,7 +81,7 @@ Every other tool (6 of 7) emits `result="error"` with `error_type` on failure pa
 
 ### O2 — 19 tool parameters not recorded in JSONL
 
-**Severity:** High
+**Severity:** High  
 **Files:** All tool handlers in `crates/aptu-coder/src/tools/`, `crates/aptu-coder/src/metrics.rs`
 
 The following parameters are accepted but produce no JSONL field. Usage of these features cannot be measured.
@@ -120,8 +120,8 @@ Note: `impl_only`, `def_use`, `git_ref`, and `drain_timeout_secs` are candidates
 
 ### O3 — Pagination mode invisible across all tools
 
-**Severity:** Medium
-**Files:** All tool handlers, `crates/aptu-coder/src/metrics.rs`
+**Severity:** Medium  
+**Files:** All tool handlers, `crates/aptu-coder/src/metrics.rs`  
 **Guard verdict:** CONFIRMED — zero references to `cursor`, `summary`, or `is_paginated` in `metrics.rs` or any handler.
 
 Whether a call is a first-page, continuation, or summary-mode call is not recorded. Pagination adoption and the cursor-vs-summary split cannot be measured.
@@ -132,7 +132,7 @@ This is a subset of O2 but warrants a separate issue because it applies to four 
 
 ### O4 — `analyze_symbol` analysis mode not recorded
 
-**Severity:** Medium
+**Severity:** Medium  
 **File:** `crates/aptu-coder/src/tools/analyze_symbol.rs`
 
 `analyze_symbol` supports three distinct modes: call graph (default), `import_lookup`, and `def_use`. Additionally `match_mode` controls name matching strategy and `follow_depth` controls traversal depth. None of these are in JSONL. Usage of advanced modes is entirely invisible.
@@ -143,7 +143,7 @@ Covered by O2's table; listed separately because it directly blocks the removal 
 
 ### O5 — Cache L1 evictions and L2 size not metricated
 
-**Severity:** Low
+**Severity:** Low  
 **File:** `crates/aptu-coder-core/src/cache.rs`
 
 L1 (in-memory LRU) evictions are not counted. L2 disk cache entry count and total size are not recorded. On cache miss, the miss tier (L1 or L2) is not distinguished — only hits carry `cache_tier`. Cache write failures are recorded for L2 only.
@@ -152,7 +152,7 @@ L1 (in-memory LRU) evictions are not counted. L2 disk cache entry count and tota
 
 ### O6 — `scripts/mcp-metrics.py` has no per-parameter breakdown
 
-**Severity:** Low
+**Severity:** Low  
 **File:** `scripts/mcp-metrics.py`
 
 The script exposes tool call volume, cache health, session patterns, and daily trends. It does not expose per-parameter usage distributions, pagination adoption, feature adoption rates (`import_lookup`, `def_use`, `impl_only`, `match_mode`), or per-session parameter breakdown. All of these require O2 to be resolved first.
@@ -161,7 +161,7 @@ The script exposes tool call volume, cache health, session patterns, and daily t
 
 ### S1 — `analyze.rs` 2,075 LOC
 
-**Severity:** Medium
+**Severity:** Medium  
 **File:** `crates/aptu-coder-core/src/analyze.rs`
 
 51 functions. Largest: `analyze_focused_with_progress_with_entries_internal` (~196 LOC). Focused-analysis orchestration and directory-level analysis are co-located with no module boundary.
@@ -172,7 +172,7 @@ The script exposes tool call volume, cache health, session patterns, and daily t
 
 ### S2 — `parser.rs` 1,949 LOC
 
-**Severity:** Medium
+**Severity:** Medium  
 **File:** `crates/aptu-coder-core/src/parser.rs`
 
 42 functions. Element extraction (class, function, import node parsing) and tree traversal coordination are co-located.
@@ -183,7 +183,7 @@ The script exposes tool call volume, cache health, session patterns, and daily t
 
 ### S3 — `tests.rs` 1,886 LOC
 
-**Severity:** Medium
+**Severity:** Medium  
 **File:** `crates/aptu-coder/src/tests.rs`
 
 66 test functions in a single file covering metrics, filters, exec, and edit subsystems.
@@ -194,7 +194,7 @@ The script exposes tool call volume, cache health, session patterns, and daily t
 
 ### S4 — `metrics.rs` 1,499 LOC
 
-**Severity:** Medium
+**Severity:** Medium  
 **File:** `crates/aptu-coder/src/metrics.rs`
 
 65 functions mixing event building/buffering with file I/O and export logic. Largest test: `test_metrics_export_file_created` (lines 1050–1162, ~112 LOC).
@@ -217,7 +217,7 @@ The script exposes tool call volume, cache health, session patterns, and daily t
 
 ### S6 — `shell_write.rs` 615 LOC, two distinct concerns
 
-**Severity:** Low
+**Severity:** Low  
 **File:** `crates/aptu-coder/src/shell_write.rs`
 
 `validate_heredocs` (lines 26–259, ~234 LOC) and `scan_backward_for_file_write` (lines 265–453, ~189 LOC) implement two independent subsystems: heredoc safety validation and backward token scanning.

@@ -2,8 +2,7 @@
 
 Audit date: 2026-06-11
 
-Status: Historical audit, preserved for issue traceability. Findings were verified against the
-repository state audited on 2026-06-11 and have not been revalidated against current `origin/main`.
+Status: Historical audit, preserved for issue traceability. Findings were verified against the repository state audited on 2026-06-11 and have not been revalidated against current `origin/main`.
 
 ## See Also
 
@@ -20,8 +19,7 @@ Point-in-time audit of the `aptu-coder` workspace against four quality axes:
 3. **Test redundancy** -- do overlapping tests obscure coverage gaps?
 4. **Rust idiomacy and clarity** -- are KISS/YAGNI principles followed?
 
-Each finding was independently verified by a Guard adversarial pass. Verdicts are recorded here so
-the rationale is preserved rather than scattered across issue comments.
+Each finding was independently verified by a Guard adversarial pass. Verdicts are recorded here so the rationale is preserved rather than scattered across issue comments.
 
 ---
 
@@ -55,9 +53,7 @@ Issue status last checked: 2026-06-13
 
 ## Confirmed Findings
 
-All 10 original findings confirmed. One bonus finding (F11) surfaced during Guard verification.
-F6 and F7 are confirmed as PARTIAL: the core claim holds but the scope is narrower than initially
-stated -- the precise constraints are documented in their sections below.
+All 10 original findings confirmed. One bonus finding (F11) surfaced during Guard verification. F6 and F7 are confirmed as PARTIAL: the core claim holds but the scope is narrower than initially stated -- the precise constraints are documented in their sections below.
 
 ---
 
@@ -67,13 +63,9 @@ stated -- the precise constraints are documented in their sections below.
 
 **Files:** `Cargo.toml` (workspace `[workspace.dependencies]`), `crates/aptu-coder/Cargo.toml`
 
-**Guard verdict:** CONFIRMED -- `rg 'async_trait|async-trait'` across all `.rs` files returns
-zero hits. rmcp 1.x features (`server`, `macros`, `transport-io`,
-`transport-streamable-http-server`) do not require `async-trait`; rmcp generates its own async
-dispatch internally. The dep is vestigial from a pre-rmcp implementation.
+**Guard verdict:** CONFIRMED -- `rg 'async_trait|async-trait'` across all `.rs` files returns zero hits. rmcp 1.x features (`server`, `macros`, `transport-io`, `transport-streamable-http-server`) do not require `async-trait`; rmcp generates its own async dispatch internally. The dep is vestigial from a pre-rmcp implementation.
 
-**Fix:** Remove `async-trait = "0.1"` from `[workspace.dependencies]` in `Cargo.toml` and from
-`crates/aptu-coder/Cargo.toml`.
+**Fix:** Remove `async-trait = "0.1"` from `[workspace.dependencies]` in `Cargo.toml` and from `crates/aptu-coder/Cargo.toml`.
 
 **Regression gate:** `cargo build && cargo test` must pass.
 
@@ -85,10 +77,7 @@ dispatch internally. The dep is vestigial from a pre-rmcp implementation.
 
 **Files:** `crates/aptu-coder-core/Cargo.toml`
 
-**Guard verdict:** CONFIRMED -- `rg 'use regex|extern crate regex|regex::'` in
-`crates/aptu-coder-core/src/` returns zero hits. The only production user of `regex` is
-`crates/aptu-coder/src/filters.rs`, which correctly declares its own `regex` dep via the server
-crate manifest. The core dep is dead.
+**Guard verdict:** CONFIRMED -- `rg 'use regex|extern crate regex|regex::'` in `crates/aptu-coder-core/src/` returns zero hits. The only production user of `regex` is `crates/aptu-coder/src/filters.rs`, which correctly declares its own `regex` dep via the server crate manifest. The core dep is dead.
 
 **Fix:** Remove `regex = { workspace = true }` from `crates/aptu-coder-core/Cargo.toml`.
 
@@ -102,11 +91,7 @@ crate manifest. The core dep is dead.
 
 **Files:** `crates/aptu-coder/src/lib.rs:507`
 
-**Guard verdict:** CONFIRMED -- the field is read at lines 3858 (`list_tools`), 3872
-(`call_tool`), and 3916 (`on_initialized` profile routing), all inside `#[tool_handler] impl
-ServerHandler for CodeAnalyzer` -- production code, not test-gated. The allow was added when
-rmcp's codegen left the field unreferenced; it now suppresses future dead-code detection on a live
-field.
+**Guard verdict:** CONFIRMED -- the field is read at lines 3858 (`list_tools`), 3872 (`call_tool`), and 3916 (`on_initialized` profile routing), all inside `#[tool_handler] impl ServerHandler for CodeAnalyzer` -- production code, not test-gated. The allow was added when rmcp's codegen left the field unreferenced; it now suppresses future dead-code detection on a live field.
 
 **Fix:** Remove the `#[allow(dead_code)]` attribute from the `tool_router` field declaration.
 
@@ -120,9 +105,7 @@ field.
 
 **Files:** `crates/aptu-coder/Cargo.toml`, `crates/aptu-coder/src/lib.rs:483`
 
-**Guard verdict:** CONFIRMED -- exactly one call site: `which::which("bash").is_ok()` inside
-`detect_shell()`. The non-unix branch returns `"cmd.exe"` directly without calling `which`. The
-`APTU_SHELL` env var shortcut is handled before the `which` call and is unaffected.
+**Guard verdict:** CONFIRMED -- exactly one call site: `which::which("bash").is_ok()` inside `detect_shell()`. The non-unix branch returns `"cmd.exe"` directly without calling `which`. The `APTU_SHELL` env var shortcut is handled before the `which` call and is unaffected.
 
 **Proposed replacement (unix branch):**
 
@@ -132,12 +115,9 @@ std::env::var("PATH").is_ok_and(|p| {
 })
 ```
 
-**Guard risk note:** On systems where `bash` is on `PATH` but the filesystem check fails
-(restricted environments, unusual mounts), behavior may differ from `which`. Risk is low in
-practice.
+**Guard risk note:** On systems where `bash` is on `PATH` but the filesystem check fails (restricted environments, unusual mounts), behavior may differ from `which`. Risk is low in practice.
 
-**Regression gate:** `cargo build` must succeed. Shell detection order must remain: `APTU_SHELL`
-env var -> bash if found -> `/bin/sh`.
+**Regression gate:** `cargo build` must succeed. Shell detection order must remain: `APTU_SHELL` env var -> bash if found -> `/bin/sh`.
 
 **PR group:** dep-trim (standalone -- logic change deserves its own commit within the PR).
 
@@ -147,21 +127,16 @@ env var -> bash if found -> `/bin/sh`.
 
 **Files:** `crates/aptu-coder/src/filters.rs:14-15`
 
-**Guard verdict:** CONFIRMED -- `FilterTableConfig.schema_version` carries `#[allow(dead_code)]`.
-After `toml::from_str::<FilterTableConfig>(&content)` at line 235, only `.filters` is accessed.
-`schema_version` is never compared or validated. A `schema_version = 2` file loads silently today.
+**Guard verdict:** CONFIRMED -- `FilterTableConfig.schema_version` carries `#[allow(dead_code)]`. After `toml::from_str::<FilterTableConfig>(&content)` at line 235, only `.filters` is accessed. `schema_version` is never compared or validated. A `schema_version = 2` file loads silently today.
 
 **Options:**
 - **Validate (recommended):** Add `if config.schema_version != 1 { return Err(...) }` immediately
   after deserialization. This is the field's intent -- make it live up to it.
 - **Remove:** Drop the field. Simpler, but loses forward compatibility gating.
 
-**Guard risk note:** Adding validation is a behavior change. Any existing user with
-`schema_version` set to a non-1 value (e.g., a typo `schema_version = 0`) will start seeing
-errors. This is the correct behavior but must be documented in the commit message.
+**Guard risk note:** Adding validation is a behavior change. Any existing user with `schema_version` set to a non-1 value (e.g., a typo `schema_version = 0`) will start seeing errors. This is the correct behavior but must be documented in the commit message.
 
-**Regression gate:** `cargo test` must pass. A new test must confirm that `schema_version = 2`
-returns a descriptive error.
+**Regression gate:** `cargo test` must pass. A new test must confirm that `schema_version = 2` returns a descriptive error.
 
 **PR group:** standalone (behavior change + new test).
 
@@ -171,22 +146,15 @@ returns a descriptive error.
 
 **Files:** `crates/aptu-coder-core/tests/integration_tests.rs:474, 610, 665, 721`
 
-**Guard verdict:** PARTIAL -- Scout claimed 10 clones; Guard found 4 pure clones
-(`test_python_edge_case_empty_file`, `test_typescript_edge_case_empty_file`,
-`test_go_edge_case_empty_file`, `test_java_edge_case_empty_file`). These 4 check only
-`functions.len() == 0` and `classes.len() == 0` -- a strict subset of what
-`test_semantic_analysis_empty_file` (line 415, rust) already asserts, which additionally verifies
-the formatted output (`FILE:` header, absence of `C:`/`F:`/`I:`/`R:` sections).
+**Guard verdict:** PARTIAL -- Scout claimed 10 clones; Guard found 4 pure clones (`test_python_edge_case_empty_file`, `test_typescript_edge_case_empty_file`, `test_go_edge_case_empty_file`, `test_java_edge_case_empty_file`). These 4 check only `functions.len() == 0` and `classes.len() == 0` -- a strict subset of what `test_semantic_analysis_empty_file` (line 415, rust) already asserts, which additionally verifies the formatted output (`FILE:` header, absence of `C:`/`F:`/`I:`/`R:` sections).
 
 Two tests are **not** clones and must be kept:
 - `test_semantic_analysis_empty_file` (line 415): the richer Rust representative
 - `test_analyze_module_empty_file` (line 3207): tests a different public API (`analyze_module`)
 
-**Fix:** Delete the 4 per-language clone tests. Keep the Rust representative and the
-`analyze_module` test.
+**Fix:** Delete the 4 per-language clone tests. Keep the Rust representative and the `analyze_module` test.
 
-**Regression gate:** `cargo test -p aptu-coder-core` must pass with the same pass rate minus 4
-tests.
+**Regression gate:** `cargo test -p aptu-coder-core` must pass with the same pass rate minus 4 tests.
 
 **PR group:** test-hygiene (with F8).
 
@@ -196,26 +164,18 @@ tests.
 
 **Files:** `crates/aptu-coder/src/lib.rs`
 
-**Guard verdict:** PARTIAL -- the 5,818-line count is confirmed. The structural concern is valid.
-However, Guard identified a key constraint: `#[tool_router]` annotates a single `impl
-CodeAnalyzer` block and processes all `#[tool]`-annotated methods within it. rmcp requires the
-`impl` block to be **contiguous** -- it cannot be split across multiple `impl CodeAnalyzer` blocks.
-The block can move to a different file (e.g. `handlers.rs`) but all tool methods must remain
-together in one `impl`.
+**Guard verdict:** PARTIAL -- the 5,818-line count is confirmed. The structural concern is valid. However, Guard identified a key constraint: `#[tool_router]` annotates a single `impl CodeAnalyzer` block and processes all `#[tool]`-annotated methods within it. rmcp requires the `impl` block to be **contiguous** -- it cannot be split across multiple `impl CodeAnalyzer` blocks. The block can move to a different file (e.g. `handlers.rs`) but all tool methods must remain together in one `impl`.
 
 **What can be extracted without constraint:**
 - Path/working-dir validation helpers -> `validation.rs`
 - `detect_shell()` and exec plumbing -> `shell.rs`
 - `#[cfg(test)]` unit test modules -> `tests/unit/`
 
-**What must stay together:** the `#[tool_router] impl CodeAnalyzer` block (currently ~3,500 lines
-of the 5,818 total). It can move to `handlers.rs` as a whole.
+**What must stay together:** the `#[tool_router] impl CodeAnalyzer` block (currently ~3,500 lines of the 5,818 total). It can move to `handlers.rs` as a whole.
 
-**Fix:** Extract non-tool code first (validation, shell, tests). Evaluate moving the full
-`#[tool_router]` impl to `handlers.rs` as a second step.
+**Fix:** Extract non-tool code first (validation, shell, tests). Evaluate moving the full `#[tool_router]` impl to `handlers.rs` as a second step.
 
-**Regression gate:** `cargo build && cargo test && cargo doc --no-deps` must pass. Zero new
-clippy warnings.
+**Regression gate:** `cargo build && cargo test && cargo doc --no-deps` must pass. Zero new clippy warnings.
 
 **PR group:** standalone, last -- largest blast radius.
 
@@ -223,15 +183,9 @@ clippy warnings.
 
 ### F8 -- `MutexGuard` held across `.await`
 
-**Files:** `crates/aptu-coder/tests/profiles.rs:211, 249, 295, 316, 337, 356, 395`,
-`crates/aptu-coder/tests/exec_command.rs:640`
+**Files:** `crates/aptu-coder/tests/profiles.rs:211, 249, 295, 316, 337, 356, 395`, `crates/aptu-coder/tests/exec_command.rs:640`
 
-**Guard verdict:** CONFIRMED -- `env_var_lock()` returns `std::sync::MutexGuard<'static, ()>`.
-In every affected async test, `let _guard = env_var_lock()` is declared at the top of the
-function and lives until the end of scope, which includes `.await` calls. `std::sync::MutexGuard`
-is `!Send`; holding it across `.await` means the future cannot be sent to another thread.
-`serial_test` prevents this from deadlocking today, but the pattern will break silently if test
-parallelism or the `serial_test` dependency ever changes.
+**Guard verdict:** CONFIRMED -- `env_var_lock()` returns `std::sync::MutexGuard<'static, ()>`. In every affected async test, `let _guard = env_var_lock()` is declared at the top of the function and lives until the end of scope, which includes `.await` calls. `std::sync::MutexGuard` is `!Send`; holding it across `.await` means the future cannot be sent to another thread. `serial_test` prevents this from deadlocking today, but the pattern will break silently if test parallelism or the `serial_test` dependency ever changes.
 
 **Fix:** Scope the guard to environment setup only:
 
@@ -243,8 +197,7 @@ parallelism or the `serial_test` dependency ever changes.
 let resp = call_tools_list_with_profile(Some("edit")).await;
 ```
 
-**Regression gate:** `cargo test` must pass. `cargo clippy --all-targets` must not flag the
-fixed sites.
+**Regression gate:** `cargo test` must pass. `cargo clippy --all-targets` must not flag the fixed sites.
 
 **PR group:** test-hygiene (with F6).
 
@@ -254,13 +207,9 @@ fixed sites.
 
 **Files:** `crates/aptu-coder-core/src/types.rs:903`
 
-**Guard verdict:** CONFIRMED -- all `ExecCommandParams` fields implement `Default` in the
-expected way: `command: String` defaults to `""`, all `Option<_>` fields default to `None`. The
-manual impl is semantically identical to what `#[derive(Default)]` would generate. The
-`#[allow(clippy::derivable_impls)]` suppress a valid and actionable suggestion.
+**Guard verdict:** CONFIRMED -- all `ExecCommandParams` fields implement `Default` in the expected way: `command: String` defaults to `""`, all `Option<_>` fields default to `None`. The manual impl is semantically identical to what `#[derive(Default)]` would generate. The `#[allow(clippy::derivable_impls)]` suppress a valid and actionable suggestion.
 
-**Fix:** Add `Default` to the `#[derive(...)]` list on `ExecCommandParams`. Remove the manual
-`impl Default for ExecCommandParams` block and the `#[allow(clippy::derivable_impls)]` above it.
+**Fix:** Add `Default` to the `#[derive(...)]` list on `ExecCommandParams`. Remove the manual `impl Default for ExecCommandParams` block and the `#[allow(clippy::derivable_impls)]` above it.
 
 **Regression gate:** `cargo clippy -- -D warnings && cargo test` must pass.
 
@@ -272,10 +221,7 @@ manual impl is semantically identical to what `#[derive(Default)]` would generat
 
 **Files:** `Cargo.toml` (workspace `[workspace.dependencies]`)
 
-**Guard verdict:** CONFIRMED -- `url = "2"` appears in `[workspace.dependencies]` but neither
-`crates/aptu-coder/Cargo.toml` nor `crates/aptu-coder-core/Cargo.toml` declares it as a
-dependency. `rmcp` and `axum` pull in their own `url` via their own manifests; the workspace
-entry does not affect them. The entry is a dead declaration.
+**Guard verdict:** CONFIRMED -- `url = "2"` appears in `[workspace.dependencies]` but neither `crates/aptu-coder/Cargo.toml` nor `crates/aptu-coder-core/Cargo.toml` declares it as a dependency. `rmcp` and `axum` pull in their own `url` via their own manifests; the workspace entry does not affect them. The entry is a dead declaration.
 
 **Fix:** Remove `url = "2"` from `[workspace.dependencies]` in `Cargo.toml`.
 
@@ -289,10 +235,7 @@ entry does not affect them. The entry is a dead declaration.
 
 **Files:** `crates/aptu-coder-core/Cargo.toml`
 
-**Guard verdict:** CONFIRMED (bonus finding surfaced during F2 verification) -- `toml = {
-workspace = true }` is declared in `crates/aptu-coder-core/Cargo.toml` but `rg 'toml::'` in
-`crates/aptu-coder-core/src/` returns zero hits. The only `toml` user is
-`crates/aptu-coder/src/filters.rs`, which is in the server crate. Core does not use `toml`.
+**Guard verdict:** CONFIRMED (bonus finding surfaced during F2 verification) -- `toml = { workspace = true }` is declared in `crates/aptu-coder-core/Cargo.toml` but `rg 'toml::'` in `crates/aptu-coder-core/src/` returns zero hits. The only `toml` user is `crates/aptu-coder/src/filters.rs`, which is in the server crate. Core does not use `toml`.
 
 **Fix:** Remove `toml = { workspace = true }` from `crates/aptu-coder-core/Cargo.toml`.
 
@@ -330,5 +273,4 @@ Safe implementation order, validated by Guard's safety ranking:
 | 5 | F5 | schema-validation | Behavior change + new test |
 | 6 | F7 | lib-split | Large refactor, do last |
 
-Each order level can be a single PR. Levels 1-3 can be done in parallel on separate branches;
-levels 4-6 must be sequential (each merged and green before the next starts).
+Each order level can be a single PR. Levels 1-3 can be done in parallel on separate branches; levels 4-6 must be sequential (each merged and green before the next starts).
