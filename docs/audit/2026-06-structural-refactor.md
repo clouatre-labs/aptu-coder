@@ -1,8 +1,8 @@
 # Structural Refactor Audit -- June 2026
 
-**Date:** 2026-06-24
-**Codebase snapshot:** v0.21.0 (3fbd64a)
-**Scope:** Full codebase -- `crates/aptu-coder` (5,952L prod) + `crates/aptu-coder-core` (11,756L prod)
+**Date:** 2026-06-24  
+**Codebase snapshot:** v0.21.0 (3fbd64a)  
+**Scope:** Full codebase -- `crates/aptu-coder` (5,952L prod) + `crates/aptu-coder-core` (11,756L prod)  
 **Focus:** File size, function size, dead code, bleeding API surface, Rust idiomatic best practices, performance
 
 Three read-only audit passes were run in parallel:

@@ -1,21 +1,15 @@
 # Audit: Knowledge Graph Implementation Review
 
-Date: 2026-08-24
-Commit: 8c5e699
-Version: v0.30.0
+Date: 2026-08-24  
+Commit: 8c5e699  
+Version: v0.30.0  
 Toolchain: Rust 1.98.0 / rmcp 3.1.4 / tokio async / petgraph 0.8.3
 
 ## Purpose
 
-Review the knowledge graph implementation that shipped after the August 3 design audit
-([2026-08-03-knowledge-graph.md](2026-08-03-knowledge-graph.md)). Assess whether the
-implementation is best practice, performant, and ontology-complete. Identify concrete
-opportunities to reduce LoC and code complexity while improving robustness. The prior audit
-was research-only (no code existed); this audit reviews the actual implementation against
-current scientific literature and industry best practices.
+Review the knowledge graph implementation that shipped after the August 3 design audit ([2026-08-03-knowledge-graph.md](2026-08-03-knowledge-graph.md)). Assess whether the implementation is best practice, performant, and ontology-complete. Identify concrete opportunities to reduce LoC and code complexity while improving robustness. The prior audit was research-only (no code existed); this audit reviews the actual implementation against current scientific literature and industry best practices.
 
-This is a research-only audit. No `aptu-coder` source was modified. Findings establish
-the basis for follow-on implementation issues.
+This is a research-only audit. No `aptu-coder` source was modified. Findings establish the basis for follow-on implementation issues.
 
 ## Scope
 
@@ -48,10 +42,7 @@ Four delegates in parallel and sequence:
 
 ## Background: What Shipped Since the August 3 Audit
 
-The prior audit (KG7) recommended a "C-hybrid" approach: petgraph DiGraph in
-`aptu-coder-core/src/graph/`, built from existing analysis output (no second parse pass),
-postcard-encoded persistence, used internally to accelerate `analyze_symbol`. The
-implementation shipped across issues #1362 and #1363.
+The prior audit (KG7) recommended a "C-hybrid" approach: petgraph DiGraph in `aptu-coder-core/src/graph/`, built from existing analysis output (no second parse pass), postcard-encoded persistence, used internally to accelerate `analyze_symbol`. The implementation shipped across issues #1362 and #1363.
 
 ### What exists today
 
@@ -76,9 +67,7 @@ Two parallel graph representations exist:
   and definitions maps. Built from `SemanticAnalysis` results. Request-scoped (L1 cache only,
   never persisted). Used by `analyze_symbol` for call-chain traversal.
 
-`GraphDiskStore` is live and wired: `CodeAnalyzer` holds `Arc<GraphDiskStore>` (`lib.rs:232`),
-`analyze_focused` builds and persists `StructuralGraph` (`analyze_focused.rs:464-482`), and
-`read_resource_impl` reads from it (`lib.rs:804`).
+`GraphDiskStore` is live and wired: `CodeAnalyzer` holds `Arc<GraphDiskStore>` (`lib.rs:232`), `analyze_focused` builds and persists `StructuralGraph` (`analyze_focused.rs:464-482`), and `read_resource_impl` reads from it (`lib.rs:804`).
 
 ---
 
@@ -89,19 +78,11 @@ Two parallel graph representations exist:
 **Severity:** High
 **Category:** BUG
 
-The `import-closure` resource template
-(`aptu-coder://graph/{repo_hash}/import-closure/{module}`) always returns an empty node list.
+The `import-closure` resource template (`aptu-coder://graph/{repo_hash}/import-closure/{module}`) always returns an empty node list.
 
-`query_to_nodes` (`resources.rs:196-206`) maps `ImportClosure` to
-`graph.bfs_blast_radius(module, 1)`. But `bfs_blast_radius` (`structural.rs:109-113`) searches
-for `Node::Symbol { name, .. }` only -- it never matches `Node::Module { path, .. }`. Since
-module names are stored as `Node::Module`, the start node is never found and the function
-returns `vec![]`.
+`query_to_nodes` (`resources.rs:196-206`) maps `ImportClosure` to `graph.bfs_blast_radius(module, 1)`. But `bfs_blast_radius` (`structural.rs:109-113`) searches for `Node::Symbol { name, .. }` only -- it never matches `Node::Module { path, .. }`. Since module names are stored as `Node::Module`, the start node is never found and the function returns `vec![]`.
 
-Even if the start node were found, the BFS would still return nothing: `Imports` edges go
-`File -> Module`, making `Module` nodes sinks with zero outgoing edges. A correct
-import-closure query would need to follow incoming edges (reverse traversal) from the module
-to find importing files, then follow those files' outgoing edges.
+Even if the start node were found, the BFS would still return nothing: `Imports` edges go `File -> Module`, making `Module` nodes sinks with zero outgoing edges. A correct import-closure query would need to follow incoming edges (reverse traversal) from the module to find importing files, then follow those files' outgoing edges.
 
 **Impact:** Any MCP client using the `import-closure` template receives empty results with no
 error. The feature appears functional but silently returns nothing.
@@ -114,11 +95,7 @@ error. The feature appears functional but silently returns nothing.
 **Severity:** Medium
 **Category:** BUG
 
-`build_from_analysis` (`structural.rs:50-105`) processes `FileAnalysisOutput` entries
-sequentially, adding symbols to `symbol_index` as it encounters them. When processing calls
-(`structural.rs:88-99`), it looks up caller and callee in `symbol_index`. If the callee is
-defined in a later entry (a file processed after the caller's file), the callee is not yet in
-the index, and the call edge is silently dropped.
+`build_from_analysis` (`structural.rs:50-105`) processes `FileAnalysisOutput` entries sequentially, adding symbols to `symbol_index` as it encounters them. When processing calls (`structural.rs:88-99`), it looks up caller and callee in `symbol_index`. If the callee is defined in a later entry (a file processed after the caller's file), the callee is not yet in the index, and the call edge is silently dropped.
 
 **Impact:** In multi-file projects where file processing order (filesystem iteration order)
 does not match definition order, cross-file call edges are lost. Blast-radius and subgraph
@@ -133,14 +110,9 @@ with sequential processing.
 **Severity:** Medium
 **Category:** DESIGN
 
-The `Edge` enum (`structural.rs:37-44`) declares six variants: `Contains`, `Calls`, `Imports`,
-`Implements`, `HasMethod`, `Tests`. The builder only emits `Contains`, `Calls`, and `Imports`.
-Similarly, `SymbolKind` includes `Trait` and `Impl`, but the builder only creates `Function`
-and `Class` symbols.
+The `Edge` enum (`structural.rs:37-44`) declares six variants: `Contains`, `Calls`, `Imports`, `Implements`, `HasMethod`, `Tests`. The builder only emits `Contains`, `Calls`, and `Imports`. Similarly, `SymbolKind` includes `Trait` and `Impl`, but the builder only creates `Function` and `Class` symbols.
 
-The unused variants are serialized to disk via postcard, consuming space in the type enum
-without producing graph edges. Future code referencing them will find zero edges with no
-compiler warning.
+The unused variants are serialized to disk via postcard, consuming space in the type enum without producing graph edges. Future code referencing them will find zero edges with no compiler warning.
 
 **Scientific context:** CodexGraph (arxiv 2408.03910) uses `CONTAINS, HAS_METHOD, INHERITS,
 USES, CALLS` -- all emitted. Joern's CPG emits all declared edge types. Dead ontology variants
@@ -155,10 +127,7 @@ are not best practice.
 **Category:** DESIGN
 **Tracking:** issue #1449
 
-`query_to_nodes` (`resources.rs:196-206`) returns a flat list of `serde_json::Value` node
-serializations. No edge information is included in the response payload. An MCP client
-receiving a blast-radius result gets a list of nodes but cannot determine which nodes call
-which, what the containment hierarchy is, or what the traversal path was.
+`query_to_nodes` (`resources.rs:196-206`) returns a flat list of `serde_json::Value` node serializations. No edge information is included in the response payload. An MCP client receiving a blast-radius result gets a list of nodes but cannot determine which nodes call which, what the containment hierarchy is, or what the traversal path was.
 
 **Best practice:** Research indicates resource payloads should include "explicit node and edge
 types, stable IDs, source spans, revision, truncation status, and traversal limits." CodexGraph
@@ -169,14 +138,9 @@ and KGCompass both return typed edges in their query results.
 **Severity:** Low
 **Category:** PERFORMANCE
 
-`bfs_blast_radius` (`structural.rs:109-113`) scans all `node_indices()` with `.find()` to
-locate the start node. On the current codebase (~1898 nodes) this is sub-millisecond, but it
-scales linearly with project size. A `HashMap<String, NodeIndex>` maintained alongside the
-graph would provide O(1) lookup.
+`bfs_blast_radius` (`structural.rs:109-113`) scans all `node_indices()` with `.find()` to locate the start node. On the current codebase (~1898 nodes) this is sub-millisecond, but it scales linearly with project size. A `HashMap<String, NodeIndex>` maintained alongside the graph would provide O(1) lookup.
 
-The `CallGraph` in `call_graph.rs` already maintains a `lowercase_index: HashMap<String,
-usize>` for O(1) exact and case-insensitive symbol resolution. The same pattern could be
-applied to `StructuralGraph`.
+The `CallGraph` in `call_graph.rs` already maintains a `lowercase_index: HashMap<String, usize>` for O(1) exact and case-insensitive symbol resolution. The same pattern could be applied to `StructuralGraph`.
 
 **Guard verification:** CONFIRMED. Linear scan at `structural.rs:109-113`.
 
@@ -186,28 +150,18 @@ applied to `StructuralGraph`.
 **Category:** ROBUSTNESS
 **Tracking:** issue #1453
 
-`GraphDiskStore::cache_key` (`store.rs:66-76`) now hashes the root path and sorted `(path, content_hash)`
-pairs using blake3, eliminating stale cache reuse in edge cases (rapid edits within the same mtime tick,
-copied files preserving mtime, etc.). This change is resolved by issue #1453.
+`GraphDiskStore::cache_key` (`store.rs:66-76`) now hashes the root path and sorted `(path, content_hash)` pairs using blake3, eliminating stale cache reuse in edge cases (rapid edits within the same mtime tick, copied files preserving mtime, etc.). This change is resolved by issue #1453.
 
-Note: The `CallGraphCacheKey` in `cache.rs` (L1 in-memory cache) remains mtime-based and was
-intentionally out of scope for this issue. The L2 disk cache (`GraphDiskStore::cache_key`) now uses
-content hashes and provides protection against the original mtime-based cache invalidation gaps.
+Note: The `CallGraphCacheKey` in `cache.rs` (L1 in-memory cache) remains mtime-based and was intentionally out of scope for this issue. The L2 disk cache (`GraphDiskStore::cache_key`) now uses content hashes and provides protection against the original mtime-based cache invalidation gaps.
 
 ### F7: Two parallel graph representations add complexity (INFO)
 
 **Severity:** Info
 **Category:** ARCHITECTURE
 
-`StructuralGraph` (petgraph, persisted, MCP Resources) and `CallGraph` (HashMap, request-scoped,
-`analyze_symbol`) serve different workloads but duplicate graph construction logic. The
-`StructuralGraph` builder is simpler but has bugs (F2, F3); the `CallGraph` builder is more
-mature with indexed symbol resolution, ambiguity handling, and impl-only filtering.
+`StructuralGraph` (petgraph, persisted, MCP Resources) and `CallGraph` (HashMap, request-scoped, `analyze_symbol`) serve different workloads but duplicate graph construction logic. The `StructuralGraph` builder is simpler but has bugs (F2, F3); the `CallGraph` builder is more mature with indexed symbol resolution, ambiguity handling, and impl-only filtering.
 
-The prior audit recommended keeping both representations ("C-hybrid"). The current evidence
-supports this decision: `CallGraph` is specialized for focused analysis with features
-(impl_only, match modes, call chains) that `StructuralGraph` does not need, and
-`StructuralGraph` provides persistent, queryable graph snapshots for MCP clients.
+The prior audit recommended keeping both representations ("C-hybrid"). The current evidence supports this decision: `CallGraph` is specialized for focused analysis with features (impl_only, match modes, call chains) that `StructuralGraph` does not need, and `StructuralGraph` provides persistent, queryable graph snapshots for MCP clients.
 
 **Recommendation:** Do not unify. Instead, fix the `StructuralGraph` builder to match
 `CallGraph`'s construction quality (two-pass indexing, complete symbol table before edge
@@ -286,13 +240,9 @@ resolution).
 **Priority:** High
 **LoC impact:** Neutral (~+10 lines for second pass, removes silent data loss)
 
-Change `build_from_analysis` to two passes:
-1. First pass: iterate all entries, add all File, Symbol, and Module nodes, populate
-   `symbol_index` completely.
-2. Second pass: iterate all entries again, resolve call edges against the complete index.
+Change `build_from_analysis` to two passes: 1. First pass: iterate all entries, add all File, Symbol, and Module nodes, populate    `symbol_index` completely. 2. Second pass: iterate all entries again, resolve call edges against the complete index.
 
-This matches `CallGraph::build_from_results` which already indexes all definitions before
-resolving calls. The fix eliminates silent cross-file call edge loss.
+This matches `CallGraph::build_from_results` which already indexes all definitions before resolving calls. The fix eliminates silent cross-file call edge loss.
 
 ### R2: Fix or remove import-closure (fixes F1)
 
@@ -317,14 +267,9 @@ becomes needed later, it can be re-added with correct semantics.
 **Priority:** Medium
 **LoC impact:** -10 to -15 lines
 
-Remove `Edge::Implements`, `Edge::HasMethod`, `Edge::Tests` and `SymbolKind::Trait`,
-`SymbolKind::Impl` from the enums. These are never emitted by the builder. Bump
-`FORMAT_VERSION` to 2 in `store.rs` to invalidate stale caches (the version check already
-handles this gracefully by returning `None` on mismatch).
+Remove `Edge::Implements`, `Edge::HasMethod`, `Edge::Tests` and `SymbolKind::Trait`, `SymbolKind::Impl` from the enums. These are never emitted by the builder. Bump `FORMAT_VERSION` to 2 in `store.rs` to invalidate stale caches (the version check already handles this gracefully by returning `None` on mismatch).
 
-If these edge types are needed in the future, they can be re-added when the builder is
-extended to emit them. Dead variants in a serialized enum are not documentation -- they are
-silent dead code.
+If these edge types are needed in the future, they can be re-added when the builder is extended to emit them. Dead variants in a serialized enum are not documentation -- they are silent dead code.
 
 ### R4: Add edge context to resource payloads (fixes F4)
 
@@ -342,18 +287,14 @@ Extend `query_to_nodes` to return both nodes and edges in the JSON payload:
 }
 ```
 
-Collect edges during BFS traversal by tracking `(source, target, edge_weight)` tuples alongside
-visited nodes. This gives MCP clients enough context to reconstruct the subgraph structure.
+Collect edges during BFS traversal by tracking `(source, target, edge_weight)` tuples alongside visited nodes. This gives MCP clients enough context to reconstruct the subgraph structure.
 
 ### R5: Retain symbol_index on StructuralGraph (fixes F5)
 
 **Priority:** Low
 **LoC impact:** +8 to -12 lines (net reduction by removing O(V) scan)
 
-Add a `symbol_index: HashMap<String, NodeIndex>` field to `StructuralGraph`. Populate it during
-`build_from_analysis`. Use it in `bfs_blast_radius` for O(1) start lookup. The index is
-transient (not serialized); rebuild it on deserialization via a `post_deserialize` method or
-compute it lazily on first query.
+Add a `symbol_index: HashMap<String, NodeIndex>` field to `StructuralGraph`. Populate it during `build_from_analysis`. Use it in `bfs_blast_radius` for O(1) start lookup. The index is transient (not serialized); rebuild it on deserialization via a `post_deserialize` method or compute it lazily on first query.
 
 **Trade-off:** Adds a field to the struct but eliminates the linear scan. Net complexity
 reduction: the O(V) scan is replaced by a simpler HashMap lookup.
@@ -363,21 +304,14 @@ reduction: the O(V) scan is replaced by a simpler HashMap lookup.
 **Priority:** Info
 **LoC impact:** 0
 
-The two representations serve different workloads. Unifying them would increase complexity,
-not reduce it. The `CallGraph` has features (impl_only filtering, match modes, call-chain
-formatting) that `StructuralGraph` does not need. The `StructuralGraph` has persistence and
-MCP exposure that `CallGraph` does not need. Keep both, but fix the `StructuralGraph` builder
-to match `CallGraph`'s construction quality (R1).
+The two representations serve different workloads. Unifying them would increase complexity, not reduce it. The `CallGraph` has features (impl_only filtering, match modes, call-chain formatting) that `StructuralGraph` does not need. The `StructuralGraph` has persistence and MCP exposure that `CallGraph` does not need. Keep both, but fix the `StructuralGraph` builder to match `CallGraph`'s construction quality (R1).
 
 ### R7: Resolve KG1 -- fix serde-skipped pagination fields (already resolved, no action needed)
 
 **Priority:** N/A -- resolved prior to this audit
 **LoC impact:** None (fix already shipped)
 
-This recommendation is stale. `FocusedAnalysisOutput.prod_chains`, `.test_chains`,
-`.outgoing_chains` in `analyze.rs` already carry `#[serde(default)]`, not `#[serde(skip)]`.
-Issue #1361 is closed. Retained here only for historical continuity with the prior audit's
-KG1 finding; see F8.
+This recommendation is stale. `FocusedAnalysisOutput.prod_chains`, `.test_chains`, `.outgoing_chains` in `analyze.rs` already carry `#[serde(default)]`, not `#[serde(skip)]`. Issue #1361 is closed. Retained here only for historical continuity with the prior audit's KG1 finding; see F8.
 
 ---
 

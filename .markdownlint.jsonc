@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 {
   "default": false,
+  "MD001": true,
   "MD009": {
     "br_spaces": 2
   },
+  "MD010": true,
   "MD035": {
     "style": "---"
   }

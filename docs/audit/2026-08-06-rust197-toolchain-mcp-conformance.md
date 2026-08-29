@@ -1,8 +1,8 @@
 # Audit: Rust 1.97.1 Toolchain, Dependency Freshness, MCP Conformance, and Codebase Quality
 
-Date: 2026-08-06
-Commit: e485d7c
-Version: v0.27.0
+Date: 2026-08-06  
+Commit: e485d7c  
+Version: v0.27.0  
 Toolchain: rustc 1.96.0 (pinned MSRV) / rustc 1.97.1 (installed locally)
 
 ## See Also
