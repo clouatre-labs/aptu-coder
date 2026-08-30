@@ -172,6 +172,7 @@ use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::instrument;
 
@@ -801,7 +802,62 @@ impl ServerHandler for CodeAnalyzer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        tools::resources::read_resource_impl(request, &self.graph_store)
+        let uri_kind = tools::resources::classify_uri_kind(&request.uri);
+        let is_paginated = request.uri.contains("cursor=");
+        let started = Instant::now();
+        let result = tools::resources::read_resource_impl(request, &self.graph_store);
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (result_name, error_type, error_subtype, cache_tier, output_chars) = match &result {
+            Ok(response) => {
+                let chars = match response {
+                    ReadResourceResponse::Complete(value) => value
+                        .contents
+                        .iter()
+                        .map(|item| match item {
+                            rmcp::model::ResourceContents::TextResourceContents {
+                                text, ..
+                            } => text.chars().count(),
+                            rmcp::model::ResourceContents::BlobResourceContents {
+                                blob, ..
+                            } => blob.chars().count(),
+                            _ => 0,
+                        })
+                        .sum(),
+                    ReadResourceResponse::InputRequired(_) => 0,
+                    _ => 0,
+                };
+                ("ok", None, None, Some("l2_disk"), chars)
+            }
+            Err(error) => {
+                let (error_type, error_subtype) = crate::metrics::classify_error_code(error.code);
+                let kind =
+                    (error.code == rmcp::model::ErrorCode::RESOURCE_NOT_FOUND).then_some("miss");
+                (
+                    "error",
+                    Some(error_type.to_owned()),
+                    error_subtype.map(str::to_owned),
+                    kind,
+                    0,
+                )
+            }
+        };
+        let seq = self
+            .session_call_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sid = self.session_id.lock().await.clone();
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("read_resource", result_name, duration_ms)
+                .uri_kind(Some(uri_kind))
+                .session_id(sid)
+                .seq(Some(seq))
+                .is_paginated(is_paginated)
+                .output_chars(output_chars)
+                .cache_tier(cache_tier)
+                .error_type(error_type)
+                .error_subtype(error_subtype)
+                .build(),
+        );
+        result
     }
 
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
