@@ -15,7 +15,7 @@ jobs:
       contents: read
       security-events: write
       statuses: write
-    uses: clouatre-labs/aptu-github-app/.github/workflows/scan-security.yml@0676ae328ab53d45a436893e666e9c46a4aff331 # main
+    uses: clouatre-labs/aptu-github-app/.github/workflows/scan-security.yml@f332f5ae58889afd1c95dce59deb41d9106c2944 # v0.1.0
     with:
       originating_repo: ${{ github.event.client_payload.originating_repo }}
       head_sha: ${{ github.event.client_payload.head_sha }}
