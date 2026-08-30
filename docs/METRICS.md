@@ -27,8 +27,10 @@ Each line in the JSONL file is one JSON object:
 | Field | Type | Description |
 |---|---|---|
 | `ts` | `u64` | Unix timestamp in milliseconds at handler return |
-| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command` |
+| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command`, `read_resource` (MCP `resources/read`, not an ordinary `tools/call`) |
+
 | `duration_ms` | `u64` | Wall-clock time from handler entry to return |
+| `uri_kind` | `string \| null` | Privacy-safe resource URI shape: `graph_blast_radius`, `graph_subgraph`, `graph_bidirectional`, or `unknown`; raw URIs are never retained. |
 | `output_chars` | `usize` | Byte length (`str::len()`) of the final text returned; `0` on error paths |
 | `param_path_depth` | `usize` | `Path::components().count()` on `params.path` |
 | `file_ext` | `string \| null` | Lowercased file extension of `params.path`: known extension key (e.g. `"rs"`), `"other"` for unrecognized extensions, `null` when the path has no extension. Only populated for `analyze_file` and `analyze_module`. |
@@ -40,7 +42,7 @@ Each line in the JSONL file is one JSON object:
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
-| `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable |
+| `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable. For `read_resource`, success is `l2_disk`, `RESOURCE_NOT_FOUND` is `miss`, and URI parse errors are null. |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
 | `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable or if the process was killed due to timeout |
 | `filter_applied` | `string \| null` | The filter rule name that caused output suppression via `.aptu/filters.toml`; `null` when no filter was applied. Omitted from JSONL when `null`. |
@@ -51,7 +53,7 @@ Each line in the JSONL file is one JSON object:
 | `stderr_bytes_raw` | `u64 \| null` | Approximate stderr bytes read before any truncation (counted as `line.len() + 1` per `LinesStream` line; last line and CRLF not exact); populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
 | `git_ref_used` | `bool` | `true` when the `git_ref` parameter was supplied on `analyze_directory` or `analyze_symbol`. Omitted from JSONL when `false`. |
 | `summary_mode` | `bool` | `true` when `summary=true` was set on `analyze_directory`, `analyze_file`, or `analyze_symbol`. Omitted from JSONL when `false`. |
-| `is_paginated` | `bool` | `true` when a `cursor` was supplied on `analyze_directory`, `analyze_file`, or `analyze_symbol` (i.e., this is a continuation page). Omitted from JSONL when `false`. |
+| `is_paginated` | `bool` | For resources, true when the request contains `cursor=`, including malformed cursors; otherwise indicates tool continuation pages. Omitted from JSONL when `false`. |
 | `fields_projected` | `bool` | `true` when the `fields` projection parameter was supplied on `analyze_file`. Omitted from JSONL when `false`. |
 | `match_mode` | `string \| null` | The `match_mode` value passed to `analyze_symbol` (e.g. `"exact"`, `"contains"`); `null` when not set (defaults to `exact` in the handler). Omitted from JSONL when `null`. |
 | `follow_depth` | `u32 \| null` | The `follow_depth` value passed to `analyze_symbol`; `null` when the parameter was not explicitly supplied. Omitted from JSONL when `null`. |
@@ -77,6 +79,21 @@ The `cache_tier` field encodes where a result was found (or not found):
 | `l1_only_miss` | Both L1 and the tool path were checked; no L2 disk cache was available (disabled or not configured). |
 | `l1_l2_miss` | Both L1 and L2 were checked; neither held a matching entry. Full computation was performed. |
 | `miss` | Legacy value emitted by older server versions; semantically equivalent to `l1_l2_miss`. |
+
+Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
+
+
+## OpenTelemetry attribute mapping
+
+Completed `read_resource` events use `mcp.method.name=resources/read`; ordinary tool events retain `mcp.method.name=tools/call`. In both cases, `gen_ai.tool.name` remains the discriminator (`read_resource` or the ordinary tool name), and `error.type` uses the bounded event classification.
+
+Read-resource queries (from the existing JSONL one-liner style):
+
+```bash
+cd ~/.local/share/aptu-coder && jq -r 'select(.tool=="read_resource") | [.uri_kind, .duration_ms, .cache_tier] | @tsv' metrics-*.jsonl
+cd ~/.local/share/aptu-coder && jq -r 'select(.tool=="read_resource") | [.uri_kind, .duration_ms] | @tsv' metrics-*.jsonl | awk -F'\t' '{c[$1]++; s[$1]+=$2} END {for (k in c) printf "%s\t%d\t%.1fms avg\n", k, c[k], s[k]/c[k]}'
+cd ~/.local/share/aptu-coder && jq -r 'select(.tool=="read_resource") | .cache_tier // "null"' metrics-*.jsonl | sort | uniq -c | sort -rn
+```
 
 ### Example record
 

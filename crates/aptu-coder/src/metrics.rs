@@ -17,7 +17,7 @@ pub(crate) use crate::metrics_export::{
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
-use rmcp::model::ProtocolVersion;
+use rmcp::model::{ErrorCode, ProtocolVersion};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
@@ -32,6 +32,8 @@ pub struct MetricEvent {
     pub param_path_depth: usize,
     pub max_depth: Option<u32>,
     pub result: &'static str,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -151,6 +153,7 @@ pub(crate) struct MetricEventBuilder {
     param_path_depth: usize,
     max_depth: Option<u32>,
     result: &'static str,
+    uri_kind: Option<String>,
     error_type: Option<String>,
     error_subtype: Option<String>,
     session_id: Option<String>,
@@ -211,6 +214,11 @@ impl MetricEventBuilder {
     #[must_use]
     pub(crate) fn max_depth(mut self, v: Option<u32>) -> Self {
         self.max_depth = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn uri_kind(mut self, v: Option<String>) -> Self {
+        self.uri_kind = v;
         self
     }
     #[must_use]
@@ -384,6 +392,7 @@ impl MetricEventBuilder {
             param_path_depth: self.param_path_depth,
             max_depth: self.max_depth,
             result: self.result,
+            uri_kind: self.uri_kind,
             error_type: self.error_type,
             error_subtype: self.error_subtype,
             session_id: self.session_id,
@@ -443,6 +452,34 @@ pub(crate) struct ToolMetrics {
 #[allow(dead_code)]
 pub(crate) struct MetricsLockGuard(pub(crate) std::fs::File);
 
+/// Return bounded, privacy-safe classifications for an MCP error code.
+#[must_use]
+pub(crate) fn classify_error_code(code: ErrorCode) -> (&'static str, Option<&'static str>) {
+    match code {
+        ErrorCode::RESOURCE_NOT_FOUND => ("RESOURCE_NOT_FOUND", None),
+        ErrorCode::INVALID_PARAMS => ("INVALID_PARAMS", None),
+        ErrorCode::INVALID_REQUEST => ("INVALID_REQUEST", None),
+        ErrorCode::METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
+        ErrorCode::PARSE_ERROR => ("PARSE_ERROR", None),
+        ErrorCode::INTERNAL_ERROR => ("INTERNAL_ERROR", None),
+        _ => ("MCP_ERROR", None),
+    }
+}
+
+#[must_use]
+pub(crate) fn otel_method_name(tool: &str) -> &'static str {
+    if tool == "read_resource" {
+        "resources/read"
+    } else {
+        "tools/call"
+    }
+}
+
+#[must_use]
+pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
+    (otel_method_name(event.tool), event.tool)
+}
+
 /// Record a metric event to OTel metrics if the global meter provider is available.
 ///
 /// Records:
@@ -496,10 +533,11 @@ pub(crate) fn record_otel_metrics(event: &MetricEvent) {
     });
 
     let error_type = event.error_type.as_deref().unwrap_or("success");
+    let (method, tool_name) = otel_labels(event);
     let attributes = [
-        KeyValue::new("gen_ai.tool.name", event.tool),
+        KeyValue::new("gen_ai.tool.name", tool_name),
         KeyValue::new("error.type", error_type.to_string()),
-        KeyValue::new("mcp.method.name", "tools/call"),
+        KeyValue::new("mcp.method.name", method),
         KeyValue::new("mcp.protocol.version", ProtocolVersion::LATEST.as_str()),
         KeyValue::new("network.transport", "pipe"),
     ];
@@ -537,6 +575,7 @@ mod tests {
             param_path_depth: 1,
             max_depth: None,
             result: "ok",
+            uri_kind: None,
             error_type: None,
             error_subtype: None,
             session_id: Some("1742468880123-42".to_string()),
@@ -651,6 +690,7 @@ mod tests {
             param_path_depth: 2,
             max_depth: Some(3),
             result: "ok",
+            uri_kind: None,
             error_type: None,
             error_subtype: None,
             session_id: Some("1742468880123-42".to_string()),
@@ -705,10 +745,35 @@ fn test_metric_event_builder_raw_bytes_serialize() {
 
 #[test]
 fn test_metric_event_builder_raw_bytes_skip_when_none() {
-    // Happy path: when stdout_bytes_raw/stderr_bytes_raw are None,
-    // they are omitted from JSON (skip_serializing_if).
     let event = MetricEventBuilder::new("exec_command", "ok", 100).build();
     let json = serde_json::to_string(&event).unwrap();
     assert!(!json.contains("stdout_bytes_raw"));
     assert!(!json.contains("stderr_bytes_raw"));
+}
+
+#[test]
+fn test_otel_method_mapping_for_resources_and_tools() {
+    let resource_event = MetricEvent {
+        tool: "read_resource",
+        ..MetricEvent::default()
+    };
+    let tool_event = MetricEvent {
+        tool: "analyze_file",
+        ..MetricEvent::default()
+    };
+
+    assert_eq!(
+        otel_labels(&resource_event),
+        ("resources/read", "read_resource")
+    );
+    assert_eq!(otel_labels(&tool_event), ("tools/call", "analyze_file"));
+}
+
+#[test]
+fn test_read_resource_error_code_is_bounded() {
+    assert_eq!(
+        classify_error_code(ErrorCode::RESOURCE_NOT_FOUND),
+        ("RESOURCE_NOT_FOUND", None)
+    );
+    assert_eq!(classify_error_code(ErrorCode(-12345)), ("MCP_ERROR", None));
 }

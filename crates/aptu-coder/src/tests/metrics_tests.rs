@@ -155,6 +155,7 @@ fn test_metric_chars_threshold_breach_fires() {
         param_path_depth: 0,
         max_depth: None,
         result: "ok",
+        uri_kind: None,
         error_type: None,
         error_subtype: None,
         session_id: None,
@@ -206,6 +207,7 @@ fn test_metric_chars_threshold_breach_no_fire() {
         param_path_depth: 0,
         max_depth: None,
         result: "ok",
+        uri_kind: None,
         error_type: None,
         error_subtype: None,
         session_id: None,
@@ -243,6 +245,28 @@ fn test_metric_chars_threshold_breach_no_fire() {
         !event.chars_threshold_breach,
         "chars_threshold_breach should be false for output_chars=5000"
     );
+}
+
+#[test]
+fn test_metric_event_uri_kind_serializes_only_when_present() {
+    let event = crate::metrics::MetricEventBuilder::new("read_resource", "ok", 1)
+        .uri_kind(Some("graph_subgraph".to_string()))
+        .build();
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains(r#""uri_kind":"graph_subgraph""#));
+
+    let without = crate::metrics::MetricEventBuilder::new("read_resource", "ok", 1).build();
+    let json_without = serde_json::to_string(&without).unwrap();
+    assert!(!json_without.contains("uri_kind"));
+}
+
+#[test]
+fn test_metric_event_old_record_without_uri_kind_deserializes_unchanged() {
+    let old = r#"{"ts":1,"tool":"read_resource","duration_ms":2,"output_chars":3,"param_path_depth":0,"result":"ok"}"#;
+    let event: crate::metrics::MetricEvent = serde_json::from_str(old).unwrap();
+    assert_eq!(event.uri_kind, None);
+    assert_eq!(event.tool, "read_resource");
+    assert_eq!(event.output_chars, 3);
 }
 
 // ── strip_cd_prefix tests ──

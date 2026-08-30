@@ -141,4 +141,4 @@ They carry no value payload, only their occurrence:
 
 ## Resources surface
 
-The MCP Resources surface (`crates/aptu-coder/src/tools/resources.rs`) currently emits no `MetricEvent` spans. Resource reads (`read_resource`) are not instrumented with the same observability as tool calls. This means resource read latency, cache hit rates, and error rates are not recorded in the JSONL metrics or OTel traces. This is a known gap; resource reads will be instrumented in a future wave.
+The MCP Resources surface (`crates/aptu-coder/src/tools/resources.rs`) emits completed `read_resource` events through the same nonblocking JSONL and OTel pipeline as tool calls. These use `resources/read` as the MCP method and retain only privacy-safe URI classification.

@@ -123,6 +123,25 @@ fn percent_decode_uri_component(s: &str) -> Result<String, ErrorData> {
         .map(|cow| cow.into_owned())
 }
 
+/// Classify resource URIs without retaining any caller-controlled content.
+pub(crate) fn classify_uri_kind(uri: &str) -> String {
+    let path = uri
+        .strip_prefix("aptu-coder://")
+        .and_then(|value| value.split('?').next())
+        .unwrap_or_default();
+    let mut parts = path.split('/');
+    if parts.next() != Some("graph") {
+        return "unknown".to_string();
+    }
+    let _repo_hash = parts.next();
+    match parts.next() {
+        Some("blast-radius") => "graph_blast_radius".to_string(),
+        Some("subgraph") => "graph_subgraph".to_string(),
+        Some("blast-radius-bidirectional") => "graph_bidirectional".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
 /// Parse a `aptu-coder://graph/{repo_hash}/{query_type}/{arg}?cursor=...&depth=N&max_nodes=M&format=...` URI.
 ///
 /// Validates scheme, path structure, and query type. The `repo_hash` is carried
@@ -530,6 +549,34 @@ mod tests {
     use super::*;
     use aptu_coder_core::analyze::FileAnalysisOutput;
     use aptu_coder_core::types::{CallInfo, FunctionInfo, SemanticAnalysis};
+
+    #[test]
+    fn test_classify_uri_kind_valid_graph_queries() {
+        assert_eq!(
+            classify_uri_kind("aptu-coder://graph/repo/blast-radius/symbol"),
+            "graph_blast_radius"
+        );
+        assert_eq!(
+            classify_uri_kind("aptu-coder://graph/repo/subgraph/symbol"),
+            "graph_subgraph"
+        );
+        assert_eq!(
+            classify_uri_kind("aptu-coder://graph/repo/blast-radius-bidirectional/a,b"),
+            "graph_bidirectional"
+        );
+    }
+
+    #[test]
+    fn test_classify_uri_kind_malformed_or_unknown_is_unknown() {
+        for uri in [
+            "not-a-resource-uri",
+            "aptu-coder://other/repo/blast-radius/symbol",
+            "aptu-coder://graph/repo/unknown/symbol",
+            "aptu-coder://graph",
+        ] {
+            assert_eq!(classify_uri_kind(uri), "unknown", "URI: {uri}");
+        }
+    }
 
     /// Build a graph with `caller` calling `callee` via a Calls edge.
     /// `bfs_blast_radius` on `caller` at depth >= 1 returns `callee`.
