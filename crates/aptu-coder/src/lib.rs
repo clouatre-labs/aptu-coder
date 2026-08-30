@@ -816,10 +816,10 @@ impl ServerHandler for CodeAnalyzer {
                         .map(|item| match item {
                             rmcp::model::ResourceContents::TextResourceContents {
                                 text, ..
-                            } => text.chars().count(),
+                            } => text.len(),
                             rmcp::model::ResourceContents::BlobResourceContents {
                                 blob, ..
-                            } => blob.chars().count(),
+                            } => blob.len(),
                             _ => 0,
                         })
                         .sum(),
