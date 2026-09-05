@@ -260,7 +260,8 @@ jobs:
   semver-checks:
     name: semver checks
     runs-on: ubuntu-24.04-arm
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     # aptu-coder-core is published on crates.io with 25+ versions.
     # If the crate is not yet found (e.g. first publish after rename), the step skips gracefully.
     timeout-minutes: 10
