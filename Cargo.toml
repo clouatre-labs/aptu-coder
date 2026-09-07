@@ -13,7 +13,7 @@ repository = "https://github.com/clouatre-labs/aptu-coder"
 homepage = "https://github.com/clouatre-labs/aptu-coder"
 
 [workspace.dependencies]
-tree-sitter = "0.26.13"
+tree-sitter = "0.27.0"
 rayon = "1"
 ignore = "0.4"
 lru = "0.18"
