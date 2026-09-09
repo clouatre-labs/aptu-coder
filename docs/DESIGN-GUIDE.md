@@ -241,13 +241,13 @@ Parameter documentation flows through schemars: `///` doc comments on struct fie
 
 ## 8. MCP Resources Design
 
-MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced two resource templates as a second access path to the structural graph that `analyze_symbol` builds.
+MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced three resource templates as a second access path to the structural graph that `analyze_symbol` builds.
 
 ### Small-Model-First URI Design
 
 **Principle:** Resource URI templates must be self-documenting. A small model reading the template description should be able to construct a valid URI without examples.
 
-*Example: The resource templates use flat, descriptive paths: `blast-radius/{symbol}`, `subgraph/{symbol}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it is returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
+*Example: The resource templates use flat, descriptive paths: `blast-radius/{symbol}`, `subgraph/{symbol}`, `blast-radius-bidirectional/{symbols}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it is returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
 
 ### Prescriptive Resource Template Descriptions
 
@@ -263,7 +263,7 @@ MCP Resources provide a URI-addressed read-only data surface alongside tools. Th
 
 ### New Server Checklist Extension
 
-Add to the New Server checklist (Section 9, step 13):
+Add to the New Server checklist (Section 10, step 13):
 
 13. **Add MCP resource templates (if applicable).** Resources are URI-addressed, read-only data surfaces. Follow the same design principles as tools: prescriptive descriptions, cursor pagination, cold-cache guidance. Resource templates are discoverable via `resources/templates/list`; the `resources/list` endpoint may return empty if all resources are template-based.
 
@@ -284,7 +284,7 @@ The following anti-patterns were identified across benchmark waves and wave post
 
 *Table 5: Anti-patterns, consequences, and corrective patterns.*
 
-## 9. Applying This Guide to a New Server
+## 10. Applying This Guide to a New Server
 
 Ordered checklist for building a new MCP server applying the principles in this guide:
 

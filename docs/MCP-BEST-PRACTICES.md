@@ -199,9 +199,19 @@ A minimal structured handoff contains the task description, any prior results th
 
 MCP defines a client/server protocol through which a host application (the MCP client, typically Claude or a Claude-powered agent) discovers and calls tools, reads resources, and uses prompts exposed by an MCP server (MCP specification, server/tools).
 
-The server exposes a catalog of tools. The client queries that catalog at session start and receives tool definitions including name, description, and input schema. When the model decides to use a tool, the client sends a tool call to the server, receives the result, and injects it into the conversation as a `tool_result` block.
+The 2026-07-28 protocol is stateless: there is no session-scoped catalog fetch. Every request carries its protocol version and capabilities in `_meta`, and the client calls `tools/list` (or any other listing method) whenever it needs a current catalog, receiving tool definitions including name, description, and input schema. When the model decides to use a tool, the client sends a tool call to the server, receives the result, and injects it into the conversation as a `tool_result` block.
 
 The server also exposes resources (arbitrary data identified by URI) and prompts (predefined instruction templates). Resources are read by the client and injected into context. Prompts are user-controlled templates that standardize instruction patterns across teams (MCP specification, server/resources; modelcontextprotocol.info, concepts/prompts).
+
+**`server/discover`:** a mandatory RPC (servers MUST implement it) that returns supported protocol versions, capabilities, and server identity in a single request. Clients use it for up-front version negotiation, and it also serves as a backward-compatibility probe for stdio clients that predate `server/discover` itself. This codebase implements it in `crates/aptu-coder/src/lib.rs` (`async fn discover`, ~line 726).
+
+**Dual-era compatibility:** this server, via `rmcp`, also still implements the legacy `initialize`/`initialized` handshake (`crates/aptu-coder/src/lib.rs`, ~lines 703-724) alongside `server/discover`, so that pre-2026-07-28 clients continue to work. Supporting both handshakes simultaneously is an explicitly sanctioned dual-era pattern under the spec's versioning policy (MCP specification, basic/versioning), not a compliance gap.
+
+### 3.1.1 Cacheable Results
+
+2026-07-28 requires `ttlMs` and `cacheScope` fields on the results of `tools/list`, `prompts/list`, `resources/list`, `resources/read`, and `resources/templates/list`. `ttlMs` is a freshness hint in milliseconds telling the client (or an intermediary cache) how long the result may be reused before re-fetching. `cacheScope` is either `public` (safe for a shared intermediary to cache and serve to other clients) or `private` (must only be cached per-client/session).
+
+This codebase implements both fields at every applicable call site: `list_tools()` in `crates/aptu-coder/src/lib.rs` chains `.with_ttl_ms(3_600_000)` and `.with_cache_scope(CacheScope::Public)` (~lines 768-771), and `crates/aptu-coder/src/tools/resources.rs` applies the same pattern at four call sites across `list_resources_impl`, `list_resource_templates_impl`, and `read_resource_impl` (the latter applies it on two return branches).
 
 ### 3.2 Tool Design Principles
 
@@ -231,55 +241,62 @@ Annotate every tool. An unannotated tool is treated as potentially destructive b
 
 MCP provides no official linting or static analysis for annotation quality, description completeness, or token efficiency. The only official tooling is MCP Inspector (`@modelcontextprotocol/inspector`), which validates protocol compliance (JSON-RPC structure, schema presence, invocation correctness) but does not evaluate description text or parameter documentation. Community security tools (mcp-scan by Invariant Labs) scan for prompt injection but are not annotation quality linters.
 
-The absence of ecosystem tooling means annotation quality must be enforced at the server level. The minimum viable enforcement is a Rust test that calls `list_tools()` and asserts two properties for every registered tool: the tool description is non-empty, and every `inputSchema.properties` entry has a non-empty `description` field. This catches the two most common regressions: a tool added without a description string, and a parameter added without a doc comment. See `crates/aptu-coder/tests/annotations.rs` for the implementation.
+The absence of ecosystem tooling means annotation quality must be enforced at the server level. `crates/aptu-coder/tests/annotations.rs` does this with a five-test suite:
+
+1. `test_all_tools_have_correct_annotations` — asserts the exact expected value of `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` for every registered tool, not merely that annotations are present.
+2. `test_all_tools_have_non_empty_descriptions` — every tool's `description` is non-empty.
+3. `test_all_tool_parameters_have_descriptions` — every `inputSchema.properties` entry has a non-empty `description` field.
+4. `test_flatten_fields_have_descriptions` — flattened pagination/output fields (`cursor`, `page_size`, `summary`) carry descriptions even when flattened in from a shared struct.
+5. `test_complex_params_have_examples` — complex parameters carry a JSON Schema `examples` array.
+
+Together these catch the common regressions: a tool added without a description string, a parameter added without a doc comment, an annotation hint set to the wrong value, and a complex parameter missing usage examples.
 
 ### 3.4 Transport Types
 
-MCP supports three transport mechanisms. HTTP/SSE is deprecated since 2025-03-26 and must not be used for new implementations, but remains in the spec with a backwards-compatibility guide and is still shipped by the Python SDK (MCP specification, basic/transports):
+As of 2026-07-28, Streamable HTTP is stateless: session IDs, the `Mcp-Session-Id` header, the standalone GET/SSE stream, and `Last-Event-ID` resumability were all removed from the spec. Every request is an independent HTTP POST; the server answers either with an inline JSON response or with a request-scoped SSE stream used only to carry progress/message notifications for that one request. There is no resumability: if a stream drops mid-request, the client must re-issue the original request as a new request, not resume the old one. Every request must carry the `MCP-Protocol-Version` header. Long-lived server-to-client notifications (list-changed, resource-update) are no longer piggybacked on a standalone stream; the client must opt in with a separate, long-lived `subscriptions/listen` request.
 
 | Transport | Status | Use Case | Protocol |
 |---|---|---|---|
 | STDIO | Active | Local integrations, CLI tools, same-host servers | Standard input/output streams, bidirectional |
-| Streamable HTTP | Active (preferred since 2025-03-26) | Distributed systems, remote servers | HTTP POST to single `/mcp` endpoint; inline response (stateless) or streaming session (stateful) |
-| HTTP/SSE | **Deprecated since 2025-03-26** | Legacy remote servers only | HTTP POST for requests, persistent SSE stream for responses |
+| Streamable HTTP | Active (preferred since 2025-03-26) | Distributed systems, remote servers | Independent HTTP POST per request; inline JSON or a request-scoped SSE stream (notifications only, no resumability) |
+| HTTP/SSE | **Deprecated** (SEP-2596, 12-month feature-lifecycle policy) | Legacy remote servers only | HTTP POST for requests, persistent SSE stream for responses |
 
 *Table 2: MCP transport types, use cases, and protocols.*
 
-For **Streamable HTTP** (preferred): the client POSTs JSON-RPC messages to a single `/mcp` endpoint. The server responds inline in the HTTP response body (stateless mode) or upgrades to a streaming session by returning a stream ID and subsequent events on the same endpoint (stateful mode). Proxy- and load-balancer-friendly because it does not require persistent SSE connections. Use this for all new remote server implementations.
+For **Streamable HTTP** (preferred): the client POSTs a JSON-RPC message to a single `/mcp` endpoint per request. The server responds inline in the HTTP response body, or opens a request-scoped SSE stream carrying progress/message notifications followed by the final result for that same request. There is no stateful/session mode. Use this for all new remote server implementations.
 
-For **HTTP/SSE** (deprecated since 2025-03-26): the client sends requests via HTTP POST and receives responses via a persistent Server-Sent Events stream. Do not use for new implementations. No removal deadline has been stated; the Python SDK (`SseServerTransport`) still ships it for existing deployments. If you maintain an HTTP/SSE server, migrate to Streamable HTTP. Migration reference: MCP Specification, Transports (legacy).
+For **HTTP/SSE** (deprecated): the client sends requests via HTTP POST and receives responses via a persistent Server-Sent Events stream. Do not use for new implementations. This transport is formally Deprecated under SEP-2596's 12-month feature-lifecycle policy, not merely discouraged with an unstated removal date; the Python SDK (`SseServerTransport`) still ships it for existing deployments. If you maintain an HTTP/SSE server, migrate to Streamable HTTP. Migration reference: MCP Specification, Transports.
+
+### 3.4.1 Deprecated Client-Side Features
+
+As of 2026-07-28, Roots, Sampling, and Logging are formally Deprecated (SEP-2577, 12-month registry-tracked deprecation window). Suggested migrations:
+
+- **Roots** → pass directories/files as tool parameters instead of relying on client-advertised roots.
+- **Sampling** → integrate directly with an LLM provider API instead of asking the client to sample on the server's behalf.
+- **Logging** → use stderr or OpenTelemetry-based logging instead of the MCP Logging capability.
 
 ---
 
 ### 3.5 Elicitation
 
-Elicitation allows a server to pause tool execution and request additional information from the user via a structured client-side form. This is the spec's mechanism for human-in-the-loop within a single tool call, without requiring the orchestrator to restart the call with new parameters.
+Elicitation lets a server request additional information from the user mid-operation, without the orchestrator having to design that back-and-forth into the tool's parameters up front. As of 2026-07-28 this is implemented via MRTR (Multi Round-Trip Requests), not a synchronous inline exchange.
 
-**How it works:** During tool execution the server sends an `elicitation/create` request to the client, containing a human-readable message and an optional JSON Schema describing the expected input. The client presents this to the user and returns their response. Execution then resumes with the collected data.
+**How it works (MRTR):** instead of blocking and waiting for an inline answer, the server responds to the original request with an `InputRequiredResult` (`resultType: input_required`). This result carries an `inputRequests` array (e.g. an `elicitation/create` request describing what's needed) and a `requestState` token. The client collects the requested input from the user, then **retries the original request** — same method, new request id — adding an `inputResponses` field with the collected answers. For URL mode, the client echoes the `requestState` token back so the server can correlate the retried request with the out-of-band flow the user completed. Execution resumes once the server sees the retried request with `inputResponses` populated.
 
 **Two modes:**
 
 | Mode | Description | Use case |
 |------|-------------|----------|
-| Form mode | Server provides a JSON Schema; client renders a structured form | Collecting missing parameters, confirmations |
-| URL mode | Server provides an external URL; client opens it | OAuth flows, sensitive credential entry |
+| Form mode | Server provides a JSON Schema; client renders a structured form. Schemas are restricted to flat objects with primitive-typed properties only (no nesting, no arrays of objects) | Collecting missing parameters, confirmations |
+| URL mode | Server provides an external URL; client opens it, and correlates the eventual retry via `requestState` | OAuth flows, sensitive credential entry |
+
+**Three-action model:** the user's response to an elicitation request is one of accept, decline, or cancel. Servers must handle all three: `accept` carries the collected data in the retried request's `inputResponses`; `decline` and `cancel` both retry the original request with an empty/negative `inputResponses` and must be handled gracefully rather than treated as errors.
 
 **Constraints:**
 - Servers MUST NOT request sensitive credentials (passwords, API keys) via form mode. Use URL mode for sensitive flows.
-- Clients may decline elicitation; servers must handle a declined or empty response gracefully.
+- Form-mode schemas MUST stay flat with primitive property types; do not nest objects or use array-of-object schemas.
 
-**FastMCP usage:**
-
-```python
-result = await ctx.elicit(
-    message="Which environment should this deploy to?",
-    schema={"type": "object", "properties": {"env": {"type": "string", "enum": ["staging", "production"]}}, "required": ["env"]}
-)
-if result.action == "accept":
-    env = result.data["env"]
-```
-
-*Code Snippet 3: FastMCP elicitation call. The server pauses tool execution, collects user input via a structured form, and resumes on `accept`. See [MCP Elicitation spec](https://modelcontextprotocol.io/specification/latest/client/elicitation).*
+See [MCP Elicitation spec](https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation) and [MRTR pattern spec](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr) for the full request/retry sequence.
 ## 4. Tool Use Best Practices
 
 ### 4.1 Tool Definition Schema
@@ -308,7 +325,7 @@ Tool definitions in the Anthropic API require three fields: `name`, `description
 }
 ```
 
-*Code Snippet 4: Anthropic API tool definition with input_schema, required fields, and optional enum parameter.*
+*Code Snippet 3: Anthropic API tool definition with input_schema, required fields, and optional enum parameter.*
 
 The MCP specification extends this with an optional `outputSchema` field that documents the structure of the tool's return value. Defining an `outputSchema` enables downstream validation and allows orchestrators to verify that tool output matches expectations before injecting it into context (MCP specification, server/tools).
 
@@ -357,7 +374,7 @@ The MCP specification extends this with an optional `outputSchema` field that do
 }
 ```
 
-*Code Snippet 5: MCP tool definition with `inputSchema` and `outputSchema`.*
+*Code Snippet 4: MCP tool definition with `inputSchema` and `outputSchema`.*
 
 **Structured output:** `outputSchema` is optional. If defined, tool results must include a `structuredContent` field matching that schema alongside the traditional `content` array. The `content` array remains as the human-readable fallback. Some SDKs (including FastMCP) automatically populate `structuredContent` from the return type annotation; servers not using such an SDK must populate it explicitly. Example result:
 
@@ -373,7 +390,7 @@ The MCP specification extends this with an optional `outputSchema` field that do
 }
 ```
 
-*Code Snippet 6: Tool result with `structuredContent` alongside the human-readable `content` fallback.*
+*Code Snippet 5: Tool result with `structuredContent` alongside the human-readable `content` fallback.*
 
 ### 4.1.1 Description Scope: Selection vs. Usage
 
@@ -407,7 +424,7 @@ Test tool selection reliability by constructing requests that could plausibly ro
 
 The MCP specification constrains tool names to alphanumeric characters, underscores, hyphens, and dots, with a maximum length of 64 characters. Spaces are explicitly disallowed. Within those constraints, the spec prescribes no naming style: it is silent on whether to use snake_case, camelCase, or dot-notation.
 
-**Prefer flat snake_case.** The recommended style for MCP tool names is flat, underscore-separated verb phrases: `extract_invoice_fields`, `search_knowledge_base`, `matrix_multiply`. This style is used by most production MCP servers and by FastMCP's own namespace separator when mounting sub-servers (FastMCP `mount()` produces `prefix_toolname`, not `prefix.toolname`). The `searchFlights` example in Code Snippet 5 uses camelCase for illustration; in a production server, prefer `search_flights` for consistency.
+**Prefer flat snake_case.** The recommended style for MCP tool names is flat, underscore-separated verb phrases: `extract_invoice_fields`, `search_knowledge_base`, `matrix_multiply`. This style is used by most production MCP servers and by FastMCP's own namespace separator when mounting sub-servers (FastMCP `mount()` produces `prefix_toolname`, not `prefix.toolname`). The `searchFlights` example in Code Snippet 4 uses camelCase for illustration; in a production server, prefer `search_flights` for consistency.
 
 **Dot-notation breaks direct OpenAI tool mappings.** OpenAI's function-calling API enforces the regex `^[a-zA-Z0-9_-]{1,64}$` at the HTTP layer. A tool named `admin.tools.list` produces an HTTP 400 error when mapped directly to an OpenAI function name. Note that some MCP clients (including Cursor) wrap MCP tools in a `CallMcpTool` meta-tool, meaning the MCP tool name becomes a parameter rather than an OpenAI function name -- in that case dots may not cause an immediate error. However, any layer that maps MCP tool names directly to OpenAI tool or function names (Azure OpenAI integrations, custom OpenAI bridges) will reject dotted names. The safe, universally compatible choice is flat snake_case.
 
@@ -451,7 +468,7 @@ The orchestrator uses the error category and retryable flag to drive retry logic
 }
 ```
 
-*Code Snippet 7: Structured error response with category, retryable flag, and user-facing message.*
+*Code Snippet 6: Structured error response with category, retryable flag, and user-facing message.*
 
 ### 4.4 Composition
 
@@ -667,10 +684,12 @@ The following patterns produce unreliable, fragile, or unsafe agent systems.
 - MCP Inspector (protocol compliance, not annotation quality): https://github.com/modelcontextprotocol/inspector
 - MCP Prompts Concept: https://modelcontextprotocol.info/docs/concepts/prompts/
 - MCP Python SDK: https://github.com/modelcontextprotocol/python-sdk
-- MCP Specification, Server/Resources: https://modelcontextprotocol.io/specification/latest/server/resources
-- MCP Specification, Server/Tools: https://modelcontextprotocol.io/specification/latest/server/tools
-- MCP Specification, Transports (draft): https://github.com/modelcontextprotocol/specification/blob/main/docs/specification/draft/basic/transports.mdx
-- MCP Specification, Transports (legacy): https://github.com/modelcontextprotocol/specification/blob/main/docs/legacy/concepts/transports.mdx
+- MCP Specification, Server/Resources: https://modelcontextprotocol.io/specification/2026-07-28/server/resources *(pinned to 2026-07-28; bump this pin on next review so prose and links don't silently drift apart)*
+- MCP Specification, Server/Tools: https://modelcontextprotocol.io/specification/2026-07-28/server/tools *(pinned to 2026-07-28; bump this pin on next review)*
+- MCP Specification, Transports (Streamable HTTP): https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
+- MCP Specification, Basic/Versioning: https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning
+- MCP Specification, Elicitation: https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation
+- MCP Specification, MRTR Pattern: https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr
 - MCP TypeScript SDK: https://github.com/modelcontextprotocol/typescript-sdk
 - OpenAI Function Calling, Tool Name Constraints: https://platform.openai.com/docs/guides/function-calling
 - OWASP, LLM Prompt Injection Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html

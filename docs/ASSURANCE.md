@@ -15,7 +15,7 @@ aptu-coder is a static analysis server that parses source files using tree-sitte
 | Streamable HTTP listener | Inbound | When `--port` or `APTU_CODER_PORT` is set, the server binds to `127.0.0.1:PORT` and serves MCP requests over HTTP |
 | OTLP exporter | Outbound | When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the server exports traces, logs, and metrics to the configured collector endpoint via OTLP/HTTP |
 
-In the default stdio transport mode, the server makes no outbound network calls, holds no credentials, and writes no persistent state. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
+In the default stdio transport mode, the server makes no outbound network calls and holds no credentials. "No persistent state" is scoped to no database/session store: an always-on JSONL metrics writer (`MetricsWriter`, spawned unconditionally in `crates/aptu-coder/src/main.rs`) appends metrics files under `$XDG_DATA_HOME/aptu-coder/`, and `analyze_symbol`'s L2 disk cache (`crates/aptu-coder-core/src/analyze_focused.rs`, keyed by canonical path + git HEAD SHA) is enabled by default under the same XDG data directory, opt-out only via `APTU_CODER_DISK_CACHE_DISABLED=1`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
 
 **Outbound network calls:** In the default stdio transport, the server makes no outbound network calls. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the OpenTelemetry exporter sends traces, logs, and metrics to the configured collector endpoint via OTLP/HTTP.
 
@@ -41,11 +41,12 @@ There is no database, no deserialization of untrusted network data, and no privi
 
 Existing mechanisms (not duplicated here):
 
-- `cargo deny` in CI: audits transitive dependencies for known advisories and license compliance
+- `cargo deny` in CI: audits transitive dependencies for known advisories, license compliance, and dependency ban/duplicate-version rules (`cargo deny check advisories licenses bans`)
 - Renovate: automated dependency update pull requests
 - SLSA provenance: build provenance attestations published alongside each release
 - cosign: release artifacts are signed with keyless signing; see [SECURITY.md](../SECURITY.md) for verification instructions
 - GPG-signed commits: all commits to main are GPG-signed
+- Secret scanning and workflow auditing: `.github/workflows/security.yml` runs a single "Security Result" job on every PR and push to main -- TruffleHog (`trufflesecurity/trufflehog` v3.97.4, `--only-verified`) for committed-secret scanning, and zizmor (`zizmorcore/zizmor-action` v0.6.3, `min-severity: medium`, SARIF upload) for GitHub Actions workflow auditing. The zizmor step is path-gated to run only when workflow files change. `.github/workflows/scheduled-security-audit.yml` re-runs zizmor weekly (`cron: '0 2 * * 1'`) independent of any diff, since CVE and Actions-advisory data changes without code commits.
 
 ## Site hardening
 
@@ -64,3 +65,4 @@ The project distribution channels (crates.io, Homebrew tap) are third-party plat
 - **Scope:** Full codebase, trust boundaries, attack surface, and supply chain (as documented in this file)
 - **Conclusion:** No exploitable vulnerabilities identified; residual risks documented above
 - **Reviewer:** Project maintainer (self-review; acceptable for solo projects under OpenSSF criteria)
+- **Note:** This review predates material changes to the CI security posture made between 2026-03-29 and 2026-09-09 -- the secret scanner switched from gitleaks to TruffleHog, secrets and zizmor scanning were consolidated into one Security Result job, the `cargo deny` check gained the `bans` rule, and path-gating was added for the zizmor step and semver-checks (see commits 2271ee7, 4d674f7, f1d52ca, bd56109). Those changes have not been covered by a re-review; treat this review as scoped to the state of the codebase on 2026-03-29 and re-run or extend it to cover the delta before relying on it for anything past that date.

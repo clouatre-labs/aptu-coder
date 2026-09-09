@@ -23,6 +23,7 @@ This document maps every repo-level artifact to its purpose and the rationale be
 | `SECURITY.md` | Vulnerability disclosure policy |
 | `Cargo.toml` `[profile.release]` | `opt-level=z`, `lto=true`, `codegen-units=1`, `panic=abort`, `strip=true` for minimal distribution binaries |
 | `Cargo.toml` `[profile.ci]` | Inherits release; `lto=false`, `codegen-units=16` for faster CI builds without sacrificing correctness |
+| `Cargo.toml` `[workspace.lints.clippy]` | Hard-denies `undocumented_unsafe_blocks`, `unwrap_used`, `expect_used`; warn-tier `must_use_candidate`, `redundant_clone`, `needless_pass_by_value`, `large_enum_variant` staged for eventual promotion to `deny` once all violations are cleared (tracked in issue #1225) |
 | `.github/workflows/ci.yml` permissions block | Top-level `permissions:` block on every workflow. Use `contents: read` + `pull-requests: read` for CI workflows; set the minimum required permissions per job, noting that jobs using `actions/checkout` need at least `contents: read`. Required even after the org default was flipped to `read` on 2026-03-25, as defence in depth. |
 | Runner pin (`ubuntu-24.04-arm`) | Pin every job to `ubuntu-24.04-arm` rather than `ubuntu-latest`. `ubuntu-latest` resolves to the newest image mid-cycle and can silently change toolchain versions between runs. |
 
@@ -32,15 +33,15 @@ This document maps every repo-level artifact to its purpose and the rationale be
 
 **Rulesets over legacy branch protection.** GitHub Rulesets apply consistently across the organization and support conditions the legacy API cannot express. Two rulesets are active: main branch protection (no force push, no deletion, required status on `CI Result`) and release tag protection (`v*.*.*` format, no overwrites).
 
-**Single aggregate CI check.** `ci.yml` ends with a `CI Result` job that depends on all others. GitHub requires only this one check to pass. A single required check is simpler to reason about and eliminates the maintenance cost of keeping the required-checks list in sync with job names. Use the following `if:` condition so that path-filtered jobs (result: `skipped`) do not block the check, while `cancelled` and `failure` still fail it:
+**Two required aggregate checks.** Rather than one aggregate, the repo splits required checks by concern: `ci.yml` ends with a `CI Result` job depending on all its own jobs, and `.github/workflows/security.yml` (a separate required workflow) has its own aggregator, `Security Result`. GitHub only needs to see these two checks pass. This is simpler to reason about than a single monolithic aggregate spanning two workflows, and it lets the security workflow's path-gating (below) skip work independently of `ci.yml`. Use the following `if:` condition so that path-filtered jobs (result: `skipped`) do not block the check, while `cancelled` and `failure` still fail it:
 
 ```yaml
-# CI Result aggregator job -- list every job in 'needs'
+# CI Result aggregator job in ci.yml -- list every job in 'needs'
 ci-result:
   name: CI Result
   runs-on: ubuntu-24.04-arm
   if: always()
-  needs: [changes, commitlint, check-base, format, lint, test, deny, msrv, renovate-check, zizmor]
+  needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks]
   steps:
     - name: Verify all jobs passed or were skipped
       run: |
@@ -51,7 +52,9 @@ ci-result:
         echo "All CI jobs passed or were skipped."
 ```
 
-**Path-based change detection.** Format, lint, and test jobs run only when `src/**`, `Cargo.*`, `tests/**`, or workflow files change. Documentation-only pushes skip expensive jobs and give faster feedback.
+There is no standalone `format` job (`cargo fmt --check` is a step inside `lint`) and no `test` job (`coverage` replaces it, running `cargo-llvm-cov`/nextest with coverage gates on `aptu-coder-core`); `ci.yml` has no `renovate-check` job. `zizmor` is not a `ci.yml` job at all -- it runs inside `security.yml`'s single `security-result` job (`Security Result`), alongside a TruffleHog secret scan, gated to run only when workflow files change (`dorny/paths-filter`). See Control 7 for the secret-scanning detail and Control 2 for the zizmor step itself.
+
+**Path-based change detection.** Lint and coverage jobs in `ci.yml` run only when `src/**`, `Cargo.*`, `tests/**`, or workflow files change. Documentation-only pushes skip expensive jobs and give faster feedback. `security.yml`'s zizmor step is similarly gated to run only when `.github/workflows/**` changes; the TruffleHog secret scan itself always runs.
 
 **Provenance attestation.** `build-and-attest.yml` generates a signed attestation via `actions/attest-build-provenance`. Consumers can verify with `gh attestation verify` before installing. `Cargo.lock` is committed and `cargo deny` enforces license and advisory checks in CI. Build provenance is covered by cosign signing and `actions/attest-build-provenance` (SLSA Build L3).
 
@@ -226,15 +229,19 @@ graph TD
 *Figure 1: Tag poisoning attack chain and how SHA pinning combined with zizmor breaks it.*
 
 ```yaml
-# zizmor step in CI; pin zizmor itself to a SHA
-- name: Lint GitHub Actions workflows
-  uses: zizmorcore/zizmor-action@71321a20a9ded102f6e9ce5718a2fcec2c4f70d8  # v0.5.2
+# zizmor step in security.yml; pin zizmor itself to a SHA; path-gated to workflow-file changes only
+- name: Audit GitHub Actions workflows
+  if: always() && steps.filter.outputs.workflows == 'true'
+  uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99  # v0.6.3
   with:
-    severity: medium
+    min-severity: medium
+    advanced-security: true
+    token: ${{ secrets.GITHUB_TOKEN }}
+    config: .github/zizmor.yml
 ```
 *Code Snippet 5: zizmor CI step for SHA pinning enforcement.*
 
-Use `advanced-security: false` unless the repo has GitHub Advanced Security (GHAS) enabled. Setting it to `true` on a non-GHAS repo causes zizmor to emit false positives for features that are unavailable. `min-severity: high` suppresses informational and medium findings that do not represent exploitable vulnerabilities in typical org workflows.
+Set `advanced-security: true` only when the repo has GitHub Advanced Security (GHAS) enabled -- otherwise zizmor emits false positives for features that are unavailable. This repo runs with `advanced-security: true`; the `security-events: write` permission granted to the job (needed for SARIF upload) implies GHAS is enabled. `.github/zizmor.yml` suppresses one specific finding: `ci.yml` gates Renovate-only jobs on `github.actor`, which zizmor's `bot-conditions` rule otherwise flags even though the condition is not attacker-controllable in this context.
 
 ```yaml
 # .github/dependabot.yml: keep action SHAs current via weekly PRs
@@ -344,22 +351,20 @@ tar -xzf tool.tar.gz
 
 ### Credential and Access Management
 
-**7. Secret Scanning with gitleaks**
+**7. Secret Scanning with TruffleHog**
 
-Secret scanning runs on every PR and push as a required CI check using a shared org-level configuration and license secret. This prevents long-lived tokens committed to any repository from persisting in history or appearing in CI log artifacts. Before enabling as a required check, run a full-history scan across all org repos with `gitleaks detect --source .` to resolve any pre-existing findings; a required check on a repo with unresolved history violations will block all PRs immediately.
+Secret scanning runs on every PR and push as part of the required `Security Result` check (`.github/workflows/security.yml`). This prevents long-lived tokens committed to any repository from persisting in history or appearing in CI log artifacts. `--only-verified` restricts findings to secrets TruffleHog has confirmed are live against the origin service, cutting noise from historical or fixture-only matches.
+
+TruffleHog is used instead of `gitleaks/gitleaks-action` because `gitleaks-action` requires a `GITLEAKS_LICENSE` org secret for GitHub Organisation repos; TruffleHog has no per-org licensing gate, so it needs no license secret to run as a required check.
 
 ```yaml
-# gitleaks workflow step referencing org-level license and config secrets
+# TruffleHog step in security.yml; no license secret required
 - name: Scan for committed secrets
-  uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-    GITLEAKS_CONFIG: ${{ secrets.GITLEAKS_CONFIG }}
+  uses: trufflesecurity/trufflehog@363923b901c911a9164f50b6c423f47c15372b1c  # v3.97.4
+  with:
+    extra_args: --only-verified
 ```
-*Code Snippet 11: gitleaks required CI check using org-level license and configuration secrets.*
-
-**Full-history scan result (2026-03-25).** Ran `gitleaks detect --source .` across all org repos. Result: clean. All findings were false positives from test fixtures and example tokens. Recommendation: add a `.gitleaks.toml` allowlist to `aptu` to suppress test-fixture false positives and reduce noise in future scans.
+*Code Snippet 11: TruffleHog required CI check, run unconditionally (not path-gated) inside `security-result`.*
 
 **8. Fine-Grained PATs Only, Classic PATs Banned, Expiry Enforced**
 
@@ -458,7 +463,7 @@ gh api "/orgs/{org}/audit-log?phrase=action:tag.create+action:repo.create&per_pa
 | 4 | `pull_request_target` ban | Fork PR PAT theft (Trivy breach, Feb 28 2026) | zizmor required check; workflow audit |
 | 5 | Environment protection | Secrets reachable from fork PRs or unapproved refs | `PUT /repos/{org}/{repo}/environments/{name}` |
 | 6 | Fork PR workflow approval | Untrusted code on org runners; wasted CI minutes | `PUT /orgs/{org}/actions/permissions/fork-pr-contributor-approval` |
-| 7 | Secret scanning (gitleaks) | Long-lived tokens persisting in repository history | gitleaks required check |
+| 7 | Secret scanning (TruffleHog) | Long-lived tokens persisting in repository history | `Security Result` required check |
 | 8 | Fine-grained PATs; classic banned | Wide-scope token exfiltration; non-atomic rotation gap | GitHub org Settings UI; `PATCH /orgs/{org}` |
 | 9 | GitHub Apps; 2FA; SAML | Long-lived automation secrets; account takeover via phishing | GitHub org Settings UI; GitHub App installation |
 | 10 | Tag immutability ruleset | Tag force-push (Trivy breach, Feb-Mar 2026) | `POST /orgs/{org}/rulesets` |
