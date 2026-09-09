@@ -23,12 +23,15 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | **`aptu-coder`** | | |
 | `filters` | `crates/aptu-coder/src/filters.rs` | `exec_command` output filtering: `build_builtin_filter_rules`, `load_filter_table` (built-in + project-local `.aptu/filters.toml`), `apply_filter`, `maybe_inject_no_stat`; `FilterTableConfig` validates `schema_version` on deserialization and falls back to built-in rules on mismatch or parse error |
 | `lib` | `crates/aptu-coder/src/lib.rs` | CodeAnalyzer struct; MCP wiring and thin shims (`#[tool(...)]` decorators, forwarding calls). Post-M17 all tool handler logic lives in `crates/aptu-coder/src/tools/<tool>.rs`. Exec plumbing (`build_exec_command`, `run_exec_impl`, `handle_output_persist`) remains in `lib.rs`. |
-| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed |
-| `metrics` | `crates/aptu-coder/src/metrics.rs` | Always-on JSONL metrics: daily-rotating files, `MetricEvent`, `MetricsSender`, `MetricsWriter`; includes `migrate_legacy_metrics_dir` for the `code-analyze-mcp` → `aptu-coder` XDG path migration |
+| `main` | `crates/aptu-coder/src/main.rs` | MCP server entry point; initializes tracing, OTel providers, metrics channel; stdio transport by default, streamable HTTP when `--port N` is passed (or via `APTU_CODER_PORT` env-var fallback when `--port` is not passed). The HTTP path adds Bearer-token auth middleware gated on `APTU_CODER_BEARER_TOKEN`: the token is blake3-hashed once at startup and compared per-request via `blake3::Hash`'s constant-time `PartialEq`, warning if the configured token is shorter than 32 characters. A `CancellationToken` listens for SIGTERM (unix) / ctrl_c; on trigger it cancels the axum server via `with_graceful_shutdown`, then explicitly shuts down the OTel trace/log/meter providers to flush pending spans/logs/metrics before exit |
+| `metrics` | `crates/aptu-coder/src/metrics.rs` | `MetricEvent` schema and builder fields; OTel-metric recording (`record_otel_metrics`); re-exports `MetricsWriter` and `migrate_legacy_metrics_dir` from `metrics_export` for callers that use `crate::metrics::*` |
+| `metrics_export` | `crates/aptu-coder/src/metrics_export.rs` | Metrics file I/O: `MetricsWriter::run` (drains the channel), `rotate_metrics_file`, `ensure_metrics_dir`, `xdg_metrics_dir`, `cleanup_old_files` (30-day retention), `migrate_legacy_metrics_dir_impl` for the `code-analyze-mcp` → `aptu-coder` XDG path migration |
 | `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
 | `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
-| `shell_write` | `crates/aptu-coder/src/shell_write.rs` | Pre-spawn heredoc guard for `exec_command`: `validate_heredocs` (Phase 1 file-write pattern + stdin-consuming flag + `params.stdin` conflict scan, Phase 2 missing closing-delimiter scan); `scan_backward_for_file_write`, `scan_backward_for_stdin_flag` |
-| `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative), `validate_path_in_dir` (working_dir-relative with traversal prevention), `io_error_to_path_error` |
+| `shell_write` | `crates/aptu-coder/src/shell_write.rs` | Compatibility re-export shim (14 lines): `pub(crate) use crate::heredoc_validation::validate_heredocs;` -- kept so `exec_command.rs` can keep calling `crate::shell_write::validate_heredocs` |
+| `heredoc_validation` | `crates/aptu-coder/src/heredoc_validation.rs` | Pre-spawn heredoc guard for `exec_command`: `validate_heredocs` (Phase 1 file-write pattern + stdin-consuming flag + `params.stdin` conflict scan, Phase 2 missing closing-delimiter scan) and its error helpers |
+| `shell_scan` | `crates/aptu-coder/src/shell_scan.rs` | Backward token-scanning primitives used by `heredoc_validation`: `scan_backward_for_file_write`, `scan_backward_for_stdin_flag` |
+| `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative; enforces containment via `validate_parent_in_root`), `validate_path_relative_to` (working_dir-relative; deliberately does *not* enforce containment -- its doc comment states it "removes the final `starts_with` containment check... This aligns with MCP 2025-11-25 spec intent: path resolution is a convenience; containment is operator responsibility", so the caller/operator owns access control), `canonical_cwd` (undocumented helper resolving the canonicalized CWD the same way `validate_path_relative_to` does, used by edit tools with no `working_dir` param), `io_error_to_path_error` |
 | `resources` | `crates/aptu-coder/src/tools/resources.rs` | MCP Resources surface: `list_resources`, `list_resource_templates`, `read_resource` for the knowledge-graph URI templates (blast-radius, subgraph) |
 | **`aptu-coder-core`** | | |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
@@ -172,6 +175,10 @@ Key sub-operations are wrapped in named child spans so P95 breakdowns are visibl
 
 All tool handlers record bounded, safe-to-emit span attributes (tool name, path, symbol, result status, error category). Secrets, file content, command output, and stdin are in the never-record list. See [OBSERVABILITY.md](https://github.com/clouatre-labs/aptu-coder/blob/main/OBSERVABILITY.md) for the full policy and PR review checklist.
 
+### `no_cache_meta` convention
+
+`crate::tools::common::no_cache_meta()` builds a `MetaObject` with `_meta.cache_hint = "no-cache"`, telling MCP clients/orchestrators not to cache the result. It is defined once and applied via `.with_meta(...)`: (a) on every error response path, through `err_to_tool_result`; (b) on every response (success and error) of the three mutating/destructive tools, `exec_command`, `edit_overwrite`, `edit_replace`; and (c) on the successful responses of `analyze_directory`, `analyze_file`, `analyze_module`, and `analyze_symbol`, where the handler takes `no_cache_meta().0` as the base map and inserts a `content_hash` (blake3 of the formatted output) alongside it. The MCP Resources surface (`resources.rs`) and the `list_tools` response use a separate mechanism instead -- `with_ttl_ms`/`with_cache_scope(CacheScope::Public)` -- since those are meant to be cached by clients.
+
 ## Language Handler System
 
 Each language is registered in `languages/mod.rs` as a `LanguageInfo` with tree-sitter queries and optional handler functions:
@@ -210,6 +217,9 @@ The server exposes MCP resource templates that surface the knowledge graph built
 |---|---|
 | `blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward; depth defaults to 3 (max 5) |
 | `subgraph/{symbol}` | Full subgraph (callers, callees, connections) for a single symbol |
+| `blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}` | Bidirectional BFS from one or more comma-separated seed symbols; `max_nodes` defaults to 50 (must be >=1), `depth` defaults to 3 (max 5); backed by `GraphQuery::BidirectionalBlastRadius` |
+
+**Output format:** All three templates accept a `format=text|json` query parameter (default `json`), parsed by `parse_graph_uri` and honored in `read_resource_impl`: `format=text` returns plain text instead of the default paginated JSON.
 
 **Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
 

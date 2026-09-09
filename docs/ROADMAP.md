@@ -227,8 +227,11 @@ Results are paginated via an opaque cursor. Cold cache returns a message recomme
 
 Shipped:
 
+- #1491/#1493: read_resource JSONL/OTel telemetry (commit afe9136, "feat(metrics): record MCP resource reads in JSONL and OTel metrics")
+
 Unimplemented and pertinent:
 
 - MCP SEP adoption: #1487 (`trustedHint`), #1561 (`unsafeOutputHint`), #1913 (trust/sensitivity annotations), #1984 (governance annotations) -- open upstream; no action until specs stabilize. #1560 (`secretHint`) closed 2026-03-23; evaluate adoption once merged into spec.
+- KG pull-only ablation benchmark (see [docs/audit/2026-08-29-kg-pull-ablation-benchmark-design.md](audit/2026-08-29-kg-pull-ablation-benchmark-design.md)): the design doc names telemetry (#1491) as its execution prerequisite; that prerequisite has now shipped, so the benchmark is unblocked and next in line.
 
 
