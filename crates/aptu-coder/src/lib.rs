@@ -432,7 +432,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Use for \"who calls X\", transitive chains, or files importing a module path. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if import_lookup=true with empty symbol; fails if summary=true and cursor. match_mode controls name matching (exact/insensitive/prefix/contains). git_ref restricts to changed files.",
+        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if summary=true and cursor. match_mode controls name matching; git_ref restricts to changed files.",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
             title = "Analyze Symbol",
