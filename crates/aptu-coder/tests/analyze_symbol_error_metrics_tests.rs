@@ -145,3 +145,61 @@ async fn test_analyze_symbol_import_lookup_empty_symbol_error_metrics() {
         text
     );
 }
+
+/// Test that analyze_symbol accepts follow_depth at the schema maximum of 3
+/// (happy_path).
+#[tokio::test]
+async fn test_analyze_symbol_follow_depth_at_maximum_accepted() {
+    // Arrange: create a temp directory with a Rust file inside CWD
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::TempDir::new_in(&cwd).unwrap();
+    std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
+
+    // Act: call analyze_symbol with follow_depth=3
+    let params = json!({
+        "path": dir.path().to_str().unwrap(),
+        "symbol": "foo",
+        "follow_depth": 3,
+    });
+    let response = call_tool_raw("analyze_symbol", params).await;
+
+    // Assert: success response, not an error
+    let result = response.get("result").unwrap();
+    assert!(
+        !result.get("isError").unwrap().as_bool().unwrap(),
+        "expected isError=false for follow_depth=3"
+    );
+}
+
+/// Test that analyze_symbol emits result=error with error_type=invalid_params
+/// when follow_depth exceeds the schema maximum of 3 (edge_case).
+#[tokio::test]
+async fn test_analyze_symbol_follow_depth_above_maximum_rejected() {
+    // Arrange: create a temp directory with a Rust file inside CWD
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::TempDir::new_in(&cwd).unwrap();
+    std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
+
+    // Act: call analyze_symbol with follow_depth=4
+    let params = json!({
+        "path": dir.path().to_str().unwrap(),
+        "symbol": "foo",
+        "follow_depth": 4,
+    });
+    let response = call_tool_raw("analyze_symbol", params).await;
+
+    // Assert: error response with invalid_params mentioning follow_depth/maximum
+    let result = response.get("result").unwrap();
+    assert!(
+        result.get("isError").unwrap().as_bool().unwrap(),
+        "expected isError=true for follow_depth=4"
+    );
+    let content = result.get("content").unwrap().as_array().unwrap();
+    assert!(!content.is_empty(), "expected content");
+    let text = content[0].get("text").unwrap().as_str().unwrap();
+    assert!(
+        text.contains("follow_depth") && text.contains("maximum"),
+        "error message should mention follow_depth and maximum: {}",
+        text
+    );
+}
