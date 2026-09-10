@@ -203,10 +203,10 @@ pub struct AnalyzeSymbolParams {
     /// Symbol matching mode (default: exact). exact: case-sensitive exact match. insensitive: case-insensitive exact match. prefix: case-insensitive prefix match. contains: case-insensitive substring match.
     pub match_mode: Option<SymbolMatchMode>,
 
-    /// Call graph traversal depth for this tool (default 1). Level 1 = direct callers and callees; level 2 = one more hop, etc. Output size grows exponentially with graph branching. Warn user on levels above 2.
+    /// Call graph traversal depth for this tool (default 1). Level 1 = direct callers and callees; level 2 = one more hop, etc. Output size grows exponentially with graph branching. Warn user on levels above 2. Hard cap of 3.
     #[cfg_attr(
         feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::option_integer_schema")
+        schemars(schema_with = "crate::schema_helpers::follow_depth_schema")
     )]
     pub follow_depth: Option<u32>,
 

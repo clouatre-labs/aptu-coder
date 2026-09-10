@@ -10,6 +10,7 @@ use aptu_coder_core::cache::{CacheTier, CallGraphCache, StructuralGraphCache};
 use aptu_coder_core::pagination::{
     CursorData, DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor, encode_cursor,
 };
+use aptu_coder_core::schema_helpers::MAX_FOLLOW_DEPTH;
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
@@ -568,6 +569,17 @@ pub(crate) async fn analyze_symbol_handler(
     if let Err(e) = validate_import_lookup(params.import_lookup, &params.symbol) {
         emit_error_metric(&ctx, "invalid_params", t_start, None);
         return Ok(err_to_tool_result(e));
+    }
+
+    if let Some(depth) = params.follow_depth
+        && depth > MAX_FOLLOW_DEPTH
+    {
+        emit_error_metric(&ctx, "invalid_params", t_start, None);
+        return invalid_params(
+            span,
+            format!("follow_depth={depth} exceeds the maximum of {MAX_FOLLOW_DEPTH}"),
+            "reduce follow_depth to 3 or lower",
+        );
     }
 
     if params.import_lookup == Some(true) {
