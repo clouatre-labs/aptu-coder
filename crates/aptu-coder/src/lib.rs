@@ -300,7 +300,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
-        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Paginates with next_cursor. Default max_depth=3; pass 0 for unlimited. Large dirs (1000+ files) auto-compact to summary; pass summary=false for per-file list (summary and cursor are mutually exclusive). git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts.",
+        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Paginates with next_cursor. Default max_depth=3. Large dirs (1000+ files) auto-compact to summary; pass summary=false for per-file list. git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts.",
         output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
             title = "Analyze Directory",
@@ -373,7 +373,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with cursor/page_size; use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. summary=true and cursor are mutually exclusive. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with cursor/page_size; use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -555,7 +555,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_overwrite",
         title = "Edit Overwrite",
-        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Works on any file type. Use edit_replace for targeted single-block edits. working_dir sets the base directory for path resolution (default: server CWD).",
+        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Works on any file type. Use edit_replace for targeted single-block edits.",
         output_schema = schema_for_type::<EditOverwriteOutput>(),
         annotations(
             title = "Edit Overwrite",
@@ -608,7 +608,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). Set replace_all=true to replace every non-overlapping occurrence; old_text must be non-empty. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Pass expected_content_hash (blake3 hex of raw file bytes) to detect stale context; a mismatch rejects the edit. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file. working_dir sets the base directory for path resolution (default: server CWD).",
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",
