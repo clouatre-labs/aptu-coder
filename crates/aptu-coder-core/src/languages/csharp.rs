@@ -100,7 +100,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
 
     // base_list is an unnamed child of class_declaration/interface_declaration/record_declaration
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX))
+        if let Some(child) = node.child(i)
             && child.kind() == "base_list"
         {
             bases.extend(extract_base_list(&child, source));
@@ -218,7 +218,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -248,7 +248,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -280,7 +280,7 @@ mod tests {
                 methods.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -308,7 +308,7 @@ mod tests {
                 ctors.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -335,7 +335,7 @@ mod tests {
                 interfaces.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -360,7 +360,7 @@ mod tests {
                 imports.push(src[node.start_byte()..node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -387,7 +387,7 @@ mod tests {
                 methods.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -414,7 +414,7 @@ mod tests {
                 classes.push(src[name_node.start_byte()..name_node.end_byte()].to_string());
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -440,7 +440,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -455,7 +455,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack2.push(child);
                 }
             }
@@ -484,7 +484,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }

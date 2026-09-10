@@ -98,7 +98,7 @@ mod tests {
         let mut captured_classes: Vec<String> = Vec::new();
         let mut captured_functions: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 match name {
@@ -146,7 +146,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }

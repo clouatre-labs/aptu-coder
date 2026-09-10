@@ -176,7 +176,7 @@ mod tests {
         let mut captures = Vec::new();
         let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
         while let Some(m) = matches.next() {
-            for c in m.captures {
+            for c in m.captures() {
                 let node = c.node;
                 let name = query.capture_names()[c.index as usize].to_string();
                 let text = node

@@ -278,7 +278,7 @@ pub(crate) fn extract_elements(
             let mut func_name_text: Option<String> = None;
             let mut class_name_text: Option<String> = None;
 
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = compiled.element.capture_names()[capture.index as usize];
                 let node = capture.node;
                 match capture_name {
@@ -491,7 +491,7 @@ pub(crate) fn extract_calls(
                 timed_out = true;
                 break;
             }
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = compiled.call.capture_names()[capture.index as usize];
                 if capture_name != "call" {
                     continue;
@@ -573,7 +573,7 @@ pub(crate) fn extract_imports(
                 break;
             }
 
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = import_query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let line = node.start_position().row + 1;
@@ -630,7 +630,7 @@ pub(crate) fn extract_impl_methods(
             let mut method_params = String::new();
             let mut method_return_type: Option<String> = None;
 
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = impl_query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 match capture_name {
@@ -724,7 +724,7 @@ pub(crate) fn extract_references(
                 break;
             }
 
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = ref_query.capture_names()[capture.index as usize];
                 if capture_name == "type_ref" {
                     let node = capture.node;
@@ -784,7 +784,7 @@ pub(crate) fn extract_impl_traits_from_tree(
             let mut impl_type = String::new();
             let mut line = 0usize;
 
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = source[node.start_byte()..node.end_byte()].to_string();
@@ -844,7 +844,7 @@ pub(crate) fn extract_def_use(
         let mut matches = cursor.matches(defuse_query, root, source.as_bytes());
 
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = defuse_query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let node_text = node.utf8_text(source.as_bytes()).unwrap_or_default();

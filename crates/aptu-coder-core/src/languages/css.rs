@@ -41,7 +41,7 @@ mod tests {
             .expect("capture not found");
         let mut results = Vec::new();
         while let Some(m) = matches.next() {
-            for cap in m.captures {
+            for cap in m.captures() {
                 if cap.index == capture_idx {
                     let text = &src[cap.node.start_byte()..cap.node.end_byte()];
                     results.push(text.trim().to_owned());
