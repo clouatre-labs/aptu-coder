@@ -37,7 +37,7 @@ mod tests {
             .expect("no func_name capture");
         let mut names = Vec::new();
         while let Some(m) = matches.next() {
-            for cap in m.captures {
+            for cap in m.captures() {
                 if cap.index == func_name_idx {
                     let text = &src[cap.node.start_byte()..cap.node.end_byte()];
                     names.push(text.trim().to_owned());

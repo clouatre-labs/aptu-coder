@@ -168,7 +168,7 @@ mod tests {
             return Some(node);
         }
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX))
+            if let Some(child) = node.child(i)
                 && let Some(found) = find_node_by_kind(child, kind)
             {
                 return Some(found);

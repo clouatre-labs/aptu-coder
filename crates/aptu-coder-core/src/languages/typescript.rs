@@ -138,7 +138,7 @@ mod tests {
         let mut captured_classes: Vec<String> = Vec::new();
         let mut captured_functions: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 match name {
@@ -188,7 +188,7 @@ mod tests {
 
         let mut captured_names: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let cap_name = query.capture_names()[capture.index as usize];
                 if cap_name == "class" {
                     let node = capture.node;
@@ -231,7 +231,7 @@ mod tests {
 
         let mut captured_functions: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let cap_name = query.capture_names()[capture.index as usize];
                 if cap_name == "function" {
                     let node = capture.node;

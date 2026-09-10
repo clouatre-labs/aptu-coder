@@ -258,7 +258,7 @@ impl ElementExtractor {
             let mut matches =
                 cursor.matches(&compiled.element, tree.root_node(), source.as_bytes());
             while let Some(mat) = matches.next() {
-                for capture in mat.captures {
+                for capture in mat.captures() {
                     let capture_name = compiled.element.capture_names()[capture.index as usize];
                     match capture_name {
                         "function" => function_count += 1,
@@ -598,7 +598,7 @@ pub fn extract_impl_traits(source: &str, path: &Path) -> Vec<ImplTraitInfo> {
             let mut impl_type = String::new();
             let mut line = 0usize;
 
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let capture_name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 let text = source[node.start_byte()..node.end_byte()].to_string();
@@ -660,7 +660,7 @@ pub(crate) fn execute_query_impl(
         cursor.set_max_start_depth(None);
         let mut matches = cursor.matches(&query, tree.root_node(), source_bytes);
         while let Some(m) = matches.next() {
-            for cap in m.captures {
+            for cap in m.captures() {
                 let node = cap.node;
                 let capture_name = query.capture_names()[cap.index as usize].to_string();
                 let text = node.utf8_text(source_bytes).unwrap_or("").to_string();

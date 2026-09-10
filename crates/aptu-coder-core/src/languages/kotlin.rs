@@ -57,7 +57,7 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
     // Find the delegation_specifiers child of the class node.
     // Grammar: optional(seq(':', $.delegation_specifiers))
     let Some(delegation) = (0..node.child_count())
-        .filter_map(|i| node.child(u32::try_from(i).ok()?))
+        .filter_map(|i| node.child(i))
         .find(|n| n.kind() == "delegation_specifiers")
     else {
         return inherits;
@@ -66,11 +66,10 @@ pub fn extract_inheritance(node: &Node, source: &str) -> Vec<String> {
     // Each delegation_specifier holds either a constructor_invocation (superclass)
     // or a user_type (interface).
     for spec in (0..delegation.child_count())
-        .filter_map(|j| delegation.child(u32::try_from(j).ok()?))
+        .filter_map(|j| delegation.child(j))
         .filter(|n| n.kind() == "delegation_specifier")
     {
-        for spec_child in (0..spec.child_count()).filter_map(|k| spec.child(u32::try_from(k).ok()?))
-        {
+        for spec_child in (0..spec.child_count()).filter_map(|k| spec.child(k)) {
             match spec_child.kind() {
                 "constructor_invocation" => {
                     // Superclass: constructor_invocation = type + value_arguments.
@@ -204,7 +203,7 @@ mod tests {
 
         let mut captured_functions: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 if name == "function"
@@ -239,7 +238,7 @@ mod tests {
         let mut captured_classes: Vec<String> = Vec::new();
         let mut captured_functions: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 match name {
@@ -286,7 +285,7 @@ mod tests {
 
         let mut captured_calls: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let name = query.capture_names()[capture.index as usize];
                 if name == "call" {
                     let node = capture.node;
@@ -318,7 +317,7 @@ mod tests {
 
         let mut captured_classes: Vec<String> = Vec::new();
         while let Some(mat) = matches.next() {
-            for capture in mat.captures {
+            for capture in mat.captures() {
                 let name = query.capture_names()[capture.index as usize];
                 let node = capture.node;
                 if name == "class"
@@ -381,7 +380,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -413,7 +412,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }
@@ -450,7 +449,7 @@ mod tests {
                 break;
             }
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX)) {
+                if let Some(child) = node.child(i) {
                     stack.push(child);
                 }
             }

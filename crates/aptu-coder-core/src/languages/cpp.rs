@@ -229,7 +229,7 @@ mod tests {
         let mut iter = cursor.captures(&query, tree.root_node(), source.as_bytes());
         let mut captures: Vec<String> = Vec::new();
         while let Some((m, _)) = iter.next() {
-            for c in m.captures {
+            for c in m.captures() {
                 let text = c
                     .node
                     .utf8_text(source.as_bytes())
@@ -263,7 +263,7 @@ mod tests {
         let mut iter = cursor.captures(&query, tree.root_node(), source.as_bytes());
         let mut func_names: Vec<String> = Vec::new();
         while let Some((m, _)) = iter.next() {
-            for c in m.captures {
+            for c in m.captures() {
                 let name = query.capture_names()[c.index as usize];
                 if name == "func_name"
                     && let Ok(text) = c.node.utf8_text(source.as_bytes())
@@ -303,7 +303,7 @@ mod tests {
             return Some(node);
         }
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(u32::try_from(i).unwrap_or(u32::MAX))
+            if let Some(child) = node.child(i)
                 && let Some(found) = find_node_by_kind(child, kind)
             {
                 return Some(found);
