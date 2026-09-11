@@ -1,12 +1,12 @@
 # Parameter-Description Experiments Audit
 
-Date: 2026-09-11
-Related: `~/git/clouatre-labs/param-description-experiments` (external repo, not a submodule/dependency of aptu-coder)
-Scope: no code changes made; findings only, pending approval.
+Date: 2026-09-11  
+Related: `~/git/clouatre-labs/param-description-experiments` (external repo, not a submodule/dependency of aptu-coder)  
+Issues: #1510, #1511, #1512
 
 ## Context
 
-`param-description-experiments` ran a controlled ablation asking whether moving per-parameter constraint detail out of an MCP tool's `description` string and into `inputSchema.properties[*].description` regresses parameter-filling accuracy. It targeted `aptu-coder`'s own `analyze_symbol` tool, comparing production text (post-PR `aptu-coder#593`) against a reconstructed pre-#593 baseline. This audit cross-references that repo's findings against (a) aptu-coder's current parameter-description implementation and existing style guidance, and (b) real-world error evidence from aptu-coder's metrics telemetry and session logs (goose, Claude Code).
+No code changes were made as part of this audit; findings and recommendations only. `param-description-experiments` ran a controlled ablation asking whether moving per-parameter constraint detail out of an MCP tool's `description` string and into `inputSchema.properties[*].description` regresses parameter-filling accuracy. It targeted `aptu-coder`'s own `analyze_symbol` tool, comparing production text (post-PR `aptu-coder#593`) against a reconstructed pre-#593 baseline. This audit cross-references that repo's findings against (a) aptu-coder's current parameter-description implementation and existing style guidance, and (b) real-world error evidence from aptu-coder's metrics telemetry and session logs (goose, Claude Code).
 
 Three read-only research passes fed this report: an inventory of the experiments repo, a baseline inventory of aptu-coder's current tool/parameter description patterns, and a log-mining pass over `~/.local/share/aptu-coder/metrics-*.jsonl`, `~/.claude/projects/`, and `~/.local/share/goose/sessions/`.
 
@@ -48,16 +48,20 @@ The experiment's finding is already implemented (`#593`) and already reflected i
 
 ### R2: Document the `summary` + `cursor` mutual exclusion in both fields' schema descriptions
 
-F3's second bucket (15 real errors) is a genuine parameter-description content gap: the constraint exists in code/error message but not in either `summary` or `cursor`'s own `schemars` description on `analyze_file`/`analyze_directory`. This is the one finding in this audit that is a parameter-description fix in the same sense the experiment targeted.
+F3's second bucket (15 real errors) is a genuine parameter-description content gap: the constraint exists in code/error message but not in either `summary` or `cursor`'s own `schemars` description on `analyze_file`/`analyze_directory`. This is the one finding in this audit that is a parameter-description fix in the same sense the experiment targeted. Filed as issue #1510.
 
 ### R3: Consider description or validation guidance for empty/malformed `cursor`
 
-F3's largest bucket (32 errors) suggests agents don't know an empty-string or malformed cursor is invalid versus omitting the field entirely. Whether this is best addressed via description wording (state that cursor must be a valid opaque token or omitted) or input validation (reject/normalize empty string before the parse step) is an implementation choice for separate discussion.
+F3's largest bucket (32 errors) suggests agents don't know an empty-string or malformed cursor is invalid versus omitting the field entirely. Whether this is best addressed via description wording (state that cursor must be a valid opaque token or omitted) or input validation (reject/normalize empty string before the parse step) is an implementation choice for separate discussion. Filed as issue #1511.
 
-### R4: Not a parameter-description issue — do not action under this audit
+### R4: `edit_replace` stale-hash errors — not actioned under this audit
 
-`edit_replace`'s stale-hash errors (F3, largest error class overall) and `exec_command`'s unattributed `invalid_params` (F3/F4) are workflow-staleness and telemetry-gap issues respectively, not parameter-description defects. Flagging for awareness only.
+`edit_replace`'s stale-hash errors (F3, largest error class overall) are a workflow-staleness issue, not a parameter-description defect. Flagging for awareness only; no issue filed.
+
+### R5: Extend metrics `error_subtype` coverage to `exec_command` and `analyze_symbol`
+
+F4's telemetry gap (unattributable `invalid_params` errors) is not itself a parameter-description defect, but was approved for follow-up alongside R2/R3. Filed as issue #1512.
 
 ## Conclusion
 
-The experiments repo empirically confirms a principle aptu-coder already documents and practices (F2), scoped to one already-shipped change on one tool (F1). It surfaces no evidence of the failure mode it was designed to detect anywhere in aptu-coder's real usage (F3). Real, evidenced parameter-related friction exists in a different place: an undocumented cross-parameter constraint (R2) and unclear cursor-omission semantics (R3), both narrower and more concrete than "verbose vs. lean" descriptions. No infrastructure, tooling, or non-MCP pattern from the experiments repo (Python/uv harness, Anthropic Batch API scoring pipeline, goose recipe) is applicable to aptu-coder, which remains strictly an MCP server.
+The experiments repo empirically confirms a principle aptu-coder already documents and practices (F2), scoped to one already-shipped change on one tool (F1). It surfaces no evidence of the failure mode it was designed to detect anywhere in aptu-coder's real usage (F3). Real, evidenced parameter-related friction exists in a different place: an undocumented cross-parameter constraint (R2, issue #1510) and unclear cursor-omission semantics (R3, issue #1511), both narrower and more concrete than "verbose vs. lean" descriptions. A related telemetry gap (R5, issue #1512) was filed alongside them. No infrastructure, tooling, or non-MCP pattern from the experiments repo (Python/uv harness, Anthropic Batch API scoring pipeline, goose recipe) is applicable to aptu-coder, which remains strictly an MCP server.
