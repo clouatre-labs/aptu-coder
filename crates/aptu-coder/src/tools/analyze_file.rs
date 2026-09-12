@@ -19,7 +19,7 @@ use tracing::instrument;
 use crate::SIZE_LIMIT;
 use crate::tools::AnalyzeFileContext;
 use crate::tools::common::{
-    err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
+    err_to_tool_result, error_meta, no_cache_meta, normalize_cursor, summary_cursor_conflict,
 };
 
 /// Core analysis logic for the `analyze_file` tool (file details mode).
@@ -148,6 +148,8 @@ pub(crate) async fn analyze_file_handler(
     param_path: String,
     span: &tracing::Span,
 ) -> Result<CallToolResult, ErrorData> {
+    let cursor = normalize_cursor(params.pagination.cursor.as_deref());
+
     if std::path::Path::new(&params.path).is_dir() {
         span.record("error", true);
         span.record("error.type", "invalid_params");
@@ -164,10 +166,7 @@ pub(crate) async fn analyze_file_handler(
         )));
     }
 
-    if summary_cursor_conflict(
-        params.output_control.summary,
-        params.pagination.cursor.as_deref(),
-    ) {
+    if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
         return Ok(err_to_tool_result(ErrorData::new(
@@ -203,7 +202,7 @@ pub(crate) async fn analyze_file_handler(
                     .language(crate::metrics::path_language(&param_path))
                     .fields_projected(params.fields.is_some())
                     .summary_mode(params.output_control.summary.unwrap_or(false))
-                    .is_paginated(params.pagination.cursor.is_some())
+                    .is_paginated(cursor.is_some())
                     .build(),
             );
             return Ok(err_to_tool_result(e));
@@ -246,7 +245,7 @@ pub(crate) async fn analyze_file_handler(
     }
 
     let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-    let offset = if let Some(ref cursor_str) = params.pagination.cursor {
+    let offset = if let Some(cursor_str) = cursor {
         let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -363,7 +362,7 @@ pub(crate) async fn analyze_file_handler(
             .language(crate::metrics::path_language(&param_path))
             .fields_projected(params.fields.is_some())
             .summary_mode(use_summary)
-            .is_paginated(params.pagination.cursor.is_some())
+            .is_paginated(cursor.is_some())
             .build(),
     );
     Ok(result)

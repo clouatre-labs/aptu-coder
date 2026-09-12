@@ -14,6 +14,43 @@ pub(crate) fn summary_cursor_conflict(summary: Option<bool>, cursor: Option<&str
     summary == Some(true) && cursor.is_some()
 }
 
+/// Normalizes an empty-string `cursor` to `None`, treating `cursor=""` as equivalent to an
+/// omitted cursor (first page). Non-empty cursors pass through unchanged; genuine malformed
+/// non-empty cursors are still rejected downstream by `decode_cursor`.
+#[must_use]
+pub(crate) fn normalize_cursor(cursor: Option<&str>) -> Option<&str> {
+    cursor.filter(|c| !c.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_cursor;
+
+    #[test]
+    fn normalize_cursor_none_stays_none() {
+        // Arrange / Act
+        let result = normalize_cursor(None);
+        // Assert
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn normalize_cursor_empty_string_becomes_none() {
+        // Arrange / Act
+        let result = normalize_cursor(Some(""));
+        // Assert
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn normalize_cursor_non_empty_passes_through() {
+        // Arrange / Act
+        let result = normalize_cursor(Some("abc"));
+        // Assert
+        assert_eq!(result, Some("abc"));
+    }
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ErrorMeta {

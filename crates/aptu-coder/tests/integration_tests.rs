@@ -1083,3 +1083,109 @@ async fn test_discover_after_initialize() {
         "supported versions must be a non-empty array: {versions}"
     );
 }
+
+#[tokio::test]
+async fn test_analyze_file_empty_string_cursor_returns_first_page() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: temp Rust file with a function.
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(f, "pub fn baz() {{}}").unwrap();
+
+    // Act: analyze_file with cursor="" (edge case: should behave like cursor omitted).
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": f.path().to_str().unwrap(),
+            "page_size": 100,
+            "cursor": ""
+        }),
+    )
+    .await;
+
+    // Assert: no error, first page returned.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success with cursor=\"\"; got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_directory_empty_string_cursor_returns_first_page() {
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::TempDir::new_in(&cwd).unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}").unwrap();
+
+    // Act: analyze_directory with cursor="" (edge case: should behave like cursor omitted).
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "page_size": 100,
+            "cursor": ""
+        }),
+    )
+    .await;
+
+    // Assert: no error, first page returned.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success with cursor=\"\"; got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_file_summary_true_empty_string_cursor_no_conflict() {
+    use std::io::Write as _;
+    use tempfile::NamedTempFile;
+
+    // Arrange: temp Rust file with a function.
+    let cwd = std::env::current_dir().unwrap();
+    let mut f = NamedTempFile::with_suffix_in(".rs", &cwd).unwrap();
+    writeln!(f, "pub fn baz() {{}}").unwrap();
+
+    // Act: summary=true with cursor="" (edge case: empty cursor normalizes to
+    // None, so the summary/cursor mutual-exclusion check must not trigger).
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({
+            "path": f.path().to_str().unwrap(),
+            "summary": true,
+            "cursor": ""
+        }),
+    )
+    .await;
+
+    // Assert: no error.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success with summary=true and cursor=\"\"; got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_directory_summary_true_empty_string_cursor_no_conflict() {
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::TempDir::new_in(&cwd).unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}").unwrap();
+
+    // Act: summary=true with cursor="" (edge case: empty cursor normalizes to
+    // None, so the summary/cursor mutual-exclusion check must not trigger).
+    let resp = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "summary": true,
+            "cursor": ""
+        }),
+    )
+    .await;
+
+    // Assert: no error.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success with summary=true and cursor=\"\"; got: {resp}"
+    );
+}

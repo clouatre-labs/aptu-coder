@@ -203,3 +203,36 @@ async fn test_analyze_symbol_follow_depth_above_maximum_rejected() {
         text
     );
 }
+
+/// Test that analyze_symbol with cursor="" behaves like cursor omitted:
+/// first page, no error, consistent mode/offset (edge_case).
+#[tokio::test]
+async fn test_analyze_symbol_empty_string_cursor_returns_first_page() {
+    // Arrange: create a temp directory with a Rust file inside CWD
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::TempDir::new_in(&cwd).unwrap();
+    std::fs::write(
+        dir.path().join("lib.rs"),
+        "fn foo() {}\nfn bar() { foo(); }",
+    )
+    .unwrap();
+
+    // Act: call analyze_symbol with cursor=""
+    let params = json!({
+        "path": dir.path().to_str().unwrap(),
+        "symbol": "foo",
+        "follow_depth": 1,
+        "cursor": "",
+    });
+    let response = call_tool_raw("analyze_symbol", params).await;
+
+    // Assert: success, no error
+    let result = response.get("result").unwrap();
+    assert!(
+        !result
+            .get("isError")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        "expected success with cursor=\"\"; got: {response}"
+    );
+}

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tracing::instrument;
 
 use crate::tools::common::{
-    err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
+    err_to_tool_result, error_meta, no_cache_meta, normalize_cursor, summary_cursor_conflict,
 };
 
 use crate::tools::symbol_focused::{apply_call_graph_pagination, handle_focused_mode};
@@ -142,6 +142,7 @@ async fn handle_import_lookup(
     let param_path = call.param_path;
     let max_depth_val = call.max_depth_val;
     let t_start = call.t_start;
+    let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     let path_owned = std::path::PathBuf::from(&params.path);
     let symbol = params.symbol.clone();
@@ -275,7 +276,7 @@ async fn handle_import_lookup(
             .def_use(params.def_use.unwrap_or(false))
             .impl_only(params.impl_only.unwrap_or(false))
             .git_ref_used(params.git_ref.is_some())
-            .is_paginated(params.pagination.cursor.is_some())
+            .is_paginated(cursor.is_some())
             .summary_mode(params.output_control.summary.unwrap_or(false))
             .build(),
     );
@@ -289,10 +290,9 @@ async fn handle_import_lookup(
 fn decode_call_graph_cursor(
     params: &AnalyzeSymbolParams,
 ) -> Result<(usize, PaginationMode), CallToolResult> {
-    let cursor_mode = params
-        .pagination
-        .cursor
-        .as_deref()
+    let cursor = normalize_cursor(params.pagination.cursor.as_deref());
+
+    let cursor_mode = cursor
         .map(|s| {
             decode_cursor(s)
                 .map(|c| c.mode)
@@ -300,7 +300,7 @@ fn decode_call_graph_cursor(
         })
         .unwrap_or(PaginationMode::Callers);
 
-    let offset = if let Some(ref cursor_str) = params.pagination.cursor {
+    let offset = if let Some(cursor_str) = cursor {
         decode_cursor(cursor_str)
             .map_err(|e| {
                 err_to_tool_result(ErrorData::new(
@@ -332,6 +332,7 @@ async fn handle_call_graph(
     let param_path = call.param_path;
     let max_depth_val = call.max_depth_val;
     let t_start = call.t_start;
+    let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     // Call handler for analysis and progress tracking
     let (graph_cache_tier, mut output) = match handle_focused_mode(&ctx, &params, ct).await {
@@ -498,7 +499,7 @@ async fn handle_call_graph(
             .def_use(params.def_use.unwrap_or(false))
             .impl_only(params.impl_only.unwrap_or(false))
             .git_ref_used(params.git_ref.is_some())
-            .is_paginated(params.pagination.cursor.is_some())
+            .is_paginated(cursor.is_some())
             .summary_mode(params.output_control.summary.unwrap_or(false))
             .build(),
     );
@@ -532,6 +533,7 @@ pub(crate) async fn analyze_symbol_handler(
 ) -> Result<CallToolResult, ErrorData> {
     let span = &call.span;
     let t_start = call.t_start;
+    let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     if std::path::Path::new(&params.path).is_file() {
         emit_error_metric(&ctx, "invalid_params", t_start, None);
@@ -545,10 +547,7 @@ pub(crate) async fn analyze_symbol_handler(
         );
     }
 
-    if summary_cursor_conflict(
-        params.output_control.summary,
-        params.pagination.cursor.as_deref(),
-    ) {
+    if summary_cursor_conflict(params.output_control.summary, cursor) {
         emit_error_metric(&ctx, "invalid_params", t_start, None);
         return invalid_params(
             span,

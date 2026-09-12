@@ -21,7 +21,7 @@ use tracing::instrument;
 
 use crate::SIZE_LIMIT;
 use crate::tools::common::{
-    err_to_tool_result, error_meta, no_cache_meta, summary_cursor_conflict,
+    err_to_tool_result, error_meta, no_cache_meta, normalize_cursor, summary_cursor_conflict,
 };
 use crate::tools::{AnalyzeDirectoryContext, DirectoryHandlerCall};
 
@@ -234,6 +234,7 @@ pub(crate) async fn analyze_directory_handler(
         max_depth_val,
         ct,
     } = call;
+    let cursor = normalize_cursor(params.pagination.cursor.as_deref());
     let (arc_output, dir_cache_hit) = match handle_overview_mode(ctx, &params, ct).await {
         Ok(v) => v,
         Err(e) => {
@@ -250,10 +251,7 @@ pub(crate) async fn analyze_directory_handler(
 
     output.cache_tier = Some(dir_cache_hit.as_str().to_owned());
 
-    if summary_cursor_conflict(
-        params.output_control.summary,
-        params.pagination.cursor.as_deref(),
-    ) {
+    if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
         return Ok(err_to_tool_result(ErrorData::new(
@@ -288,7 +286,7 @@ pub(crate) async fn analyze_directory_handler(
     }
 
     let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
-    let offset = if let Some(ref cursor_str) = params.pagination.cursor {
+    let offset = if let Some(cursor_str) = cursor {
         let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -378,7 +376,7 @@ pub(crate) async fn analyze_directory_handler(
             .cache_tier(Some(dir_cache_hit.as_str()))
             .git_ref_used(params.git_ref.is_some())
             .summary_mode(use_summary)
-            .is_paginated(params.pagination.cursor.is_some())
+            .is_paginated(cursor.is_some())
             .build(),
     );
     Ok(result)
