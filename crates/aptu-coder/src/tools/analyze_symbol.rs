@@ -52,11 +52,56 @@ pub(crate) struct FocusedAnalysisParams {
     pub(crate) parse_timeout_micros: Option<u64>,
 }
 
+/// Machine-readable cause for an `analyze_symbol` `invalid_params` error, used to
+/// populate `MetricEvent::error_subtype` for per-cause metrics dashboards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnalyzeSymbolErrorSubtype {
+    /// `path` argument points to a file instead of a directory.
+    PathIsFile,
+    /// `summary=true` combined with a pagination `cursor`.
+    SummaryCursorConflict,
+    /// `import_lookup=true` combined with `def_use=true`.
+    ImportLookupDefUseConflict,
+    /// `import_lookup=true` without a non-empty `symbol`.
+    ImportLookupMissingSymbol,
+    /// `follow_depth` exceeds `MAX_FOLLOW_DEPTH`.
+    FollowDepthExceeded,
+    /// The pagination `cursor` failed to decode.
+    InvalidCursor,
+    /// `git_ref` filtering failed (not a git repo, git unavailable, etc.).
+    GitRefFilterFailed,
+    /// Call-graph pagination rejected the requested cursor/offset.
+    PaginationInvalid,
+}
+
+impl AnalyzeSymbolErrorSubtype {
+    #[must_use]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::PathIsFile => "path_is_file",
+            Self::SummaryCursorConflict => "summary_cursor_conflict",
+            Self::ImportLookupDefUseConflict => "import_lookup_def_use_conflict",
+            Self::ImportLookupMissingSymbol => "import_lookup_missing_symbol",
+            Self::FollowDepthExceeded => "follow_depth_exceeded",
+            Self::InvalidCursor => "invalid_cursor",
+            Self::GitRefFilterFailed => "git_ref_filter_failed",
+            Self::PaginationInvalid => "pagination_invalid",
+        }
+    }
+}
+
+impl std::fmt::Display for AnalyzeSymbolErrorSubtype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Helper function to emit error metrics for analyze_symbol.
 /// Extracts the error_type string from ErrorCode and records it on the span.
 pub(crate) fn emit_error_metric(
     ctx: &AnalyzeSymbolContext,
     error_type: &str,
+    error_subtype: Option<AnalyzeSymbolErrorSubtype>,
     t_start: std::time::Instant,
     param_path_depth: Option<usize>,
 ) {
@@ -65,6 +110,7 @@ pub(crate) fn emit_error_metric(
     tracing::Span::current().record("error.type", error_type);
     let mut builder = crate::metrics::MetricEventBuilder::new("analyze_symbol", "error", dur)
         .error_type(Some(error_type.to_string()))
+        .error_subtype(error_subtype.map(|s| s.to_string()))
         .session_id(ctx.sid.clone())
         .seq(Some(ctx.seq));
     if let Some(depth) = param_path_depth {
@@ -80,7 +126,7 @@ pub(crate) fn err_invalid_params(
     message: String,
     hint: &'static str,
 ) -> ErrorData {
-    emit_error_metric(ctx, "invalid_params", t_start, None);
+    emit_error_metric(ctx, "invalid_params", None, t_start, None);
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         message,
@@ -212,9 +258,14 @@ async fn handle_import_lookup(
                 rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
                 _ => "unknown",
             };
+            // The only INVALID_PARAMS cause inside this spawn_blocking closure is a
+            // failed git_ref filter; internal_error/unknown causes get no subtype.
+            let error_subtype = (error_type_str == "invalid_params")
+                .then_some(AnalyzeSymbolErrorSubtype::GitRefFilterFailed);
             emit_error_metric(
                 &ctx,
                 error_type_str,
+                error_subtype,
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -224,6 +275,7 @@ async fn handle_import_lookup(
             emit_error_metric(
                 &ctx,
                 "internal_error",
+                None,
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -343,9 +395,13 @@ async fn handle_call_graph(
                 rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
                 _ => "unknown",
             };
+            // handle_focused_mode can raise invalid_params for several distinct causes
+            // (git_ref filter failure, impl_only validation, output size limit); none
+            // are distinguishable here without inspecting the message, so no subtype.
             emit_error_metric(
                 &ctx,
                 error_type_str,
+                None,
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -363,6 +419,7 @@ async fn handle_call_graph(
             emit_error_metric(
                 &ctx,
                 "invalid_params",
+                Some(AnalyzeSymbolErrorSubtype::InvalidCursor),
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -385,6 +442,7 @@ async fn handle_call_graph(
             emit_error_metric(
                 &ctx,
                 "invalid_params",
+                Some(AnalyzeSymbolErrorSubtype::PaginationInvalid),
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -536,7 +594,13 @@ pub(crate) async fn analyze_symbol_handler(
     let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     if std::path::Path::new(&params.path).is_file() {
-        emit_error_metric(&ctx, "invalid_params", t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(AnalyzeSymbolErrorSubtype::PathIsFile),
+            t_start,
+            None,
+        );
         return invalid_params(
             span,
             format!(
@@ -548,7 +612,13 @@ pub(crate) async fn analyze_symbol_handler(
     }
 
     if summary_cursor_conflict(params.output_control.summary, cursor) {
-        emit_error_metric(&ctx, "invalid_params", t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(AnalyzeSymbolErrorSubtype::SummaryCursorConflict),
+            t_start,
+            None,
+        );
         return invalid_params(
             span,
             "summary=true is incompatible with a pagination cursor; use one or the other",
@@ -557,7 +627,13 @@ pub(crate) async fn analyze_symbol_handler(
     }
 
     if params.import_lookup == Some(true) && params.def_use == Some(true) {
-        emit_error_metric(&ctx, "invalid_params", t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict),
+            t_start,
+            None,
+        );
         return invalid_params(
             span,
             "import_lookup=true and def_use=true are mutually exclusive; use one or the other",
@@ -566,14 +642,26 @@ pub(crate) async fn analyze_symbol_handler(
     }
 
     if let Err(e) = validate_import_lookup(params.import_lookup, &params.symbol) {
-        emit_error_metric(&ctx, "invalid_params", t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol),
+            t_start,
+            None,
+        );
         return Ok(err_to_tool_result(e));
     }
 
     if let Some(depth) = params.follow_depth
         && depth > MAX_FOLLOW_DEPTH
     {
-        emit_error_metric(&ctx, "invalid_params", t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(AnalyzeSymbolErrorSubtype::FollowDepthExceeded),
+            t_start,
+            None,
+        );
         return invalid_params(
             span,
             format!("follow_depth={depth} exceeds the maximum of {MAX_FOLLOW_DEPTH}"),
@@ -585,5 +673,87 @@ pub(crate) async fn analyze_symbol_handler(
         handle_import_lookup(ctx, params, call).await
     } else {
         handle_call_graph(ctx, params, call).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aptu_coder_core::cache::{CallGraphCache, DiskCache, StructuralGraphCache};
+
+    /// Builds a minimal `AnalyzeSymbolContext` backed by an unbounded metrics channel,
+    /// returning the context and the receiving end so tests can inspect emitted events.
+    fn test_context() -> (
+        AnalyzeSymbolContext,
+        tokio::sync::mpsc::UnboundedReceiver<crate::metrics::MetricEvent>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let ctx = AnalyzeSymbolContext {
+            metrics_tx: crate::metrics::MetricsSender(tx),
+            call_graph_cache: CallGraphCache::new(1),
+            structural_graph_cache: StructuralGraphCache::new(1),
+            disk_cache: Arc::new(DiskCache::new(std::path::PathBuf::new(), true)),
+            sid: None,
+            seq: 0,
+        };
+        (ctx, rx)
+    }
+
+    fn test_call(param_path: String) -> crate::tools::AnalyzeSymbolCall {
+        crate::tools::AnalyzeSymbolCall {
+            ct: tokio_util::sync::CancellationToken::new(),
+            param_path,
+            max_depth_val: None,
+            span: tracing::Span::none(),
+            t_start: std::time::Instant::now(),
+        }
+    }
+
+    fn test_params(path: &str, summary: Option<bool>, cursor: Option<&str>) -> AnalyzeSymbolParams {
+        serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "",
+            "summary": summary,
+            "cursor": cursor,
+        }))
+        .expect("valid AnalyzeSymbolParams JSON")
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_path_is_file_sets_path_is_file_subtype() {
+        // Arrange: path points to a real file rather than a directory.
+        let (ctx, mut rx) = test_context();
+        let file_path = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+        let params = test_params(&file_path, None, None);
+        let call = test_call(file_path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(event.error_subtype.as_deref(), Some("path_is_file"));
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_summary_and_cursor_sets_summary_cursor_conflict_subtype() {
+        // Arrange: path does not exist (so the is_file check passes through), but
+        // summary=true is combined with a pagination cursor.
+        let (ctx, mut rx) = test_context();
+        let path = "/definitely-nonexistent-dir-abcxyz123".to_string();
+        let params = test_params(&path, Some(true), Some("some-cursor"));
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("summary_cursor_conflict")
+        );
     }
 }

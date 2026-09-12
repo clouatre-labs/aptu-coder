@@ -127,7 +127,7 @@ pub(crate) async fn run_focused_with_auto_summary(
     })
     .await
     .map_err(|e| {
-        emit_error_metric(ctx, "internal_error", t_start, None);
+        emit_error_metric(ctx, "internal_error", None, t_start, None);
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis task panicked: {e}"),
@@ -135,7 +135,7 @@ pub(crate) async fn run_focused_with_auto_summary(
         )
     })?
     .map_err(|e| {
-        emit_error_metric(ctx, "internal_error", t_start, None);
+        emit_error_metric(ctx, "internal_error", None, t_start, None);
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis failed: {e}"),
