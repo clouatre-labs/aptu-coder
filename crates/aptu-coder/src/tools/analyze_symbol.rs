@@ -789,4 +789,31 @@ mod tests {
             Some("impl_only_requires_rust")
         );
     }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_invalid_git_ref_sets_git_ref_filter_failed_subtype() {
+        // Arrange: git_ref containing whitespace is rejected before git is invoked.
+        let (ctx, mut rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").expect("write temp file");
+        let path = dir.path().to_str().expect("valid utf8 path").to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "foo",
+            "git_ref": "bad ref",
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("git_ref_filter_failed")
+        );
+    }
 }
