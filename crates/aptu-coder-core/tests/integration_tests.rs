@@ -3246,6 +3246,45 @@ fn test_no_uint_format_in_schemas() {
     }
 }
 
+// Regression test for #1516
+#[cfg(feature = "schemars")]
+#[test]
+fn test_call_info_arg_count_not_required_in_schema() {
+    use aptu_coder_core::types::CallInfo;
+
+    let schema = schemars::schema_for!(CallInfo);
+    let schema_value = serde_json::to_value(&schema).unwrap();
+
+    let required = schema_value
+        .get("required")
+        .and_then(|r| r.as_array())
+        .expect("CallInfo schema must have a required array");
+    assert!(
+        !required.iter().any(|v| v.as_str() == Some("arg_count")),
+        "arg_count must not be in the required array: {required:?}"
+    );
+
+    let arg_count_schema = schema_value
+        .get("properties")
+        .and_then(|p| p.get("arg_count"))
+        .expect("CallInfo schema must have an arg_count property");
+    let arg_count_type = arg_count_schema
+        .get("type")
+        .and_then(|t| t.as_array())
+        .expect("arg_count schema must have a type array");
+    let type_strs: Vec<&str> = arg_count_type.iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(
+        type_strs,
+        vec!["integer", "null"],
+        "arg_count type must remain [\"integer\", \"null\"]"
+    );
+    assert_eq!(
+        arg_count_schema.get("minimum").and_then(|m| m.as_i64()),
+        Some(0),
+        "arg_count schema must retain minimum 0"
+    );
+}
+
 // Note: the async handler cannot be invoked directly in unit tests (requires MCP transport
 // context). These tests verify the guard condition matches the implementation. See integration
 // coverage for end-to-end behavior.

@@ -380,7 +380,7 @@ pub struct CallInfo {
     )]
     pub column: usize,
     /// Number of arguments passed at the call site.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::option_integer_schema")
