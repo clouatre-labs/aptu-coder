@@ -25,8 +25,8 @@ use crate::tools::common::{err_to_tool_result, error_meta};
 use crate::{SIZE_LIMIT, err_to_tool_result_from_pagination};
 
 use crate::tools::analyze_symbol::{
-    AnalyzeSymbolContext, FocusedAnalysisParams, emit_error_metric, err_invalid_params,
-    validate_impl_only,
+    AnalyzeSymbolContext, AnalyzeSymbolErrorSubtype, FocusedAnalysisParams, emit_error_metric,
+    err_invalid_params, validate_impl_only,
 };
 
 /// Paginates a slice of call chains and returns the paginated items with an optional next cursor.
@@ -127,7 +127,7 @@ pub(crate) async fn run_focused_with_auto_summary(
     })
     .await
     .map_err(|e| {
-        emit_error_metric(ctx, "internal_error", t_start, None);
+        emit_error_metric(ctx, "internal_error", None, t_start, None);
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis task panicked: {e}"),
@@ -135,7 +135,7 @@ pub(crate) async fn run_focused_with_auto_summary(
         )
     })?
     .map_err(|e| {
-        emit_error_metric(ctx, "internal_error", t_start, None);
+        emit_error_metric(ctx, "internal_error", None, t_start, None);
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis failed: {e}"),
@@ -186,6 +186,7 @@ pub(crate) async fn run_focused_with_auto_summary(
                 t_start,
                 message,
                 "use summary=true or narrow scope",
+                Some(AnalyzeSymbolErrorSubtype::OutputTooLarge),
             ));
         }
     } else if output.formatted.len() > SIZE_LIMIT && params.output_control.summary == Some(false) {
@@ -202,6 +203,7 @@ pub(crate) async fn run_focused_with_auto_summary(
             t_start,
             message,
             "use summary=true or narrow scope",
+            Some(AnalyzeSymbolErrorSubtype::OutputTooLarge),
         ));
     }
 
@@ -214,6 +216,7 @@ pub(crate) async fn handle_focused_mode(
     ctx: &AnalyzeSymbolContext,
     params: &AnalyzeSymbolParams,
     ct: tokio_util::sync::CancellationToken,
+    t_start: std::time::Instant,
 ) -> Result<(CacheTier, analyze::FocusedAnalysisOutput), ErrorData> {
     let path = Path::new(&params.path);
     let raw_entries = match walk_directory(path, params.max_depth) {
@@ -234,25 +237,44 @@ pub(crate) async fn handle_focused_mode(
     let filtered_entries = if let Some(ref git_ref) = params.git_ref
         && !git_ref.is_empty()
     {
-        let changed = changed_files_from_git_ref(path, git_ref).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!("git_ref filter failed: {e}"),
-                Some(error_meta(
-                    "resource",
-                    false,
-                    "ensure git is installed and path is inside a git repository",
-                )),
-            )
-        })?;
+        let changed = match changed_files_from_git_ref(path, git_ref) {
+            Ok(v) => v,
+            Err(e) => {
+                emit_error_metric(
+                    ctx,
+                    "invalid_params",
+                    Some(AnalyzeSymbolErrorSubtype::GitRefFilterFailed),
+                    t_start,
+                    None,
+                );
+                return Err(ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    format!("git_ref filter failed: {e}"),
+                    Some(error_meta(
+                        "resource",
+                        false,
+                        "ensure git is installed and path is inside a git repository",
+                    )),
+                ));
+            }
+        };
         filter_entries_by_git_ref(raw_entries, &changed, path)
     } else {
         raw_entries
     };
     let entries = Arc::new(filtered_entries);
 
-    if params.impl_only == Some(true) {
-        validate_impl_only(&entries)?;
+    if params.impl_only == Some(true)
+        && let Err(e) = validate_impl_only(&entries)
+    {
+        emit_error_metric(
+            ctx,
+            "invalid_params",
+            Some(AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust),
+            t_start,
+            None,
+        );
+        return Err(e);
     }
 
     // Build cache key for this call-graph request.

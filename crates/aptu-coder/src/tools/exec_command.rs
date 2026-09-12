@@ -22,6 +22,47 @@ use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 use crate::tools::exec_runtime::{DEFAULT_DRAIN_TIMEOUT_MS, run_exec_impl};
 use crate::{ExecCommandParams, STDIN_MAX_BYTES, ShellOutput, validate_path};
 
+/// Machine-readable cause for an `exec_command` `invalid_params` error, used to
+/// populate `MetricEvent::error_subtype` for per-cause metrics dashboards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExecCommandErrorSubtype {
+    /// `working_dir` canonicalized to a path that exists but is not a directory.
+    WorkingDirNotDir,
+    /// `working_dir` failed to canonicalize (does not exist or is inaccessible).
+    WorkingDirNotFound,
+    /// A promoted `cd <path> &&` prefix resolved to a path that is not a directory.
+    CdPathNotDir,
+    /// A promoted `cd <path> &&` prefix does not exist or is outside CWD.
+    CdPathNotFound,
+    /// `stdin` content exceeds the 1 MB size cap.
+    StdinTooLarge,
+    /// Heredoc validation failed (malformed or unterminated heredoc).
+    HeredocError,
+    /// `drain_timeout_secs` was negative.
+    DrainTimeoutInvalid,
+}
+
+impl ExecCommandErrorSubtype {
+    #[must_use]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkingDirNotDir => "working_dir_not_dir",
+            Self::WorkingDirNotFound => "working_dir_not_found",
+            Self::CdPathNotDir => "cd_path_not_dir",
+            Self::CdPathNotFound => "cd_path_not_found",
+            Self::StdinTooLarge => "stdin_too_large",
+            Self::HeredocError => "heredoc_error",
+            Self::DrainTimeoutInvalid => "drain_timeout_invalid",
+        }
+    }
+}
+
+impl std::fmt::Display for ExecCommandErrorSubtype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// State extracted from `&self` in the `exec_command` shim and passed to `exec_command_impl`.
 pub(crate) struct ExecContext {
     pub(crate) seq: u32,
@@ -44,7 +85,7 @@ pub(crate) struct ExecContext {
 fn validate_working_dir_phase(
     params: &ExecCommandParams,
     span: &tracing::Span,
-) -> Result<(String, Option<std::path::PathBuf>), CallToolResult> {
+) -> Result<(String, Option<std::path::PathBuf>), (CallToolResult, ExecCommandErrorSubtype)> {
     // Validate working_dir if provided -- existence + is_dir only, no CWD confinement.
     // exec_command is a shell runner; CWD confinement applies only to edit_overwrite/edit_replace.
     let working_dir_path = if let Some(ref wd) = params.working_dir {
@@ -61,7 +102,7 @@ fn validate_working_dir_phase(
                     result.structured_content = Some(serde_json::json!({
                         "workingDir": wd,
                     }));
-                    return Err(result);
+                    return Err((result, ExecCommandErrorSubtype::WorkingDirNotDir));
                 }
                 Some(p)
             }
@@ -76,7 +117,7 @@ fn validate_working_dir_phase(
                     "workingDir": wd,
                     "error": e.to_string(),
                 }));
-                return Err(result);
+                return Err((result, ExecCommandErrorSubtype::WorkingDirNotFound));
             }
         }
     } else {
@@ -122,7 +163,7 @@ fn validate_working_dir_phase(
                         result.structured_content = Some(serde_json::json!({
                             "cdPath": cd_path,
                         }));
-                        return Err(result);
+                        return Err((result, ExecCommandErrorSubtype::CdPathNotDir));
                     }
                     Err(_) => {
                         span.record("error", true);
@@ -134,7 +175,7 @@ fn validate_working_dir_phase(
                         result.structured_content = Some(serde_json::json!({
                             "cdPath": cd_path,
                         }));
-                        return Err(result);
+                        return Err((result, ExecCommandErrorSubtype::CdPathNotFound));
                     }
                 }
             }
@@ -171,7 +212,7 @@ fn validate_pre_spawn_phase(
     params: &ExecCommandParams,
     command: &str,
     span: &tracing::Span,
-) -> Result<std::time::Duration, CallToolResult> {
+) -> Result<std::time::Duration, (CallToolResult, ExecCommandErrorSubtype)> {
     // Validate stdin size cap (1 MB)
     if let Some(ref stdin_content) = params.stdin
         && stdin_content.len() > STDIN_MAX_BYTES
@@ -187,14 +228,14 @@ fn validate_pre_spawn_phase(
             .message,
         )])
         .with_meta(Some(no_cache_meta()));
-        return Err(result);
+        return Err((result, ExecCommandErrorSubtype::StdinTooLarge));
     }
 
     // Validate heredocs before spawning any process
     if let Err(e) = shell_write::validate_heredocs(command, params.stdin.is_some()) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
-        return Err(err_to_tool_result(e));
+        return Err((err_to_tool_result(e), ExecCommandErrorSubtype::HeredocError));
     }
 
     // Validate drain_timeout_secs: negative values are invalid.
@@ -216,7 +257,7 @@ fn validate_pre_spawn_phase(
             .message,
         )])
         .with_meta(Some(no_cache_meta()));
-        return Err(result);
+        return Err((result, ExecCommandErrorSubtype::DrainTimeoutInvalid));
     }
 
     // Compute effective drain timeout
@@ -378,7 +419,7 @@ pub(crate) async fn exec_command_impl(
             span.record("command", &cmd);
             (cmd, wd)
         }
-        Err(result) => {
+        Err((result, subtype)) => {
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
@@ -386,6 +427,7 @@ pub(crate) async fn exec_command_impl(
                         param_path.as_deref().unwrap_or(""),
                     ))
                     .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some(subtype.to_string()))
                     .session_id(sid)
                     .seq(Some(seq))
                     .output_truncated(Some(false))
@@ -402,7 +444,7 @@ pub(crate) async fn exec_command_impl(
     // Phase 2: Validate pre-spawn requirements
     let drain_dur = match validate_pre_spawn_phase(&params, &command, &span) {
         Ok(dur) => dur,
-        Err(result) => {
+        Err((result, subtype)) => {
             let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
@@ -410,6 +452,7 @@ pub(crate) async fn exec_command_impl(
                         param_path.as_deref().unwrap_or(""),
                     ))
                     .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some(subtype.to_string()))
                     .session_id(sid)
                     .seq(Some(seq))
                     .output_truncated(Some(false))
@@ -589,6 +632,82 @@ pub(crate) fn strip_cd_prefix(cmd: &str) -> (&str, Option<&str>) {
 mod tests {
     use super::*;
     use crate::ShellOutput;
+
+    #[test]
+    fn validate_working_dir_phase_not_a_directory_sets_working_dir_not_dir_subtype() {
+        // Arrange: working_dir points to an existing file, not a directory.
+        let params = ExecCommandParams {
+            command: "echo hello".to_string(),
+            working_dir: Some(env!("CARGO_MANIFEST_DIR").to_string() + "/Cargo.toml"),
+            stdin: None,
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+        let span = tracing::Span::none();
+
+        // Act
+        let result = validate_working_dir_phase(&params, &span);
+
+        // Assert
+        match result {
+            Err((_, subtype)) => {
+                assert_eq!(subtype, ExecCommandErrorSubtype::WorkingDirNotDir);
+                assert_eq!(subtype.as_str(), "working_dir_not_dir");
+            }
+            Ok(_) => panic!("expected an error for a non-directory working_dir"),
+        }
+    }
+
+    #[test]
+    fn validate_working_dir_phase_cd_prefix_path_missing_sets_cd_path_not_found_subtype() {
+        // Arrange: no explicit working_dir; cd prefix targets a plain absolute path that
+        // does not exist, so it cannot be promoted to working_dir.
+        let params = ExecCommandParams {
+            command: "cd /definitely-nonexistent-dir-abcxyz123 && ls".to_string(),
+            working_dir: None,
+            stdin: None,
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+        let span = tracing::Span::none();
+
+        // Act
+        let result = validate_working_dir_phase(&params, &span);
+
+        // Assert
+        match result {
+            Err((_, subtype)) => {
+                assert_eq!(subtype, ExecCommandErrorSubtype::CdPathNotFound);
+                assert_eq!(subtype.as_str(), "cd_path_not_found");
+            }
+            Ok(_) => panic!("expected an error for a nonexistent cd prefix path"),
+        }
+    }
+
+    #[test]
+    fn validate_pre_spawn_phase_stdin_over_limit_sets_stdin_too_large_subtype() {
+        // Arrange: stdin content exceeds the 1 MB cap.
+        let params = ExecCommandParams {
+            command: "cat".to_string(),
+            working_dir: None,
+            stdin: Some("a".repeat(STDIN_MAX_BYTES + 1)),
+            timeout_secs: None,
+            drain_timeout_secs: None,
+        };
+        let span = tracing::Span::none();
+
+        // Act
+        let result = validate_pre_spawn_phase(&params, "cat", &span);
+
+        // Assert
+        match result {
+            Err((_, subtype)) => {
+                assert_eq!(subtype, ExecCommandErrorSubtype::StdinTooLarge);
+                assert_eq!(subtype.as_str(), "stdin_too_large");
+            }
+            Ok(_) => panic!("expected an error for oversized stdin"),
+        }
+    }
 
     #[test]
     fn test_format_shell_output_stdout_path_hint() {

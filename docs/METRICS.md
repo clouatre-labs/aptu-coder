@@ -38,7 +38,7 @@ Each line in the JSONL file is one JSON object:
 | `max_depth` | `u32 \| null` | The `max_depth` param if present; `null` for `analyze_file` and `analyze_module` |
 | `result` | `string` | `"ok"` on success, `"error"` on early-exit error paths, `"received"` on request entry (emitted at handler entry with `duration_ms=0` and `cache_hit=null`; excluded from all analysis aggregates by design) |
 | `error_type` | `string \| null` | On error: `invalid_params`, `parse`, or `unknown`; `null` on success |
-| `error_subtype` | `string \| null` | On error: detailed subtype (e.g., `not_found`, `ambiguous`, `stale_content_hash` for `edit_replace`); `null` on success or for generic errors. Omitted from JSONL when `null` for backward compatibility. |
+| `error_subtype` | `string \| null` | On error: detailed subtype for `invalid_params` failures, tool-specific (see [error_subtype values](#error_subtype-values) below); `null` on success or for `parse`/`unknown`/`internal_error` failures. Omitted from JSONL when `null` for backward compatibility. |
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
@@ -79,6 +79,34 @@ The `cache_tier` field encodes where a result was found (or not found):
 | `l1_only_miss` | Both L1 and the tool path were checked; no L2 disk cache was available (disabled or not configured). |
 | `l1_l2_miss` | Both L1 and L2 were checked; neither held a matching entry. Full computation was performed. |
 | `miss` | Legacy value emitted by older server versions; semantically equivalent to `l1_l2_miss`. |
+
+### error_subtype values
+
+Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, and `internal_error` failures. Values are tool-specific:
+
+| Tool | Value | Meaning |
+|---|---|---|
+| `edit_replace` | `not_found` | `old_text` matched zero locations in the file. |
+| `edit_replace` | `ambiguous` | `old_text` matched more than one location and `replace_all` was not set. |
+| `edit_replace` | `stale_context` | The circuit breaker tripped after repeated `not_found`/`ambiguous` failures on the same path in one session. |
+| `edit_replace` | `stale_content_hash` | The caller-supplied `expected_content_hash` no longer matches the file on disk. |
+| `exec_command` | `working_dir_not_dir` | `working_dir` canonicalized to a path that exists but is not a directory. |
+| `exec_command` | `working_dir_not_found` | `working_dir` failed to canonicalize (does not exist or is inaccessible). |
+| `exec_command` | `cd_path_not_dir` | A promoted `cd <path> &&` prefix resolved to a path that is not a directory. |
+| `exec_command` | `cd_path_not_found` | A promoted `cd <path> &&` prefix does not exist or is outside CWD. |
+| `exec_command` | `stdin_too_large` | `stdin` content exceeds the 1 MB size cap. |
+| `exec_command` | `heredoc_error` | Heredoc validation failed (malformed or unterminated heredoc). |
+| `exec_command` | `drain_timeout_invalid` | `drain_timeout_secs` was negative. |
+| `analyze_symbol` | `path_is_file` | `path` argument points to a file instead of a directory. |
+| `analyze_symbol` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
+| `analyze_symbol` | `import_lookup_def_use_conflict` | `import_lookup=true` combined with `def_use=true`. |
+| `analyze_symbol` | `import_lookup_missing_symbol` | `import_lookup=true` without a non-empty `symbol`. |
+| `analyze_symbol` | `follow_depth_exceeded` | `follow_depth` exceeds `MAX_FOLLOW_DEPTH`. |
+| `analyze_symbol` | `invalid_cursor` | The pagination `cursor` failed to decode. |
+| `analyze_symbol` | `git_ref_filter_failed` | `git_ref` filtering failed (not a git repo, git unavailable, etc.). |
+| `analyze_symbol` | `pagination_invalid` | Call-graph pagination rejected the requested cursor/offset. |
+
+Some `invalid_params` failures for `analyze_symbol` (e.g. errors surfaced from focused-mode analysis with multiple possible causes) do not set `error_subtype`; this mirrors `edit_replace`'s `NotAFile` case, which also carries no subtype.
 
 Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
 
