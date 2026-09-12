@@ -186,6 +186,7 @@ pub(crate) async fn run_focused_with_auto_summary(
                 t_start,
                 message,
                 "use summary=true or narrow scope",
+                Some(AnalyzeSymbolErrorSubtype::OutputTooLarge),
             ));
         }
     } else if output.formatted.len() > SIZE_LIMIT && params.output_control.summary == Some(false) {
@@ -202,6 +203,7 @@ pub(crate) async fn run_focused_with_auto_summary(
             t_start,
             message,
             "use summary=true or narrow scope",
+            Some(AnalyzeSymbolErrorSubtype::OutputTooLarge),
         ));
     }
 

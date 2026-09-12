@@ -74,6 +74,8 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     PaginationInvalid,
     /// `impl_only=true` on a directory containing no Rust source files.
     ImplOnlyRequiresRust,
+    /// Formatted output exceeds the size limit even with `summary=true`.
+    OutputTooLarge,
 }
 
 impl AnalyzeSymbolErrorSubtype {
@@ -89,6 +91,7 @@ impl AnalyzeSymbolErrorSubtype {
             Self::GitRefFilterFailed => "git_ref_filter_failed",
             Self::PaginationInvalid => "pagination_invalid",
             Self::ImplOnlyRequiresRust => "impl_only_requires_rust",
+            Self::OutputTooLarge => "output_too_large",
         }
     }
 }
@@ -128,8 +131,9 @@ pub(crate) fn err_invalid_params(
     t_start: std::time::Instant,
     message: String,
     hint: &'static str,
+    error_subtype: Option<AnalyzeSymbolErrorSubtype>,
 ) -> ErrorData {
-    emit_error_metric(ctx, "invalid_params", None, t_start, None);
+    emit_error_metric(ctx, "invalid_params", error_subtype, t_start, None);
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         message,
@@ -815,5 +819,25 @@ mod tests {
             event.error_subtype.as_deref(),
             Some("git_ref_filter_failed")
         );
+    }
+
+    #[test]
+    fn err_invalid_params_forwards_the_given_subtype() {
+        // Arrange
+        let (ctx, mut rx) = test_context();
+
+        // Act
+        let _ = err_invalid_params(
+            &ctx,
+            std::time::Instant::now(),
+            "output too large".to_string(),
+            "narrow scope",
+            Some(AnalyzeSymbolErrorSubtype::OutputTooLarge),
+        );
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(event.error_subtype.as_deref(), Some("output_too_large"));
     }
 }
