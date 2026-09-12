@@ -3246,6 +3246,7 @@ fn test_no_uint_format_in_schemas() {
     }
 }
 
+// Regression test for #1516
 #[cfg(feature = "schemars")]
 #[test]
 fn test_call_info_arg_count_not_required_in_schema() {
