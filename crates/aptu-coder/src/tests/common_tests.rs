@@ -29,8 +29,9 @@ async fn test_validate_impl_only_non_rust_returns_invalid_params() {
         traversal::walk_directory(dir.path(), None).unwrap_or_default();
     let result = crate::tools::analyze_symbol::validate_impl_only(&entries);
     assert!(result.is_err());
-    let err = result.unwrap_err();
+    let (err, subtype) = result.unwrap_err();
     assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert_eq!(subtype.as_str(), "impl_only_requires_rust");
     drop(analyzer); // ensure it compiles with analyzer in scope
 }
 
@@ -151,18 +152,19 @@ fn test_analyze_symbol_import_lookup_invalid_params() {
     // Act: call the validate helper directly (same pattern as validate_impl_only).
     let result = crate::tools::analyze_symbol::validate_import_lookup(Some(true), "");
 
-    // Assert: INVALID_PARAMS is returned.
+    // Assert: INVALID_PARAMS is returned, paired with the ImportLookupMissingSymbol subtype.
     assert!(
         result.is_err(),
         "import_lookup=true with empty symbol must return Err"
     );
-    let err = result.unwrap_err();
+    let (err, subtype) = result.unwrap_err();
     assert_eq!(
         err.code,
         rmcp::model::ErrorCode::INVALID_PARAMS,
         "expected INVALID_PARAMS; got {:?}",
         err.code
     );
+    assert_eq!(subtype.as_str(), "import_lookup_missing_symbol");
 }
 
 #[tokio::test]

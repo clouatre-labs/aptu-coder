@@ -819,4 +819,33 @@ mod tests {
             "should contain interleaved path hint: {result}"
         );
     }
+
+    #[test]
+    fn exec_command_error_subtype_as_str_golden_list() {
+        // Arrange: every current variant, matched exhaustively so adding a new
+        // variant without updating this arm fails to compile.
+        for subtype in [
+            ExecCommandErrorSubtype::WorkingDirNotDir,
+            ExecCommandErrorSubtype::WorkingDirNotFound,
+            ExecCommandErrorSubtype::CdPathNotDir,
+            ExecCommandErrorSubtype::CdPathNotFound,
+            ExecCommandErrorSubtype::StdinTooLarge,
+            ExecCommandErrorSubtype::HeredocError,
+            ExecCommandErrorSubtype::DrainTimeoutInvalid,
+        ] {
+            // Act
+            let expected = match subtype {
+                ExecCommandErrorSubtype::WorkingDirNotDir => "working_dir_not_dir",
+                ExecCommandErrorSubtype::WorkingDirNotFound => "working_dir_not_found",
+                ExecCommandErrorSubtype::CdPathNotDir => "cd_path_not_dir",
+                ExecCommandErrorSubtype::CdPathNotFound => "cd_path_not_found",
+                ExecCommandErrorSubtype::StdinTooLarge => "stdin_too_large",
+                ExecCommandErrorSubtype::HeredocError => "heredoc_error",
+                ExecCommandErrorSubtype::DrainTimeoutInvalid => "drain_timeout_invalid",
+            };
+
+            // Assert
+            assert_eq!(subtype.as_str(), expected);
+        }
+    }
 }
