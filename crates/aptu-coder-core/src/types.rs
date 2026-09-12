@@ -74,6 +74,7 @@ pub struct DefUseSite {
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct PaginationParams {
     /// Pagination cursor from a previous response's `next_cursor` field. Pass unchanged to retrieve the next page. Omit on the first call.
+    /// Mutually exclusive with summary=true; passing both returns INVALID_PARAMS.
     pub cursor: Option<String>,
     /// Files per page for pagination (default: 100). Reduce below 100 to limit response size; increase above 100 to reduce round trips.
     #[cfg_attr(
