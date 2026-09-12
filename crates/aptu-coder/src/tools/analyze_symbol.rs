@@ -72,6 +72,8 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     GitRefFilterFailed,
     /// Call-graph pagination rejected the requested cursor/offset.
     PaginationInvalid,
+    /// `impl_only=true` on a directory containing no Rust source files.
+    ImplOnlyRequiresRust,
 }
 
 impl AnalyzeSymbolErrorSubtype {
@@ -86,6 +88,7 @@ impl AnalyzeSymbolErrorSubtype {
             Self::InvalidCursor => "invalid_cursor",
             Self::GitRefFilterFailed => "git_ref_filter_failed",
             Self::PaginationInvalid => "pagination_invalid",
+            Self::ImplOnlyRequiresRust => "impl_only_requires_rust",
         }
     }
 }
@@ -387,7 +390,8 @@ async fn handle_call_graph(
     let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     // Call handler for analysis and progress tracking
-    let (graph_cache_tier, mut output) = match handle_focused_mode(&ctx, &params, ct).await {
+    let (graph_cache_tier, mut output) = match handle_focused_mode(&ctx, &params, ct, t_start).await
+    {
         Ok(v) => v,
         Err(e) => {
             let error_type_str = match e.code {
@@ -395,16 +399,18 @@ async fn handle_call_graph(
                 rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
                 _ => "unknown",
             };
-            // handle_focused_mode can raise invalid_params for several distinct causes
-            // (git_ref filter failure, impl_only validation, output size limit); none
-            // are distinguishable here without inspecting the message, so no subtype.
-            emit_error_metric(
-                &ctx,
-                error_type_str,
-                None,
-                t_start,
-                Some(crate::metrics::path_component_count(&param_path)),
-            );
+            // handle_focused_mode now emits its own subtype-tagged metric at each
+            // invalid_params failure site (git_ref filter, impl_only, output size
+            // limit); only non-invalid_params causes need to be recorded here.
+            if error_type_str != "invalid_params" {
+                emit_error_metric(
+                    &ctx,
+                    error_type_str,
+                    None,
+                    t_start,
+                    Some(crate::metrics::path_component_count(&param_path)),
+                );
+            }
             return Ok(err_to_tool_result(e));
         }
     };
@@ -754,6 +760,33 @@ mod tests {
         assert_eq!(
             event.error_subtype.as_deref(),
             Some("summary_cursor_conflict")
+        );
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_impl_only_without_rust_sets_impl_only_requires_rust_subtype() {
+        // Arrange: directory contains no .rs files, so impl_only=true fails validation.
+        let (ctx, mut rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::write(dir.path().join("lib.py"), "def foo(): pass").expect("write temp file");
+        let path = dir.path().to_str().expect("valid utf8 path").to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "foo",
+            "impl_only": true,
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("impl_only_requires_rust")
         );
     }
 }
