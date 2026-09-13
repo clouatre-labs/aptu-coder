@@ -447,11 +447,6 @@ pub(crate) struct ToolMetrics {
     pub(crate) output_chars: u64,
 }
 
-/// RAII guard that releases an exclusive lock on a metrics .lock file when dropped.
-/// Lock release happens implicitly when the underlying `std::fs::File` is closed.
-#[allow(dead_code)]
-pub(crate) struct MetricsLockGuard(pub(crate) std::fs::File);
-
 /// Return bounded, privacy-safe classifications for an MCP error code.
 #[must_use]
 pub(crate) fn classify_error_code(code: ErrorCode) -> (&'static str, Option<&'static str>) {

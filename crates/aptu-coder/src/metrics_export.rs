@@ -7,9 +7,9 @@
 //! data directory. Also provides helper functions for file-level concerns:
 //! path analysis, date arithmetic, legacy migration, and old-file cleanup.
 
-use crate::metrics::{MetricEvent, MetricsLockGuard, ToolMetrics, record_otel_metrics};
+use crate::metrics::{MetricEvent, ToolMetrics, record_otel_metrics};
+use aptu_coder_core::file_lock::FileLockGuard;
 use aptu_coder_core::lang::language_for_extension;
-use fs2::FileExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
@@ -76,9 +76,9 @@ impl MetricsWriter {
     /// Acquire an exclusive lock on a sibling .lock file for the metrics JSONL file.
     /// Returns a guard that releases the lock when dropped.
     /// On failure, logs a warning and returns None (degrade gracefully).
-    async fn acquire_metrics_lock(path: &Path) -> Option<MetricsLockGuard> {
+    async fn acquire_metrics_lock(path: &Path) -> Option<FileLockGuard> {
         let lock_path = format!("{}.lock", path.display());
-        let file = match std::fs::OpenOptions::new()
+        let lock_file = match std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
@@ -94,9 +94,9 @@ impl MetricsWriter {
                 return None;
             }
         };
-        let result = tokio::task::spawn_blocking(move || file.lock_exclusive().map(|_| file)).await;
+        let result = tokio::task::spawn_blocking(move || lock_file.lock().map(|_| lock_file)).await;
         match result {
-            Ok(Ok(locked)) => Some(MetricsLockGuard(locked)),
+            Ok(Ok(locked)) => Some(FileLockGuard::from_file(locked)),
             Ok(Err(e)) => {
                 tracing::warn!(
                     error = %e,

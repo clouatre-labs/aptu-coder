@@ -5,7 +5,7 @@
 //! Provides persistent, file-backed caching of analysis outputs with atomic writes,
 //! per-shard locking, and stale-file eviction.
 
-use fs2::FileExt;
+use crate::file_lock;
 use serde::{Serialize, de::DeserializeOwned};
 use std::io::{Read, Write};
 #[cfg(unix)]
@@ -258,49 +258,19 @@ fn evict_dir_recursive(
 /// Creates the lock file if it does not exist. Lock failures degrade
 /// gracefully (warn and return None) so that read availability is
 /// never blocked by lock infrastructure issues.
-fn lock_shard_shared(shard_dir: &std::path::Path) -> Option<ShardLockGuard> {
-    let lock_path = shard_dir.join(".lock");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .ok()?;
-    match file.lock_shared() {
-        Ok(()) => Some(ShardLockGuard(file)),
-        Err(e) => {
-            warn!(
-                error = %e, lock_path = %lock_path.display(),
-                "disk cache: failed to acquire shared lock on shard; proceeding without lock"
-            );
-            None
-        }
-    }
+fn lock_shard_shared(shard_dir: &std::path::Path) -> Option<file_lock::FileLockGuard> {
+    file_lock::lock_shared(&shard_dir.join(".lock"))
 }
 
 /// Acquire an exclusive (write) lock on the per-shard `.lock` sentinel.
 /// Creates the lock file if it does not exist. Returns Err if the lock
 /// file cannot be opened or if the lock acquisition fails, propagating
 /// the error to the caller (which typically degrades gracefully).
-fn lock_shard_exclusive(shard_dir: &std::path::Path) -> Result<ShardLockGuard, std::io::Error> {
-    let lock_path = shard_dir.join(".lock");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    file.lock_exclusive()?;
-    Ok(ShardLockGuard(file))
+fn lock_shard_exclusive(
+    shard_dir: &std::path::Path,
+) -> Result<file_lock::FileLockGuard, std::io::Error> {
+    file_lock::lock_exclusive(&shard_dir.join(".lock"))
 }
-
-/// RAII guard that releases a per-shard flock when dropped.
-/// Closing the underlying file descriptor releases the BSD/OFC lock.
-struct ShardLockGuard(
-    /// Held exclusively for its `Drop` implementation: closing the file
-    /// descriptor releases the advisory flock. Never read directly.
-    #[expect(dead_code)]
-    std::fs::File,
-);
 
 #[cfg(test)]
 mod disk_cache_tests {

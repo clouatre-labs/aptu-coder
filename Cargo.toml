@@ -32,7 +32,6 @@ schemars = { version = "1", features = ["derive"] }
 tempfile = "=3.27.0"
 filetime = "0.2"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
-fs2 = "0.4"
 tree-sitter-rust = "0.24.2"
 regex = "1"
 toml = "1.0"
