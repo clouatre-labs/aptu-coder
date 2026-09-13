@@ -51,6 +51,7 @@ jobs:
               - 'clippy.toml'
               - '.github/workflows/**'
               - 'tests/**'
+              - '!crates/**/*.md'
             workflows:
               - '.github/workflows/**'
             docs:
