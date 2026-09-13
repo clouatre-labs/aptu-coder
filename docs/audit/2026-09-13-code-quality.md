@@ -1,6 +1,9 @@
 # Audit: Code Quality and Structural Cleanup -- September 2026
 
-Audit date: 2026-09-13
+Date: 2026-09-13  
+Commit: d6ef2ff  
+Version: v0.32.6  
+Toolchain: Rust 1.98.0 / rmcp 3.3.0 / tokio async
 
 ## See Also
 
