@@ -109,23 +109,22 @@ This project follows a Rust adaptation of the [NASA/JPL Power of 10](https://en.
 
 - **Zero warnings:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test`, and `cargo deny check` must all pass
 - **Every unsafe block requires a SAFETY comment:** Enforced by `clippy::undocumented_unsafe_blocks = deny` in workspace lints
-- **No `.unwrap()` in production code:** Enforced by `clippy::unwrap_used = "deny"`. Test code is exempted via `#[cfg_attr(test, allow(clippy::unwrap_used))]` at each crate root. Use `.expect("reason")` in tests instead of `.unwrap()`.
-- **Shared MCP test harness:** Integration tests for `aptu-coder` live in `crates/aptu-coder/tests/`. Use `make_test_analyzer()` and `call_tool_raw(tool_name, params)` from `tests/common/mod.rs` rather than duplicating server setup. Unit tests for `validation`, `shell`, and `filters` logic live as `#[cfg(test)]` modules in their respective source files.
+- Workspace lint denies (`unwrap_used`, `expect_used`), test-code exemptions, and the shared MCP test harness are documented in [AGENTS.md](AGENTS.md) — see that file rather than this one
 - **No unchecked indexing on untrusted data:** Use `.get()` with explicit error propagation instead of `[]`
 - **Loops over untrusted or externally-driven data must have an explicit bound or checked max-iteration guard**
 - **Minimize #[cfg] feature combinations:** Each supported combination must be covered by CI
 
 ## Automated Review Tooling
 
-This repository uses [aptu](https://github.com/clouatre-labs/aptu) for automated issue triage and pull request review via GitHub Actions.
+This repository uses [aptu](https://github.com/clouatre-labs/aptu) for automated issue triage and pull request review. Both are dispatched externally by the `aptu-github-app`, not triggered directly by GitHub issue/PR events.
 
 ### Issue triage
 
-Every new issue triggers `.github/workflows/issue-triage.yml`, which runs `aptu issue triage`. The workflow applies type and priority labels. No comment is posted to the issue.
+`.github/workflows/aptu-triage.yml` runs on `repository_dispatch` (type `aptu-triage`) and applies type and priority labels. No comment is posted to the issue.
 
 ### Pull request review
 
-Every opened or updated pull request triggers `.github/workflows/pr-review.yml`, which runs `aptu pr review`. The review is advisory (`continue-on-error: true`) and never blocks merging. The workflow uses Gemini as the primary provider and OpenRouter Mercury-2 as the fallback.
+`.github/workflows/aptu-review.yml` runs on `repository_dispatch` (type `aptu-review`). The review is advisory (`continue-on-error: true`) and never blocks merging. The AI provider and model are set by the dispatch payload, defaulting to OpenRouter; see the workflow file for current defaults.
 
 ### Copilot code review
 
