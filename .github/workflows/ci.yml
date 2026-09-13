@@ -44,14 +44,15 @@ jobs:
         with:
           filters: |
             code:
-              - 'crates/aptu-coder-core/**'
-              - 'crates/aptu-coder/**'
+              - 'crates/aptu-coder-core/**/*.rs'
+              - 'crates/aptu-coder-core/**/*.toml'
+              - 'crates/aptu-coder/**/*.rs'
+              - 'crates/aptu-coder/**/*.toml'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'clippy.toml'
               - '.github/workflows/**'
               - 'tests/**'
-              - '!crates/**/*.md'
             workflows:
               - '.github/workflows/**'
             docs:
