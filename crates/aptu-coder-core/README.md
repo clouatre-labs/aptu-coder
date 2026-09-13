@@ -62,11 +62,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Supported Languages
 
-See the [MCP server README](https://github.com/clouatre-labs/aptu-coder/blob/main/README.md#supported-languages) for the full table with file extensions and feature flags.
+See the [MCP server README](https://github.com/clouatre-labs/aptu-coder/blob/main/README.md#supported-languages) for the full table with file extensions.
 
-**Tree-sitter (full AST extraction):** C/C++, C#, CSS (`lang-css`), Fortran, Go, HTML, Java, JavaScript, Kotlin, Markdown, Python, Rust, TSX, TypeScript, YAML (`lang-yaml`)
+**Tree-sitter (full AST extraction):** C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, Kotlin, Markdown, Python, Rust, TSX, TypeScript, YAML
 
-**Regex extraction (imports/symbols via pattern matching):** Astro, JSON, TOML; CSS and YAML fall back to regex when compiled without their tree-sitter feature flag
+**Regex extraction (imports/symbols via pattern matching):** Astro, JSON, TOML
 
 For any other extension, `analyze_file` returns a graceful fallback (line count and the first 50 lines of the file) rather than an error.
 

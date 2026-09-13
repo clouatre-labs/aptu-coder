@@ -228,6 +228,11 @@ Results are paginated via an opaque cursor. Cold cache returns a message recomme
 Shipped:
 
 - #1491/#1493: read_resource JSONL/OTel telemetry (commit afe9136, "feat(metrics): record MCP resource reads in JSONL and OTel metrics")
+- #1514: document summary/cursor mutual exclusion on the cursor field
+- #1515: normalize empty-string cursor to none, clarify pagination semantics
+- #1517: mark `arg_count` non-required in the CallInfo schema
+- #1518: extend error_subtype coverage to exec_command and analyze_symbol
+- #1520: enforce error_subtype pairing for analyze_symbol invalid_params errors
 
 Unimplemented and pertinent:
 
