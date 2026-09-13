@@ -25,8 +25,8 @@ use crate::tools::common::{err_to_tool_result, error_meta};
 use crate::{SIZE_LIMIT, err_to_tool_result_from_pagination};
 
 use crate::tools::analyze_symbol::{
-    AnalyzeSymbolContext, AnalyzeSymbolErrorSubtype, FocusedAnalysisParams, emit_error_metric,
-    err_invalid_params, validate_impl_only,
+    AnalyzeSymbolContext, AnalyzeSymbolErrorSubtype, FocusedAnalysisParams, SubtypedResult,
+    emit_error_metric, err_invalid_params, validate_impl_only,
 };
 
 /// Paginates a slice of call chains and returns the paginated items with an optional next cursor.
@@ -35,7 +35,7 @@ pub(crate) fn paginate_focus_chains(
     mode: PaginationMode,
     offset: usize,
     page_size: usize,
-) -> Result<
+) -> SubtypedResult<
     (
         Vec<aptu_coder_core::graph::InternalCallChain>,
         Option<String>,
@@ -43,10 +43,17 @@ pub(crate) fn paginate_focus_chains(
     ErrorData,
 > {
     let paginated = paginate_slice(chains, offset, page_size, mode).map_err(|e| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            e.to_string(),
-            Some(error_meta("transient", true, "retry the request")),
+        (
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                e.to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "page_size must be at least 1",
+                )),
+            ),
+            Some(AnalyzeSymbolErrorSubtype::PaginationPageSizeInvalid),
         )
     })?;
 
@@ -54,12 +61,19 @@ pub(crate) fn paginate_focus_chains(
         return Ok((paginated.items, None));
     }
 
+    // The cursor decoded/re-encoded below was generated moments ago by
+    // `paginate_slice` itself (never client-supplied), so a failure here
+    // reflects an internal bug, not a client mistake: no subtype, matching
+    // the `error_subtype` metrics contract for `internal_error` failures.
     let next = if let Some(raw_cursor) = paginated.next_cursor {
         let decoded = decode_cursor(&raw_cursor).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                e.to_string(),
-                Some(error_meta("validation", false, "invalid cursor format")),
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    e.to_string(),
+                    Some(error_meta("transient", true, "retry the request")),
+                ),
+                None,
             )
         })?;
         Some(
@@ -68,10 +82,13 @@ pub(crate) fn paginate_focus_chains(
                 offset: decoded.offset,
             })
             .map_err(|e| {
-                ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    e.to_string(),
-                    Some(error_meta("transient", true, "retry the request")),
+                (
+                    ErrorData::new(
+                        rmcp::model::ErrorCode::INTERNAL_ERROR,
+                        e.to_string(),
+                        Some(error_meta("transient", true, "retry the request")),
+                    ),
+                    None,
                 )
             })?,
         )
@@ -265,15 +282,9 @@ pub(crate) async fn handle_focused_mode(
     let entries = Arc::new(filtered_entries);
 
     if params.impl_only == Some(true)
-        && let Err(e) = validate_impl_only(&entries)
+        && let Err((e, subtype)) = validate_impl_only(&entries)
     {
-        emit_error_metric(
-            ctx,
-            "invalid_params",
-            Some(AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust),
-            t_start,
-            None,
-        );
+        emit_error_metric(ctx, "invalid_params", Some(subtype), t_start, None);
         return Err(e);
     }
 
@@ -417,6 +428,7 @@ pub(crate) async fn handle_focused_mode(
 }
 
 /// Applies pagination to call graph output based on cursor mode.
+#[allow(clippy::result_large_err)]
 pub(crate) fn apply_call_graph_pagination(
     output: &mut analyze::FocusedAnalysisOutput,
     params: &AnalyzeSymbolParams,
@@ -424,7 +436,7 @@ pub(crate) fn apply_call_graph_pagination(
     offset: usize,
     page_size: usize,
     use_summary: bool,
-) -> Result<Option<String>, CallToolResult> {
+) -> SubtypedResult<Option<String>, CallToolResult> {
     match cursor_mode {
         PaginationMode::Callers => {
             let (paginated_items, paginated_next) = paginate_focus_chains(
@@ -433,7 +445,7 @@ pub(crate) fn apply_call_graph_pagination(
                 offset,
                 page_size,
             )
-            .map_err(err_to_tool_result)?;
+            .map_err(|(e, subtype)| (err_to_tool_result(e), subtype))?;
 
             if !use_summary
                 && (paginated_next.is_some() || offset > 0 || !output.outgoing_chains.is_empty())
@@ -464,7 +476,7 @@ pub(crate) fn apply_call_graph_pagination(
                 offset,
                 page_size,
             )
-            .map_err(err_to_tool_result)?;
+            .map_err(|(e, subtype)| (err_to_tool_result(e), subtype))?;
 
             if paginated_next.is_some() || offset > 0 {
                 let base_path = Path::new(&params.path);
@@ -486,15 +498,18 @@ pub(crate) fn apply_call_graph_pagination(
                 Ok(None)
             }
         }
-        PaginationMode::Default => Err(err_to_tool_result(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "invalid cursor: unknown pagination mode".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "use a cursor returned by a previous analyze_symbol call",
+        PaginationMode::Default => Err((
+            err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "invalid cursor: unknown pagination mode".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "use a cursor returned by a previous analyze_symbol call",
+                )),
             )),
-        ))),
+            Some(AnalyzeSymbolErrorSubtype::PaginationModeInvalid),
+        )),
         PaginationMode::DefUse => {
             let total_sites = output.def_use_sites.len();
             let (paginated_sites, paginated_next) = paginate_slice(
@@ -504,7 +519,12 @@ pub(crate) fn apply_call_graph_pagination(
                 PaginationMode::DefUse,
             )
             .map(|r| (r.items, r.next_cursor))
-            .map_err(err_to_tool_result_from_pagination)?;
+            .map_err(|e| {
+                (
+                    err_to_tool_result_from_pagination(e),
+                    Some(AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid),
+                )
+            })?;
 
             if !use_summary {
                 let base_path = Path::new(&params.path);
@@ -520,5 +540,104 @@ pub(crate) fn apply_call_graph_pagination(
             output.def_use_sites = paginated_sites;
             Ok(paginated_next)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds a minimal `AnalyzeSymbolParams` for pagination tests (path/symbol only).
+    fn test_params() -> AnalyzeSymbolParams {
+        serde_json::from_value(serde_json::json!({
+            "path": "/definitely-nonexistent-dir-abcxyz123",
+            "symbol": "foo",
+        }))
+        .expect("valid AnalyzeSymbolParams JSON")
+    }
+
+    /// Builds a minimal `FocusedAnalysisOutput` (all chain/site vecs empty) via
+    /// deserialization; the type is `#[non_exhaustive]` so a struct literal is
+    /// not available outside `aptu-coder-core`.
+    fn test_output() -> analyze::FocusedAnalysisOutput {
+        serde_json::from_value(serde_json::json!({ "formatted": "" }))
+            .expect("valid FocusedAnalysisOutput JSON")
+    }
+
+    #[test]
+    fn apply_call_graph_pagination_unknown_mode_sets_pagination_mode_invalid_subtype() {
+        // Arrange: PaginationMode::Default is not a valid cursor mode for a decoded cursor.
+        let mut output = test_output();
+        let params = test_params();
+
+        // Act
+        let result = apply_call_graph_pagination(
+            &mut output,
+            &params,
+            PaginationMode::Default,
+            0,
+            10,
+            false,
+        );
+
+        // Assert
+        let (_, subtype) = result.expect_err("expected PaginationMode::Default to be rejected");
+        assert_eq!(
+            subtype,
+            Some(AnalyzeSymbolErrorSubtype::PaginationModeInvalid)
+        );
+        assert_eq!(
+            subtype.expect("invalid mode is invalid_params").as_str(),
+            "pagination_mode_invalid"
+        );
+    }
+
+    #[test]
+    fn apply_call_graph_pagination_zero_page_size_sets_page_size_invalid_subtype() {
+        // Arrange: page_size=0 is rejected by paginate_slice for Callers/Callees modes.
+        let mut output = test_output();
+        let params = test_params();
+
+        // Act
+        let result =
+            apply_call_graph_pagination(&mut output, &params, PaginationMode::Callers, 0, 0, false);
+
+        // Assert
+        let (_, subtype) = result.expect_err("expected page_size=0 to be rejected");
+        assert_eq!(
+            subtype,
+            Some(AnalyzeSymbolErrorSubtype::PaginationPageSizeInvalid)
+        );
+        assert_eq!(
+            subtype
+                .expect("page_size=0 is invalid_params, not internal_error")
+                .as_str(),
+            "pagination_page_size_invalid"
+        );
+    }
+
+    #[test]
+    fn apply_call_graph_pagination_def_use_zero_page_size_sets_def_use_invalid_subtype() {
+        // Arrange: page_size=0 is rejected by paginate_slice for DefUse mode too, but
+        // must be distinguished from the Callers/Callees pagination failure above.
+        let mut output = test_output();
+        let params = test_params();
+
+        // Act
+        let result =
+            apply_call_graph_pagination(&mut output, &params, PaginationMode::DefUse, 0, 0, false);
+
+        // Assert
+        let (_, subtype) = result.expect_err("expected page_size=0 to be rejected");
+        assert_eq!(
+            subtype,
+            Some(AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid)
+        );
+        assert_eq!(
+            subtype
+                .expect("def_use page_size=0 is invalid_params")
+                .as_str(),
+            "pagination_def_use_invalid"
+        );
     }
 }

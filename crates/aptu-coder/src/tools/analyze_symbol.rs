@@ -70,8 +70,12 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     InvalidCursor,
     /// `git_ref` filtering failed (not a git repo, git unavailable, etc.).
     GitRefFilterFailed,
-    /// Call-graph pagination rejected the requested cursor/offset.
-    PaginationInvalid,
+    /// Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`.
+    PaginationModeInvalid,
+    /// Call-graph pagination `page_size` is zero, which cannot make progress.
+    PaginationPageSizeInvalid,
+    /// DefUse-mode pagination rejected the requested cursor/offset.
+    PaginationDefUseInvalid,
     /// `impl_only=true` on a directory containing no Rust source files.
     ImplOnlyRequiresRust,
     /// Formatted output exceeds the size limit even with `summary=true`.
@@ -89,7 +93,9 @@ impl AnalyzeSymbolErrorSubtype {
             Self::FollowDepthExceeded => "follow_depth_exceeded",
             Self::InvalidCursor => "invalid_cursor",
             Self::GitRefFilterFailed => "git_ref_filter_failed",
-            Self::PaginationInvalid => "pagination_invalid",
+            Self::PaginationModeInvalid => "pagination_mode_invalid",
+            Self::PaginationPageSizeInvalid => "pagination_page_size_invalid",
+            Self::PaginationDefUseInvalid => "pagination_def_use_invalid",
             Self::ImplOnlyRequiresRust => "impl_only_requires_rust",
             Self::OutputTooLarge => "output_too_large",
         }
@@ -101,6 +107,13 @@ impl std::fmt::Display for AnalyzeSymbolErrorSubtype {
         f.write_str(self.as_str())
     }
 }
+
+/// An `invalid_params` result: the error is always paired with a subtype.
+pub(crate) type InvalidParamsResult<T, E> = Result<T, (E, AnalyzeSymbolErrorSubtype)>;
+
+/// A result whose error may be `invalid_params` (subtype present) or `internal_error`
+/// (subtype `None`, matching the `error_subtype` metrics contract).
+pub(crate) type SubtypedResult<T, E> = Result<T, (E, Option<AnalyzeSymbolErrorSubtype>)>;
 
 /// Helper function to emit error metrics for analyze_symbol.
 /// Extracts the error_type string from ErrorCode and records it on the span.
@@ -142,7 +155,7 @@ pub(crate) fn err_invalid_params(
 }
 
 /// Validate that `impl_only=true` is only used with directories containing Rust source files.
-pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> Result<(), ErrorData> {
+pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> InvalidParamsResult<(), ErrorData> {
     let has_rust = entries.iter().any(|e| {
         !e.is_dir
             && e.path
@@ -152,14 +165,17 @@ pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> Result<(), ErrorData>
     });
 
     if !has_rust {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "impl_only=true requires Rust source files. No .rs files found in the given path. Use analyze_symbol without impl_only for cross-language analysis.".to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "remove impl_only or point to a directory containing .rs files",
-            )),
+        return Err((
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "impl_only=true requires Rust source files. No .rs files found in the given path. Use analyze_symbol without impl_only for cross-language analysis.".to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "remove impl_only or point to a directory containing .rs files",
+                )),
+            ),
+            AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust,
         ));
     }
     Ok(())
@@ -169,17 +185,20 @@ pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> Result<(), ErrorData>
 pub(crate) fn validate_import_lookup(
     import_lookup: Option<bool>,
     symbol: &str,
-) -> Result<(), ErrorData> {
+) -> InvalidParamsResult<(), ErrorData> {
     if import_lookup == Some(true) && symbol.is_empty() {
-        return Err(ErrorData::new(
-            rmcp::model::ErrorCode::INVALID_PARAMS,
-            "import_lookup=true requires symbol to contain the module path to search for"
-                .to_string(),
-            Some(error_meta(
-                "validation",
-                false,
-                "set symbol to the module path when using import_lookup=true",
-            )),
+        return Err((
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                "import_lookup=true requires symbol to contain the module path to search for"
+                    .to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "set symbol to the module path when using import_lookup=true",
+                )),
+            ),
+            AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol,
         ));
     }
     Ok(())
@@ -207,14 +226,17 @@ async fn handle_import_lookup(
         let raw_entries = match walk_directory(path, max_depth) {
             Ok(e) => e,
             Err(e) => {
-                return Err(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("Failed to walk directory: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check path permissions and availability",
-                    )),
+                return Err((
+                    ErrorData::new(
+                        rmcp::model::ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to walk directory: {e}"),
+                        Some(error_meta(
+                            "resource",
+                            false,
+                            "check path permissions and availability",
+                        )),
+                    ),
+                    None,
                 ));
             }
         };
@@ -225,14 +247,17 @@ async fn handle_import_lookup(
             let changed = match changed_files_from_git_ref(path, git_ref_val) {
                 Ok(c) => c,
                 Err(e) => {
-                    return Err(ErrorData::new(
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        format!("git_ref filter failed: {e}"),
-                        Some(error_meta(
-                            "resource",
-                            false,
-                            "ensure git is installed and path is inside a git repository",
-                        )),
+                    return Err((
+                        ErrorData::new(
+                            rmcp::model::ErrorCode::INVALID_PARAMS,
+                            format!("git_ref filter failed: {e}"),
+                            Some(error_meta(
+                                "resource",
+                                false,
+                                "ensure git is installed and path is inside a git repository",
+                            )),
+                        ),
+                        Some(AnalyzeSymbolErrorSubtype::GitRefFilterFailed),
                     ));
                 }
             };
@@ -243,14 +268,17 @@ async fn handle_import_lookup(
         let output = match analyze::analyze_import_lookup(path, &symbol, &entries, None) {
             Ok(v) => v,
             Err(e) => {
-                return Err(ErrorData::new(
-                    rmcp::model::ErrorCode::INTERNAL_ERROR,
-                    format!("import_lookup failed: {e}"),
-                    Some(error_meta(
-                        "resource",
-                        false,
-                        "check path and file permissions",
-                    )),
+                return Err((
+                    ErrorData::new(
+                        rmcp::model::ErrorCode::INTERNAL_ERROR,
+                        format!("import_lookup failed: {e}"),
+                        Some(error_meta(
+                            "resource",
+                            false,
+                            "check path and file permissions",
+                        )),
+                    ),
+                    None,
                 ));
             }
         };
@@ -259,20 +287,18 @@ async fn handle_import_lookup(
 
     let output = match handle.await {
         Ok(Ok(v)) => v,
-        Ok(Err(e)) => {
+        Ok(Err((e, subtype))) => {
+            // `subtype` is carried directly from the spawn_blocking closure's typed
+            // return instead of being inferred after the fact from `error_type_str`.
             let error_type_str = match e.code {
                 rmcp::model::ErrorCode::INVALID_PARAMS => "invalid_params",
                 rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
                 _ => "unknown",
             };
-            // The only INVALID_PARAMS cause inside this spawn_blocking closure is a
-            // failed git_ref filter; internal_error/unknown causes get no subtype.
-            let error_subtype = (error_type_str == "invalid_params")
-                .then_some(AnalyzeSymbolErrorSubtype::GitRefFilterFailed);
             emit_error_metric(
                 &ctx,
                 error_type_str,
-                error_subtype,
+                subtype,
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -346,9 +372,10 @@ async fn handle_import_lookup(
 ///
 /// Returns `Err(CallToolResult)` on a malformed cursor so the caller can
 /// propagate the error immediately.
+#[allow(clippy::result_large_err)]
 fn decode_call_graph_cursor(
     params: &AnalyzeSymbolParams,
-) -> Result<(usize, PaginationMode), CallToolResult> {
+) -> InvalidParamsResult<(usize, PaginationMode), CallToolResult> {
     let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     let cursor_mode = cursor
@@ -362,11 +389,14 @@ fn decode_call_graph_cursor(
     let offset = if let Some(cursor_str) = cursor {
         decode_cursor(cursor_str)
             .map_err(|e| {
-                err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    e.to_string(),
-                    Some(error_meta("validation", false, "invalid cursor format")),
-                ))
+                (
+                    err_to_tool_result(ErrorData::new(
+                        rmcp::model::ErrorCode::INVALID_PARAMS,
+                        e.to_string(),
+                        Some(error_meta("validation", false, "invalid cursor format")),
+                    )),
+                    AnalyzeSymbolErrorSubtype::InvalidCursor,
+                )
             })?
             .offset
     } else {
@@ -425,11 +455,11 @@ async fn handle_call_graph(
     let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
     let (offset, cursor_mode) = match decode_call_graph_cursor(&params) {
         Ok(v) => v,
-        Err(e) => {
+        Err((e, subtype)) => {
             emit_error_metric(
                 &ctx,
                 "invalid_params",
-                Some(AnalyzeSymbolErrorSubtype::InvalidCursor),
+                Some(subtype),
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -448,11 +478,16 @@ async fn handle_call_graph(
         use_summary,
     ) {
         Ok(v) => v,
-        Err(e) => {
+        Err((e, subtype)) => {
+            let error_type_str = if subtype.is_some() {
+                "invalid_params"
+            } else {
+                "internal_error"
+            };
             emit_error_metric(
                 &ctx,
-                "invalid_params",
-                Some(AnalyzeSymbolErrorSubtype::PaginationInvalid),
+                error_type_str,
+                subtype,
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -574,19 +609,82 @@ async fn handle_call_graph(
     Ok(result)
 }
 
-/// Emit an INVALID_PARAMS error, recording it on the span, and return early.
-fn invalid_params(
+/// Build an INVALID_PARAMS `CallToolResult`, recording it on the span.
+fn invalid_params_result(
     span: &tracing::Span,
     msg: impl Into<String>,
     hint: &'static str,
-) -> Result<CallToolResult, ErrorData> {
+) -> CallToolResult {
     span.record("error", true);
     span.record("error.type", "invalid_params");
-    Ok(err_to_tool_result(ErrorData::new(
+    err_to_tool_result(ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         msg.into(),
         Some(error_meta("validation", false, hint)),
-    )))
+    ))
+}
+
+/// Phase: validate top-level `analyze_symbol` preconditions before dispatch.
+///
+/// Constructs the `AnalyzeSymbolErrorSubtype` at the point of failure, mirroring
+/// `exec_command.rs`'s phase-function pattern so the caller cannot forget to pair
+/// a subtype with an invalid_params result.
+#[allow(clippy::result_large_err)]
+fn validate_top_level_preconditions(
+    params: &AnalyzeSymbolParams,
+    cursor: Option<&str>,
+    span: &tracing::Span,
+) -> InvalidParamsResult<(), CallToolResult> {
+    if std::path::Path::new(&params.path).is_file() {
+        return Err((
+            invalid_params_result(
+                span,
+                format!(
+                    "'{}' is a file; analyze_symbol requires a directory path",
+                    params.path
+                ),
+                "pass a directory path, not a file",
+            ),
+            AnalyzeSymbolErrorSubtype::PathIsFile,
+        ));
+    }
+
+    if summary_cursor_conflict(params.output_control.summary, cursor) {
+        return Err((
+            invalid_params_result(
+                span,
+                "summary=true is incompatible with a pagination cursor; use one or the other",
+                "remove cursor or set summary=false",
+            ),
+            AnalyzeSymbolErrorSubtype::SummaryCursorConflict,
+        ));
+    }
+
+    if params.import_lookup == Some(true) && params.def_use == Some(true) {
+        return Err((
+            invalid_params_result(
+                span,
+                "import_lookup=true and def_use=true are mutually exclusive; use one or the other",
+                "remove import_lookup or set def_use=false",
+            ),
+            AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict,
+        ));
+    }
+
+    if let Some(depth) = params.follow_depth
+        && depth > MAX_FOLLOW_DEPTH
+    {
+        return Err((
+            invalid_params_result(
+                span,
+                format!("follow_depth={depth} exceeds the maximum of {MAX_FOLLOW_DEPTH}"),
+                "reduce follow_depth to 3 or lower",
+            ),
+            AnalyzeSymbolErrorSubtype::FollowDepthExceeded,
+        ));
+    }
+
+    Ok(())
 }
 
 /// Main handler for the `analyze_symbol` tool.
@@ -603,80 +701,14 @@ pub(crate) async fn analyze_symbol_handler(
     let t_start = call.t_start;
     let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
-    if std::path::Path::new(&params.path).is_file() {
-        emit_error_metric(
-            &ctx,
-            "invalid_params",
-            Some(AnalyzeSymbolErrorSubtype::PathIsFile),
-            t_start,
-            None,
-        );
-        return invalid_params(
-            span,
-            format!(
-                "'{}' is a file; analyze_symbol requires a directory path",
-                params.path
-            ),
-            "pass a directory path, not a file",
-        );
+    if let Err((result, subtype)) = validate_top_level_preconditions(&params, cursor, span) {
+        emit_error_metric(&ctx, "invalid_params", Some(subtype), t_start, None);
+        return Ok(result);
     }
 
-    if summary_cursor_conflict(params.output_control.summary, cursor) {
-        emit_error_metric(
-            &ctx,
-            "invalid_params",
-            Some(AnalyzeSymbolErrorSubtype::SummaryCursorConflict),
-            t_start,
-            None,
-        );
-        return invalid_params(
-            span,
-            "summary=true is incompatible with a pagination cursor; use one or the other",
-            "remove cursor or set summary=false",
-        );
-    }
-
-    if params.import_lookup == Some(true) && params.def_use == Some(true) {
-        emit_error_metric(
-            &ctx,
-            "invalid_params",
-            Some(AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict),
-            t_start,
-            None,
-        );
-        return invalid_params(
-            span,
-            "import_lookup=true and def_use=true are mutually exclusive; use one or the other",
-            "remove import_lookup or set def_use=false",
-        );
-    }
-
-    if let Err(e) = validate_import_lookup(params.import_lookup, &params.symbol) {
-        emit_error_metric(
-            &ctx,
-            "invalid_params",
-            Some(AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol),
-            t_start,
-            None,
-        );
+    if let Err((e, subtype)) = validate_import_lookup(params.import_lookup, &params.symbol) {
+        emit_error_metric(&ctx, "invalid_params", Some(subtype), t_start, None);
         return Ok(err_to_tool_result(e));
-    }
-
-    if let Some(depth) = params.follow_depth
-        && depth > MAX_FOLLOW_DEPTH
-    {
-        emit_error_metric(
-            &ctx,
-            "invalid_params",
-            Some(AnalyzeSymbolErrorSubtype::FollowDepthExceeded),
-            t_start,
-            None,
-        );
-        return invalid_params(
-            span,
-            format!("follow_depth={depth} exceeds the maximum of {MAX_FOLLOW_DEPTH}"),
-            "reduce follow_depth to 3 or lower",
-        );
     }
 
     if params.import_lookup == Some(true) {
@@ -839,5 +871,149 @@ mod tests {
         let event = rx.try_recv().expect("expected an error metric event");
         assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
         assert_eq!(event.error_subtype.as_deref(), Some("output_too_large"));
+    }
+
+    #[test]
+    fn analyze_symbol_error_subtype_as_str_golden_list() {
+        // Arrange: every current variant, matched exhaustively so adding a new
+        // variant without updating this arm fails to compile.
+        for subtype in [
+            AnalyzeSymbolErrorSubtype::PathIsFile,
+            AnalyzeSymbolErrorSubtype::SummaryCursorConflict,
+            AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict,
+            AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol,
+            AnalyzeSymbolErrorSubtype::FollowDepthExceeded,
+            AnalyzeSymbolErrorSubtype::InvalidCursor,
+            AnalyzeSymbolErrorSubtype::GitRefFilterFailed,
+            AnalyzeSymbolErrorSubtype::PaginationModeInvalid,
+            AnalyzeSymbolErrorSubtype::PaginationPageSizeInvalid,
+            AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid,
+            AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust,
+            AnalyzeSymbolErrorSubtype::OutputTooLarge,
+        ] {
+            // Act
+            let expected = match subtype {
+                AnalyzeSymbolErrorSubtype::PathIsFile => "path_is_file",
+                AnalyzeSymbolErrorSubtype::SummaryCursorConflict => "summary_cursor_conflict",
+                AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict => {
+                    "import_lookup_def_use_conflict"
+                }
+                AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol => {
+                    "import_lookup_missing_symbol"
+                }
+                AnalyzeSymbolErrorSubtype::FollowDepthExceeded => "follow_depth_exceeded",
+                AnalyzeSymbolErrorSubtype::InvalidCursor => "invalid_cursor",
+                AnalyzeSymbolErrorSubtype::GitRefFilterFailed => "git_ref_filter_failed",
+                AnalyzeSymbolErrorSubtype::PaginationModeInvalid => "pagination_mode_invalid",
+                AnalyzeSymbolErrorSubtype::PaginationPageSizeInvalid => {
+                    "pagination_page_size_invalid"
+                }
+                AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid => "pagination_def_use_invalid",
+                AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust => "impl_only_requires_rust",
+                AnalyzeSymbolErrorSubtype::OutputTooLarge => "output_too_large",
+            };
+
+            // Assert
+            assert_eq!(subtype.as_str(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_import_lookup_and_def_use_sets_conflict_subtype() {
+        // Arrange: import_lookup=true and def_use=true are mutually exclusive.
+        let (ctx, mut rx) = test_context();
+        let path = "/definitely-nonexistent-dir-abcxyz123".to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "std::collections",
+            "import_lookup": true,
+            "def_use": true,
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("import_lookup_def_use_conflict")
+        );
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_follow_depth_above_max_sets_follow_depth_exceeded_subtype() {
+        // Arrange: follow_depth exceeds MAX_FOLLOW_DEPTH (3).
+        let (ctx, mut rx) = test_context();
+        let path = "/definitely-nonexistent-dir-abcxyz123".to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "foo",
+            "follow_depth": 4,
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("follow_depth_exceeded")
+        );
+    }
+
+    #[test]
+    fn decode_call_graph_cursor_malformed_cursor_sets_invalid_cursor_subtype() {
+        // Arrange: cursor is not valid base64/JSON cursor data.
+        let params = test_params(
+            "/definitely-nonexistent-dir-abcxyz123",
+            None,
+            Some("not-a-valid-cursor!!"),
+        );
+
+        // Act
+        let result = decode_call_graph_cursor(&params);
+
+        // Assert
+        let (_, subtype) = result.expect_err("expected a decode failure for a malformed cursor");
+        assert_eq!(subtype, AnalyzeSymbolErrorSubtype::InvalidCursor);
+        assert_eq!(subtype.as_str(), "invalid_cursor");
+    }
+
+    #[tokio::test]
+    async fn handle_import_lookup_invalid_git_ref_propagates_typed_subtype() {
+        // Arrange: import_lookup=true with a whitespace-containing git_ref, rejected
+        // inside the spawn_blocking closure and propagated as a typed (error, subtype)
+        // pair rather than inferred from the error's ErrorCode after the fact.
+        let (ctx, mut rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").expect("write temp file");
+        let path = dir.path().to_str().expect("valid utf8 path").to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "std::collections",
+            "import_lookup": true,
+            "git_ref": "bad ref",
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("git_ref_filter_failed")
+        );
     }
 }

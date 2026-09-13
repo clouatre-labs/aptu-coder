@@ -104,9 +104,11 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `analyze_symbol` | `follow_depth_exceeded` | `follow_depth` exceeds `MAX_FOLLOW_DEPTH`. |
 | `analyze_symbol` | `invalid_cursor` | The pagination `cursor` failed to decode. |
 | `analyze_symbol` | `git_ref_filter_failed` | `git_ref` filtering failed (not a git repo, git unavailable, etc.). |
-| `analyze_symbol` | `pagination_invalid` | Call-graph pagination rejected the requested cursor/offset. |
-
-Some `invalid_params` failures for `analyze_symbol` (e.g. errors surfaced from focused-mode analysis with multiple possible causes) do not set `error_subtype`; this mirrors `edit_replace`'s `NotAFile` case, which also carries no subtype.
+| `analyze_symbol` | `pagination_mode_invalid` | Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`. |
+| `analyze_symbol` | `pagination_page_size_invalid` | Call-graph pagination `page_size` is zero, which cannot make progress (Callers/Callees). |
+| `analyze_symbol` | `pagination_def_use_invalid` | DefUse-mode pagination rejected the requested cursor/offset. |
+| `analyze_symbol` | `impl_only_requires_rust` | `impl_only=true` on a directory containing no Rust source files. |
+| `analyze_symbol` | `output_too_large` | Formatted output exceeds the size limit even with `summary=true`. |
 
 Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
 
