@@ -72,8 +72,8 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     GitRefFilterFailed,
     /// Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`.
     PaginationModeInvalid,
-    /// Call-graph pagination offset exceeds the available item count (Callers/Callees).
-    PaginationOffsetOutOfRange,
+    /// Call-graph pagination `page_size` is zero, which cannot make progress.
+    PaginationPageSizeInvalid,
     /// DefUse-mode pagination rejected the requested cursor/offset.
     PaginationDefUseInvalid,
     /// `impl_only=true` on a directory containing no Rust source files.
@@ -94,7 +94,7 @@ impl AnalyzeSymbolErrorSubtype {
             Self::InvalidCursor => "invalid_cursor",
             Self::GitRefFilterFailed => "git_ref_filter_failed",
             Self::PaginationModeInvalid => "pagination_mode_invalid",
-            Self::PaginationOffsetOutOfRange => "pagination_offset_out_of_range",
+            Self::PaginationPageSizeInvalid => "pagination_page_size_invalid",
             Self::PaginationDefUseInvalid => "pagination_def_use_invalid",
             Self::ImplOnlyRequiresRust => "impl_only_requires_rust",
             Self::OutputTooLarge => "output_too_large",
@@ -107,6 +107,13 @@ impl std::fmt::Display for AnalyzeSymbolErrorSubtype {
         f.write_str(self.as_str())
     }
 }
+
+/// An `invalid_params` result: the error is always paired with a subtype.
+pub(crate) type InvalidParamsResult<T, E> = Result<T, (E, AnalyzeSymbolErrorSubtype)>;
+
+/// A result whose error may be `invalid_params` (subtype present) or `internal_error`
+/// (subtype `None`, matching the `error_subtype` metrics contract).
+pub(crate) type SubtypedResult<T, E> = Result<T, (E, Option<AnalyzeSymbolErrorSubtype>)>;
 
 /// Helper function to emit error metrics for analyze_symbol.
 /// Extracts the error_type string from ErrorCode and records it on the span.
@@ -148,9 +155,7 @@ pub(crate) fn err_invalid_params(
 }
 
 /// Validate that `impl_only=true` is only used with directories containing Rust source files.
-pub(crate) fn validate_impl_only(
-    entries: &[WalkEntry],
-) -> Result<(), (ErrorData, AnalyzeSymbolErrorSubtype)> {
+pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> InvalidParamsResult<(), ErrorData> {
     let has_rust = entries.iter().any(|e| {
         !e.is_dir
             && e.path
@@ -180,7 +185,7 @@ pub(crate) fn validate_impl_only(
 pub(crate) fn validate_import_lookup(
     import_lookup: Option<bool>,
     symbol: &str,
-) -> Result<(), (ErrorData, AnalyzeSymbolErrorSubtype)> {
+) -> InvalidParamsResult<(), ErrorData> {
     if import_lookup == Some(true) && symbol.is_empty() {
         return Err((
             ErrorData::new(
@@ -370,7 +375,7 @@ async fn handle_import_lookup(
 #[allow(clippy::result_large_err)]
 fn decode_call_graph_cursor(
     params: &AnalyzeSymbolParams,
-) -> Result<(usize, PaginationMode), (CallToolResult, AnalyzeSymbolErrorSubtype)> {
+) -> InvalidParamsResult<(usize, PaginationMode), CallToolResult> {
     let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     let cursor_mode = cursor
@@ -474,10 +479,15 @@ async fn handle_call_graph(
     ) {
         Ok(v) => v,
         Err((e, subtype)) => {
+            let error_type_str = if subtype.is_some() {
+                "invalid_params"
+            } else {
+                "internal_error"
+            };
             emit_error_metric(
                 &ctx,
-                "invalid_params",
-                Some(subtype),
+                error_type_str,
+                subtype,
                 t_start,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
@@ -624,7 +634,7 @@ fn validate_top_level_preconditions(
     params: &AnalyzeSymbolParams,
     cursor: Option<&str>,
     span: &tracing::Span,
-) -> Result<(), (CallToolResult, AnalyzeSymbolErrorSubtype)> {
+) -> InvalidParamsResult<(), CallToolResult> {
     if std::path::Path::new(&params.path).is_file() {
         return Err((
             invalid_params_result(
@@ -876,7 +886,7 @@ mod tests {
             AnalyzeSymbolErrorSubtype::InvalidCursor,
             AnalyzeSymbolErrorSubtype::GitRefFilterFailed,
             AnalyzeSymbolErrorSubtype::PaginationModeInvalid,
-            AnalyzeSymbolErrorSubtype::PaginationOffsetOutOfRange,
+            AnalyzeSymbolErrorSubtype::PaginationPageSizeInvalid,
             AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid,
             AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust,
             AnalyzeSymbolErrorSubtype::OutputTooLarge,
@@ -895,8 +905,8 @@ mod tests {
                 AnalyzeSymbolErrorSubtype::InvalidCursor => "invalid_cursor",
                 AnalyzeSymbolErrorSubtype::GitRefFilterFailed => "git_ref_filter_failed",
                 AnalyzeSymbolErrorSubtype::PaginationModeInvalid => "pagination_mode_invalid",
-                AnalyzeSymbolErrorSubtype::PaginationOffsetOutOfRange => {
-                    "pagination_offset_out_of_range"
+                AnalyzeSymbolErrorSubtype::PaginationPageSizeInvalid => {
+                    "pagination_page_size_invalid"
                 }
                 AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid => "pagination_def_use_invalid",
                 AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust => "impl_only_requires_rust",
