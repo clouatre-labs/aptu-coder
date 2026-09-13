@@ -117,4 +117,4 @@ Lines 47-807 (call-chain/focused-analysis: `analyze_focused_with_progress`, `com
 | 2 | [#1527](https://github.com/clouatre-labs/aptu-coder/issues/1527) | Small, no readers of the removed field |
 | 3 | [#1526](https://github.com/clouatre-labs/aptu-coder/issues/1526) | Cargo.toml + shared helper, touches 3 call sites -- test each crate independently |
 | 4 | [#1530](https://github.com/clouatre-labs/aptu-coder/issues/1530) | Pure structural move, no logic change |
-| 5 | [#1529](https://github.com/clouatre-labs/aptu-coder/issues/1529) | Breaking public API change -- needs a version bump or deprecation shim, do last |
+| 5 | [#1529](https://github.com/clouatre-labs/aptu-coder/issues/1529) | Breaking public API change -- workspace version bump required, no deprecation shim, do last |
