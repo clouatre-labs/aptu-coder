@@ -1,19 +1,17 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-//! Disk-backed structural graph cache with versioned postcard encoding, fs2
-//! per-shard locking, atomic writes via NamedTempFile::persist, and size-capped
+//! Disk-backed structural graph cache with versioned postcard encoding, native
+//! per-shard advisory locking, atomic writes via NamedTempFile::persist, and size-capped
 //! LRU eviction by file mtime. All I/O errors degrade silently via tracing::warn!.
 //!
 //! `GraphDiskStore` itself and its public API compile on every target,
 //! including `wasm32-unknown-unknown`, so callers never need their own
-//! `cfg` gates. Only the actual disk I/O (which depends on `fs2` and
-//! `tempfile`, neither WASM-safe) is gated: on `wasm32`, `get` always misses
-//! and `put` is a no-op, matching aptu's `cache.rs` WASM stub pattern.
+//! `cfg` gates. Only the actual disk I/O (which depends on the file lock
+//! helper and `tempfile`, neither WASM-safe) is gated: on `wasm32`, `get`
+//! always misses and `put` is a no-op, matching aptu's `cache.rs` WASM stub pattern.
 
 use super::structural::StructuralGraph;
 use blake3;
-#[cfg(not(target_arch = "wasm32"))]
-use fs2::FileExt;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -26,39 +24,20 @@ use tracing::warn;
 const FORMAT_VERSION: u32 = 2;
 pub const DEFAULT_MAX_DISK_CACHE_BYTES: u64 = 512 * 1024 * 1024;
 
-#[cfg(not(target_arch = "wasm32"))]
-struct ShardLockGuard {
-    _file: std::fs::File,
-}
 /// `.lock` files are 0-byte advisory control files, never written to.
 /// Shard count is bounded at 256 by the 2-hex-char blake3 key prefix (`&key[..2]`).
 #[cfg(not(target_arch = "wasm32"))]
-fn lock_shard_shared(shard_dir: &Path) -> Option<ShardLockGuard> {
-    let lock_path = shard_dir.join(".lock");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .ok()?;
-    file.lock_shared().map_err(|e| {
-        warn!(error = %e, lock_path = %lock_path.display(), "graph store: shared lock failed")
-    }).ok()?;
-    Some(ShardLockGuard { _file: file })
+fn lock_shard_shared(shard_dir: &Path) -> Option<crate::file_lock::FileLockGuard> {
+    crate::file_lock::lock_shared(&shard_dir.join(".lock"))
 }
 
 /// `.lock` files are 0-byte advisory control files, never written to.
 /// Shard count is bounded at 256 by the 2-hex-char blake3 key prefix (`&key[..2]`).
 #[cfg(not(target_arch = "wasm32"))]
-fn lock_shard_exclusive(shard_dir: &Path) -> Result<ShardLockGuard, std::io::Error> {
-    let lock_path = shard_dir.join(".lock");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    file.lock_exclusive()?;
-    Ok(ShardLockGuard { _file: file })
+fn lock_shard_exclusive(
+    shard_dir: &Path,
+) -> Result<crate::file_lock::FileLockGuard, std::io::Error> {
+    crate::file_lock::lock_exclusive(&shard_dir.join(".lock"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

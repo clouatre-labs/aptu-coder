@@ -42,7 +42,6 @@ opentelemetry-otlp = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 schemars = { workspace = true }
-fs2 = { workspace = true }
 base64 = { workspace = true }
 percent-encoding = "2.3"
 
