@@ -179,11 +179,11 @@ jobs:
           shared-key: workspace-cov
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        uses: taiki-e/install-action@fa23953489c080190314742a9b907f8e97c6767c # v2.87.10
         with:
           tool: cargo-llvm-cov
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        uses: taiki-e/install-action@fa23953489c080190314742a9b907f8e97c6767c # v2.87.10
         with:
           tool: cargo-nextest
       - name: Coverage
@@ -212,7 +212,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install cargo-deny
-        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        uses: taiki-e/install-action@fa23953489c080190314742a9b907f8e97c6767c # v2.87.10
         with:
           tool: cargo-deny
       - name: Check advisories, licenses, and bans
