@@ -111,12 +111,6 @@ pub struct MetricEvent {
     /// Whether `stdin` was provided to `exec_command`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stdin_provided: bool,
-    /// Configured timeout in milliseconds for `exec_command`. `None` means no limit.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_configured_ms: Option<i64>,
-    /// Drain timeout in milliseconds for `exec_command`. `None` means default (500ms).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub drain_timeout_ms: Option<i64>,
     /// Whether a `working_dir` parameter was provided. Populated by `edit_overwrite`,
     /// `edit_replace`, and `exec_command`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -176,8 +170,6 @@ pub(crate) struct MetricEventBuilder {
     mode: Option<String>,
     impl_only: bool,
     stdin_provided: bool,
-    timeout_configured_ms: Option<i64>,
-    drain_timeout_ms: Option<i64>,
     working_dir_used: bool,
     l1_eviction_count: Option<u64>,
     l2_entry_count: Option<u64>,
@@ -336,16 +328,6 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
-    pub(crate) fn timeout_configured_ms(mut self, v: Option<i64>) -> Self {
-        self.timeout_configured_ms = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn drain_timeout_ms(mut self, v: Option<i64>) -> Self {
-        self.drain_timeout_ms = v;
-        self
-    }
-    #[must_use]
     pub(crate) fn working_dir_used(mut self, v: bool) -> Self {
         self.working_dir_used = v;
         self
@@ -409,8 +391,6 @@ impl MetricEventBuilder {
             mode: self.mode,
             impl_only: self.impl_only,
             stdin_provided: self.stdin_provided,
-            timeout_configured_ms: self.timeout_configured_ms,
-            drain_timeout_ms: self.drain_timeout_ms,
             working_dir_used: self.working_dir_used,
             l1_eviction_count: self.l1_eviction_count,
             l2_entry_count: self.l2_entry_count,
@@ -701,8 +681,6 @@ mod tests {
             mode: None,
             impl_only: false,
             stdin_provided: false,
-            timeout_configured_ms: None,
-            drain_timeout_ms: None,
             working_dir_used: false,
             l1_eviction_count: None,
             l2_entry_count: None,

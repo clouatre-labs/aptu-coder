@@ -60,19 +60,6 @@ pub struct ExecCommandParams {
     pub working_dir: Option<String>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
     pub stdin: Option<String>,
-    /// Maximum execution time in seconds. When the command exceeds this limit, the
-    /// child process is killed and the response indicates `timed_out: true`.
-    /// A value of 0 or None means no timeout (unlimited execution).
-    #[serde(default)]
-    pub timeout_secs: Option<i64>,
-    /// Drain timeout in milliseconds after the child process exits. When the child
-    /// exits but a background subprocess holds pipes open, the drain collects
-    /// buffered output for this many milliseconds before returning
-    /// `output_truncated: true`. Default: 500ms when omitted or 0.
-    /// Positive values override the default. Negative values are rejected with
-    /// INVALID_PARAMS.
-    #[serde(default)]
-    pub drain_timeout_secs: Option<i64>,
 }
 
 impl ExecCommandParams {
@@ -117,7 +104,8 @@ pub struct ShellOutput {
     /// Description of the filter applied to stdout (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_applied: Option<String>,
-    /// True when the command was killed due to exceeding `timeout_secs`.
+    /// True when the command was killed because it exceeded the server execution
+    /// timeout or the request was cancelled.
     /// When true, exit_code is None and no partial output is available.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub timed_out: bool,
@@ -658,7 +646,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Output capped at 30 KB stdout / 10 KB stderr / 2000 lines. Set working_dir to the target directory; write commands with relative paths only. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens.",
+        description = "Execute shell command via sh -c (or $SHELL if set). Output capped at 30 KB stdout / 10 KB stderr / 2000 lines. Set working_dir to the target directory; write commands with relative paths only. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. Server-side execution timeout is 300 seconds (DEFAULT_EXEC_TIMEOUT_SECS); a runaway child is killed and reported as timed_out. Post-exit pipe drain uses a 500 ms default (DEFAULT_DRAIN_TIMEOUT_MS). Timeouts are not client-configurable; send notifications/cancelled to kill a running command early (the child is killed and reaped; no response is returned for cancelled requests).",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
@@ -690,6 +678,7 @@ impl CodeAnalyzer {
             filter_table: self.filter_table.clone(),
             metrics_tx: self.metrics_tx.clone(),
             t_start,
+            ct: context.ct.clone(),
         };
         crate::tools::exec_command::exec_command_impl(params, context, ctx).await
     }

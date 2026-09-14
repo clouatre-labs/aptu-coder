@@ -1,6 +1,7 @@
 use crate::tools::exec_command::strip_cd_prefix;
 use crate::tools::exec_runtime::{
     build_exec_command, handle_output_persist, persist_interleaved_overflow, run_exec_impl,
+    run_exec_impl_with_timeouts,
 };
 use crate::{SIZE_LIMIT, STDIN_MAX_BYTES, filters::CompiledRule};
 
@@ -391,6 +392,7 @@ async fn test_run_exec_impl_raw_byte_counters() {
     // output. The command produces a small amount of stdout and stderr; counters
     // should reflect the actual bytes received, not zero.
     let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
+    let ct = tokio_util::sync::CancellationToken::new();
     let (output, raw_so, raw_se) = run_exec_impl(
         "echo hello && echo world >&2".to_string(),
         None,
@@ -398,8 +400,7 @@ async fn test_run_exec_impl_raw_byte_counters() {
         0,
         None,
         &filter_table,
-        Some(5),
-        std::time::Duration::from_millis(500),
+        ct,
     )
     .await;
 
@@ -417,17 +418,9 @@ async fn test_run_exec_impl_raw_counters_exceed_budget() {
     let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
     let large_line = "x".repeat(1000);
     let cmd = format!("for i in $(seq 1 50); do echo {}; done", large_line);
-    let (output, raw_so, _raw_se) = run_exec_impl(
-        cmd,
-        None,
-        None,
-        0,
-        None,
-        &filter_table,
-        Some(10),
-        std::time::Duration::from_millis(500),
-    )
-    .await;
+    let ct = tokio_util::sync::CancellationToken::new();
+    let (output, raw_so, _raw_se) =
+        run_exec_impl(cmd, None, None, 0, None, &filter_table, ct).await;
 
     // Raw counter should exceed the 30k budget
     assert!(raw_so > 30_000, "raw_stdout_bytes should exceed 30k budget");
@@ -441,14 +434,16 @@ async fn test_run_exec_impl_raw_counters_zero_on_timeout() {
     // Edge case: raw byte counters are 0 when timed_out=true because the
     // drain task is aborted before any output is collected.
     let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
-    let (output, raw_so, raw_se) = run_exec_impl(
+    let ct = tokio_util::sync::CancellationToken::new();
+    let (output, raw_so, raw_se) = run_exec_impl_with_timeouts(
         "sleep 2".to_string(),
         None,
         None,
         0,
         None,
         &filter_table,
-        Some(1), // 1 second timeout, sleep 2 exceeds it
+        ct,
+        std::time::Duration::from_secs(1), // 1 second timeout, sleep 2 exceeds it
         std::time::Duration::from_millis(500),
     )
     .await;
@@ -456,4 +451,47 @@ async fn test_run_exec_impl_raw_counters_zero_on_timeout() {
     assert!(output.timed_out, "command should have timed out");
     assert_eq!(raw_so, 0, "raw_stdout_bytes should be 0 on timeout");
     assert_eq!(raw_se, 0, "raw_stderr_bytes should be 0 on timeout");
+}
+
+#[tokio::test]
+async fn test_run_exec_impl_cancellation_kills_and_reaps_child() {
+    // Edge case: cancelling the request's CancellationToken mid-exec must
+    // start_kill the child, reap it (no hang), and report timed_out=true.
+    let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
+    let ct = tokio_util::sync::CancellationToken::new();
+    let ct2 = ct.clone();
+
+    let run_fut = run_exec_impl_with_timeouts(
+        "sleep 30".to_string(),
+        None,
+        None,
+        0,
+        None,
+        &filter_table,
+        ct2,
+        std::time::Duration::from_secs(300),
+        std::time::Duration::from_millis(500),
+    );
+
+    let cancel_fut = async {
+        // Give the child time to spawn, then cancel.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        ct.cancel();
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        panic!("run_exec_impl did not return within 10s of cancellation");
+    };
+
+    let (output, raw_so, raw_se) = tokio::select! {
+        biased;
+        res = run_fut => res,
+        _ = cancel_fut => unreachable!("cancel_fut panics before completing"),
+    };
+
+    assert!(
+        output.timed_out,
+        "cancelled run should report timed_out=true"
+    );
+    assert_eq!(output.exit_code, None);
+    assert_eq!(raw_so, 0);
+    assert_eq!(raw_se, 0);
 }

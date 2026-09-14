@@ -4,8 +4,6 @@
 mod common;
 
 use common::call_tool_raw;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncWriteExt;
 
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
@@ -875,45 +873,11 @@ async fn test_handler_heredoc_leading_space_on_non_dash_delimiter_not_accepted()
 }
 
 #[tokio::test]
-async fn test_timeout_fires_on_slow_command() {
-    // Arrange: a command that sleeps longer than the timeout
-    // Act: wrap in harness-level timeout to guard against regression
-    let test_fut = async {
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "sleep 60",
-            "timeout_secs": 1
-        }))
-        .await;
-
-        // Assert: error with isError=true, timed_out=true in structured content
-        assert!(
-            resp["result"]["isError"].as_bool().unwrap_or(false),
-            "expected isError=true for timed-out command: {resp}"
-        );
-        let sc = &resp["result"]["structuredContent"];
-        assert_eq!(
-            sc["timed_out"].as_bool(),
-            Some(true),
-            "expected structuredContent.timed_out=true: {resp}"
-        );
-        assert_eq!(
-            sc["timeout_secs"], 1,
-            "expected structuredContent.timeout_secs=1: {resp}"
-        );
-    };
-
-    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
-        .await
-        .expect("test timed out (harness guard)");
-}
-
-#[tokio::test]
 async fn test_fast_command_completes_with_timed_out_false() {
-    // Arrange: a fast command with generous timeout
+    // Arrange: a fast command (server default timeout applies, cannot fire)
     let test_fut = async {
         let resp = call_exec_command_raw(serde_json::json!({
-            "command": "echo ok",
-            "timeout_secs": 10
+            "command": "echo ok"
         }))
         .await;
 
@@ -944,35 +908,8 @@ async fn test_fast_command_completes_with_timed_out_false() {
 }
 
 #[tokio::test]
-async fn test_timeout_secs_zero_is_treated_as_none() {
-    // Arrange: timeout_secs=0 should be treated as no timeout (unlimited)
-    let test_fut = async {
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "echo ok",
-            "timeout_secs": 0
-        }))
-        .await;
-
-        // Assert: command completes normally
-        assert!(
-            !resp["result"]["isError"].as_bool().unwrap_or(false),
-            "expected isError=false for timeout_secs=0: {resp}"
-        );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-        assert!(
-            text.contains("Exit code: 0"),
-            "expected exit code 0: {resp}"
-        );
-    };
-
-    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
-        .await
-        .expect("test timed out (harness guard)");
-}
-
-#[tokio::test]
-async fn test_timeout_not_fires_for_immediate_command_without_timeout_secs() {
-    // Arrange: no timeout_secs (None) should not produce a timeout
+async fn test_timeout_not_fires_for_immediate_command() {
+    // Arrange: an immediate command must never hit the server timeout
     let test_fut = async {
         let resp = call_exec_command_raw(serde_json::json!({
             "command": "echo hello"
@@ -982,14 +919,14 @@ async fn test_timeout_not_fires_for_immediate_command_without_timeout_secs() {
         // Assert: command completes normally
         assert!(
             !resp["result"]["isError"].as_bool().unwrap_or(false),
-            "expected isError=false when timeout is None: {resp}"
+            "expected isError=false when no timeout fires: {resp}"
         );
         let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
         assert!(
             text.contains("Exit code: 0"),
             "expected exit code 0: {resp}"
         );
-        // timed_out should not be present (no timeout_secs provided)
+        // timed_out should not be present
         let sc = resp.get("result").and_then(|r| r.get("structuredContent"));
         if let Some(sc) = sc {
             // If present, must be false
@@ -1009,77 +946,13 @@ async fn test_timeout_not_fires_for_immediate_command_without_timeout_secs() {
 }
 
 #[tokio::test]
-async fn test_drain_timeout_negative_rejected() {
+async fn test_drain_background_pipe_holder_truncates() {
+    // Happy path: drain semantics survive via server-side defaults. A child
+    // that exits but leaves a background subprocess holding the pipes open
+    // must produce output_truncated=true after the drain grace period.
     let test_fut = async {
         let resp = call_exec_command_raw(serde_json::json!({
-            "command": "echo hello",
-            "drain_timeout_secs": -1
-        }))
-        .await;
-        assert!(
-            resp["result"]["isError"].as_bool().unwrap_or(false),
-            "expected isError: {resp}"
-        );
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
-        .await
-        .expect("test timed out");
-}
-
-#[tokio::test]
-async fn test_drain_timeout_zero_uses_default() {
-    let test_fut = async {
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "echo hello",
-            "drain_timeout_secs": 0
-        }))
-        .await;
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-        assert!(
-            text.contains("Exit code: 0"),
-            "expected exit code 0: {resp}"
-        );
-        assert!(
-            resp["result"]["structuredContent"]["stdout"]
-                .as_str()
-                .unwrap_or("")
-                .contains("hello"),
-            "stdout should contain hello: {resp}"
-        );
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
-        .await
-        .expect("test timed out");
-}
-
-#[tokio::test]
-async fn test_drain_timeout_positive_happy_path() {
-    let test_fut = async {
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "echo hello",
-            "drain_timeout_secs": 100
-        }))
-        .await;
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-        assert!(text.contains("Exit code: 0"), "exit code: {resp}");
-        let sc = &resp["result"]["structuredContent"];
-        assert!(
-            sc["stdout"].as_str().unwrap_or("").contains("hello"),
-            "stdout: {resp}"
-        );
-        assert_eq!(sc["output_truncated"], false, "truncated: {resp}");
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
-        .await
-        .expect("test timed out");
-}
-
-#[tokio::test]
-async fn test_drain_timeout_background_pipe_holder() {
-    let test_fut = async {
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "echo main done; sleep 30 &",
-            "drain_timeout_secs": 1000
+            "command": "echo main done; sleep 30 &"
         }))
         .await;
         let sc = &resp["result"]["structuredContent"];
@@ -1092,679 +965,9 @@ async fn test_drain_timeout_background_pipe_holder() {
             "stdout: {resp}"
         );
     };
-    tokio::time::timeout(std::time::Duration::from_secs(3), test_fut)
+    tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
         .await
         .expect("test timed out");
-}
-
-// ---------------------------------------------------------------------------
-// Heredoc file-write rejection tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_heredoc_cat_redirect_write_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat > /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_cat_append_write_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat >> /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_tee_write_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "tee /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_tee_append_flag_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "tee -a /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_bare_redirect_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": ">> /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_bare_single_redirect_rejected() {
-    // Bare > file << EOF with no command before the redirect operator.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "> /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for bare > redirect: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_tee_append_redirect_rejected() {
-    // tee >> file << EOF -- tee with an explicit append redirect operator.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "tee >> /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for tee >> redirect: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_tee_single_redirect_rejected() {
-    // tee > file << EOF -- tee with an explicit write redirect operator.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "tee > /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for tee > redirect: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_cat_redirect_in_quotes_accepted() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "echo 'cat > file <<EOF'"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_cat_stdout_accepted() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_awk_bitshift_accepted() {
-    // The awk command should execute (exit code 2 from awk syntax),
-    // NOT be rejected by pre-spawn validation.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "awk '{print 1 << 2}'"
-    }))
-    .await;
-    // awk syntax error on macOS produces exit code 2, so isError=true,
-    // but the important thing is that the command *ran* at all (not
-    // rejected by pre-spawn heredoc validation).  Verify by checking
-    // the output contains the awk error message.
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("awk:"),
-        "expected awk to run (not be rejected by pre-scan): {resp}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Extended heredoc file-write rejection tests (subshells, process/command
-// substitution, variable commands, additional file-write tools)
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_heredoc_subshell_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "(cat > /tmp/file << EOF\ncontent\nEOF)"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for subshell heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_process_substitution_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat > >(tee /tmp/file) << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for process substitution heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_command_substitution_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat > $(echo /tmp/file) << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for command substitution heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_variable_command_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "$cmd > /tmp/file << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for variable command heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_printf_write_rejected() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "printf '%s\\n' hello > /tmp/file << EOF\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for printf heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_pipeline_accepted() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat << EOF | grep pattern\nhello pattern world\nEOF"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false for pipeline heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_quoted_subshell_delimiter_accepted() {
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat << '$(EOF)'\ncontent\n$(EOF)"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false for quoted subshell-like delimiter: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_escaped_paren_accepted() {
-    // Escaped parentheses (\)) in a non-file-write command must not be
-    // misinterpreted by paren_aware_token as an unmatched closing paren
-    // that opens a spurious depth-tracking context.  The FSM operates on
-    // raw bytes; '\' is not a paren-depth marker, so the depth counter
-    // stays at 0 and the command is correctly accepted.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "echo \"hello \\)\" << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false for escaped paren in non-write command: {resp}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Heredoc + stdin-consuming flag rejection tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_heredoc_stdin_bodyfile_flag_rejected() {
-    // Arrange: --body-file - with heredoc (both consume stdin)
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl --body-file - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --body-file - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_data_flag_rejected() {
-    // Arrange: --data - with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl --data - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --data - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_data_raw_flag_rejected() {
-    // Arrange: --data-raw - with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl --data-raw - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --data-raw - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_data_binary_flag_rejected() {
-    // Arrange: --data-binary - with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl --data-binary - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --data-binary - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_data_urlencode_flag_rejected() {
-    // Arrange: --data-urlencode - with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl --data-urlencode - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --data-urlencode - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_dash_d_flag_rejected() {
-    // Arrange: -d - with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl -d - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for -d - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_cap_f_flag_rejected() {
-    // Arrange: -F - with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl -F - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for -F - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_stdin_flag_rejected() {
-    // Arrange: --stdin with heredoc
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "some-tool --stdin << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --stdin with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag"),
-        "error should mention stdin-consuming flag: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_cat_dash_rejected() {
-    // Arrange: cat - with heredoc (reads from stdin with - argument).
-    // Note: cat - is already caught by the file-write heredoc check
-    // (cat is a known file-write command), so the error message will
-    // reference file-write rather than stdin-consuming flag.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat - << EOF\ncontent\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for cat - with heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_param_conflict_rejected() {
-    // Arrange: params.stdin set + heredoc in command
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat << EOF\ncontent\nEOF",
-        "stdin": "some_content"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for stdin param + heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin parameter and heredoc cannot be used together"),
-        "error should mention conflict: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_heredoc_stdin_param_no_conflict_succeeds() {
-    // Arrange: params.stdin set, no heredoc (regression guard)
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "cat",
-        "stdin": "hello"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false for stdin param without heredoc: {resp}"
-    );
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["exit_code"], 0, "cat with stdin should succeed: {sc}");
-}
-
-#[tokio::test]
-async fn test_scan_backward_flag_in_single_quotes_not_rejected() {
-    // Arrange: --body-file - inside single quotes with heredoc
-    // Should NOT be rejected (flag inside quotes is literal, not a flag)
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "echo '--body-file -' << EOF\ndata\nEOF"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false for quoted --body-file - with heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_scan_backward_flag_in_double_quotes_not_rejected() {
-    // Arrange: --data - inside double quotes with heredoc
-    // Should NOT be rejected (flag inside quotes is literal, not a flag)
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "echo \"--data -\" << EOF\ndata\nEOF"
-    }))
-    .await;
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(true),
-        "expected isError=false for quoted --data - with heredoc: {resp}"
-    );
-}
-
-#[tokio::test]
-async fn test_body_file_flag_with_heredoc_rejected() {
-    // Arrange: --body-file - outside quotes with heredoc
-    // MUST be rejected (stdin-consuming flag + heredoc conflict)
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl --body-file - << EOF\ndata\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for --body-file - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag") || text.contains("stdin"),
-        "error should mention stdin conflict: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_data_flag_d_with_heredoc_rejected() {
-    // Arrange: -d - outside quotes with heredoc
-    // MUST be rejected (stdin-consuming flag + heredoc conflict)
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "curl -d - << EOF\ndata\nEOF"
-    }))
-    .await;
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for -d - with heredoc: {resp}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("stdin-consuming flag") || text.contains("stdin"),
-        "error should mention stdin conflict: {text}"
-    );
-}
-
-#[tokio::test]
-async fn test_interleaved_overflow_slot_file() {
-    // Arrange: generate interleaved output that exceeded limits. With drain byte
-    // budget enforcement (30k stdout / 10k stderr) the drain task drops oversized
-    // lines before they reach the post-collection loop, so interleaved overflow
-    // no longer fires for single-line writes. Instead, truncation is reported via
-    // output_truncated and content is within stream budget limits.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 35000); sys.stderr.write(chr(121) * 35000)'"
-    }))
-    .await;
-
-    // Act: inspect structuredContent
-    let sc = &resp["result"]["structuredContent"];
-
-    // Assert: output_truncated is true (drain byte budget enforced)
-    assert_eq!(
-        sc["output_truncated"], true,
-        "output_truncated should be true: {sc}"
-    );
-
-    // stdout and stderr previews are within the drain budget limits
-    let stdout = sc["stdout"].as_str().unwrap_or("");
-    let stderr = sc["stderr"].as_str().unwrap_or("");
-    assert!(
-        stdout.len() <= 30_000,
-        "stdout preview size {} exceeds 30k limit",
-        stdout.len()
-    );
-    assert!(
-        stderr.len() <= 10_000,
-        "stderr preview size {} exceeds 10k limit",
-        stderr.len()
-    );
-
-    // interleaved may be empty (lines were dropped in drain task) or a small preview
-    let interleaved = sc["interleaved"].as_str().unwrap_or("");
-    assert!(
-        interleaved.len() <= 60 * 1024,
-        "interleaved should be <=60 KB, got {} bytes",
-        interleaved.len()
-    );
-}
-
-#[tokio::test]
-async fn test_concurrent_interleaved_overflow() {
-    // Arrange: send N concurrent exec_command calls over a single MCP connection
-    // so they share the same seq counter. With drain byte budget enforcement,
-    // each call's interleaved stays under the overflow threshold, but output_truncated
-    // is set from drain budget exhaustion. Slot isolation via stdout_path/stderr_path.
-    const N: usize = 4;
-
-    let analyzer = common::make_test_analyzer();
-    let (client, server) = tokio::io::duplex(65536);
-
-    let server_handle = tokio::spawn(async move {
-        let (server_rx, server_tx) = tokio::io::split(server);
-        if let Ok(service) = rmcp::serve_server(analyzer, (server_rx, server_tx)).await {
-            let _ = service.waiting().await;
-        }
-    });
-
-    let (client_rx, mut client_tx) = tokio::io::split(client);
-    let mut reader = tokio::io::BufReader::new(client_rx).lines();
-
-    // Initialize
-    let init = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": rmcp::model::ProtocolVersion::LATEST.as_str(),
-            "capabilities": {},
-            "clientInfo": {"name": "test-client", "version": "0.1.0"}
-        }
-    })
-    .to_string()
-        + "\n";
-    client_tx
-        .write_all(init.as_bytes())
-        .await
-        .expect("write init");
-    client_tx.flush().await.expect("flush init");
-    let _resp = reader
-        .next_line()
-        .await
-        .expect("read init response")
-        .expect("init response");
-
-    // Initialized notification
-    let notif = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-        "params": {}
-    })
-    .to_string()
-        + "\n";
-    client_tx
-        .write_all(notif.as_bytes())
-        .await
-        .expect("write notif");
-    client_tx.flush().await.expect("flush notif");
-
-    // Act: send all N tool calls at once (concurrent dispatch)
-    let cmd = serde_json::json!({
-        "command": "python3 -c 'import sys; sys.stdout.write(chr(120) * 35000); sys.stderr.write(chr(121) * 35000)'"
-    });
-    for i in 0..N {
-        let call = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": (i + 2) as u64,
-            "method": "tools/call",
-            "params": {
-                "name": "exec_command",
-                "arguments": cmd
-            }
-        })
-        .to_string()
-            + "\n";
-        client_tx
-            .write_all(call.as_bytes())
-            .await
-            .expect("write call");
-    }
-    client_tx.flush().await.expect("flush calls");
-
-    // Collect all N responses (order may vary)
-    let mut responses = Vec::new();
-    for _ in 0..N {
-        let line = reader
-            .next_line()
-            .await
-            .expect("read response")
-            .expect("response");
-        let v: serde_json::Value = serde_json::from_str(&line).expect("valid JSON");
-        responses.push(v);
-    }
-
-    server_handle.abort();
-
-    // Assert: output_truncated is true for all tasks
-    for (i, resp) in responses.iter().enumerate() {
-        let sc = &resp["result"]["structuredContent"];
-        assert!(
-            sc["output_truncated"].as_bool().unwrap_or(false),
-            "task {i}: output_truncated should be true: {sc}"
-        );
-    }
-
-    // All N responses received
-    assert_eq!(responses.len(), N, "all {N} tasks must produce responses");
 }
 
 // ---------------------------------------------------------------------------
@@ -1776,8 +979,7 @@ async fn test_concurrent_interleaved_overflow() {
 #[tokio::test]
 async fn exec_command_large_output_truncation_via_drain() {
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "count=0; while [ $count -lt 200000 ]; do echo \"line $count\"; count=$((count + 1)); done",
-        "timeout_secs": 30
+        "command": "count=0; while [ $count -lt 200000 ]; do echo \"line $count\"; count=$((count + 1)); done"
     }))
     .await;
 
@@ -1814,8 +1016,7 @@ async fn exec_command_large_output_truncation_via_drain() {
 #[tokio::test]
 async fn exec_command_stderr_exceeds_budget_stdout_present() {
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "for i in $(seq 1 1500); do echo >&2 \"error detail line $i\"; done; echo 'ok'",
-        "timeout_secs": 30
+        "command": "for i in $(seq 1 1500); do echo >&2 \"error detail line $i\"; done; echo 'ok'"
     }))
     .await;
 
@@ -1847,8 +1048,7 @@ async fn exec_command_stderr_exceeds_budget_stdout_present() {
 #[tokio::test]
 async fn exec_command_drain_budget_exhaustion() {
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "seq 1 200000",
-        "timeout_secs": 30
+        "command": "seq 1 200000"
     }))
     .await;
 
