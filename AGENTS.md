@@ -49,12 +49,11 @@ Integration tests for the `aptu-coder` crate live in `crates/aptu-coder/tests/`.
 
 Patterns contributors consistently get wrong:
 
-- Use `ContentBlock`, not `Content` (renamed in rmcp v2) or `RawContent` (never existed)
+- Use `ContentBlock`, not `Content` or `RawContent`
 - Every `#[tool(...)]` requires `output_schema = schema_for_type::<T>()` and `title = "..."`
 - Tool methods take `_context: RequestContext<RoleServer>` as second parameter
 - `#[tool_router]` goes on `impl CodeAnalyzer`; `#[tool_handler]` goes on `impl ServerHandler for CodeAnalyzer` -- they are separate impls
 - Apply `.with_meta(Some(no_cache_meta()))` on every `CallToolResult::success(...)` response
-- Transport entry point: `let (stdin, stdout) = stdio(); let service = serve_server(analyzer, (stdin, stdout)).await?; service.waiting().await?`
 
 ## Adding a language
 
