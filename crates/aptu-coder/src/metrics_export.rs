@@ -438,7 +438,6 @@ pub fn migrate_legacy_metrics_dir() -> std::io::Result<()> {
     migrate_legacy_metrics_dir_impl(&home)
 }
 
-#[allow(dead_code)]
 fn migrate_legacy_metrics_dir_impl(home: &str) -> std::io::Result<()> {
     let old_dir = PathBuf::from(home).join(".local/share/code-analyze-mcp");
     let new_dir = PathBuf::from(home).join(".local/share/aptu-coder");
