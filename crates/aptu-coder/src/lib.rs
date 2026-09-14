@@ -273,7 +273,6 @@ impl CodeAnalyzer {
             cache: self.cache.clone(),
             disk_cache: self.disk_cache.clone(),
             metrics_tx: self.metrics_tx.clone(),
-            peer: self.peer.clone(),
             sid: self.session_id.lock().await.clone(),
         };
         crate::tools::server::handle_overview_mode(&ctx, params, ct).await
@@ -350,7 +349,6 @@ impl CodeAnalyzer {
             cache: self.cache.clone(),
             disk_cache: self.disk_cache.clone(),
             metrics_tx: self.metrics_tx.clone(),
-            peer: self.peer.clone(),
             sid: sid.clone(),
         };
         tools::analyze_directory::analyze_directory_handler(
