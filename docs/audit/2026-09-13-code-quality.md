@@ -29,13 +29,15 @@ All 5 findings survived verification as **CONFIRMED**, several with corrections 
 
 ## Summary Table
 
-| # | Category | Finding | Verdict | Issue |
-|---|---|---|---|---|
-| 1 | Dependency / Duplication | Three near-identical file-lock RAII implementations built on `fs2`; std has native locking since Rust 1.89 | CONFIRMED | [#1526](https://github.com/clouatre-labs/aptu-coder/issues/1526) |
-| 2 | Dead Code | `AnalyzeDirectoryContext.peer` field written but never read | CONFIRMED | [#1527](https://github.com/clouatre-labs/aptu-coder/issues/1527) |
-| 3 | Dead Code | Stale `#[allow(dead_code)]` on a function with a real production caller | CONFIRMED | [#1528](https://github.com/clouatre-labs/aptu-coder/issues/1528) |
-| 4 | API Surface | `edit_replace_block` is a dead pass-through; its sibling is also a trivial forward | CONFIRMED | [#1529](https://github.com/clouatre-labs/aptu-coder/issues/1529) |
-| 5 | Structure | `analyze_focused.rs` mixes two call-graph-disjoint concerns in one 1219-line file | CONFIRMED | [#1530](https://github.com/clouatre-labs/aptu-coder/issues/1530) |
+| # | Category | Finding | Verdict | Issue | Resolution |
+|---|---|---|---|---|---|
+| 1 | Dependency / Duplication | Three near-identical file-lock RAII implementations built on `fs2`; std has native locking since Rust 1.89 | CONFIRMED | [#1526](https://github.com/clouatre-labs/aptu-coder/issues/1526) | Resolved via [#1533](https://github.com/clouatre-labs/aptu-coder/pull/1533) |
+| 2 | Dead Code | `AnalyzeDirectoryContext.peer` field written but never read | CONFIRMED | [#1527](https://github.com/clouatre-labs/aptu-coder/issues/1527) | Resolved via [#1534](https://github.com/clouatre-labs/aptu-coder/pull/1534) |
+| 3 | Dead Code | Stale `#[allow(dead_code)]` on a function with a real production caller | CONFIRMED | [#1528](https://github.com/clouatre-labs/aptu-coder/issues/1528) | Resolved via [#1537](https://github.com/clouatre-labs/aptu-coder/pull/1537) |
+| 4 | API Surface | `edit_replace_block` is a dead pass-through; its sibling is also a trivial forward | CONFIRMED | [#1529](https://github.com/clouatre-labs/aptu-coder/issues/1529) | Resolved via [#1538](https://github.com/clouatre-labs/aptu-coder/pull/1538) |
+| 5 | Structure | `analyze_focused.rs` mixes two call-graph-disjoint concerns in one 1219-line file | CONFIRMED | [#1530](https://github.com/clouatre-labs/aptu-coder/issues/1530) | Resolved via [#1539](https://github.com/clouatre-labs/aptu-coder/pull/1539) |
+
+All five findings were remediated on main following the order above. Regression status at closure: `cargo test` 810 passed / 0 failed, `cargo clippy --all-targets -- -D warnings` clean, `cargo fmt --check` clean.
 
 ---
 
