@@ -81,8 +81,7 @@ Follow an existing handler in `crates/aptu-coder-core/src/languages/`. The exten
 - Implement features not specified in the assigned issue
 - Modify files outside the scope of the assigned issue
 - Assume any API exists based on training data; verify against installed crate versions
-- Reference host-specific tools or clients in tool descriptions or server instructions (e.g. Claude Code's Grep, Glob, Read)
+- Reference host-specific tools or clients in tool descriptions or server instructions (e.g. Claude Code's Grep, Glob, Read), including host-specific environment variables such as `DISABLE_PROMPT_CACHING`; it was removed from server instructions (stale v8/v9 benchmark guidance, non-actionable by the reading LLM)
 - Use `gh release create` to tag releases; always create a GPG-signed annotated tag and push it to trigger the release workflow
 - Never revert `release.yml` `update-homebrew` to full formula regeneration; it must update URLs and SHA256s in-place so that structural changes in `clouatre-labs/homebrew-tap/Formula/aptu-coder.rb` survive releases
-- Remove `DISABLE_PROMPT_CACHING=1` from server instructions; caching data never read again is detrimental
 - Use relative links in `README.md`; all links must be absolute (`https://github.com/clouatre-labs/aptu-coder/blob/main/...`) so they resolve correctly when README is rendered on crates.io, docs.rs, and other mirrors

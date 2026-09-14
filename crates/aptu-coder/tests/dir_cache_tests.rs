@@ -174,7 +174,6 @@ async fn test_dir_cache_out_of_scope_file_does_not_bust() {
         "path": dir.path().to_str().unwrap(),
         "git_ref": "HEAD",
         "max_depth": 0,
-        "page_size": 100
     });
 
     let mut mcp = SequentialMcp::new().await;
@@ -232,7 +231,6 @@ async fn test_dir_cache_in_scope_file_change_still_invalidates() {
         "path": dir.path().to_str().unwrap(),
         "git_ref": "HEAD",
         "max_depth": 0,
-        "page_size": 100
     });
 
     let mut mcp = SequentialMcp::new().await;
@@ -305,7 +303,6 @@ async fn test_dir_cache_out_of_scope_depth_file_does_not_bust() {
     let params = serde_json::json!({
         "path": root.to_str().unwrap(),
         "max_depth": 2,
-        "page_size": 100
     });
 
     let mut mcp = SequentialMcp::new().await;
@@ -369,7 +366,6 @@ async fn test_dir_cache_in_scope_depth_file_change_still_invalidates() {
     let params = serde_json::json!({
         "path": root.to_str().unwrap(),
         "max_depth": 2,
-        "page_size": 100
     });
 
     let mut mcp = SequentialMcp::new().await;

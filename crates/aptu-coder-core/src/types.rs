@@ -77,12 +77,6 @@ pub struct PaginationParams {
     /// Must be a valid opaque token or omitted entirely; passing an empty string is invalid and is treated as omitted.
     /// Mutually exclusive with summary=true; passing both returns INVALID_PARAMS.
     pub cursor: Option<String>,
-    /// Files per page for pagination (default: 100). Reduce below 100 to limit response size; increase above 100 to reduce round trips.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::option_page_size_schema")
-    )]
-    pub page_size: Option<usize>,
 }
 
 /// Output control parameters shared across all tools.
@@ -691,7 +685,7 @@ mod tests {
     fn schema_flatten_inline() {
         use schemars::schema_for;
 
-        // Test AnalyzeDirectoryParams: cursor, page_size, force, summary must be top-level
+        // Test AnalyzeDirectoryParams: cursor, force, summary must be top-level
         let dir_schema = schema_for!(AnalyzeDirectoryParams);
         let dir_props = dir_schema
             .as_object()
@@ -704,8 +698,8 @@ mod tests {
             "cursor must be top-level in AnalyzeDirectoryParams schema"
         );
         assert!(
-            dir_props.contains_key("page_size"),
-            "page_size must be top-level in AnalyzeDirectoryParams schema"
+            !dir_props.contains_key("page_size"),
+            "page_size must be ABSENT from AnalyzeDirectoryParams schema"
         );
         assert!(
             dir_props.contains_key("summary"),
@@ -725,8 +719,8 @@ mod tests {
             "cursor must be top-level in AnalyzeFileParams schema"
         );
         assert!(
-            file_props.contains_key("page_size"),
-            "page_size must be top-level in AnalyzeFileParams schema"
+            !file_props.contains_key("page_size"),
+            "page_size must be ABSENT from AnalyzeFileParams schema"
         );
         assert!(
             file_props.contains_key("summary"),
@@ -746,8 +740,8 @@ mod tests {
             "cursor must be top-level in AnalyzeSymbolParams schema"
         );
         assert!(
-            symbol_props.contains_key("page_size"),
-            "page_size must be top-level in AnalyzeSymbolParams schema"
+            !symbol_props.contains_key("page_size"),
+            "page_size must be ABSENT from AnalyzeSymbolParams schema"
         );
         assert!(
             symbol_props.contains_key("summary"),

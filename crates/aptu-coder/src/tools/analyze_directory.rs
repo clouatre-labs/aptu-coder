@@ -8,7 +8,10 @@
 use aptu_coder_core::analyze;
 use aptu_coder_core::cache::{CacheTier, DirectoryCacheKey};
 use aptu_coder_core::formatter::{format_structure_paginated, format_summary};
-use aptu_coder_core::pagination::{DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor};
+use aptu_coder_core::pagination::{PaginationMode, decode_cursor};
+
+/// Fixed server-side page size for analyze_directory. Clients cannot override it.
+const ANALYZE_DIRECTORY_PAGE_SIZE: usize = 50;
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
@@ -285,7 +288,7 @@ pub(crate) async fn analyze_directory_handler(
         );
     }
 
-    let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
+    let page_size = ANALYZE_DIRECTORY_PAGE_SIZE;
     let offset = if let Some(cursor_str) = cursor {
         let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
             ErrorData::new(

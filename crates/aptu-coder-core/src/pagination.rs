@@ -10,6 +10,7 @@ use base64::{DecodeError, engine::Engine};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Legacy default kept for internal callers (MCP Resources) that do not take client page sizes.
 pub const DEFAULT_PAGE_SIZE: usize = 100;
 pub const MAX_PAGE_SIZE: usize = 10_000;
 
