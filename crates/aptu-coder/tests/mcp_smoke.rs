@@ -54,7 +54,7 @@ fn test_mcp_server_responds_to_tools_call() {
     stdin.write_all(b"\n").expect("failed to write newline");
 
     // Send tool call
-    let tool_call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_directory","arguments":{"path":"src","max_depth":1,"page_size":100,"summary":true}}}"#;
+    let tool_call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_directory","arguments":{"path":"src","max_depth":1,"summary":true}}}"#;
     stdin
         .write_all(tool_call.as_bytes())
         .expect("failed to write");
@@ -155,14 +155,14 @@ fn test_mcp_server_recovers_after_tool_error() {
         thread::sleep(Duration::from_millis(500));
 
         // Tool call with a nonexistent path — must return isError=true, not crash.
-        let bad = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_file","arguments":{"path":"/nonexistent/does_not_exist.py","page_size":null}}}"#;
+        let bad = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_file","arguments":{"path":"/nonexistent/does_not_exist.py"}}}"#;
         stdin.write_all(bad.as_bytes()).expect("write bad call");
         stdin.write_all(b"\n").expect("newline");
 
         thread::sleep(Duration::from_millis(2000));
 
         // Follow-up call — server must still be alive.
-        let good = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"analyze_directory","arguments":{"path":"src","max_depth":1,"page_size":100,"summary":true}}}"#;
+        let good = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"analyze_directory","arguments":{"path":"src","max_depth":1,"summary":true}}}"#;
         stdin.write_all(good.as_bytes()).expect("write good call");
         stdin.write_all(b"\n").expect("newline");
 

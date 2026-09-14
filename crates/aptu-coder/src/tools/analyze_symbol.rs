@@ -7,10 +7,11 @@
 
 use aptu_coder_core::analyze;
 use aptu_coder_core::cache::{CacheTier, CallGraphCache, StructuralGraphCache};
-use aptu_coder_core::pagination::{
-    CursorData, DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor, encode_cursor,
-};
+use aptu_coder_core::pagination::{CursorData, PaginationMode, decode_cursor, encode_cursor};
 use aptu_coder_core::schema_helpers::MAX_FOLLOW_DEPTH;
+
+/// Fixed server-side page size for analyze_symbol. Clients cannot override it.
+const ANALYZE_SYMBOL_PAGE_SIZE: usize = 20;
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
@@ -72,7 +73,8 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     GitRefFilterFailed,
     /// Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`.
     PaginationModeInvalid,
-    /// Call-graph pagination `page_size` is zero, which cannot make progress.
+    /// Internal guard: zero page size cannot make pagination progress. Kept as a
+    /// defensive check for `paginate_slice` even though client `page_size` was removed.
     PaginationPageSizeInvalid,
     /// DefUse-mode pagination rejected the requested cursor/offset.
     PaginationDefUseInvalid,
@@ -452,7 +454,7 @@ async fn handle_call_graph(
     // Surface cache tier in structuredContent for observability and testing.
     output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
 
-    let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
+    let page_size = ANALYZE_SYMBOL_PAGE_SIZE;
     let (offset, cursor_mode) = match decode_call_graph_cursor(&params) {
         Ok(v) => v,
         Err((e, subtype)) => {

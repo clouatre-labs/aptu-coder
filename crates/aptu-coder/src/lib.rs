@@ -371,7 +371,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with cursor/page_size; use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with an opaque cursor; page size is fixed at 50 server-side and a client page_size parameter is not accepted. Use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -739,7 +739,7 @@ impl ServerHandler for CodeAnalyzer {
             2. Re-run analyze_directory(path=<source_package>, max_depth=2, summary=true) for module map. Include test directories (tests/, *_test.go, test_*.py, test_*.rs, *.spec.ts, *.spec.js).\n\
             3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types.\n\
             4. Use analyze_symbol to trace call graphs.\n\
-            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with cursor/page_size. For subagents: DISABLE_PROMPT_CACHING=1.\n\
+            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with the opaque cursor; page sizes are fixed server-side (analyze_directory 50, analyze_file 50, analyze_symbol 20) and a client page_size parameter is not accepted. For subagents: DISABLE_PROMPT_CACHING=1.\n\
             JSONL metrics at $HOME/.local/share/aptu-coder/ (or $XDG_DATA_HOME/aptu-coder/). Always cd there before jq glob queries."
         );
         let capabilities = ServerCapabilities::builder()

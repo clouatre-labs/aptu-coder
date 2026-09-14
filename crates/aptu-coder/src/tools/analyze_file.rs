@@ -8,7 +8,10 @@
 use aptu_coder_core::analyze;
 use aptu_coder_core::cache::{CacheKey, CacheTier};
 use aptu_coder_core::formatter::{format_file_details_paginated, format_file_details_summary};
-use aptu_coder_core::pagination::{DEFAULT_PAGE_SIZE, PaginationMode, decode_cursor};
+use aptu_coder_core::pagination::{PaginationMode, decode_cursor};
+
+/// Fixed server-side page size for analyze_file. Clients cannot override it.
+const ANALYZE_FILE_PAGE_SIZE: usize = 50;
 use aptu_coder_core::parser::ParserError;
 use aptu_coder_core::types::{AnalysisMode, AnalyzeFileParams, FunctionInfo};
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
@@ -244,7 +247,7 @@ pub(crate) async fn analyze_file_handler(
         )));
     }
 
-    let page_size = params.pagination.page_size.unwrap_or(DEFAULT_PAGE_SIZE);
+    let page_size = ANALYZE_FILE_PAGE_SIZE;
     let offset = if let Some(cursor_str) = cursor {
         let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
             ErrorData::new(

@@ -23,7 +23,6 @@ async fn transport_stays_open_after_tracing_event() {
             "analyze_file",
             serde_json::json!({
                 "path": "Cargo.toml",
-                "page_size": 100
             }),
         ),
         (

@@ -44,8 +44,7 @@ async fn test_no_cache_meta_on_pagination_error() {
             "symbol": "test_symbol",
             "follow_depth": 1,
             "max_depth": 3,
-            "page_size": 100,
-            "def_use": true,
+                        "def_use": true,
             "cursor": "INVALID_CORRUPTED_CURSOR_12345"
         }),
     )
@@ -85,7 +84,6 @@ async fn test_analyze_directory_bounded_traversal_skips_deep() {
         serde_json::json!({
             "path": root.to_str().unwrap(),
             "max_depth": 2,
-            "page_size": 100
         }),
     )
     .await;
@@ -118,7 +116,7 @@ async fn test_path_outside_cwd_rejected() {
         serde_json::json!({
             "path": "/etc/passwd",
             "max_depth": 0,
-            "page_size": 10
+
         }),
     )
     .await;
@@ -237,7 +235,6 @@ async fn test_fields_functions_only_structured() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "page_size": null,
             "fields": ["functions"]
         }),
     )
@@ -294,7 +291,6 @@ async fn test_fields_classes_only_structured() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "page_size": null,
             "fields": ["classes"]
         }),
     )
@@ -351,7 +347,6 @@ async fn test_fields_imports_only_structured() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "page_size": null,
             "fields": ["imports"]
         }),
     )
@@ -408,7 +403,6 @@ async fn test_fields_none_structured_full() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "page_size": null
         }),
     )
     .await;
@@ -810,7 +804,6 @@ async fn test_analyze_directory_default_max_depth_is_three() {
         "analyze_directory",
         serde_json::json!({
             "path": base.to_str().expect("path is valid UTF-8"),
-            "page_size": 100
         }),
     )
     .await;
@@ -847,7 +840,6 @@ async fn test_analyze_directory_explicit_max_depth_zero_unlimited() {
         serde_json::json!({
             "path": base.to_str().expect("path is valid UTF-8"),
             "max_depth": 0,
-            "page_size": 100
         }),
     )
     .await;
@@ -1099,8 +1091,7 @@ async fn test_analyze_file_empty_string_cursor_returns_first_page() {
         "analyze_file",
         serde_json::json!({
             "path": f.path().to_str().unwrap(),
-            "page_size": 100,
-            "cursor": ""
+                        "cursor": ""
         }),
     )
     .await;
@@ -1123,8 +1114,7 @@ async fn test_analyze_directory_empty_string_cursor_returns_first_page() {
         "analyze_directory",
         serde_json::json!({
             "path": dir.path().to_str().unwrap(),
-            "page_size": 100,
-            "cursor": ""
+                        "cursor": ""
         }),
     )
     .await;
@@ -1187,5 +1177,76 @@ async fn test_analyze_directory_summary_true_empty_string_cursor_no_conflict() {
     assert!(
         !resp["result"]["isError"].as_bool().unwrap_or(false),
         "expected success with summary=true and cursor=\"\"; got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_directory_cursor_continuation_fixed_page_size() {
+    // Arrange: temp dir with 60 files so the fixed server page size (50) forces
+    // two pages; the second call passes ONLY the cursor (no page_size).
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let base = temp_dir.path();
+    for i in 0..60 {
+        let name = base.join(format!("file_{i:02}.rs"));
+        std::fs::write(&name, format!("fn f_{i:02}() {{}}")).expect("write file");
+    }
+
+    let path = base.to_str().expect("path is valid UTF-8");
+    let resp1 = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({ "path": path, "max_depth": 0, "summary": false }),
+    )
+    .await;
+    assert!(
+        !resp1["result"]["isError"].as_bool().unwrap_or(false),
+        "page 1 expected success, got: {resp1}"
+    );
+    let cursor = resp1["result"]["structuredContent"]["next_cursor"]
+        .as_str()
+        .expect("page 1 of 60 files must emit next_cursor at fixed page size 50");
+
+    // Act: continue with only the cursor.
+    let resp2 = call_tool_raw(
+        "analyze_directory",
+        serde_json::json!({ "path": path, "max_depth": 0, "summary": false, "cursor": cursor }),
+    )
+    .await;
+
+    // Assert: second page succeeds and terminates without another cursor.
+    assert!(
+        !resp2["result"]["isError"].as_bool().unwrap_or(false),
+        "page 2 expected success, got: {resp2}"
+    );
+    assert!(
+        resp2["result"]["structuredContent"]["next_cursor"].is_null(),
+        "second page must terminate without next_cursor: {resp2}"
+    );
+    let text = resp2["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("file_59.rs"),
+        "second page must contain remaining files: {text}"
+    );
+}
+
+#[tokio::test]
+async fn test_analyze_symbol_legacy_page_size_silently_ignored() {
+    // Arrange/Act: send legacy page_size argument; serde must accept and ignore it
+    // (fixed server page size of 20 applies instead).
+    let resp = call_tool_raw(
+        "analyze_symbol",
+        serde_json::json!({
+            "path": "src",
+            "symbol": "no_cache_meta",
+            "match_mode": "exact",
+            "page_size": 30
+        }),
+    )
+    .await;
+
+    // Assert: accepted without error.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "legacy page_size must be silently ignored, got: {resp}"
     );
 }
