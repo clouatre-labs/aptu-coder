@@ -131,23 +131,12 @@ pub fn edit_overwrite_content(
     })
 }
 
-pub fn edit_replace_block(
-    path: &Path,
-    old_text: &str,
-    new_text: &str,
-) -> Result<EditReplaceOutput, EditError> {
-    edit_replace_block_inner(path, old_text, new_text, false, None)
-}
-
-/// Same as `edit_replace_block` but with an explicit `replace_all` flag and an
-/// optional `expected_content_hash` for optimistic-concurrency staleness
-/// detection.
-///
-/// When `replace_all` is true, all non-overlapping occurrences of `old_text`
-/// are replaced in a single pass. When `expected_content_hash` is `Some`, the
+/// Replaces an exact text block; `old_text` must appear exactly once unless
+/// `replace_all` is true, in which case all non-overlapping occurrences are
+/// replaced in a single pass. When `expected_content_hash` is `Some`, the
 /// raw file bytes are hashed with blake3 and compared before the edit proceeds.
 /// A mismatch returns `EditError::StaleContentHash`.
-pub fn edit_replace_block_with_options(
+pub fn edit_replace_block(
     path: &Path,
     old_text: &str,
     new_text: &str,
@@ -328,7 +317,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let result = edit_replace_block(&path, "bar", "qux").unwrap();
+        let result = edit_replace_block(&path, "bar", "qux", false, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "foo qux baz");
         assert_eq!(result.bytes_before, 11);
         assert_eq!(result.bytes_after, 11);
@@ -339,7 +328,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let err = edit_replace_block(&path, "missing", "x").unwrap_err();
+        let err = edit_replace_block(&path, "missing", "x", false, None).unwrap_err();
         std::assert_matches!(&err, EditError::NotFound { first_20_lines, .. } if !first_20_lines.is_empty());
     }
 
@@ -348,14 +337,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("file.txt");
         std::fs::write(&path, "foo foo baz").unwrap();
-        let err = edit_replace_block(&path, "foo", "x").unwrap_err();
+        let err = edit_replace_block(&path, "foo", "x", false, None).unwrap_err();
         std::assert_matches!(&err, EditError::Ambiguous { count: 2, match_lines, .. } if match_lines == &[1, 1]);
     }
 
     #[test]
     fn edit_replace_block_directory_guard() {
         let dir = tempfile::tempdir().unwrap();
-        let err = edit_replace_block(dir.path(), "old", "new").unwrap_err();
+        let err = edit_replace_block(dir.path(), "old", "new", false, None).unwrap_err();
         std::assert_matches!(err, EditError::NotAFile(_));
     }
 
@@ -366,7 +355,7 @@ mod tests {
         let path = dir.path().join("crlf.txt");
         // Write raw CRLF bytes: "foo\r\nbar\r\nbaz"
         std::fs::write(&path, b"foo\r\nbar\r\nbaz").unwrap();
-        let result = edit_replace_block(&path, "bar", "qux").unwrap();
+        let result = edit_replace_block(&path, "bar", "qux", false, None).unwrap();
         // The result should contain "foo\r\nqux\r\nbaz" (non-replaced lines retain CRLF)
         let output = std::fs::read_to_string(&path).unwrap();
         assert_eq!(output, "foo\r\nqux\r\nbaz");
@@ -380,7 +369,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lf.txt");
         std::fs::write(&path, b"foo\nbar\nbaz").unwrap();
-        let result = edit_replace_block(&path, "bar\r\n", "qux\n").unwrap();
+        let result = edit_replace_block(&path, "bar\r\n", "qux\n", false, None).unwrap();
         // old_text "bar\r\n" is normalized to "bar\n", matches "bar\n" in file
         let output = std::fs::read_to_string(&path).unwrap();
         assert_eq!(output, "foo\nqux\nbaz");
@@ -394,7 +383,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bothcrlf.txt");
         std::fs::write(&path, b"line1\r\nline2\r\nline3").unwrap();
-        let result = edit_replace_block(&path, "line2\r\n", "replaced\n").unwrap();
+        let result = edit_replace_block(&path, "line2\r\n", "replaced\n", false, None).unwrap();
         let output = std::fs::read_to_string(&path).unwrap();
         assert_eq!(output, "line1\r\nreplaced\nline3");
         assert_eq!(result.bytes_before, 19); // "line1\r\nline2\r\nline3" = 19 bytes
@@ -408,7 +397,7 @@ mod tests {
         std::fs::write(&path, "foo  \nbar\nfoo\nbar").unwrap();
         // old_text "foo\nbar" should match the SECOND occurrence ("foo\nbar"),
         // not the first ("foo  \nbar"), because trailing spaces are not stripped
-        let result = edit_replace_block(&path, "foo\nbar", "replaced").unwrap();
+        let result = edit_replace_block(&path, "foo\nbar", "replaced", false, None).unwrap();
         let output = std::fs::read_to_string(&path).unwrap();
         assert_eq!(output, "foo  \nbar\nreplaced");
         assert_eq!(result.bytes_before, 17); // "foo  \nbar\nfoo\nbar" = 17 bytes
@@ -420,7 +409,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("all.txt");
         std::fs::write(&path, "a b a c a d").unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "x", true, None).unwrap();
+        let result = edit_replace_block(&path, "a", "x", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x b x c x d");
         assert_eq!(result.bytes_before, 11);
         assert_eq!(result.bytes_after, 11);
@@ -432,7 +421,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nf.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let err = edit_replace_block_with_options(&path, "missing", "x", true, None).unwrap_err();
+        let err = edit_replace_block(&path, "missing", "x", true, None).unwrap_err();
         std::assert_matches!(&err, EditError::NotFound { .. });
     }
 
@@ -441,7 +430,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let err = edit_replace_block_with_options(&path, "", "x", true, None).unwrap_err();
+        let err = edit_replace_block(&path, "", "x", true, None).unwrap_err();
         std::assert_matches!(&err, EditError::InvalidParams(_));
     }
 
@@ -451,7 +440,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("crlf_all.txt");
         std::fs::write(&path, b"a\r\nb\r\na\r\nc").unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "x", true, None).unwrap();
+        let result = edit_replace_block(&path, "a", "x", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x\r\nb\r\nx\r\nc");
         assert_eq!(result.occurrences_replaced, 2);
     }
@@ -461,7 +450,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("delete.txt");
         std::fs::write(&path, "a b a c a d").unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "", true, None).unwrap();
+        let result = edit_replace_block(&path, "a", "", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), " b  c  d");
         assert_eq!(result.bytes_before, 11);
         assert_eq!(result.bytes_after, 8);
@@ -473,7 +462,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("adjacent.txt");
         std::fs::write(&path, "aaaa").unwrap();
-        let result = edit_replace_block_with_options(&path, "aa", "xx", true, None).unwrap();
+        let result = edit_replace_block(&path, "aa", "xx", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "xxxx");
         assert_eq!(result.occurrences_replaced, 2);
     }
@@ -483,7 +472,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("size.txt");
         std::fs::write(&path, "x y x z x").unwrap();
-        let result = edit_replace_block_with_options(&path, "x", "yyy", true, None).unwrap();
+        let result = edit_replace_block(&path, "x", "yyy", true, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "yyy y yyy z yyy");
         assert_eq!(result.bytes_before, 9);
         assert_eq!(result.bytes_after, 15);
@@ -495,7 +484,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let err = edit_replace_block(&path, "", "x").unwrap_err();
+        let err = edit_replace_block(&path, "", "x", false, None).unwrap_err();
         std::assert_matches!(&err, EditError::InvalidParams(_));
     }
 
@@ -504,7 +493,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("stale.txt");
         std::fs::write(&path, "hello world").unwrap();
-        let err = edit_replace_block_with_options(
+        let err = edit_replace_block(
             &path,
             "hello",
             "hi",
@@ -524,8 +513,7 @@ mod tests {
         std::fs::write(&path, "hello world").unwrap();
         let raw_bytes = std::fs::read(&path).unwrap();
         let hash = blake3::hash(&raw_bytes).to_hex().to_string();
-        let result =
-            edit_replace_block_with_options(&path, "hello", "hi", false, Some(&hash)).unwrap();
+        let result = edit_replace_block(&path, "hello", "hi", false, Some(&hash)).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hi world");
         assert_eq!(result.occurrences_replaced, 1);
     }
@@ -535,7 +523,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nohash.txt");
         std::fs::write(&path, "foo bar baz").unwrap();
-        let result = edit_replace_block_with_options(&path, "bar", "qux", false, None).unwrap();
+        let result = edit_replace_block(&path, "bar", "qux", false, None).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "foo qux baz");
         assert_eq!(result.occurrences_replaced, 1);
     }
@@ -549,7 +537,7 @@ mod tests {
         // Mixed CRLF and LF: "a\r\nb\na\r\nc\na\r\nd"
         let original = b"a\r\nb\na\r\nc\na\r\nd";
         std::fs::write(&path, original).unwrap();
-        let result = edit_replace_block_with_options(&path, "a", "XYZ", true, None).unwrap();
+        let result = edit_replace_block(&path, "a", "XYZ", true, None).unwrap();
         assert_eq!(result.occurrences_replaced, 3);
         let output = std::fs::read(&path).unwrap();
         // Expected: "XYZ\r\nb\nXYZ\r\nc\nXYZ\r\nd"

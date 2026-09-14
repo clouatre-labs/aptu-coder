@@ -501,7 +501,7 @@ pub(crate) async fn edit_replace(
         // this is fatal and should propagate.
         #[allow(clippy::expect_used)]
         let _guard = path_lock.lock().expect("per-path edit lock poisoned");
-        aptu_coder_core::edit_replace_block_with_options(
+        aptu_coder_core::edit_replace_block(
             &resolved_path,
             &old_text,
             &new_text,
