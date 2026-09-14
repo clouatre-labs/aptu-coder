@@ -43,6 +43,7 @@ pub mod formatter_defuse;
 pub mod graph;
 pub mod lang;
 pub mod languages;
+pub(crate) mod module_lookup;
 pub mod pagination;
 pub mod parser;
 pub(crate) mod parser_elements;
