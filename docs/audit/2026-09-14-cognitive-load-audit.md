@@ -17,7 +17,7 @@ Should we reduce the cognitive load of using aptu-coder -- fewer parameters and 
 
 ## Methodology
 
-Three parallel research passes (web/spec, codebase, telemetry), each writing a JSON handoff, followed by an adversarial verification pass instructed to refute every claim (handoffs: `.git/coder-handoffs/audit-cogload-20260914/01a-01d`), followed by a second adversarial validation pass on each proposed recommendation (handoffs `02a`, `02b`). Verdicts below reflect the verification and validation passes. Four recommendations survived and were filed as issues; two were refuted during validation and are recorded as rejected with reasons.
+Three parallel research passes (web/spec, codebase, telemetry), each writing a JSON handoff, followed by an adversarial verification pass instructed to refute every claim (handoffs: `.git/coder-handoffs/audit-cogload-20260914/01a-01d`), followed by a second adversarial validation pass on each proposed recommendation (handoffs `02a`, `02b`). The first verification pass checked the *findings* (are the claims about code, telemetry, and spec true?); the second validation pass checked the *recommendations* (is the proposed change feasible, already implemented, or contradicted by data?). Verdicts below reflect the verification and validation passes. Four recommendations survived and were filed as issues; two were refuted during validation and are recorded as rejected with reasons.
 
 ## Answer (short)
 
@@ -41,7 +41,7 @@ Yes to parameter reduction, no to tool-count reduction. At 7 tools the server si
 ### Usage distribution (18-day window, 58,776 calls)
 
 - `exec_command` 72% of calls; top-3 (`exec_command`, `edit_replace`, `edit_overwrite`) = 91.9% (75,827/82,504 over full history). The `analyze_*` family is ~8%.
-- Error rates: `edit_replace` 15.4-18.8% (142/873 windowed); `analyze_symbol` 11 errors on 17 calls (small n, worth diagnosing); `exec_command` 0.9%.
+- Error rates: `edit_replace` 15.4-18.8% (142/873 windowed) -- dominated by `stale_content_hash` (118 events) rather than `ambiguous` (4); `analyze_symbol` 11 errors on 17 calls (small n, worth diagnosing); `exec_command` 0.9%.
 - Latency: `analyze_*` p50 4-77 ms; `exec_command` p95 3,606 ms. Performance is not a cognitive-load problem; accuracy is.
 - Truncation: 56 events, all `exec_command`, clustered at the ~30 KB cap; output p50 456 chars -- output sizing defaults are largely adequate.
 
@@ -65,7 +65,20 @@ Yes to parameter reduction, no to tool-count reduction. At 7 tools the server si
 5. **Collapse result-shaping params into a payload-carrying `response_format` enum**, experiment-gated -- [#1545](https://github.com/clouatre-labs/aptu-coder/issues/1545)
 6. ~~**Merge `analyze_module` into `analyze_file`.**~~ REJECTED at validation: `analyze_module` has higher usage and a dedicated L2 cache fast path. No action.
 
-Do NOT: reduce tool count further (no evidence of selection pressure at 7 tools), remove `working_dir` (spec-sanctioned post-SEP-2577), or touch description verbosity (prior experiment: null effect; real errors clustered in cursors and stale hashes).
+Do NOT: reduce tool count further (at 7 tools the server sits at 15-35% of the lowest measured selection cliff, ~20 tools -- no evidence of selection pressure), remove `working_dir` (spec-sanctioned post-[SEP-2577](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577)), or touch description verbosity (prior experiment: null effect; real errors clustered in cursors and stale hashes).
+
+## Impact (measured facts only)
+
+- #1542 removes 2 of `exec_command`'s parameters (the protocol-duplicating timeouts) and converts log-only cancellation into process kill.
+- #1543 replaces 3 interacting booleans with 1 defaulted enum on the heaviest tool (12 params).
+- #1544 removes `page_size` from 3 tools (analyze_directory, analyze_file, analyze_symbol).
+- #1545 replaces 4 result-shaping params with 1 shape, gated on experiment data (no pre-claimed benefit).
+- Expected token/accuracy deltas are NOT claimed here; they must come from the #1545 experiment framework and post-rollout telemetry.
+
+## Future Work (non-blocking)
+
+- `stale_content_hash` churn (118 events) is the dominant `edit_replace` error driver with complete guidance already returned; the `EDIT_STALE_CONTEXT` circuit breaker (`edit_replace.rs:18-32`) does not currently count `stale_content_hash` toward its threshold. Whether it should is a separate, small decision.
+- `analyze_symbol`'s 11/17 error rate (small n) deserves a diagnosis before #1543 lands, to avoid encoding a broken path into the new `mode` enum.
 
 ## Sources
 
