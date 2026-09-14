@@ -299,7 +299,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
-        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Paginates with next_cursor. Default max_depth=3. Large dirs (1000+ files) auto-compact to summary; pass summary=false for per-file list. git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts.",
+        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Paginates with an opaque cursor; fixed server page size 50. Default max_depth=3. Large dirs (1000+ files) auto-compact to summary; pass summary=false for per-file list. git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts.",
         output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
             title = "Analyze Directory",
@@ -371,7 +371,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with an opaque cursor; page size is fixed at 50 server-side and a client page_size parameter is not accepted. Use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with an opaque cursor; fixed server page size 50. Use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -430,7 +430,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if summary=true and cursor. match_mode controls name matching; git_ref restricts to changed files.",
+        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Paginates with an opaque cursor; fixed server page size 20. Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if summary=true and cursor. match_mode controls name matching; git_ref restricts to changed files.",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
             title = "Analyze Symbol",
@@ -739,7 +739,7 @@ impl ServerHandler for CodeAnalyzer {
             2. Re-run analyze_directory(path=<source_package>, max_depth=2, summary=true) for module map. Include test directories (tests/, *_test.go, test_*.py, test_*.rs, *.spec.ts, *.spec.js).\n\
             3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types.\n\
             4. Use analyze_symbol to trace call graphs.\n\
-            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with the opaque cursor; page sizes are fixed server-side (analyze_directory 50, analyze_file 50, analyze_symbol 20) and a client page_size parameter is not accepted. For subagents: DISABLE_PROMPT_CACHING=1.\n\
+            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with the opaque cursor; page sizes are server-owned (analyze_directory 50, analyze_file 50, analyze_symbol 20). For subagents: DISABLE_PROMPT_CACHING=1.\n\
             JSONL metrics at $HOME/.local/share/aptu-coder/ (or $XDG_DATA_HOME/aptu-coder/). Always cd there before jq glob queries."
         );
         let capabilities = ServerCapabilities::builder()
