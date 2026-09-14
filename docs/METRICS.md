@@ -57,8 +57,7 @@ Each line in the JSONL file is one JSON object:
 | `fields_projected` | `bool` | `true` when the `fields` projection parameter was supplied on `analyze_file`. Omitted from JSONL when `false`. |
 | `match_mode` | `string \| null` | The `match_mode` value passed to `analyze_symbol` (e.g. `"exact"`, `"contains"`); `null` when not set (defaults to `exact` in the handler). Omitted from JSONL when `null`. |
 | `follow_depth` | `u32 \| null` | The `follow_depth` value passed to `analyze_symbol`; `null` when the parameter was not explicitly supplied. Omitted from JSONL when `null`. |
-| `import_lookup` | `bool` | `true` when `import_lookup=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
-| `def_use` | `bool` | `true` when `def_use=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
+| `mode` | `string \| null` | The `mode` value passed to `analyze_symbol` (`"call_graph"`, `"import_lookup"`, or `"def_use"`); `null` when not set (defaults to `call_graph` in the handler). Omitted from JSONL when `null`. |
 | `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
 | `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
 | `timeout_configured_ms` | `i64 \| null` | `timeout_secs * 1000` when `timeout_secs` was supplied to `exec_command`; `null` when the parameter was not set (no limit). Omitted from JSONL when `null`. |
@@ -99,8 +98,8 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `exec_command` | `drain_timeout_invalid` | `drain_timeout_secs` was negative. |
 | `analyze_symbol` | `path_is_file` | `path` argument points to a file instead of a directory. |
 | `analyze_symbol` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
-| `analyze_symbol` | `import_lookup_def_use_conflict` | `import_lookup=true` combined with `def_use=true`. |
-| `analyze_symbol` | `import_lookup_missing_symbol` | `import_lookup=true` without a non-empty `symbol`. |
+| `analyze_symbol` | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `follow_depth`, or `impl_only`. |
+| `analyze_symbol` | `mode_missing_symbol` | Non-call-graph `mode` without a non-empty `symbol`. |
 | `analyze_symbol` | `follow_depth_exceeded` | `follow_depth` exceeds `MAX_FOLLOW_DEPTH`. |
 | `analyze_symbol` | `invalid_cursor` | The pagination `cursor` failed to decode. |
 | `analyze_symbol` | `git_ref_filter_failed` | `git_ref` filtering failed (not a git repo, git unavailable, etc.). |

@@ -84,7 +84,7 @@ fn test_analyze_module_cache_hit_metrics() {
     );
 }
 
-// --- import_lookup tests ---
+// --- analyze_symbol mode metric tests ---
 
 #[test]
 #[serial_test::serial]
@@ -176,8 +176,7 @@ fn test_metric_chars_threshold_breach_fires() {
         fields_projected: false,
         match_mode: None,
         follow_depth: None,
-        import_lookup: false,
-        def_use: false,
+        mode: None,
         impl_only: false,
         stdin_provided: false,
         timeout_configured_ms: None,
@@ -228,8 +227,7 @@ fn test_metric_chars_threshold_breach_no_fire() {
         fields_projected: false,
         match_mode: None,
         follow_depth: None,
-        import_lookup: false,
-        def_use: false,
+        mode: None,
         impl_only: false,
         stdin_provided: false,
         timeout_configured_ms: None,
