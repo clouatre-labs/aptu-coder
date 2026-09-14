@@ -87,9 +87,6 @@ pub(crate) struct AnalyzeDirectoryContext {
     pub(crate) cache: AnalysisCache,
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
-    // Retained for log-level notification infrastructure (separate active feature).
-    #[allow(dead_code)]
-    pub(crate) peer: Arc<tokio::sync::Mutex<Option<rmcp::Peer<rmcp::RoleServer>>>>,
     pub(crate) sid: Option<String>,
 }
 
