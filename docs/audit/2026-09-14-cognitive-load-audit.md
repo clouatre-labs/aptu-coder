@@ -1,9 +1,10 @@
 # Audit: MCP Tool Cognitive Load and Parameter Surface -- September 2026
 
-Date: 2026-09-14
-Version: v0.33.0
-Spec baseline: MCP 2026-07-28 (rmcp 3.3.0)
-Evidence: web spec research + codebase inventory + 18-day telemetry window (2026-08-26..09-14, 58,776 tool calls; guard re-check over full history: 82,504 calls) + Claude Code client logs (~/.claude/projects)
+Date: 2026-09-14  
+Version: v0.33.0  
+Spec baseline: MCP 2026-07-28 (rmcp 3.3.0)  
+Evidence: web spec research + codebase inventory + 18-day telemetry window (2026-08-26..09-14, 58,776 tool calls; guard re-check over full history: 82,504 calls) + Claude Code client logs (~/.claude/projects)  
+
 
 ## See Also
 
