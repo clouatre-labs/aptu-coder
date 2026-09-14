@@ -46,7 +46,7 @@ Each line in the JSONL file is one JSON object:
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
 | `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable or if the process was killed due to timeout |
 | `filter_applied` | `string \| null` | The filter rule name that caused output suppression via `.aptu/filters.toml`; `null` when no filter was applied. Omitted from JSONL when `null`. |
-| `timed_out` | `bool` | `true` when the child process was killed because it exceeded `timeout_secs`; `false` otherwise. Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`). |
+| `timed_out` | `bool` | `true` when the child process was killed by the server-side exec timeout (`DEFAULT_EXEC_TIMEOUT_SECS`) or by request cancellation; `false` otherwise. Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`). |
 | `output_truncated` | `bool \| null` | `true` if any truncation occurred (line cap or per-stream byte cap); `false` if the command completed without truncation; `null` for all non-`exec_command` tools and for `exec_command` calls emitted by older server versions |
 | `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
 | `stdout_bytes_raw` | `u64 \| null` | Approximate stdout bytes read before any truncation (counted as `line.len() + 1` per `LinesStream` line; last line and CRLF not exact); populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
@@ -60,8 +60,6 @@ Each line in the JSONL file is one JSON object:
 | `mode` | `string \| null` | The `mode` value passed to `analyze_symbol` (`"call_graph"`, `"import_lookup"`, or `"def_use"`); `null` when not set (defaults to `call_graph` in the handler). Omitted from JSONL when `null`. |
 | `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
 | `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
-| `timeout_configured_ms` | `i64 \| null` | `timeout_secs * 1000` when `timeout_secs` was supplied to `exec_command`; `null` when the parameter was not set (no limit). Omitted from JSONL when `null`. |
-| `drain_timeout_ms` | `i64 \| null` | The raw `drain_timeout_secs` value passed to `exec_command` (stored as-is; represents milliseconds in the server parameter despite the naming); `null` when not set (defaults to 500 ms in the handler). Omitted from JSONL when `null`. |
 | `working_dir_used` | `bool` | `true` when the `working_dir` parameter was supplied to `exec_command`, `edit_overwrite`, or `edit_replace`. Omitted from JSONL when `false`. |
 | `l1_eviction_count` | `u64 \| null` | Number of L1 in-memory LRU evictions that have occurred in the cache since process start, at the time of metric emission. Process-lifetime counter; resets on restart. Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls that use the call-graph cache. |
 | `l2_entry_count` | `u64 \| null` | Approximate number of entries currently tracked in the L2 disk cache, at the time of metric emission. Incremented on successful `put()`; approximate (does not account for manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
@@ -95,7 +93,6 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `exec_command` | `cd_path_not_found` | A promoted `cd <path> &&` prefix does not exist or is outside CWD. |
 | `exec_command` | `stdin_too_large` | `stdin` content exceeds the 1 MB size cap. |
 | `exec_command` | `heredoc_error` | Heredoc validation failed (malformed or unterminated heredoc). |
-| `exec_command` | `drain_timeout_invalid` | `drain_timeout_secs` was negative. |
 | `analyze_symbol` | `path_is_file` | `path` argument points to a file instead of a directory. |
 | `analyze_symbol` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
 | `analyze_symbol` | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `follow_depth`, or `impl_only`. |
@@ -148,7 +145,7 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `error_subtype` | `null` (omitted when null; e.g. `not_found`, `ambiguous` for `edit_replace` errors) |
 | `language` | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
 | `file_ext` | `null` (omitted when null; populated for `analyze_file` and `analyze_module` only) |
-| `timed_out` | `false` (omitted from JSONL when false; set when child process was killed by `timeout_secs`) |
+| `timed_out` | `false` (omitted from JSONL when false; set when the child process was killed by the server-side exec timeout or by request cancellation) |
 | `git_ref_used` | `false` (omitted when false; `true` only when `git_ref` was supplied) |
 | `summary_mode` | `false` (omitted when false; `true` only when `summary=true` was set) |
 | `is_paginated` | `false` (omitted when false; `true` only when a `cursor` was supplied) |
@@ -159,8 +156,6 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `def_use` | `false` (omitted when false; `true` only when `def_use=true` was set) |
 | `impl_only` | `false` (omitted when false; `true` only when `impl_only=true` was set) |
 | `stdin_provided` | `false` (omitted when false; `true` only when `stdin` was supplied to `exec_command`) |
-| `timeout_configured_ms` | `null` (omitted when null; present only when `timeout_secs` was supplied) |
-| `drain_timeout_ms` | `null` (omitted when null; present only when `drain_timeout_secs` was supplied) |
 | `working_dir_used` | `false` (omitted when false; `true` only when `working_dir` was supplied) |
 | `l1_eviction_count` | `null` (omitted when null; process-lifetime L1 LRU eviction counter; only for `analyze_symbol`) |
 | `l2_entry_count` | `null` (omitted when null; approximate L2 entry count; only for `analyze_symbol`) |

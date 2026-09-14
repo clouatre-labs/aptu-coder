@@ -19,7 +19,7 @@ use crate::metrics::MetricsSender;
 use crate::otel::{ClientMetadata, extract_and_set_trace_context};
 use crate::shell_write;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
-use crate::tools::exec_runtime::{DEFAULT_DRAIN_TIMEOUT_MS, run_exec_impl};
+use crate::tools::exec_runtime::run_exec_impl;
 use crate::{ExecCommandParams, STDIN_MAX_BYTES, ShellOutput, validate_path};
 
 /// Machine-readable cause for an `exec_command` `invalid_params` error, used to
@@ -38,8 +38,6 @@ pub(crate) enum ExecCommandErrorSubtype {
     StdinTooLarge,
     /// Heredoc validation failed (malformed or unterminated heredoc).
     HeredocError,
-    /// `drain_timeout_secs` was negative.
-    DrainTimeoutInvalid,
 }
 
 impl ExecCommandErrorSubtype {
@@ -52,7 +50,6 @@ impl ExecCommandErrorSubtype {
             Self::CdPathNotFound => "cd_path_not_found",
             Self::StdinTooLarge => "stdin_too_large",
             Self::HeredocError => "heredoc_error",
-            Self::DrainTimeoutInvalid => "drain_timeout_invalid",
         }
     }
 }
@@ -74,6 +71,9 @@ pub(crate) struct ExecContext {
     pub(crate) filter_table: std::sync::Arc<Vec<CompiledRule>>,
     pub(crate) metrics_tx: MetricsSender,
     pub(crate) t_start: std::time::Instant,
+    /// Per-request cancellation token; cancelled when the client sends
+    /// `notifications/cancelled` for this request.
+    pub(crate) ct: tokio_util::sync::CancellationToken,
 }
 
 /// Phase 1: Resolve working directory and promote cd-prefix.
@@ -206,13 +206,13 @@ fn validate_working_dir_phase(
     Ok((command, working_dir_path))
 }
 
-/// Phase 2: Validate pre-spawn requirements (stdin size, heredocs, drain timeout).
+/// Phase 2: Validate pre-spawn requirements (stdin size, heredocs).
 #[allow(clippy::result_large_err)]
 fn validate_pre_spawn_phase(
     params: &ExecCommandParams,
     command: &str,
     span: &tracing::Span,
-) -> Result<std::time::Duration, (CallToolResult, ExecCommandErrorSubtype)> {
+) -> Result<(), (CallToolResult, ExecCommandErrorSubtype)> {
     // Validate stdin size cap (1 MB)
     if let Some(ref stdin_content) = params.stdin
         && stdin_content.len() > STDIN_MAX_BYTES
@@ -238,40 +238,12 @@ fn validate_pre_spawn_phase(
         return Err((err_to_tool_result(e), ExecCommandErrorSubtype::HeredocError));
     }
 
-    // Validate drain_timeout_secs: negative values are invalid.
-    if let Some(n) = params.drain_timeout_secs
-        && n < 0
-    {
-        span.record("error", true);
-        span.record("error.type", "invalid_params");
-        let result = CallToolResult::error(vec![ContentBlock::text(
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "drain_timeout_secs must be >= 0".to_string(),
-                Some(error_meta(
-                    "validation",
-                    false,
-                    "use a non-negative value or omit it",
-                )),
-            )
-            .message,
-        )])
-        .with_meta(Some(no_cache_meta()));
-        return Err((result, ExecCommandErrorSubtype::DrainTimeoutInvalid));
-    }
-
-    // Compute effective drain timeout
-    let drain_dur = match params.drain_timeout_secs {
-        Some(n) if n > 0 => std::time::Duration::from_millis(n as u64),
-        _ => std::time::Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
-    };
-
-    Ok(drain_dur)
+    Ok(())
 }
 
 /// Phase 3: Spawn and collect output.
 ///
-/// Executes the command, handles timeout, and returns the raw output.
+/// Executes the command, handles timeout/cancellation, and returns the raw output.
 #[allow(clippy::too_many_arguments)]
 async fn spawn_and_collect_phase(
     command: String,
@@ -280,7 +252,7 @@ async fn spawn_and_collect_phase(
     seq: u32,
     resolved_path_str: Option<&str>,
     filter_table: &Arc<Vec<CompiledRule>>,
-    drain_dur: std::time::Duration,
+    ct: tokio_util::sync::CancellationToken,
     span: &tracing::Span,
 ) -> Result<(ShellOutput, u64, u64), CallToolResult> {
     let (output, raw_stdout_bytes, raw_stderr_bytes) = run_exec_impl(
@@ -290,12 +262,13 @@ async fn spawn_and_collect_phase(
         seq,
         resolved_path_str,
         filter_table,
-        params.timeout_secs,
-        drain_dur,
+        ct,
     )
     .await;
 
-    // Short-circuit on timeout: return error before any output processing.
+    // Short-circuit on timeout or cancellation: return error before any output
+    // processing. (rmcp drops this response when the request was cancelled, but
+    // the kill/reap side effects still matter.)
     if output.timed_out {
         span.record("error", true);
         span.record("error.type", "timeout");
@@ -305,7 +278,6 @@ async fn spawn_and_collect_phase(
         .with_meta(Some(no_cache_meta()));
         result.structured_content = Some(serde_json::json!({
             "timed_out": true,
-            "timeout_secs": params.timeout_secs,
         }));
         return Err(result);
     }
@@ -391,6 +363,7 @@ pub(crate) async fn exec_command_impl(
         filter_table,
         metrics_tx,
         t_start,
+        ct,
     } = ctx;
     // Extract W3C Trace Context from request _meta if present
     extract_and_set_trace_context(
@@ -410,8 +383,6 @@ pub(crate) async fn exec_command_impl(
     let param_path = params.working_dir.clone();
     let working_dir_used = params.working_dir.is_some();
     let stdin_provided = params.stdin.is_some();
-    let timeout_configured_ms = params.timeout_secs.map(|s| s * 1000);
-    let drain_timeout_ms = params.drain_timeout_secs;
 
     // Phase 1: Validate working_dir and resolve cd-prefix
     let (command, working_dir_path) = match validate_working_dir_phase(&params, &span) {
@@ -432,8 +403,6 @@ pub(crate) async fn exec_command_impl(
                     .seq(Some(seq))
                     .output_truncated(Some(false))
                     .stdin_provided(stdin_provided)
-                    .timeout_configured_ms(timeout_configured_ms)
-                    .drain_timeout_ms(drain_timeout_ms)
                     .working_dir_used(working_dir_used)
                     .build(),
             );
@@ -442,29 +411,24 @@ pub(crate) async fn exec_command_impl(
     };
 
     // Phase 2: Validate pre-spawn requirements
-    let drain_dur = match validate_pre_spawn_phase(&params, &command, &span) {
-        Ok(dur) => dur,
-        Err((result, subtype)) => {
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ))
-                    .error_type(Some("invalid_params".to_string()))
-                    .error_subtype(Some(subtype.to_string()))
-                    .session_id(sid)
-                    .seq(Some(seq))
-                    .output_truncated(Some(false))
-                    .stdin_provided(stdin_provided)
-                    .timeout_configured_ms(timeout_configured_ms)
-                    .drain_timeout_ms(drain_timeout_ms)
-                    .working_dir_used(working_dir_used)
-                    .build(),
-            );
-            return Ok(result);
-        }
-    };
+    if let Err((result, subtype)) = validate_pre_spawn_phase(&params, &command, &span) {
+        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+        metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                .param_path_depth(crate::metrics::path_component_count(
+                    param_path.as_deref().unwrap_or(""),
+                ))
+                .error_type(Some("invalid_params".to_string()))
+                .error_subtype(Some(subtype.to_string()))
+                .session_id(sid)
+                .seq(Some(seq))
+                .output_truncated(Some(false))
+                .stdin_provided(stdin_provided)
+                .working_dir_used(working_dir_used)
+                .build(),
+        );
+        return Ok(result);
+    }
 
     // Phase 3: Spawn and collect
     let resolved_path_str = resolved_path.as_deref();
@@ -475,7 +439,7 @@ pub(crate) async fn exec_command_impl(
         seq,
         resolved_path_str,
         &filter_table,
-        drain_dur,
+        ct,
         &span,
     )
     .await
@@ -494,8 +458,6 @@ pub(crate) async fn exec_command_impl(
                     .timed_out(true)
                     .output_truncated(Some(false))
                     .stdin_provided(stdin_provided)
-                    .timeout_configured_ms(timeout_configured_ms)
-                    .drain_timeout_ms(drain_timeout_ms)
                     .working_dir_used(working_dir_used)
                     .build(),
             );
@@ -566,8 +528,6 @@ pub(crate) async fn exec_command_impl(
                     .timed_out(output.timed_out)
                     .output_truncated(Some(output_truncated))
                     .stdin_provided(stdin_provided)
-                    .timeout_configured_ms(timeout_configured_ms)
-                    .drain_timeout_ms(drain_timeout_ms)
                     .working_dir_used(working_dir_used)
                     .build(),
             );
@@ -590,8 +550,6 @@ pub(crate) async fn exec_command_impl(
         .chars_threshold_breach(text.len() > 30_000)
         .filter_applied(output.filter_applied.clone())
         .stdin_provided(stdin_provided)
-        .timeout_configured_ms(timeout_configured_ms)
-        .drain_timeout_ms(drain_timeout_ms)
         .working_dir_used(working_dir_used);
     // Emit approximate raw byte counts only when output_truncated is true and the
     // truncation was not caused by a timeout or drain-abort. output_truncated covers
@@ -640,8 +598,6 @@ mod tests {
             command: "echo hello".to_string(),
             working_dir: Some(env!("CARGO_MANIFEST_DIR").to_string() + "/Cargo.toml"),
             stdin: None,
-            timeout_secs: None,
-            drain_timeout_secs: None,
         };
         let span = tracing::Span::none();
 
@@ -666,8 +622,6 @@ mod tests {
             command: "cd /definitely-nonexistent-dir-abcxyz123 && ls".to_string(),
             working_dir: None,
             stdin: None,
-            timeout_secs: None,
-            drain_timeout_secs: None,
         };
         let span = tracing::Span::none();
 
@@ -691,8 +645,6 @@ mod tests {
             command: "cat".to_string(),
             working_dir: None,
             stdin: Some("a".repeat(STDIN_MAX_BYTES + 1)),
-            timeout_secs: None,
-            drain_timeout_secs: None,
         };
         let span = tracing::Span::none();
 
@@ -729,8 +681,6 @@ mod tests {
             command: "echo hello".to_string(),
             working_dir: None,
             stdin: None,
-            timeout_secs: None,
-            drain_timeout_secs: None,
         };
 
         // Act
@@ -767,8 +717,6 @@ mod tests {
             command: "false".to_string(),
             working_dir: None,
             stdin: None,
-            timeout_secs: None,
-            drain_timeout_secs: None,
         };
 
         // Act
@@ -805,8 +753,6 @@ mod tests {
             command: "echo test".to_string(),
             working_dir: None,
             stdin: None,
-            timeout_secs: None,
-            drain_timeout_secs: None,
         };
 
         // Act
@@ -831,7 +777,6 @@ mod tests {
             ExecCommandErrorSubtype::CdPathNotFound,
             ExecCommandErrorSubtype::StdinTooLarge,
             ExecCommandErrorSubtype::HeredocError,
-            ExecCommandErrorSubtype::DrainTimeoutInvalid,
         ] {
             // Act
             let expected = match subtype {
@@ -841,7 +786,6 @@ mod tests {
                 ExecCommandErrorSubtype::CdPathNotFound => "cd_path_not_found",
                 ExecCommandErrorSubtype::StdinTooLarge => "stdin_too_large",
                 ExecCommandErrorSubtype::HeredocError => "heredoc_error",
-                ExecCommandErrorSubtype::DrainTimeoutInvalid => "drain_timeout_invalid",
             };
 
             // Assert

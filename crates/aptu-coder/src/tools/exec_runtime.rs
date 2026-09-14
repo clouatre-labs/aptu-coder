@@ -12,6 +12,13 @@ use crate::filters::CompiledRule;
 /// Default drain timeout in milliseconds for post-exit pipe drain (500ms).
 pub(crate) const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
 
+/// Default server-side execution timeout in seconds (300s / 5 minutes).
+///
+/// Clients can no longer configure a per-call timeout via `timeout_secs`; this
+/// generous default bounds runaway child processes. A client may still cancel
+/// early via `notifications/cancelled`, which kills and reaps the child.
+pub(crate) const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 300;
+
 /// Max bytes to buffer from child stdout during drain (matches handle_output_persist cap).
 pub(crate) const MAX_DRAIN_STDOUT_BYTES: usize = 30_000;
 
@@ -65,11 +72,13 @@ pub(crate) fn build_exec_command(
     cmd
 }
 
-/// Runs a child process with optional timeout and drains output with a grace period.
+/// Runs a child process bounded by the exec timeout or request cancellation,
+/// then drains output with a grace period.
 pub(crate) async fn run_with_timeout(
     mut child: tokio::process::Child,
     tx: tokio::sync::mpsc::UnboundedSender<(bool, String)>,
-    timeout_secs: Option<i64>,
+    ct: tokio_util::sync::CancellationToken,
+    exec_timeout: std::time::Duration,
     drain_timeout: std::time::Duration,
 ) -> ExecutionResult {
     use tokio::io::AsyncBufReadExt as _;
@@ -160,99 +169,67 @@ pub(crate) async fn run_with_timeout(
 
     let drain_abort = drain_task.abort_handle();
 
-    match timeout_secs {
-        Some(secs) if secs > 0 => {
-            // User timeout wraps only child.wait(); drain follows outside the timeout.
-            let timeout_secs_u64 = u64::try_from(secs).unwrap_or(u64::MAX);
-            let (exit_code, timed_out) = match tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs_u64),
-                child.wait(),
-            )
-            .await
-            {
-                Ok(Ok(s)) => (s.code(), false),
-                Ok(Err(_)) => (None, false),
-                Err(_elapsed) => {
-                    child.start_kill().ok();
-                    // Reap the zombie so the OS does not accumulate a defunct child.
-                    let _ = child.wait().await;
-                    (None, true)
-                }
-            };
+    // Wait for child exit, bounded by the server exec timeout and by request
+    // cancellation. Either branch kills and reaps the child.
+    let (exit_code, timed_out) = tokio::select! {
+        res = tokio::time::timeout(exec_timeout, child.wait()) => match res {
+            Ok(Ok(s)) => (s.code(), false),
+            Ok(Err(_)) => (None, false),
+            Err(_elapsed) => {
+                child.start_kill().ok();
+                // Reap the zombie so the OS does not accumulate a defunct child.
+                let _ = child.wait().await;
+                (None, true)
+            }
+        },
+        _ = ct.cancelled() => {
+            // Request was cancelled: kill and reap the child, mirroring the
+            // timed-out path so no zombie remains.
+            child.start_kill().ok();
+            let _ = child.wait().await;
+            (None, true)
+        }
+    };
 
-            // Drain remaining buffered output with drain_timeout grace (outside user timeout).
-            let (drain_truncated, byte_truncated, raw_so, raw_se) = if timed_out {
-                drain_abort.abort();
+    // Drain remaining buffered output with drain_timeout grace. A timed-out or
+    // cancelled child is killed and its pipes closed, so abort the drain task
+    // instead of waiting on it.
+    let (drain_truncated, byte_truncated, raw_so, raw_se) = if timed_out {
+        drain_abort.abort();
+        (false, false, 0, 0)
+    } else {
+        match tokio::time::timeout(drain_timeout, drain_task).await {
+            Ok(Ok((budget_hit, rso, rse))) => (false, budget_hit, rso, rse),
+            Ok(Err(join_err)) => {
+                // Task panicked: treat as no budget truncation, log warning.
+                tracing::warn!("drain_task panicked: {join_err}");
                 (false, false, 0, 0)
-            } else {
-                match tokio::time::timeout(drain_timeout, drain_task).await {
-                    Ok(Ok((budget_hit, rso, rse))) => (false, budget_hit, rso, rse),
-                    Ok(Err(join_err)) => {
-                        // Task panicked: treat as no budget truncation, log warning.
-                        tracing::warn!("drain_task panicked: {join_err}");
-                        (false, false, 0, 0)
-                    }
-                    Err(_) => {
-                        drain_abort.abort();
-                        (true, false, 0, 0)
-                    }
-                }
-            };
-
-            let ocerr = if drain_truncated {
-                Some("post-exit drain timeout: background process held pipes".to_string())
-            } else {
-                None
-            };
-
-            ExecutionResult {
-                exit_code,
-                output_truncated: drain_truncated,
-                output_collection_error: ocerr,
-                timed_out,
-                byte_truncated,
-                raw_stdout_bytes: raw_so as u64,
-                raw_stderr_bytes: raw_se as u64,
+            }
+            Err(_) => {
+                drain_abort.abort();
+                (true, false, 0, 0)
             }
         }
-        _ => {
-            // No user timeout: wait for child exit first, then drain buffered output
-            // with a short grace period (drain_timeout) for background subprocesses.
-            let exit_status = child.wait().await.ok();
-            let drain_result = tokio::time::timeout(drain_timeout, drain_task).await;
+    };
 
-            let (drain_truncated, byte_truncated, raw_so, raw_se) = match drain_result {
-                Ok(Ok((budget_hit, rso, rse))) => (false, budget_hit, rso, rse),
-                Ok(Err(join_err)) => {
-                    tracing::warn!("drain_task panicked: {join_err}");
-                    (false, false, 0, 0)
-                }
-                Err(_) => {
-                    drain_abort.abort();
-                    (true, false, 0, 0)
-                }
-            };
-            let exit_code = exit_status.and_then(|s| s.code());
-            let ocerr = if drain_truncated {
-                Some("post-exit drain timeout: background process held pipes".to_string())
-            } else {
-                None
-            };
-            ExecutionResult {
-                exit_code,
-                output_truncated: drain_truncated,
-                output_collection_error: ocerr,
-                timed_out: false,
-                byte_truncated,
-                raw_stdout_bytes: raw_so as u64,
-                raw_stderr_bytes: raw_se as u64,
-            }
-        }
+    let ocerr = if drain_truncated {
+        Some("post-exit drain timeout: background process held pipes".to_string())
+    } else {
+        None
+    };
+
+    ExecutionResult {
+        exit_code,
+        output_truncated: drain_truncated,
+        output_collection_error: ocerr,
+        timed_out,
+        byte_truncated,
+        raw_stdout_bytes: raw_so as u64,
+        raw_stderr_bytes: raw_se as u64,
     }
 }
 
-/// Runs the command with stdin, timeout, and output collection.
-#[allow(clippy::too_many_arguments)]
+/// Runs the command with stdin, server-default timeout, and output collection.
 pub(crate) async fn run_exec_impl(
     command: String,
     working_dir_path: Option<std::path::PathBuf>,
@@ -260,7 +237,35 @@ pub(crate) async fn run_exec_impl(
     seq: u32,
     resolved_path: Option<&str>,
     filter_table: &Arc<Vec<CompiledRule>>,
-    timeout_secs: Option<i64>,
+    ct: tokio_util::sync::CancellationToken,
+) -> (ShellOutput, u64, u64) {
+    run_exec_impl_with_timeouts(
+        command,
+        working_dir_path,
+        stdin,
+        seq,
+        resolved_path,
+        filter_table,
+        ct,
+        std::time::Duration::from_secs(DEFAULT_EXEC_TIMEOUT_SECS),
+        std::time::Duration::from_millis(DEFAULT_DRAIN_TIMEOUT_MS),
+    )
+    .await
+}
+
+/// Test-only variant with injectable exec/drain timeouts so unit tests can
+/// exercise the timeout and cancellation paths without waiting 300 seconds.
+#[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_exec_impl_with_timeouts(
+    command: String,
+    working_dir_path: Option<std::path::PathBuf>,
+    stdin: Option<String>,
+    seq: u32,
+    resolved_path: Option<&str>,
+    filter_table: &Arc<Vec<CompiledRule>>,
+    ct: tokio_util::sync::CancellationToken,
+    exec_timeout: std::time::Duration,
     drain_timeout: std::time::Duration,
 ) -> (ShellOutput, u64, u64) {
     let mut cmd = build_exec_command(
@@ -304,7 +309,7 @@ pub(crate) async fn run_exec_impl(
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, String)>();
 
-    let exec_result = run_with_timeout(child, tx, timeout_secs, drain_timeout).await;
+    let exec_result = run_with_timeout(child, tx, ct, exec_timeout, drain_timeout).await;
     let exit_code = exec_result.exit_code;
     let mut output_truncated = exec_result.output_truncated || exec_result.byte_truncated;
     let output_collection_error = exec_result.output_collection_error;
