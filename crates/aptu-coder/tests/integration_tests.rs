@@ -44,7 +44,7 @@ async fn test_no_cache_meta_on_pagination_error() {
             "symbol": "test_symbol",
             "follow_depth": 1,
             "max_depth": 3,
-                        "def_use": true,
+                        "mode": "def_use",
             "cursor": "INVALID_CORRUPTED_CURSOR_12345"
         }),
     )

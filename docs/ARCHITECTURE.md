@@ -141,11 +141,11 @@ Exported from `aptu_coder_core` as a public API for library consumers that hold 
 
 `CallChainEntry` is a stable public type (exported from `aptu_coder_core`) with fields `symbol: String`, `file: String`, `line: usize`. Conversion from the internal `InternalCallChain` (which is non-serializable and stays internal) happens at the output boundary via the private `chains_to_entries` helper. The `follow_depth` parameter does not affect these arrays; they always represent depth-1 relationships.
 
-**Import lookup mode:** When `import_lookup=true`, instead of building a call graph, the tool scans all files in the directory for imports of the module path specified in `symbol`. Returns a list of files that import that module. Mutually exclusive with the call-graph mode.
+**Import lookup mode:** When `mode=import_lookup`, instead of building a call graph, the tool scans all files in the directory for imports of the module path specified in `symbol`. Returns a list of files that import that module. This mode rejects `match_mode`, `follow_depth`, and `impl_only` (`mode_param_conflict`).
 
 **Git ref filtering:** When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the set of changed files, and `filter_entries_by_git_ref()` restricts the analysis to those files before the graph is built.
 
-**Def-use mode:** When `def_use=true`, the tool computes definition and use sites alongside the call graph. However, `def_use_sites` is cleared (`Vec::new()`) in `structuredContent` on the initial response. Once the callers and callees pages are exhausted, the handler automatically emits a `{mode: defuse, offset: 0}` cursor. Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
+**Def-use mode:** When `mode=def_use`, the tool computes definition and use sites alongside the call graph. However, `def_use_sites` is cleared (`Vec::new()`) in `structuredContent` on the initial response. Once the callers and callees pages are exhausted, the handler automatically emits a `{mode: defuse, offset: 0}` cursor. Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
 
 ## Observability Architecture
 

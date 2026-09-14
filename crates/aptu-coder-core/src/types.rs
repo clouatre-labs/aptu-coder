@@ -186,6 +186,20 @@ pub enum SymbolMatchMode {
     Contains,
 }
 
+/// Analysis mode for `analyze_symbol`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolAnalysisMode {
+    /// Build a call graph for the symbol (default).
+    #[default]
+    CallGraph,
+    /// Find all files in the directory that import the module path given in symbol.
+    ImportLookup,
+    /// Extract write/read sites for the symbol.
+    DefUse,
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
@@ -223,15 +237,15 @@ pub struct AnalyzeSymbolParams {
     #[serde(default)]
     pub impl_only: Option<bool>,
 
-    /// Find all files in the directory that import the module path given in symbol (e.g., std::collections). Requires symbol to be non-empty. Mutually exclusive with def_use and normal call-graph lookup. When set, follow_depth, impl_only, and match_mode are ignored.
+    /// Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/follow_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty.
     #[serde(default)]
     #[cfg_attr(
         feature = "schemars",
         schemars(
-            description = "Find all files in the directory that import the module path given in symbol (e.g., std::collections). Requires symbol to be non-empty. Mutually exclusive with def_use and normal call-graph lookup. When set, follow_depth, impl_only, and match_mode are ignored."
+            description = "Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/follow_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty."
         )
     )]
-    pub import_lookup: Option<bool>,
+    pub mode: Option<SymbolAnalysisMode>,
 
     /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering. Example: "main" or "HEAD~1".
     #[serde(default)]
@@ -242,10 +256,6 @@ pub struct AnalyzeSymbolParams {
         )
     )]
     pub git_ref: Option<String>,
-
-    /// Extract write/read sites for the symbol. First call returns empty def_use_sites and a cursor; paginate with that cursor to retrieve results. Mutually exclusive with import_lookup. Default: false.
-    #[serde(default)]
-    pub def_use: Option<bool>,
 }
 
 #[non_exhaustive]

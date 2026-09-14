@@ -15,7 +15,7 @@ const ANALYZE_SYMBOL_PAGE_SIZE: usize = 20;
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
-use aptu_coder_core::types::{AnalyzeSymbolParams, SymbolMatchMode};
+use aptu_coder_core::types::{AnalyzeSymbolParams, SymbolAnalysisMode, SymbolMatchMode};
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, MetaObject, TextContent};
 use serde_json::Value;
 use std::sync::Arc;
@@ -61,10 +61,10 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     PathIsFile,
     /// `summary=true` combined with a pagination `cursor`.
     SummaryCursorConflict,
-    /// `import_lookup=true` combined with `def_use=true`.
-    ImportLookupDefUseConflict,
-    /// `import_lookup=true` without a non-empty `symbol`.
-    ImportLookupMissingSymbol,
+    /// `mode=import_lookup` combined with `match_mode`, `follow_depth`, or `impl_only`.
+    ModeParamConflict,
+    /// Non-call-graph `mode` without a non-empty `symbol`.
+    ModeMissingSymbol,
     /// `follow_depth` exceeds `MAX_FOLLOW_DEPTH`.
     FollowDepthExceeded,
     /// The pagination `cursor` failed to decode.
@@ -90,8 +90,8 @@ impl AnalyzeSymbolErrorSubtype {
         match self {
             Self::PathIsFile => "path_is_file",
             Self::SummaryCursorConflict => "summary_cursor_conflict",
-            Self::ImportLookupDefUseConflict => "import_lookup_def_use_conflict",
-            Self::ImportLookupMissingSymbol => "import_lookup_missing_symbol",
+            Self::ModeParamConflict => "mode_param_conflict",
+            Self::ModeMissingSymbol => "mode_missing_symbol",
             Self::FollowDepthExceeded => "follow_depth_exceeded",
             Self::InvalidCursor => "invalid_cursor",
             Self::GitRefFilterFailed => "git_ref_filter_failed",
@@ -183,27 +183,41 @@ pub(crate) fn validate_impl_only(entries: &[WalkEntry]) -> InvalidParamsResult<(
     Ok(())
 }
 
-/// Validate that `import_lookup=true` is accompanied by a non-empty symbol (the module path).
-pub(crate) fn validate_import_lookup(
-    import_lookup: Option<bool>,
+/// Validate that a non-call-graph `mode` is accompanied by a non-empty symbol
+/// (the module path for import_lookup; the target symbol for def_use).
+pub(crate) fn validate_mode_symbol(
+    mode: SymbolAnalysisMode,
     symbol: &str,
 ) -> InvalidParamsResult<(), ErrorData> {
-    if import_lookup == Some(true) && symbol.is_empty() {
+    if mode != SymbolAnalysisMode::CallGraph && symbol.trim().is_empty() {
         return Err((
             ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
-                "import_lookup=true requires symbol to contain the module path to search for"
-                    .to_string(),
+                format!("mode={} requires symbol to be non-empty", mode_name(mode)),
                 Some(error_meta(
                     "validation",
                     false,
-                    "set symbol to the module path when using import_lookup=true",
+                    "set symbol to the module path or target symbol for the selected mode",
                 )),
             ),
-            AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol,
+            AnalyzeSymbolErrorSubtype::ModeMissingSymbol,
         ));
     }
     Ok(())
+}
+
+/// Resolve the effective analysis mode, defaulting to call_graph.
+fn resolve_mode(params: &AnalyzeSymbolParams) -> SymbolAnalysisMode {
+    params.mode.clone().unwrap_or_default()
+}
+
+/// Lowercase metric/span name for an analysis mode.
+fn mode_name(mode: SymbolAnalysisMode) -> &'static str {
+    match mode {
+        SymbolAnalysisMode::CallGraph => "call_graph",
+        SymbolAnalysisMode::ImportLookup => "import_lookup",
+        SymbolAnalysisMode::DefUse => "def_use",
+    }
 }
 
 async fn handle_import_lookup(
@@ -359,8 +373,12 @@ async fn handle_import_lookup(
                     .map(|m| format!("{:?}", m).to_lowercase()),
             )
             .follow_depth(params.follow_depth)
-            .import_lookup(params.import_lookup.unwrap_or(false))
-            .def_use(params.def_use.unwrap_or(false))
+            .mode(
+                params
+                    .mode
+                    .as_ref()
+                    .map(|m| mode_name(m.clone()).to_owned()),
+            )
             .impl_only(params.impl_only.unwrap_or(false))
             .git_ref_used(params.git_ref.is_some())
             .is_paginated(cursor.is_some())
@@ -600,8 +618,12 @@ async fn handle_call_graph(
                     .map(|m| format!("{:?}", m).to_lowercase()),
             )
             .follow_depth(params.follow_depth)
-            .import_lookup(params.import_lookup.unwrap_or(false))
-            .def_use(params.def_use.unwrap_or(false))
+            .mode(
+                params
+                    .mode
+                    .as_ref()
+                    .map(|m| mode_name(m.clone()).to_owned()),
+            )
             .impl_only(params.impl_only.unwrap_or(false))
             .git_ref_used(params.git_ref.is_some())
             .is_paginated(cursor.is_some())
@@ -662,14 +684,20 @@ fn validate_top_level_preconditions(
         ));
     }
 
-    if params.import_lookup == Some(true) && params.def_use == Some(true) {
+    let mode = resolve_mode(params);
+    if mode == SymbolAnalysisMode::ImportLookup
+        && (params.match_mode.is_some()
+            || params.follow_depth.is_some()
+            || params.impl_only.is_some())
+    {
         return Err((
             invalid_params_result(
                 span,
-                "import_lookup=true and def_use=true are mutually exclusive; use one or the other",
-                "remove import_lookup or set def_use=false",
+                "mode=import_lookup rejects match_mode, follow_depth, and impl_only; \
+                 remove those parameters or use mode=call_graph",
+                "remove match_mode/follow_depth/impl_only when mode=import_lookup",
             ),
-            AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict,
+            AnalyzeSymbolErrorSubtype::ModeParamConflict,
         ));
     }
 
@@ -692,7 +720,7 @@ fn validate_top_level_preconditions(
 /// Main handler for the `analyze_symbol` tool.
 ///
 /// Validates common preconditions, then dispatches to `handle_import_lookup`
-/// or `handle_call_graph` based on the `import_lookup` flag.
+/// or `handle_call_graph` based on the resolved analysis mode.
 #[instrument(skip(ctx, params, call))]
 pub(crate) async fn analyze_symbol_handler(
     ctx: AnalyzeSymbolContext,
@@ -708,12 +736,14 @@ pub(crate) async fn analyze_symbol_handler(
         return Ok(result);
     }
 
-    if let Err((e, subtype)) = validate_import_lookup(params.import_lookup, &params.symbol) {
+    let mode = resolve_mode(&params);
+
+    if let Err((e, subtype)) = validate_mode_symbol(mode.clone(), &params.symbol) {
         emit_error_metric(&ctx, "invalid_params", Some(subtype), t_start, None);
         return Ok(err_to_tool_result(e));
     }
 
-    if params.import_lookup == Some(true) {
+    if mode == SymbolAnalysisMode::ImportLookup {
         handle_import_lookup(ctx, params, call).await
     } else {
         handle_call_graph(ctx, params, call).await
@@ -882,8 +912,8 @@ mod tests {
         for subtype in [
             AnalyzeSymbolErrorSubtype::PathIsFile,
             AnalyzeSymbolErrorSubtype::SummaryCursorConflict,
-            AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict,
-            AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol,
+            AnalyzeSymbolErrorSubtype::ModeParamConflict,
+            AnalyzeSymbolErrorSubtype::ModeMissingSymbol,
             AnalyzeSymbolErrorSubtype::FollowDepthExceeded,
             AnalyzeSymbolErrorSubtype::InvalidCursor,
             AnalyzeSymbolErrorSubtype::GitRefFilterFailed,
@@ -897,12 +927,8 @@ mod tests {
             let expected = match subtype {
                 AnalyzeSymbolErrorSubtype::PathIsFile => "path_is_file",
                 AnalyzeSymbolErrorSubtype::SummaryCursorConflict => "summary_cursor_conflict",
-                AnalyzeSymbolErrorSubtype::ImportLookupDefUseConflict => {
-                    "import_lookup_def_use_conflict"
-                }
-                AnalyzeSymbolErrorSubtype::ImportLookupMissingSymbol => {
-                    "import_lookup_missing_symbol"
-                }
+                AnalyzeSymbolErrorSubtype::ModeParamConflict => "mode_param_conflict",
+                AnalyzeSymbolErrorSubtype::ModeMissingSymbol => "mode_missing_symbol",
                 AnalyzeSymbolErrorSubtype::FollowDepthExceeded => "follow_depth_exceeded",
                 AnalyzeSymbolErrorSubtype::InvalidCursor => "invalid_cursor",
                 AnalyzeSymbolErrorSubtype::GitRefFilterFailed => "git_ref_filter_failed",
@@ -921,15 +947,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn analyze_symbol_handler_import_lookup_and_def_use_sets_conflict_subtype() {
-        // Arrange: import_lookup=true and def_use=true are mutually exclusive.
+    async fn analyze_symbol_handler_import_lookup_mode_with_exclusive_params_sets_conflict_subtype()
+    {
+        // Arrange: mode=import_lookup rejects match_mode/follow_depth/impl_only.
         let (ctx, mut rx) = test_context();
         let path = "/definitely-nonexistent-dir-abcxyz123".to_string();
         let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
             "path": path,
             "symbol": "std::collections",
-            "import_lookup": true,
-            "def_use": true,
+            "mode": "import_lookup",
+            "follow_depth": 1,
         }))
         .expect("valid AnalyzeSymbolParams JSON");
         let call = test_call(path.clone());
@@ -940,10 +967,7 @@ mod tests {
         // Assert
         let event = rx.try_recv().expect("expected an error metric event");
         assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
-        assert_eq!(
-            event.error_subtype.as_deref(),
-            Some("import_lookup_def_use_conflict")
-        );
+        assert_eq!(event.error_subtype.as_deref(), Some("mode_param_conflict"));
     }
 
     #[tokio::test]
@@ -991,7 +1015,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_import_lookup_invalid_git_ref_propagates_typed_subtype() {
-        // Arrange: import_lookup=true with a whitespace-containing git_ref, rejected
+        // Arrange: mode=import_lookup with a whitespace-containing git_ref, rejected
         // inside the spawn_blocking closure and propagated as a typed (error, subtype)
         // pair rather than inferred from the error's ErrorCode after the fact.
         let (ctx, mut rx) = test_context();
@@ -1001,7 +1025,7 @@ mod tests {
         let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
             "path": path,
             "symbol": "std::collections",
-            "import_lookup": true,
+            "mode": "import_lookup",
             "git_ref": "bad ref",
         }))
         .expect("valid AnalyzeSymbolParams JSON");

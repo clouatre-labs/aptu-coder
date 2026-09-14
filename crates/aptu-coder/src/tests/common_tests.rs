@@ -146,16 +146,19 @@ async fn test_analyze_directory_summary_false_forces_pagination() {
 // --- cache_hit integration tests ---
 
 #[test]
-fn test_analyze_symbol_import_lookup_invalid_params() {
-    // Arrange: empty symbol with import_lookup=true (violates the guard:
-    // symbol must hold the module path when import_lookup=true).
+fn test_analyze_symbol_mode_missing_symbol_invalid_params() {
+    // Arrange: empty symbol with mode=import_lookup (violates the guard:
+    // symbol must hold the module path when mode=import_lookup).
     // Act: call the validate helper directly (same pattern as validate_impl_only).
-    let result = crate::tools::analyze_symbol::validate_import_lookup(Some(true), "");
+    let result = crate::tools::analyze_symbol::validate_mode_symbol(
+        aptu_coder_core::types::SymbolAnalysisMode::ImportLookup,
+        "",
+    );
 
-    // Assert: INVALID_PARAMS is returned, paired with the ImportLookupMissingSymbol subtype.
+    // Assert: INVALID_PARAMS is returned, paired with the ModeMissingSymbol subtype.
     assert!(
         result.is_err(),
-        "import_lookup=true with empty symbol must return Err"
+        "mode=import_lookup with empty symbol must return Err"
     );
     let (err, subtype) = result.unwrap_err();
     assert_eq!(
@@ -164,7 +167,7 @@ fn test_analyze_symbol_import_lookup_invalid_params() {
         "expected INVALID_PARAMS; got {:?}",
         err.code
     );
-    assert_eq!(subtype.as_str(), "import_lookup_missing_symbol");
+    assert_eq!(subtype.as_str(), "mode_missing_symbol");
 }
 
 #[tokio::test]

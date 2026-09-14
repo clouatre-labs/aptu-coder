@@ -43,21 +43,20 @@ async fn test_analyze_symbol_file_path_error_metrics() {
 }
 
 /// Test that analyze_symbol emits result=error with error_type=invalid_params
-/// when both import_lookup=true and def_use=true (edge_case).
+/// when mode=import_lookup is combined with match_mode/follow_depth/impl_only (edge_case).
 #[tokio::test]
-async fn test_analyze_symbol_import_lookup_def_use_conflict_error_metrics() {
+async fn test_analyze_symbol_mode_param_conflict_error_metrics() {
     // Arrange: create a temp directory with a Rust file inside CWD
     let cwd = std::env::current_dir().unwrap();
     let dir = tempfile::TempDir::new_in(&cwd).unwrap();
     std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
 
-    // Act: call analyze_symbol with both import_lookup=true and def_use=true
+    // Act: call analyze_symbol with mode=import_lookup and follow_depth
     let params = json!({
         "path": dir.path().to_str().unwrap(),
         "symbol": "std::collections",
+        "mode": "import_lookup",
         "follow_depth": 1,
-        "import_lookup": true,
-        "def_use": true,
     });
     let response = call_tool_raw("analyze_symbol", params).await;
 
@@ -71,8 +70,8 @@ async fn test_analyze_symbol_import_lookup_def_use_conflict_error_metrics() {
     assert!(!content.is_empty(), "expected content");
     let text = content[0].get("text").unwrap().as_str().unwrap();
     assert!(
-        text.contains("mutually exclusive"),
-        "error message should mention mutually exclusive: {}",
+        text.contains("import_lookup"),
+        "error message should mention import_lookup: {}",
         text
     );
 }
@@ -121,12 +120,11 @@ async fn test_analyze_symbol_import_lookup_empty_symbol_error_metrics() {
     let dir = tempfile::TempDir::new_in(&cwd).unwrap();
     std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
 
-    // Act: call analyze_symbol with import_lookup=true and empty symbol
+    // Act: call analyze_symbol with mode=import_lookup and empty symbol
     let params = json!({
         "path": dir.path().to_str().unwrap(),
         "symbol": "",
-        "follow_depth": 1,
-        "import_lookup": true,
+        "mode": "import_lookup",
     });
     let response = call_tool_raw("analyze_symbol", params).await;
 
@@ -140,8 +138,8 @@ async fn test_analyze_symbol_import_lookup_empty_symbol_error_metrics() {
     assert!(!content.is_empty(), "expected content");
     let text = content[0].get("text").unwrap().as_str().unwrap();
     assert!(
-        text.contains("module path"),
-        "error message should mention module path: {}",
+        text.contains("non-empty"),
+        "error message should mention non-empty: {}",
         text
     );
 }

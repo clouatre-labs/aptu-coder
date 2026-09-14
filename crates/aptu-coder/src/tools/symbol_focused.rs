@@ -17,7 +17,7 @@ use aptu_coder_core::pagination::{
 use aptu_coder_core::traversal::{
     WalkEntry, changed_files_from_git_ref, filter_entries_by_git_ref, walk_directory,
 };
-use aptu_coder_core::types::AnalyzeSymbolParams;
+use aptu_coder_core::types::{AnalyzeSymbolParams, SymbolAnalysisMode};
 use rmcp::model::{CallToolResult, ErrorData};
 use tracing::instrument;
 
@@ -369,7 +369,7 @@ pub(crate) async fn handle_focused_mode(
         follow_depth: params.follow_depth.unwrap_or(1),
         max_depth: params.max_depth,
         impl_only: params.impl_only,
-        def_use: params.def_use.unwrap_or(false),
+        def_use: params.mode.as_ref() == Some(&SymbolAnalysisMode::DefUse),
         parse_timeout_micros: None,
     };
 

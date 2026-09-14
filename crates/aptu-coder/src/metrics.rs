@@ -100,12 +100,11 @@ pub struct MetricEvent {
     /// Call graph traversal depth for `analyze_symbol` (default 1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_depth: Option<u32>,
-    /// Whether `import_lookup=true` was set on `analyze_symbol`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub import_lookup: bool,
-    /// Whether `def_use=true` was set on `analyze_symbol`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub def_use: bool,
+    /// Analysis mode used by `analyze_symbol` (e.g., "call_graph", "import_lookup").
+    /// `None` when the mode parameter was omitted (defaults to call_graph) or not an
+    /// `analyze_symbol` call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     /// Whether `impl_only=true` was set on `analyze_symbol`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub impl_only: bool,
@@ -174,8 +173,7 @@ pub(crate) struct MetricEventBuilder {
     fields_projected: bool,
     match_mode: Option<String>,
     follow_depth: Option<u32>,
-    import_lookup: bool,
-    def_use: bool,
+    mode: Option<String>,
     impl_only: bool,
     stdin_provided: bool,
     timeout_configured_ms: Option<i64>,
@@ -323,13 +321,8 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
-    pub(crate) fn import_lookup(mut self, v: bool) -> Self {
-        self.import_lookup = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn def_use(mut self, v: bool) -> Self {
-        self.def_use = v;
+    pub(crate) fn mode(mut self, v: Option<String>) -> Self {
+        self.mode = v;
         self
     }
     #[must_use]
@@ -413,8 +406,7 @@ impl MetricEventBuilder {
             fields_projected: self.fields_projected,
             match_mode: self.match_mode,
             follow_depth: self.follow_depth,
-            import_lookup: self.import_lookup,
-            def_use: self.def_use,
+            mode: self.mode,
             impl_only: self.impl_only,
             stdin_provided: self.stdin_provided,
             timeout_configured_ms: self.timeout_configured_ms,
@@ -706,8 +698,7 @@ mod tests {
             fields_projected: false,
             match_mode: None,
             follow_depth: None,
-            import_lookup: false,
-            def_use: false,
+            mode: None,
             impl_only: false,
             stdin_provided: false,
             timeout_configured_ms: None,
