@@ -20,6 +20,9 @@ Verbatim artifacts (task.md, run-order.txt, scores-template.json, mcp-aptu-coder
 5. Budget cap: BENCH_MAX_BUDGET_USD is forwarded as --max-budget-usd.
 6. Transcript archival: the per-run session JSONL is copied from ~/.claude/projects/<slug>/ into docs/benchmarks/v17/results/runs/ and validated for tool isolation after each run.
 7. Session-dir slug: the runner now slugifies every non-alphanumeric character in the project path (including `.`), fixing transcript archival that previously always failed to locate the session directory.
+8. Working directory: the CLI (and therefore the stdio aptu-coder MCP server) is launched with cwd = Django checkout. In the discarded execution the server inherited the runner-repo cwd, so its path validation rejected every target path (`path is outside the working directory`) and no MCP run ever read the target repo (see [postmortem.md](postmortem.md), H2). Applied to all conditions equally.
+9. Prompt caching: `DISABLE_PROMPT_CACHING=1` (a v9 fix for a Bedrock-specific cache-write asymmetry) removed. With 5-19 turns per run, within-run cache reuse is substantial; disabling caching re-billed the full static context (~35-40k tokens/turn for MCP sessions) at full price every turn, disproportionately penalizing the MCP arm. Cost is taken from CLI `total_cost_usd`, which accounts for cached-token pricing; cache_read/cache_creation token counts are recorded in telemetry.
+10. Pre-flight MCP gate: for MCP conditions, the runner verifies a minimal `analyze_directory("django/contrib/auth")` call succeeds from the exact harness working directory before starting the run, and aborts on failure. This would have caught defect 8 in both v17 and (if it had existed) v12 before any spend.
 
 ## Isolation policy
 
@@ -92,6 +95,8 @@ A run in which the agent fails entirely (e.g., no usable output, budget exhauste
 ## Rejected execution (2026-09-14/15)
 
 A first execution of the v17 run order was discarded. During it, four runner defects were found and fixed (session-dir slug breaking transcript archival; missing --disallowedTools enforcement; a validator that checked only native tool names and missed mcp__aptu-coder__exec_command; missing WebFetch enforcement in native conditions). Because these fixes landed mid-benchmark, runs were executed under different flag sets; the resulting data is not a valid comparison and is not scored. No v17 results are retained. The full matrix (pilots and scored runs) will be re-executed from scratch under the fixed, frozen configuration in a separate execution before any scores are produced.
+
+Post-hoc investigation of the discarded artifacts (see [postmortem.md](postmortem.md)) found a fifth, fatal defect: the MCP server's working directory was never the Django checkout, so no MCP run in any condition accessed the target repo, and all A/C scores measured prior knowledge rather than tool use. Corrections 8-10 above address it. The postmortem also documents that v12's headline aggregation used a best-subset MCP comparison and that v12's MCP arm validity is unverifiable (no transcripts archived).
 
 ## Environment manifest
 

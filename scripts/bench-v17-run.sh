@@ -261,9 +261,66 @@ PYEOF
 # ---------------------------------------------------------------------------
 touch /tmp/.v17-run-marker
 # Claude slugifies the project path by replacing every non-alphanumeric
-# character (both "/" and ".") with "-".
-_REPO_SLUG=$(printf '%s' "$REPO_ROOT" | sed 's|[^A-Za-z0-9]|-|g')
+# character (both "/" and ".") with "-". The CLI now runs with cwd =
+# $DJANGO_REPO (see invocation below), so the session dir slug derives from
+# the Django checkout path, not the runner repo.
+_REPO_SLUG=$(printf '%s' "$DJANGO_REPO" | sed 's|[^A-Za-z0-9]|-|g')
 SESSION_DIR="${CLAUDE_SESSION_DIR:-$HOME/.claude/projects/${_REPO_SLUG}}"
+
+# ---------------------------------------------------------------------------
+# Pre-flight MCP sanity gate (MCP conditions only)
+# ---------------------------------------------------------------------------
+# The discarded v17 execution (and possibly v12) scored an MCP arm that never
+# read a single target file: the server rejected every target path and the
+# models answered from prior knowledge (postmortem.md, headline finding).
+# Before any run, verify that a minimal analyze_directory call succeeds from
+# the exact harness working directory. Abort rather than score a hollow run.
+if [[ "$TOOL_SET" == "mcp" ]]; then
+  echo "Pre-flight: verifying aptu-coder MCP access to target repo..."
+  if ! python3 - "$DJANGO_REPO" << 'PYEOF'
+import json, subprocess, sys
+
+django_repo = sys.argv[1]
+msgs = [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+     "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "bench-v17-preflight", "version": "1"}}},
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+     "params": {"name": "analyze_directory",
+                "arguments": {"path": "django/contrib/auth", "max_depth": 1, "summary": True}}},
+]
+try:
+    p = subprocess.run(["aptu-coder"], input="".join(json.dumps(m) + "\n" for m in msgs),
+                       capture_output=True, text=True, cwd=django_repo, timeout=120)
+except FileNotFoundError:
+    print("PREFLIGHT FAIL: aptu-coder binary not found on PATH", file=sys.stderr)
+    sys.exit(1)
+except subprocess.TimeoutExpired:
+    print("PREFLIGHT FAIL: aptu-coder did not respond within 120s", file=sys.stderr)
+    sys.exit(1)
+for line in p.stdout.splitlines():
+    try:
+        m = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if m.get("id") == 2:
+        r = m.get("result", {})
+        text = "".join(c.get("text", "") for c in r.get("content", []) if isinstance(c, dict))
+        if r.get("isError"):
+            print(f"PREFLIGHT FAIL: analyze_directory('django/contrib/auth') from {django_repo}: "
+                  f"{text[:200]!r}", file=sys.stderr)
+            sys.exit(1)
+        print("PREFLIGHT PASS: target repo reachable through MCP")
+        sys.exit(0)
+print("PREFLIGHT FAIL: no tools/call response from aptu-coder", file=sys.stderr)
+sys.exit(1)
+PYEOF
+  then
+    echo "ERROR: MCP pre-flight failed; aborting run." >&2
+    exit 1
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Claude invocation (with isolation flags)
@@ -275,7 +332,13 @@ if [[ -n "${BENCH_MAX_BUDGET_USD:-}" ]]; then
   BUDGET_FLAG=(--max-budget-usd "$BENCH_MAX_BUDGET_USD")
 fi
 
-DISABLE_PROMPT_CACHING=1 claude \
+# The CLI (and therefore the stdio aptu-coder MCP server) must run with the
+# Django checkout as working directory: validate_path() in the server
+# canonicalizes paths against std::env::current_dir(), so launching from the
+# runner repo makes every TARGET_REPO_PATH call fail with "path is outside
+# the working directory" (see docs/benchmarks/v17/postmortem.md, H2).
+# Applied to all conditions equally to preserve the 2x2 comparison.
+(cd "$DJANGO_REPO" && claude \
   -p \
   --model "$MODEL" \
   --system-prompt "$SYSTEM_PROMPT" \
@@ -290,6 +353,7 @@ DISABLE_PROMPT_CACHING=1 claude \
   "$TASK_CONTENT" \
   > "$JSONL_FILE" \
   2> "$LOG_FILE"
+)
 echo "Run completed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # ---------------------------------------------------------------------------
