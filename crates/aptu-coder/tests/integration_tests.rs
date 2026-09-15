@@ -1230,23 +1230,39 @@ async fn test_analyze_directory_cursor_continuation_fixed_page_size() {
 }
 
 #[tokio::test]
-async fn test_analyze_symbol_legacy_page_size_silently_ignored() {
-    // Arrange/Act: send legacy page_size argument; serde must accept and ignore it
-    // (fixed server page size of 20 applies instead).
-    let resp = call_tool_raw(
-        "analyze_symbol",
-        serde_json::json!({
-            "path": "src",
-            "symbol": "no_cache_meta",
-            "match_mode": "exact",
-            "page_size": 30
-        }),
-    )
-    .await;
+async fn test_analyze_tools_reject_legacy_page_size() {
+    // Arrange: legacy page_size argument must be rejected (removed per #1556);
+    // page sizing is server-owned, cursor-only pagination is the accepted surface.
+    let cases = [
+        (
+            "analyze_directory",
+            serde_json::json!({ "path": "src", "page_size": 30 }),
+        ),
+        (
+            "analyze_file",
+            serde_json::json!({ "path": "src/lib.rs", "page_size": 30 }),
+        ),
+        (
+            "analyze_symbol",
+            serde_json::json!({
+                "path": "src",
+                "symbol": "no_cache_meta",
+                "match_mode": "exact",
+                "page_size": 30
+            }),
+        ),
+    ];
 
-    // Assert: accepted without error.
-    assert!(
-        !resp["result"]["isError"].as_bool().unwrap_or(false),
-        "legacy page_size must be silently ignored, got: {resp}"
-    );
+    for (tool, params) in cases {
+        // Act
+        let resp = call_tool_raw(tool, params).await;
+
+        // Assert: rejected with an error mentioning page_size.
+        let resp_text = resp.to_string();
+        assert!(
+            (resp["result"]["isError"].as_bool().unwrap_or(false) || !resp["error"].is_null())
+                && resp_text.contains("page_size"),
+            "legacy page_size must be rejected by {tool}, got: {resp}"
+        );
+    }
 }

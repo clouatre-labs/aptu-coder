@@ -77,6 +77,24 @@ pub struct PaginationParams {
     /// Must be a valid opaque token or omitted entirely; passing an empty string is invalid and is treated as omitted.
     /// Mutually exclusive with summary=true; passing both returns INVALID_PARAMS.
     pub cursor: Option<String>,
+    /// Legacy parameter removed per alpha policy (#1556). Presence is rejected so unknown
+    /// pagination inputs fail deserialization instead of being silently ignored.
+    #[serde(default, skip_serializing, deserialize_with = "reject_page_size")]
+    #[cfg_attr(feature = "schemars", schemars(skip))]
+    pub page_size: Option<()>,
+}
+
+fn reject_page_size<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<serde::de::IgnoredAny> = Option::deserialize(deserializer)?;
+    match value {
+        Some(_) => Err(serde::de::Error::custom(
+            "unknown field `page_size`: page sizing is server-owned and removed from the parameter surface; use `cursor` for pagination",
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Output control parameters shared across all tools.
