@@ -94,9 +94,15 @@ A run in which the agent fails entirely (e.g., no usable output, budget exhauste
 
 ## Rejected execution (2026-09-14/15)
 
-A first execution of the v17 run order was discarded. During it, four runner defects were found and fixed (session-dir slug breaking transcript archival; missing --disallowedTools enforcement; a validator that checked only native tool names and missed mcp__aptu-coder__exec_command; missing WebFetch enforcement in native conditions). Because these fixes landed mid-benchmark, runs were executed under different flag sets; the resulting data is not a valid comparison and is not scored. No v17 results are retained. The full matrix (pilots and scored runs) will be re-executed from scratch under the fixed, frozen configuration in a separate execution before any scores are produced.
+A first execution of the v17 run order was discarded. During it, four runner defects were found and fixed (session-dir slug breaking transcript archival; missing --disallowedTools enforcement; a validator that checked only native tool names and missed mcp__aptu-coder__exec_command; missing WebFetch enforcement in native conditions). Because these fixes landed mid-benchmark, runs were executed under different flag sets; the resulting data is not a valid comparison and is not scored. No v17 results are retained. (The full-matrix re-execution originally planned here was cancelled; see "Superseded" below.)
 
 Post-hoc investigation of the discarded artifacts (see [postmortem.md](postmortem.md)) found a fifth, fatal defect: the MCP server's working directory was never the Django checkout, so no MCP run in any condition accessed the target repo, and all A/C scores measured prior knowledge rather than tool use. Corrections 8-10 above address it. The postmortem also documents that v12's headline aggregation used a best-subset MCP comparison and that v12's MCP arm validity is unverifiable (no transcripts archived).
+
+## Superseded (2026-09-15)
+
+This methodology will not be executed. The re-execution of the v17 matrix described above is cancelled: an adversarial review of this methodology against its own failure history found an unmitigated gap -- contamination from model prior knowledge of the famous target repo. Django contrib.auth allowed a model to score 9/9 with zero target reads (postmortem.md, headline finding); the corrections here detect that failure mode only at the zero-read extreme, and no element prevents it. Additional gaps: transcript archival failure was a warning rather than an abort, scoring was not condition-blind, and a 12-run single-task matrix at n>=3-5 offers little statistical power.
+
+The benchmark question moves to a v18 design ([../v18/](../v18/)): a pi-harness-based, per-task paired, auto-graded suite on an unfamiliar/synthetic frozen repository, with seal-and-reveal blinding, a dry-run/smoke/pilot ladder outside the sealed run, per-run treatment audits, and pre-registered GO/NO-GO gates. This directory (postmortem, methodology, runner) is retained unchanged as the factual record of the discarded execution and its corrections; the corrections to `scripts/bench-v17-run.sh` are Claude-Code-harness-specific and are not carried forward.
 
 ## Environment manifest
 
