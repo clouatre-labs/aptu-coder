@@ -151,14 +151,17 @@ if [[ "$TOOL_SET" == "mcp" ]]; then
   # exec_command/edit_* are aptu-coder MCP tools outside the v12 four-tool
   # allowlist (shell/file escape). Disallow all of them explicitly in MCP
   # conditions so isolation holds.
-  DISALLOWED_TOOLS="ToolSearch,mcp__aptu-coder__exec_command,mcp__aptu-coder__edit_overwrite,mcp__aptu-coder__edit_replace"
+  DISALLOWED_TOOLS="ToolSearch,mcp__aptu-coder__exec_command,mcp__aptu-coder__edit_overwrite,mcp__aptu-coder__edit_replace,WebFetch,WebSearch,Task,TodoWrite"
   MCP_FLAGS="--mcp-config $MCP_APTU_CODER_CONFIG --strict-mcp-config --disallowedTools $DISALLOWED_TOOLS"
   trap 'rm -f "$JSONL_FILE"' EXIT
 else
   ALLOWED_TOOLS="$NATIVE_TOOLS"
   EMPTY_MCP_CONFIG=$(mktemp /tmp/bench-v17-empty-mcp.XXXXXX.json)
   echo '{"mcpServers":{}}' > "$EMPTY_MCP_CONFIG"
-  MCP_FLAGS="--mcp-config $EMPTY_MCP_CONFIG --strict-mcp-config"
+  # Block built-ins outside the v12 native allowlist (haiku voluntarily invoked
+  # WebFetch in D conditions); same list applies to MCP conditions above.
+  DISALLOWED_TOOLS="WebFetch,WebSearch,Task,TodoWrite"
+  MCP_FLAGS="--mcp-config $EMPTY_MCP_CONFIG --strict-mcp-config --disallowedTools $DISALLOWED_TOOLS"
   trap 'rm -f "$EMPTY_MCP_CONFIG" "${JSONL_FILE:-}"' EXIT
 fi
 
