@@ -1,0 +1,56 @@
+{
+  "run_id": "C-haiku-mcp-1",
+  "condition": "C",
+  "auth_module_map": [
+    {
+      "file": "django/contrib/auth/models.py",
+      "role": "Core models defining AbstractBaseUser (lines ~42-118), AbstractUser (lines ~329-401), and User proxy"
+    },
+    {
+      "file": "django/contrib/auth/managers.py",
+      "role": "User and UserManager defining creation patterns and queryset methods (lines ~1-200)"
+    },
+    {
+      "file": "django/contrib/auth/backends.py",
+      "role": "Authentication backends assuming standard auth fields"
+    },
+    {
+      "file": "django/contrib/auth/migrations/__init__.py",
+      "role": "Migration framework entry point for auth app"
+    },
+    {
+      "file": "django/contrib/auth/apps.py",
+      "role": "AppConfig defining auth app setup and ready() hook"
+    }
+  ],
+  "migration_trace": [
+    "1. Audit current User model extending AbstractUser: verify all fields in custom app (django/contrib/auth/models.py:329-401)",
+    "2. Identify unmappable fields: profile_tier, external_sso_id, last_sync_at have no equiv in AbstractBaseUser (lines 42-118)",
+    "3. Create intermediate migration: add new fields to temp table (django migrations/0002_*.py)",
+    "4. Switch inheritance: create new CustomUser(AbstractBaseUser) + managers.UserManager (managers.py:1-200)",
+    "5. Backfill unmappable fields: data migration copying values from old model",
+    "6. Update auth backends: ensure custom auth logic handles new field locations (backends.py)",
+    "7. Verify signals: check apps.py ready() hook for any User model signal handlers"
+  ],
+  "unmappable_fields": [
+    {
+      "field": "profile_tier",
+      "reason": "CharField with choices=['free','pro','enterprise'] has no equivalent in AbstractBaseUser or AbstractUser; not in standard auth user model fields (id, password, last_login, is_active, is_staff, is_superuser, username, first_name, last_name, email, date_joined)",
+      "migration_strategy": "Add as custom field in CustomUser model extending AbstractBaseUser. Add to model definition after AbstractBaseUser inheritance, then create data migration to populate from old User.profile_tier values.",
+      "evidence": "django/contrib/auth/models.py:42-118 (AbstractBaseUser declares only: password, last_login, is_active fields); lines 329-401 show AbstractUser adds: username, first_name, last_name, email, is_staff, is_superuser, date_joined but no profile_tier"
+    },
+    {
+      "field": "external_sso_id",
+      "reason": "CharField with unique=True constraint and null=True is custom; AbstractBaseUser/AbstractUser provide no SSO integration or external identity fields",
+      "migration_strategy": "Add custom CharField(unique=True, null=True, blank=True) to CustomUser model. Implement custom authentication backend (inherit from ModelBackend in django/contrib/auth/backends.py) to support SSO lookups via external_sso_id. Create data migration: backfill from old User model via intermediate shadow field.",
+      "evidence": "django/contrib/auth/backends.py (ModelBackend ~lines 30-100) authenticates via username/email only; no external_sso_id support. AbstractUser (models.py:329) does not define unique external ID. Custom backend required to override authenticate() to check external_sso_id."
+    },
+    {
+      "field": "last_sync_at",
+      "reason": "DateTimeField(null=True) for SSO synchronization timestamp has no equivalent in contrib.auth; AbstractBaseUser only provides last_login (password auth login only, not SSO sync events)",
+      "migration_strategy": "Add custom DateTimeField(null=True, blank=True) to CustomUser. Do NOT override last_login for SSO events (breaks standard auth). Create separate last_sync_at field. Update custom SSO integration code to write to last_sync_at instead of last_login on SSO events. Create data migration to preserve old timestamps.",
+      "evidence": "django/contrib/auth/models.py:50-60 (AbstractBaseUser.last_login is DateTimeField for password auth only, linked to Session framework). No sync-event field. models.py:329-401 (AbstractUser inherits last_login unchanged). Custom field required; do not repurpose last_login."
+    }
+  ],
+  "tool_calls_total": 3
+}

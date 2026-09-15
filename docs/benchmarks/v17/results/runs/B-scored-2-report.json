@@ -1,0 +1,58 @@
+{
+  "run_id": "B-scored-2",
+  "condition": "B",
+  "auth_module_map": [
+    {
+      "file": "django/contrib/auth/base_user.py",
+      "role": "Defines AbstractBaseUser (line 43) with only password (line 44) and last_login (line 45) DB fields, plus BaseUserManager (line 21) with normalize_email and get_by_natural_key; importable even when auth is not in INSTALLED_APPS"
+    },
+    {
+      "file": "django/contrib/auth/models.py",
+      "role": "Defines PermissionsMixin (line 317) with is_superuser/groups/user_permissions; AbstractUser (line 446) adding username/first_name/last_name/email/is_staff/is_active/date_joined; concrete User model (line 517) with swappable='AUTH_USER_MODEL' (line 526); update_last_login signal receiver (line 18)"
+    },
+    {
+      "file": "django/contrib/auth/migrations/0001_initial.py",
+      "role": "Initial migration (line 7) creating Permission, Group, and User tables; baseline schema dependency for any custom app migration that touches auth models"
+    },
+    {
+      "file": "django/contrib/auth/signals.py",
+      "role": "Declares user_logged_in (line 3), user_login_failed (line 4), user_logged_out (line 5) Django Signals; user_logged_in triggers update_last_login"
+    },
+    {
+      "file": "django/contrib/auth/apps.py",
+      "role": "AuthConfig.ready() (line 18) wires post_migrate permission creation and conditionally connects update_last_login to user_logged_in only if last_login is a real DB field (isinstance check line 29)"
+    }
+  ],
+  "migration_trace": [
+    "Step 1 \u2014 settings.py: confirm AUTH_USER_MODEL = 'myapp.CustomUser' is already set; no change needed since the model is already swapped in",
+    "Step 2 \u2014 models.py: change base class from AbstractUser (django/contrib/auth/models.py:446) to AbstractBaseUser (django/contrib/auth/base_user.py:43); AbstractUser fields username/first_name/last_name/email/is_staff/is_active/date_joined are no longer inherited and must be explicitly re-declared if needed",
+    "Step 3 \u2014 models.py: add PermissionsMixin (django/contrib/auth/models.py:317) to MRO alongside AbstractBaseUser to retain is_superuser (line 323), groups (line 331), user_permissions (line 342)",
+    "Step 4 \u2014 models.py: set USERNAME_FIELD (used by get_by_natural_key at django/contrib/auth/base_user.py:37), REQUIRED_FIELDS, and EMAIL_FIELD (used by get_email_field_name at base_user.py:152) class attributes on the new model",
+    "Step 5 \u2014 models.py: subclass BaseUserManager (django/contrib/auth/base_user.py:21) for CustomUserManager; implement create_user and create_superuser manually \u2014 the existing UserManager (django/contrib/auth/models.py:140) is coupled to username+email and cannot be reused as-is",
+    "Step 6 \u2014 models.py: retain profile_tier, external_sso_id, last_sync_at as explicit fields on CustomUser; these have no equivalent anywhere in django/contrib/auth/ (neither base_user.py nor models.py)",
+    "Step 7 \u2014 migration file: run makemigrations to generate a new migration for myapp; it will add/alter columns per the new field set and declare dependency on ('auth', '0001_initial') (django/contrib/auth/migrations/0001_initial.py:7-10) for the groups/user_permissions M2M tables",
+    "Step 8 \u2014 verify signal wiring: AbstractBaseUser defines last_login = models.DateTimeField (django/contrib/auth/base_user.py:45) as a real field, so AuthConfig.ready() (django/contrib/auth/apps.py:29) will still connect update_last_login (django/contrib/auth/models.py:18) to user_logged_in (django/contrib/auth/signals.py:3) \u2014 no action needed",
+    "Step 9 \u2014 run migrations: apply the generated migration; confirm no data loss for the three custom fields which remain as custom columns untouched by auth internals"
+  ],
+  "unmappable_fields": [
+    {
+      "field": "profile_tier",
+      "reason": "No business-tier or subscription-level concept exists anywhere in django/contrib/auth/. AbstractBaseUser (base_user.py:43-164) and AbstractUser (models.py:446-514) define only authentication and identity fields; choices-based tier classification is purely application-domain logic.",
+      "migration_strategy": "Keep as a custom field on the AbstractBaseUser subclass: `profile_tier = models.CharField(max_length=20, choices=[('free','Free'),('pro','Pro'),('enterprise','Enterprise')], default='free')`. Generate a migration adding this column. No auth integration point is needed \u2014 access is purely via the model instance.",
+      "evidence": "django/contrib/auth/base_user.py:43 (AbstractBaseUser class definition, no tier field); django/contrib/auth/models.py:446 (AbstractUser class definition, no tier field)"
+    },
+    {
+      "field": "external_sso_id",
+      "reason": "Django contrib.auth has no SSO or external identity provider field. AbstractBaseUser provides only password (base_user.py:44) and last_login (base_user.py:45) as DB fields. AbstractUser adds username (models.py:456) and email (models.py:470) but neither is intended as an opaque external identifier. The unique=True + nullable pattern for SSO IDs has no auth equivalent.",
+      "migration_strategy": "Keep as a custom field: `external_sso_id = models.CharField(max_length=255, unique=True, null=True, blank=True)`. Add a DB index for SSO lookup performance. Implement a custom authentication backend (subclassing ModelBackend) that looks up users by external_sso_id when the SSO provider authenticates; wire it into AUTHENTICATION_BACKENDS in settings.",
+      "evidence": "django/contrib/auth/base_user.py:44-45 (only password+last_login in AbstractBaseUser); django/contrib/auth/models.py:456-470 (username/email in AbstractUser, neither suitable for opaque SSO IDs)"
+    },
+    {
+      "field": "last_sync_at",
+      "reason": "The closest temporal field in contrib.auth is last_login (base_user.py:45), updated by the update_last_login receiver (models.py:18-24) on the user_logged_in signal (signals.py:3). However last_login tracks authentication events, not external system synchronisation. There is no sync-timestamp concept in django/contrib/auth/.",
+      "migration_strategy": "Keep as a custom field: `last_sync_at = models.DateTimeField(null=True, blank=True)`. Update it in the SSO sync code path (e.g. a Celery task or post-save signal in the application). Do NOT repurpose last_login \u2014 doing so would break the update_last_login wiring in AuthConfig.ready() (apps.py:27-32) and the session auth hash mechanism in AbstractBaseUser.get_session_auth_hash() (base_user.py:132-149).",
+      "evidence": "django/contrib/auth/base_user.py:45 (last_login DateTimeField \u2014 auth-event semantics only); django/contrib/auth/models.py:18-24 (update_last_login sets last_login = timezone.now() on login, not on sync); django/contrib/auth/apps.py:27-32 (update_last_login wired to user_logged_in, not a sync signal)"
+    }
+  ],
+  "tool_calls_total": 11
+}

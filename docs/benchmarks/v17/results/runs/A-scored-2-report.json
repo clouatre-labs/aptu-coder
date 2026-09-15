@@ -1,0 +1,57 @@
+{
+  "run_id": "A-scored-2",
+  "condition": "A",
+  "auth_module_map": [
+    {
+      "file": "django/contrib/auth/base_user.py",
+      "role": "Defines BaseUserManager (~line 14) and AbstractBaseUser (~line 57) with the two built-in auth fields: password (CharField, line ~61) and last_login (DateTimeField null=True, line ~62). All custom user models targeting maximum control must extend AbstractBaseUser from this file."
+    },
+    {
+      "file": "django/contrib/auth/models.py",
+      "role": "Defines PermissionsMixin (~line 231, adds is_superuser/groups/user_permissions), UserManager (~line 131), AbstractUser (~line 321, extends AbstractBaseUser+PermissionsMixin with username/first_name/last_name/email/is_staff/is_active/date_joined), and the concrete User class (~line 390)."
+    },
+    {
+      "file": "django/contrib/auth/migrations/0001_initial.py",
+      "role": "First migration in the contrib.auth migration graph; establishes the baseline auth schema (Permission, Group, User tables). Custom apps that swap AUTH_USER_MODEL must depend on this migration via dependencies = [('auth', '0001_initial')] in their own initial migration."
+    },
+    {
+      "file": "django/contrib/auth/management/__init__.py",
+      "role": "Post-migrate signal hooks (create_permissions, create_contenttypes). Relevant when a custom user model swaps auth.User: the signal wiring still fires and must resolve correctly against the swapped model."
+    },
+    {
+      "file": "django/contrib/auth/backends.py",
+      "role": "ModelBackend.authenticate() uses USERNAME_FIELD and password. When switching to AbstractBaseUser the custom model's USERNAME_FIELD declaration (required by AbstractBaseUser, base_user.py ~line 57) must be set so this backend can locate users."
+    }
+  ],
+  "migration_trace": [
+    "Step 1 \u2013 Audit AbstractUser fields (django/contrib/auth/models.py:321\u2013388): document which AbstractUser fields the app currently uses (username, email, is_staff, is_active, date_joined from ~lines 334\u2013358; permissions fields from PermissionsMixin at ~line 231) versus fields that can be dropped when moving to AbstractBaseUser.",
+    "Step 2 \u2013 Choose base class: change model to extend AbstractBaseUser (django/contrib/auth/base_user.py:57) + PermissionsMixin (django/contrib/auth/models.py:231) instead of AbstractUser. AbstractBaseUser provides only password (base_user.py:~61) and last_login (base_user.py:~62); all other fields must be re-declared explicitly on the custom model.",
+    "Step 3 \u2013 Declare required class attributes on the custom model: USERNAME_FIELD (abstract slot in AbstractBaseUser, base_user.py:~57), REQUIRED_FIELDS list, and implement get_full_name()/get_short_name() (abstract method stubs in AbstractBaseUser, base_user.py:~80\u201390).",
+    "Step 4 \u2013 Write a custom manager extending BaseUserManager (django/contrib/auth/base_user.py:14) implementing create_user() and create_superuser(); assign it as objects = CustomUserManager() on the model.",
+    "Step 5 \u2013 Keep profile_tier, external_sso_id, and last_sync_at as explicit fields on the custom model (no built-in auth equivalent). No data loss migration needed for these fields since they are custom additions.",
+    "Step 6 \u2013 Write a Django schema migration: because AbstractUser fields that are being dropped (e.g., username if the app switches to email-based auth) require explicit RemoveField operations; fields being kept (email, is_staff, is_active, date_joined) must be re-declared and their existing column names preserved to avoid data loss.",
+    "Step 7 \u2013 Ensure the app's first migration lists dependencies = [('auth', '0001_initial')] (django/contrib/auth/migrations/0001_initial.py) so the auth permission/group tables exist before the custom user table is created.",
+    "Step 8 \u2013 Verify AUTH_USER_MODEL in settings.py matches the new model app_label and class name; run makemigrations --check and then migrate on a staging database to confirm the migration graph is acyclic and all foreign keys to auth.User (e.g., from contrib.admin LogEntry, ~models.py:390 reference) resolve to the swapped model."
+  ],
+  "unmappable_fields": [
+    {
+      "field": "profile_tier",
+      "reason": "AbstractBaseUser (django/contrib/auth/base_user.py:57) has no tiering, subscription, or role field. AbstractUser (models.py:321) adds only identity/auth fields (username, email, is_staff, is_active, date_joined) and no application-level classification field. The choices=['free','pro','enterprise'] pattern is a product concept, not an auth primitive.",
+      "migration_strategy": "Declare profile_tier = models.CharField(max_length=20, choices=[('free','Free'),('pro','Pro'),('enterprise','Enterprise')], default='free') directly on the custom model that extends AbstractBaseUser. No separate migration table needed. Add a database index if queries filter by tier frequently. If billing/feature logic grows complex, consider extracting to a Subscription model with a OneToOneField back to the user.",
+      "evidence": "django/contrib/auth/base_user.py:57 (AbstractBaseUser class definition, no tier field); django/contrib/auth/models.py:321 (AbstractUser class definition, no tier field)"
+    },
+    {
+      "field": "external_sso_id",
+      "reason": "Neither AbstractBaseUser (base_user.py:57) nor AbstractUser (models.py:321) carries any external identity provider reference. Django auth has no SSO/SAML/OAuth identifier concept built in. The closest field is username (models.py:~334) but it is a display/login name, not an immutable external provider ID, and does not have the unique+nullable semantics required.",
+      "migration_strategy": "Keep external_sso_id = models.CharField(max_length=255, unique=True, null=True, blank=True) on the custom AbstractBaseUser model. The unique+null combination is valid in Django (NULL values are not compared for uniqueness by most databases). For SSO flow, add a custom authentication backend (extending ModelBackend in django/contrib/auth/backends.py) that looks up by external_sso_id instead of the USERNAME_FIELD. This keeps the field identity-adjacent without polluting USERNAME_FIELD.",
+      "evidence": "django/contrib/auth/base_user.py:57 (AbstractBaseUser fields: only password and last_login); django/contrib/auth/models.py:334 (username field\u2014semantically different, no external-id contract)"
+    },
+    {
+      "field": "last_sync_at",
+      "reason": "AbstractBaseUser (base_user.py:62) has last_login (DateTimeField, null=True) which tracks the most recent authentication session, not an external-system synchronisation timestamp. These are semantically distinct: last_login is written by Django's auth machinery (update_last_login signal, django/contrib/auth/models.py signal registration ~line 394) automatically on every login; last_sync_at reflects a business process outside auth. Reusing last_login would corrupt auth audit trails.",
+      "migration_strategy": "Retain last_sync_at = models.DateTimeField(null=True, blank=True) as a separate field on the custom model. Do not map it to last_login. If sync is done by a background task, update last_sync_at there. Add a database index if queries like 'users not synced in 24 h' are frequent. The existing data in last_sync_at is preserved by keeping the column; the Django migration framework will leave the column unchanged since it belongs to the custom model, not to any contrib.auth migration.",
+      "evidence": "django/contrib/auth/base_user.py:62 (last_login DateTimeField\u2014auth session concept only); django/contrib/auth/models.py:~394 (update_last_login signal registered to post_save, showing last_login is managed by the auth signal pipeline, not by application sync logic)"
+    }
+  ],
+  "tool_calls_total": 4
+}
