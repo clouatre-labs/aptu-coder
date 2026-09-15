@@ -148,8 +148,10 @@ if [[ "$TOOL_SET" == "mcp" ]]; then
   ALLOWED_TOOLS="$MCP_TOOLS"
   # ToolSearch is a built-in native tool that post-dates v12; the models invoke
   # it voluntarily to discover MCP tools, which trips tool-isolation validation.
-  # Disallow it explicitly in MCP conditions so isolation holds.
-  DISALLOWED_TOOLS="ToolSearch"
+  # exec_command/edit_* are aptu-coder MCP tools outside the v12 four-tool
+  # allowlist (shell/file escape). Disallow all of them explicitly in MCP
+  # conditions so isolation holds.
+  DISALLOWED_TOOLS="ToolSearch,mcp__aptu-coder__exec_command,mcp__aptu-coder__edit_overwrite,mcp__aptu-coder__edit_replace"
   MCP_FLAGS="--mcp-config $MCP_APTU_CODER_CONFIG --strict-mcp-config --disallowedTools $DISALLOWED_TOOLS"
   trap 'rm -f "$JSONL_FILE"' EXIT
 else
@@ -231,20 +233,23 @@ with open(session_file) as f:
 
 print(f"Tools used: {sorted(tools_used)}")
 
+# StructuredOutput is the CLI's response-formatting tool, not an agent tool.
+PERMITTED_META = {"StructuredOutput"}
+
 if expected_tool_set == "mcp":
-    forbidden_used = tools_used & NATIVE_TOOLS
+    forbidden_used = (tools_used - MCP_TOOLS) - PERMITTED_META
     if forbidden_used:
-        print(f"ISOLATION FAIL: native tools used in MCP condition: {forbidden_used}", file=sys.stderr)
+        print(f"ISOLATION FAIL: non-allowlisted tools used in MCP condition: {forbidden_used}", file=sys.stderr)
         sys.exit(1)
     print(f"MCP tools used: {sorted(tools_used & MCP_TOOLS)}")
-    print("ISOLATION PASS: no native tools used")
+    print("ISOLATION PASS: only allowlisted MCP tools used")
 else:
-    forbidden_used = tools_used & MCP_TOOLS
+    forbidden_used = (tools_used - NATIVE_TOOLS) - PERMITTED_META
     if forbidden_used:
-        print(f"ISOLATION FAIL: MCP tools used in native condition: {forbidden_used}", file=sys.stderr)
+        print(f"ISOLATION FAIL: non-allowlisted tools used in native condition: {forbidden_used}", file=sys.stderr)
         sys.exit(1)
     print(f"Native tools used: {sorted(tools_used & NATIVE_TOOLS)}")
-    print("ISOLATION PASS: no MCP tools used")
+    print("ISOLATION PASS: only allowlisted native tools used")
 PYEOF
 }
 
