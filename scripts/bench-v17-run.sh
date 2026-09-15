@@ -146,7 +146,11 @@ NATIVE_TOOLS="Bash,Glob,Grep,Read,Write,ToolSearch"
 
 if [[ "$TOOL_SET" == "mcp" ]]; then
   ALLOWED_TOOLS="$MCP_TOOLS"
-  MCP_FLAGS="--mcp-config $MCP_APTU_CODER_CONFIG --strict-mcp-config"
+  # ToolSearch is a built-in native tool that post-dates v12; the models invoke
+  # it voluntarily to discover MCP tools, which trips tool-isolation validation.
+  # Disallow it explicitly in MCP conditions so isolation holds.
+  DISALLOWED_TOOLS="ToolSearch"
+  MCP_FLAGS="--mcp-config $MCP_APTU_CODER_CONFIG --strict-mcp-config --disallowedTools $DISALLOWED_TOOLS"
   trap 'rm -f "$JSONL_FILE"' EXIT
 else
   ALLOWED_TOOLS="$NATIVE_TOOLS"
