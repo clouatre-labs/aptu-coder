@@ -1,0 +1,14 @@
+# v12 run order (randomized, seed=42)
+# Format: seq | type | condition | model | tool_set
+ 1 | scored | B | claude-sonnet-4-6    | native
+ 2 | scored | A | claude-sonnet-4-6    | mcp
+ 3 | pilot  | C | claude-haiku-4-5     | mcp
+ 4 | scored | C | claude-haiku-4-5     | mcp
+ 5 | scored | C | claude-haiku-4-5     | mcp
+ 6 | scored | B | claude-sonnet-4-6    | native
+ 7 | scored | D | claude-haiku-4-5     | native
+ 8 | pilot  | D | claude-haiku-4-5     | native
+ 9 | scored | A | claude-sonnet-4-6    | mcp
+10 | pilot  | A | claude-sonnet-4-6    | mcp
+11 | pilot  | B | claude-sonnet-4-6    | native
+12 | scored | D | claude-haiku-4-5     | native

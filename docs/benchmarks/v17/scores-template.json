@@ -1,0 +1,302 @@
+{
+  "version": "v12",
+  "rubric": {
+    "dimensions": [
+      "structural_accuracy",
+      "cross_module_tracing",
+      "approach_quality"
+    ],
+    "max_per_dimension": 3,
+    "max_total": 9
+  },
+  "runs": [
+    {
+      "run_id": "A-scored-1",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 3,
+      "telemetry": {
+        "wall_time_ms": 72385,
+        "api_time_ms": 72158,
+        "input_tokens": 156820,
+        "output_tokens": 4873,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.543555,
+        "num_turns": 9
+      }
+    },
+    {
+      "run_id": "A-scored-2",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 3,
+      "telemetry": {
+        "wall_time_ms": 75118,
+        "api_time_ms": 74905,
+        "input_tokens": 133780,
+        "output_tokens": 4853,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.474135,
+        "num_turns": 8
+      }
+    },
+    {
+      "run_id": "B-scored-1",
+      "condition": "B",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "native",
+      "scores": {
+        "structural_accuracy": 2,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 8
+      },
+      "notes": "",
+      "tool_calls_total": 12,
+      "telemetry": {
+        "wall_time_ms": 143201,
+        "api_time_ms": 135004,
+        "input_tokens": 316415,
+        "output_tokens": 8455,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 1.07607,
+        "num_turns": 30
+      }
+    },
+    {
+      "run_id": "B-scored-2",
+      "condition": "B",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "native",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 12,
+      "telemetry": {
+        "wall_time_ms": 126209,
+        "api_time_ms": 120874,
+        "input_tokens": 236166,
+        "output_tokens": 7014,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.8137080000000001,
+        "num_turns": 19
+      }
+    },
+    {
+      "run_id": "C-scored-1",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 2,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 8
+      },
+      "notes": "",
+      "tool_calls_total": 4,
+      "telemetry": {
+        "wall_time_ms": 46536,
+        "api_time_ms": 46092,
+        "input_tokens": 364078,
+        "output_tokens": 3302,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.380588,
+        "num_turns": 11
+      }
+    },
+    {
+      "run_id": "C-scored-2",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 2,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 8
+      },
+      "notes": "",
+      "tool_calls_total": 6,
+      "telemetry": {
+        "wall_time_ms": 47910,
+        "api_time_ms": 47321,
+        "input_tokens": 433944,
+        "output_tokens": 4166,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.45477400000000007,
+        "num_turns": 15
+      }
+    },
+    {
+      "run_id": "D-scored-1",
+      "condition": "D",
+      "model": "claude-haiku-4-5",
+      "tool_set": "native",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 2,
+      "telemetry": {
+        "wall_time_ms": 47302,
+        "api_time_ms": 45301,
+        "input_tokens": 241993,
+        "output_tokens": 3625,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.260118,
+        "num_turns": 9
+      }
+    },
+    {
+      "run_id": "D-scored-2",
+      "condition": "D",
+      "model": "claude-haiku-4-5",
+      "tool_set": "native",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 14,
+      "telemetry": {
+        "wall_time_ms": 109422,
+        "api_time_ms": 106842,
+        "input_tokens": 703393,
+        "output_tokens": 6478,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.7987029999999999,
+        "num_turns": 29
+      }
+    },
+    {
+      "run_id": "A-scored-3",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 4,
+      "telemetry": {
+        "wall_time_ms": 63566,
+        "api_time_ms": 63247,
+        "input_tokens": 97595,
+        "output_tokens": 3489,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.34512,
+        "num_turns": 7
+      }
+    },
+    {
+      "run_id": "A-scored-4",
+      "condition": "A",
+      "model": "claude-sonnet-4-6",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 6,
+      "telemetry": {
+        "wall_time_ms": 76537,
+        "api_time_ms": null,
+        "input_tokens": 126336,
+        "output_tokens": 4009,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.439143,
+        "num_turns": 8
+      }
+    },
+    {
+      "run_id": "C-scored-3",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 2,
+        "cross_module_tracing": 2,
+        "approach_quality": 2,
+        "total": 6
+      },
+      "notes": "D1: missing backends.py and checks.py as integration points. D2: backends.py not traced, forms/admin paths not followed; only 1-2 paths with file:line. D3: strategies present for all 3 fields but secondary impacts (forms, admin) not detailed; 3-4 files cited but forms/admin missing.",
+      "tool_calls_total": 5,
+      "telemetry": {
+        "wall_time_ms": null,
+        "api_time_ms": null,
+        "input_tokens": 342907,
+        "output_tokens": 2467,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.355242,
+        "num_turns": 7
+      }
+    },
+    {
+      "run_id": "C-scored-4",
+      "condition": "C",
+      "model": "claude-haiku-4-5",
+      "tool_set": "mcp",
+      "scores": {
+        "structural_accuracy": 3,
+        "cross_module_tracing": 3,
+        "approach_quality": 3,
+        "total": 9
+      },
+      "notes": "",
+      "tool_calls_total": 7,
+      "telemetry": {
+        "wall_time_ms": 59647,
+        "api_time_ms": 59289,
+        "input_tokens": 469547,
+        "output_tokens": 3791,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cost_usd": 0.488502,
+        "num_turns": 10
+      }
+    }
+  ]
+}
