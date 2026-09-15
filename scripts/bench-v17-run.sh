@@ -248,7 +248,9 @@ PYEOF
 # Session capture setup
 # ---------------------------------------------------------------------------
 touch /tmp/.v17-run-marker
-_REPO_SLUG="${REPO_ROOT//\//-}"
+# Claude slugifies the project path by replacing every non-alphanumeric
+# character (both "/" and ".") with "-".
+_REPO_SLUG=$(printf '%s' "$REPO_ROOT" | sed 's|[^A-Za-z0-9]|-|g')
 SESSION_DIR="${CLAUDE_SESSION_DIR:-$HOME/.claude/projects/${_REPO_SLUG}}"
 
 # ---------------------------------------------------------------------------
