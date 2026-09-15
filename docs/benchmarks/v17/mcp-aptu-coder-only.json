@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aptu-coder": {
+      "type": "stdio",
+      "command": "aptu-coder",
+      "args": []
+    }
+  }
+}
