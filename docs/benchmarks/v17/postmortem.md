@@ -1,29 +1,25 @@
 # v17 Post-mortem: Investigation of the Discarded Benchmark Execution
 
-Status: analysis of `663467f` artifacts on `bench/v17-results`, read-only.
-The v17 execution remains discarded as a measurement; this document treats the
-artifacts as observational data only.
+Analysis of the artifacts preserved at commit `663467f` on `bench/v17-results`, conducted read-only. The v17 execution remains discarded as a measurement; this document treats the artifacts as observational data for diagnosis only.
 
-## Headline finding (supersedes the framing of all five hypotheses)
+## Scope limitation
 
-**The MCP arm never analyzed the Django checkout in any run.** Across all six
-A/C sessions, every absolute attempt at the Django path failed with the exact
-error `path is outside the working directory`, and every relative attempt failed
-with `path not found`. The only successful `analyze_directory` calls listed
-files of the aptu-coder repository itself (e.g. `./CONTRIBUTING.md`,
-`./Cargo.lock`, `./crates`). All A/C scores -- including Sonnet's 9/9 -- were
-produced from model prior knowledge of Django's contrib.auth plus error
-recovery, not from MCP tool output. The A-vs-B and C-vs-D comparisons in v17
-measure "prior knowledge + recovery" vs "actual repo access", not MCP vs native.
+The central fact of this post-mortem invalidates most of the original analysis questions. Every quantitative comparison between the MCP conditions (A, C) and the native conditions (B, D) in v17 — tokens, cost, latency, quality — compares two agents doing *different tasks*: the MCP agents never accessed the target repository at all, while the native agents did. Such comparisons measure nothing about MCP tools versus native tools and are not reported as findings below except where noted.
+
+## Headline finding
+
+**No MCP run in any condition ever read a single file of the Django checkout.** Across all six A/C sessions, every absolute attempt at the Django path failed with the exact error `path is outside the working directory`, and every relative attempt failed with `path not found`. The only successful `analyze_directory` calls listed files of the aptu-coder repository itself, for example `./CONTRIBUTING.md`, `./Cargo.lock`, and `./crates`. All A/C scores, including Sonnet's 9/9, were produced from the model's prior knowledge of Django's contrib.auth plus error recovery. The scores.json note attributing C-scored-1's failure to "model-path-choice variance" is incorrect: the path failure was universal. The only inter-run variation was post-failure behavior — Sonnet and C-scored-2 reconstructed plausible answers from memory, while C-scored-1 gave up and emitted an empty `auth_module_map`.
+
+Root cause: the MCP config stub (`mcp-aptu-coder-only.json`, byte-identical to v12's) specifies no `cwd`, so the stdio server inherited the benchmark-runner repo root as its sandbox. `validate_path()` in `crates/aptu-coder/src/validation.rs` canonicalizes the server's `std::env::current_dir()` as the allowed root and rejects anything outside it. The prompt, meanwhile, substitutes `TARGET_REPO_PATH=/tmp/benchmark-repos/django` — outside that root by construction. A correctly behaving server *must* reject these calls; the harness pointed the agent at a path the server could never accept.
 
 ## Hypothesis verdicts
 
-### H1. Payload bloat from analyze_directory results -- REFUTED as stated; modified mechanism CONFIRMED
+### H1: Payload bloat from analyze_directory results — refuted as stated
 
-Measured tool_result sizes (paired `tool_use`/`toolUseResult` by id):
+Tool-result sizes were measured by pairing `tool_use` blocks with `toolUseResult` entries by `tool_use_id`:
 
-| run | tool calls | total result bytes | cumulative re-send bytes | telemetry input_tokens |
-|---|---|---|---|---|
+| Run | Tool calls | Total result bytes | Cumulative re-send bytes | Telemetry input tokens |
+|---|---:|---:|---:|---:|
 | A-pilot-1 | 4 | 6,121 | 12,160 | 146,277 |
 | A-scored-1 | 4 | 7,060 | 7,157 | 163,683 |
 | A-scored-2 | 6 | 9,613 | 30,675 | 268,283 |
@@ -37,63 +33,26 @@ Measured tool_result sizes (paired `tool_use`/`toolUseResult` by id):
 | D-scored-1 | 18 | 62,168 | 326,179 | 502,792 |
 | D-scored-2 | 14 | 44,307 | 243,583 | 388,505 |
 
-MCP tool results are tiny (3-10 KB total; the largest single result is 6,927
-bytes -- a per-file index with `cache_tier`, `class_count`, `function_count`,
-`line_count`, `path` fields). Native sessions carry 33-62 KB of results with
-134-326 KB of cumulative re-send. The 46-byte MCP results are the repeated
-error string `Error: path is outside the working directory`.
+The MCP sessions' tool results are tiny — 3 to 10 KB per session, the largest single result being 6,927 bytes (a per-file index with `cache_tier`, `class_count`, `function_count`, `line_count`, and `path` fields). The recurring 46-byte results are the error string `Error: path is outside the working directory`. Native sessions carry 33 to 62 KB of results with 134 to 326 KB of cumulative re-send. Large `analyze_directory` payloads do not explain MCP token counts.
 
-The actual input-token driver in MCP sessions is a **~40,000-token static
-per-turn base context** (~40,008-40,021 tokens on the first API call of every
-A/C session vs ~22,017 for native sessions). With `cache_read_tokens: 0` and
-`cache_creation_tokens: 0` everywhere, that ~18k/turn delta is re-billed every
-turn: 5-9 turns x ~40k = the entire 146k-348k MCP input totals. Per-turn input
-grows only a few hundred tokens across tool calls (A-scored-1: 40,021 ->
-40,021 -> 40,266 -> 40,456 -> 42,940), confirming tool results are not the
-cost.
+One observational finding does survive the scope limitation, because it is about session mechanics rather than task performance: MCP sessions began with roughly 35,000 to 40,000 input tokens on the very first API call, versus about 20,000 to 22,000 for native sessions. Per-turn input then grew by only a few hundred tokens across tool calls (A-scored-1: 40,021 → 40,021 → 40,266 → 40,456 → 42,940), confirming that tool results were not the cost driver; the static context was. This is measured on degenerate sessions but reflects fixed per-session cost, not task behavior.
 
-Measurement against the live server (homebrew aptu-coder 0.34.1, the build the
-runner invokes): `tools/list` returns 7 tools totaling 27,610 bytes (~6.9k
-tokens: analyze_symbol 7,153 B, analyze_file 6,616 B, analyze_directory 3,117
-B, analyze_module 2,709 B, exec_command 3,595 B, edit_replace 3,225 B,
-edit_overwrite 1,195 B) plus ~223 tokens of server instructions (~892 chars).
-So the server directly contributes ~7.1k tokens of static context -- including
-~2k tokens of edit/exec tool schemas that v17 conditions disallow but the
-server unconditionally ships. The remainder of the measured ~15-18k MCP-vs-
-native first-turn delta is client-side (Claude Code's MCP integration), not
-aptu-coder payload.
+Measured against the live server (homebrew aptu-coder 0.34.1, the build the runner invokes): `tools/list` returns 7 tools totaling 27,610 bytes (~6.9k tokens — `analyze_symbol` 7,153 B, `analyze_file` 6,616 B, `analyze_directory` 3,117 B, `analyze_module` 2,709 B, `exec_command` 3,595 B, `edit_replace` 3,225 B, `edit_overwrite` 1,195 B) plus roughly 223 tokens of server instructions. The server directly contributes about 7.1k tokens of static context, including ~2k tokens of edit/exec schemas that v17 conditions disallowed but the server ships unconditionally. The remainder of the ~15–18k first-turn MCP-vs-native delta is client-side (Claude Code's MCP integration), not aptu-coder payload.
 
-**Correction of an earlier draft claim**: "static MCP context tripled from
-~14k to ~40k tokens/turn" is wrong. What the data supports is that the
-**MCP-vs-native per-turn premium** grew ~3x between v12 and v17 while native
-per-turn context also roughly doubled -- i.e., much of the absolute growth is
-client-side and affects both arms:
+**Correction of a draft claim**: an earlier draft stated that "static MCP context tripled from ~14k to ~40k tokens/turn." That was wrong — it compared a v12 *mean-per-turn* figure to a v17 *first-turn base*. What the data supports is that the **MCP-vs-native per-turn premium** grew roughly threefold while native per-turn context also roughly doubled, so much of the absolute growth is client-side and affects both arms:
 
-| per-turn input (mean over run) | v12 | v17 |
+| Mean input tokens per turn | v12 | v17 |
 |---|---|---|
 | Sonnet native (B) | 10,547 / 12,429 | ~16,018 |
-| Sonnet MCP (A) | 17,424 / 16,722 (runs 3-4: 13,942 / 15,792) | 32,737 / 38,326 |
+| Sonnet MCP (A) | 17,424 / 16,722 (runs 3–4: 13,942 / 15,792) | 32,737 / 38,326 |
 | Haiku native (D) | 26,888 / 24,254 | 26,463 / 25,900 |
-| Haiku MCP (C) | 33,098-48,986 | 38,651 / 36,286 |
+| Haiku MCP (C) | 33,098–48,986 | 38,651 / 36,286 |
 
-v12 Sonnet MCP premium: ~4-7k tokens/turn. v17 Sonnet MCP premium: ~17-22k
-tokens/turn. Of the v17 premium, ~7.1k is directly attributable to server
-payload (above); the attribution of the remaining ~10-15k between server
-schema growth since v12 and client-side MCP context is unresolved (v12-era
-schema sizes were not archived).
+The v12 Sonnet MCP premium was ~4–7k tokens/turn; v17's was ~17–22k. Of the v17 premium, ~7.1k is directly attributable to server payload; attribution of the rest between server schema growth since v12 and client-side MCP context is unresolved (v12-era schema sizes were not archived). Note also that the runner set `DISABLE_PROMPT_CACHING=1`, so this static context was re-billed at full price every turn — a harness choice, applied to both arms, now removed (see below).
 
-Two further facts reweight the cost story:
-- The runner sets `DISABLE_PROMPT_CACHING=1` (scripts/bench-v17-run.sh), so
-  the per-turn re-billing of static context is a deliberate harness choice
-  applied to both arms, not a server or client defect.
-- Whether v12 made the same choice is not recorded in its methodology; if
-  v12 ran with caching enabled, part of v12's "59% cheaper" would itself be a
-  caching artifact. v12 telemetry shows cache_read_tokens: 0, consistent with
-  caching being disabled there too, so this is likely symmetric.
+### H2: Sandbox/path failure — confirmed, and universal
 
-### H2. Sandbox/path failure -- CONFIRMED, and universal (not C-scored-1-specific)
-
-Every `analyze_directory` invocation across all A/C sessions, verbatim:
+Complete inventory of every aptu-coder tool call in all A/C sessions, with verbatim path arguments and results. The only aptu-coder tool ever invoked was `analyze_directory` (plus the CLI's `StructuredOutput` to finish):
 
 | Session | `path` argument (verbatim) | Result |
 |---|---|---|
@@ -125,176 +84,67 @@ Every `analyze_directory` invocation across all A/C sessions, verbatim:
 | C-scored-2 | `/django/contrib/auth` | `path not found` |
 | C-scored-2 | `../django/django/contrib/auth` | `path not found` |
 
-There is **no path-formation difference that produced success**: C-scored-2
-and C-pilot-1 did not reach the repo either. The scores.json note attributing
-C-scored-1's failure to "model-path-choice variance" is factually wrong about
-the other runs. The only inter-run variance was post-failure behavior: Sonnet
-and C-scored-2 reconstructed answers from prior knowledge; C-scored-1 gave up
-and emitted an empty `auth_module_map`.
-
-Mechanism: `crates/aptu-coder/src/validation.rs` `validate_path()`
-(line ~102) takes `cwd = std::env::current_dir()` as the allowed root and
-rejects anything that canonicalizes outside it. The MCP config stub
-(`mcp-aptu-coder-only.json`, byte-identical to v12's:
-`{"mcpServers":{"aptu-coder":{"type":"stdio","command":"aptu-coder","args":[]}}}`)
-has no `cwd`, so the server inherited the benchmark-runner repo root, while the
-prompt substitutes `TARGET_REPO_PATH=/tmp/benchmark-repos/django` -- outside
-the sandbox by construction.
-
 Classification:
-1. **Harness/prompt defect (primary)**: prompt target is outside the server's
-   working directory; a correctly behaving server must reject it.
-2. **Server usability defect (contributing)**: the error
-   `path is outside the working directory` never states what the working
-   directory is (the `error_meta` suggestion
-   `provide a path within the current working directory` exists but omits the
-   root), so every model burned calls guessing (`/Users/hugues.clouatre`,
-   `../django`, `/django/...`).
-3. **Model variance (consequence only)**: explains 9/9 vs 6 vs 1, not the
-   failure itself.
 
-### H3. Tool-selection collapse -- CONFIRMED as observation; cause is H2, so server-side summary-mode effect is UNRESOLVED
+1. **Harness/prompt defect (primary).** The prompt target is outside the server's working directory; a correctly behaving server must reject it.
+2. **Server usability defect (contributing).** The error text `path is outside the working directory` never states what the working directory actually is. The structured `suggestedAction` (`provide a path within the current working directory`) exists but also omits the root, so every model burned calls guessing path forms (`/Users/hugues.clouatre`, `../django`, `/django/...`).
+3. **Model variance (consequence only).** It explains 9/9 versus 6 versus 1 in condition C, not the failure itself.
 
-Counts: `analyze_file` 0, `analyze_module` 0, `analyze_symbol` 0 in all six
-A/C sessions; only `analyze_directory` (3-6 calls) plus a final
-`StructuredOutput`. The prompts' recipes (condition-a/c lines 14-19) are
-internally coherent post-drift-corrections: step 2's `analyze_file` on "2-3
-key files identified above" depends on step 1's directory overview, which
-always failed -- the recipe never got past step 1 in any run. Git history
-between v12 and v17 (`bfe0e96` tree output by default + 5K auto-summary
-threshold, `bd3229e` default max_depth=3, `e67c792`/`5800b2b` server-owned
-paging) plausibly made `analyze_directory` output richer, but v17 data cannot
-test whether that changes drill-down behavior because no session ever saw a
-successful target-repo analysis.
+### H3: Tool-selection collapse — confirmed as observation; cause is H2, so the server-side question is unresolved
 
-### H4. v12 comparison integrity -- PARTIALLY CONFIRMED (headline cherry-picked; underlying effect real)
+`analyze_file`, `analyze_module`, and `analyze_symbol` were called zero times in all six A/C sessions. The condition prompts' recipes are internally coherent after the drift corrections: step 2's `analyze_file` on "2-3 key files identified above" depends on step 1's directory overview — which always failed. The recipe never advanced past step 1 in any run. Git history between v12 and v17 (`bfe0e96` tree output by default plus a 5K auto-summary threshold, `bd3229e` default `max_depth=3`, `e67c792`/`5800b2b` server-owned paging) plausibly made `analyze_directory` output richer, but this dataset cannot test whether that changes drill-down behavior, because no session ever saw a successful target-repo analysis.
 
-The 59% claim lives in README.md ("cutting token usage by up to 59%"; MCP
-Sonnet 112k/$0.39 vs Native 276k/$0.95), computed as input tokens, median,
-with the MCP side using only A runs 3-4 (the improved-build re-run) against
-the full n=2 native B condition. Recomputed aggregation matrix (A vs B):
+### H4: v12 comparison integrity — partially confirmed
 
-| Aggregation | A | B | Reduction |
+The "59%" claim lives in the README ("cutting token usage by up to 59%"; MCP Sonnet 112k tokens / $0.39 vs native 276k / $0.95). It is computed as median input tokens with the MCP side using only A runs 3–4 (the improved-build re-run) against the full n=2 native condition. Recomputed aggregation matrix (v12, A vs B):
+
+| Aggregation | A | B | MCP reduction |
 |---|---:|---:|---:|
-| input, median, A runs 3-4 (README basis) | 111,966 | 276,291 | 59.5% |
+| input, median, A runs 3–4 (README basis) | 111,966 | 276,291 | 59.5% |
 | total tokens, median, all 4 A runs | 134,489 | 284,025 | 52.6% |
 | input, mean, all 4 A runs | 128,633 | 276,291 | 53.4% |
 | input, median, first 2 A runs | 145,300 | 276,291 | 47.4% |
 
-So the headline is inflated by ~7 points via best-subset selection, but the
-v12 effect is robust at 47-59% under every aggregation. The v17 Sonnet
-collapse to -3% (MCP slightly worse) therefore survives conservative
-re-aggregation. However, given the H2 finding, v12's MCP arm validity is now
-itself in question: v12 preserved no session transcripts (all `.log` files are
-0 bytes; A-scored-3 has none), so we cannot verify that v12 MCP runs ever
-accessed Django either. If they did not, v12's "cheaper AND equal quality"
-could be the same prior-knowledge artifact at lower per-turn cost (v12 MCP ran
-~13.9k tokens/turn vs v17's ~40k).
+The headline is inflated by roughly 7 points via best-subset selection, but the underlying v12 effect is robust at 47–59% under every aggregation. The v17 Sonnet collapse to −3% therefore survives conservative re-aggregation. However, given the H2 finding, v12's MCP arm validity is itself in question: v12 preserved no session transcripts (all `.log` files are zero bytes; A-scored-3 has none), so it cannot be verified that v12's MCP runs ever accessed Django either. If they did not, v12's "cheaper and equal quality" could be the same prior-knowledge artifact at one-third the per-turn overhead.
 
-### H5. Wall-time / API-time -- PARTIALLY CONFIRMED (benign accounting, real latency effect from static context)
+### H5: Wall-time / API-time — partially confirmed; accounting is benign
 
-- api_time ~= wall_time holds for all A/C runs (ratio 1.006-1.027). A-scored-2
-  api 137,949 ms > wall 137,508 ms is a 441 ms (0.32%) excess consistent with
-  timer ordering/rounding, not a defect; the same ratio pattern appears in
-  every A/C run.
-- Native runs B-scored-1, D-scored-1, D-scored-2 have 25-39% of wall time
-  outside api_time (client-side Bash/Read execution) -- native wall times
-  overstate API cost.
-- Large MCP tool results do NOT inflate latency (results are <=7 KB and
-  per-turn input barely grows). The uncached ~40k-token base context plausibly
-  does: A runs ~17-20 s/turn vs B ~6.9-8.5 s/turn, with A-scored-2 showing
-  18-40 s single turns re-processing ~35-43k input tokens at zero cache.
-
-## Ranked defects and non-defects
-
-1. **Harness defect (v17, likely inherited from v12)**: MCP server launched
-   without `cwd`, so its sandbox root is the runner repo while the prompt
-   targets `/tmp/benchmark-repos/django`. Invalidates the entire MCP arm.
-2. **Server cost contributor**: the MCP-vs-native per-turn input premium grew
-   from ~4-7k (v12) to ~17-22k tokens (v17, Sonnet). Of the v17 premium,
-   ~7.1k tokens/turn is directly measured server payload (7-tool tools/list =
-   27,610 bytes + 892-char instructions), including ~2k tokens of edit/exec
-   schemas shipped unconditionally even when disallowed by the client
-   allowlist. The rest of the premium's growth is unresolved between server
-   schema growth since v12 and client-side MCP context. With caching disabled
-   by the harness (DISABLE_PROMPT_CACHING=1), this premium is re-billed every
-   turn.
-3. **Server usability defect**: `path is outside the working directory` error
-   omits the actual working-directory root; models cannot self-correct and
-   burn calls guessing path forms.
-4. **README aggregation defect (v12)**: "up to 59%" compares best-subset MCP
-   re-runs against the full native condition; honest all-runs figure is ~53%.
-5. **scores.json misdiagnosis**: C-scored-1 attributed to "model-path-choice
-   variance" when the path failure was universal.
-6. **Non-defects**: analyze_directory result size (tiny, well-bounded);
-   api_time > wall_time in A-scored-2 (0.3%, benign); the condition prompts'
-   recipes (coherent, never reached step 2); native-condition wall-time
-   inflation is client-side tool execution, not API.
-
-## Attribution of the observed MCP disadvantage
-
-- **(a) aptu-coder server behavior**: the MCP-vs-native per-turn premium
-  (~17-22k tokens on Sonnet, of which ~7.1k directly measured server payload,
-  ~2k of it disallowed-tools schemas) is a genuine server-side cost
-  contributor and the only mechanism that made MCP runs token-competitive-or-
-  worse despite doing strictly less work (never reading Django). Est.
-  contribution to the Sonnet A-vs-B gap: material, though the majority of the
-  premium's growth since v12 is unresolved between server and client. The
-  error-message UX defect wasted 2-5 calls per session but is second-order
-  for tokens.
-- **(b) Prompt/recipe/harness design**: the sandbox/cwd misconfiguration is
-  the reason the MCP arm measured nothing about MCP. It does not explain the
-  token gap per se (failed calls are cheap) but it invalidates what the gap
-  means.
-- **(c) Model variance at n=2**: explains quality spread (9 vs 6 vs 1 in C)
-  and nothing about the token anomaly. C-scored-1's 347,858 input tokens are
-  9 turns x ~40k static context, not 5 tool calls of payload.
-- **(d) v12 baseline inflation**: ~7 points of the 59% headline is
-  best-subset aggregation; the remaining ~53% v12 advantage still does not
-  reproduce in v17, but v12's MCP arm is unverifiable (0-byte logs) and may
-  share the same harness flaw, in which case v12's "advantage" was partly the
-  same prior-knowledge artifact at one-third the per-turn overhead.
+Across all 12 runs: `api_time` ≈ `wall_time` holds for all six A/C runs (ratio 1.006–1.027); A-scored-2's api 137,949 ms exceeding wall 137,508 ms is a 441 ms (0.32%) excess consistent with timer ordering, not a defect, and the same ratio pattern appears in every A/C run. Native runs B-scored-1, D-scored-1, and D-scored-2 show 25–39% of wall time outside api time (client-side Bash/Read execution), so native wall times overstate API cost. Large MCP tool results do not inflate latency (results ≤7 KB, per-turn input nearly flat); the uncached ~40k-token static context plausibly does — A runs averaged ~17–20 s/turn versus B's ~7–8.5 s/turn — but since the MCP sessions were degenerate, this is an observation about session mechanics, not a benchmark finding.
 
 ## Root-cause fix validation (2026-09-15, live test against aptu-coder 0.34.1)
 
 Tested via direct MCP stdio (initialize / tools/list / tools/call):
 
-1. **Reproduction** -- server cwd = aptu-coder repo, call
-   `analyze_directory(path="/tmp/benchmark-repos/django/django/contrib/auth")`:
-   returns `isError: true`, text `path is outside the working directory`,
-   `structuredContent.suggestedAction` = `"provide a path within the current
-   working directory"`. The payload nowhere states what the working directory
-   actually is -- confirming the usability defect verbatim.
-2. **Fix** -- server cwd = `/tmp/benchmark-repos/django`, call
-   `analyze_directory(path="django/contrib/auth", max_depth=1, summary=true)`:
-   full tree returns, e.g. `SUMMARY: 19 files (19 prod, 0 test), 4839L, 384F,
-   76C (max_depth=1)` including `base_user.py [164L, 27F, 3C]` and
-   `models.py [634L, 67F, 14C]`. The absolute TARGET_REPO_PATH form also
-   succeeds from this cwd because validation.rs canonicalizes it inside the
-   allowed root.
+1. **Reproduction** — server cwd = aptu-coder repo, `analyze_directory(path="/tmp/benchmark-repos/django/django/contrib/auth")` returns `isError: true`, text `path is outside the working directory`, `suggestedAction` = `provide a path within the current working directory`. The payload nowhere states the working directory.
+2. **Fix** — server cwd = `/tmp/benchmark-repos/django`, `analyze_directory(path="django/contrib/auth", max_depth=1, summary=true)` returns the full tree: `SUMMARY: 19 files (19 prod, 0 test), 4839L, 384F, 76C (max_depth=1)` including `base_user.py [164L, 27F, 3C]` and `models.py [634L, 67F, 14C]`. The absolute `TARGET_REPO_PATH` form also succeeds from this cwd, because the path canonicalizes inside the allowed root.
 
-Conclusion: launching the CLI (and therefore the stdio MCP server) with
-working directory = Django checkout fully resolves the MCP-arm failure. The
-runner fix (run `claude` from `$DJANGO_REPO`) applies to all four conditions
-equally, preserving the 2x2 comparison.
+Conclusion: launching the CLI (and therefore the stdio MCP server) with working directory = Django checkout fully resolves the MCP-arm failure. The runner now does this for all four conditions equally.
+
+## Defects and non-defects, ranked
+
+1. **Harness defect (v17, likely inherited from v12):** MCP server launched without `cwd`, so its sandbox root was the runner repo while the prompt targeted `/tmp/benchmark-repos/django`. Invalidated the entire MCP arm.
+2. **Server cost contributor:** the MCP-vs-native per-turn input premium grew from ~4–7k (v12) to ~17–22k tokens (v17, Sonnet). About 7.1k tokens/turn of the v17 premium is directly measured server payload (27,610-byte `tools/list` plus 892-char instructions), including ~2k tokens of edit/exec schemas shipped even when disallowed by the client allowlist. Attribution of the remainder is unresolved. With caching disabled by the harness, this premium was re-billed every turn.
+3. **Server usability defect:** `path is outside the working directory` omits the actual working-directory root; models cannot self-correct and waste calls guessing.
+4. **README aggregation defect (v12):** "up to 59%" compares best-subset MCP re-runs against the full native condition; the honest all-runs figure is ~53%.
+5. **scores.json misdiagnosis:** C-scored-1 attributed to "model-path-choice variance" when the path failure was universal.
+6. **Non-defects:** `analyze_directory` result size (tiny and well-bounded); api_time exceeding wall_time in A-scored-2 (0.3%, benign); the condition prompts' recipes (coherent, simply never reached step 2); native wall-time inflation (client-side tool execution, not API).
+
+## Attribution
+
+Because the MCP arm never performed the task, no part of the observed v17 "MCP disadvantage" can be attributed to MCP tooling at all. What can be said:
+
+- **(a) aptu-coder server behavior:** a real cost contributor (~7.1k tokens/turn of measured static payload, ~2k of it disallowed-tool schemas) and a real usability defect in the path-validation error. Neither was the cause of the quality or token anomaly.
+- **(b) Prompt/recipe/harness design:** the cause of the anomaly. The cwd misconfiguration made the MCP arm measure prior knowledge instead of tool use.
+- **(c) Model variance at n=2:** explains the quality spread within condition C (9/9, ~6, ~1) and nothing about tokens.
+- **(d) v12 baseline inflation:** ~7 points of the 59% headline is best-subset aggregation; the remaining ~53% v12 advantage does not reproduce in v17, but v12's MCP arm is unverifiable (zero-byte logs) and may share the same harness flaw, in which case v12's advantage was partly the same prior-knowledge artifact at lower per-turn overhead.
 
 ## Follow-ups executed in PR 1562 (2026-09-15)
 
-- Runner: CLI launched with cwd = Django checkout (correction 8); pre-flight
-  MCP gate added (correction 10); `DISABLE_PROMPT_CACHING=1` removed
-  (correction 9). Validated live against aptu-coder 0.34.1 (see fix-test
-  section above).
+- Runner: CLI launched with cwd = Django checkout (methodology correction 8); pre-flight MCP gate added (correction 10); `DISABLE_PROMPT_CACHING=1` removed (correction 9). Validated live against aptu-coder 0.34.1.
 
 ## Recommended follow-ups (not executed)
 
-- Fix the harness: launch the MCP server with `cwd` = Django checkout (or make
-  the prompt path relative to the server's working directory). Requires a new
-  commit on a new branch; re-freezes the pending benchmark.
-- Server: include the canonical working-directory root in
-  `path is outside the working directory` errors (validation.rs already
-  carries an `error_meta` suggestion; add the root to it).
-- Server: investigate the v12->v17 growth of the static MCP context
-  (tool descriptions, server instructions) and why prompt caching is not
-  engaged (cache_read_tokens: 0 in every run of both benchmarks).
-- Re-run v12 MCP arm with transcripts preserved to determine whether v12's
-  MCP runs ever accessed the target repo.
+- Server: include the canonical working-directory root in the `path is outside the working directory` error (validation.rs already carries an `error_meta` suggestion; add the root to it).
+- Server: investigate trimming the static context — ship only client-allowlisted tool schemas where the protocol allows, and audit the v12-to-v17 growth of tool descriptions.
+- Benchmark design: use a target repository the models do not know (synthetic or deliberately obscure). Sonnet's 9/9 from zero target reads shows prior knowledge can fully mask tool-access failure on a famous codebase; consider scorer verification that cited `file:line` anchors exist in the checkout.
+- Re-run the v12 MCP arm with transcripts preserved to determine whether v12's MCP runs ever accessed the target repo.
