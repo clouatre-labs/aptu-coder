@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use rmcp::RoleServer;
-use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
+use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, Resource, TextContent};
 use rmcp::service::RequestContext;
 use tracing::instrument;
 
@@ -288,7 +288,12 @@ async fn spawn_and_collect_phase(
 /// Phase 4: Format output text and apply truncation limits.
 ///
 /// Returns the formatted output text string.
-fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -> String {
+fn format_shell_output_phase(
+    output: &ShellOutput,
+    params: &ExecCommandParams,
+    raw_stdout_bytes: u64,
+    raw_stderr_bytes: u64,
+) -> String {
     // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
     let output_text = if output.interleaved.is_empty() {
         format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
@@ -311,6 +316,21 @@ fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -
         if let Some(ref p) = output.interleaved_path {
             let _ = writeln!(truncation_notice, "Full output available at: {p}");
         }
+        // Byte-count hint per overflow path; skipped when the raw counter is 0
+        // (timed_out / drain-abort results report no raw counts).
+        if let Some(ref p) = output.stdout_path {
+            let _ = write!(truncation_notice, "{}", capture_hint(p, raw_stdout_bytes));
+        }
+        if let Some(ref p) = output.stderr_path {
+            let _ = write!(truncation_notice, "{}", capture_hint(p, raw_stderr_bytes));
+        }
+        if let Some(ref p) = output.interleaved_path {
+            let _ = write!(
+                truncation_notice,
+                "{}",
+                capture_hint(p, raw_stdout_bytes + raw_stderr_bytes)
+            );
+        }
     }
 
     format!(
@@ -324,6 +344,15 @@ fn format_shell_output_phase(output: &ShellOutput, params: &ExecCommandParams) -
         truncation_notice,
         output_text,
     )
+}
+
+/// Hint line for an overflow capture path; omits byte counts when 0.
+fn capture_hint(path: &str, bytes: u64) -> String {
+    if bytes > 0 {
+        format!("output truncated; full capture at {path} ({bytes} bytes captured)\n")
+    } else {
+        format!("output truncated; full capture at {path}\n")
+    }
 }
 
 /// Free-function implementation of the `exec_command` tool handler.
@@ -474,7 +503,7 @@ pub(crate) async fn exec_command_impl(
     }
 
     // Phase 4: Format output
-    let text = format_shell_output_phase(&output, &params);
+    let text = format_shell_output_phase(&output, &params, raw_stdout_bytes, raw_stderr_bytes);
 
     // Sync output_truncated to the struct before serialization (fix #1266)
     output.output_truncated = output_truncated;
@@ -486,9 +515,36 @@ pub(crate) async fn exec_command_impl(
         tracing::debug!(truncated = true, message = "output truncated");
     }
 
-    let content_blocks = vec![ContentBlock::Text(
+    let mut content_blocks = vec![ContentBlock::Text(
         TextContent::new(text.clone()).with_annotations(Annotations::default().with_priority(0.0)),
     )];
+
+    // MCP resource links for overflow slot files: emitted only when output was
+    // truncated AND at least one capture path is set. Uses file:// URIs
+    // matching the paths printed in the truncation notice.
+    if output_truncated {
+        if let Some(ref p) = output.stdout_path {
+            content_blocks.push(ContentBlock::resource_link(
+                Resource::new(format!("file://{p}"), "stdout capture".to_string())
+                    .with_mime_type("text/plain"),
+            ));
+        }
+        if let Some(ref p) = output.stderr_path {
+            content_blocks.push(ContentBlock::resource_link(
+                Resource::new(format!("file://{p}"), "stderr capture".to_string())
+                    .with_mime_type("text/plain"),
+            ));
+        }
+        if let Some(ref p) = output.interleaved_path {
+            content_blocks.push(ContentBlock::resource_link(
+                Resource::new(
+                    format!("file://{p}"),
+                    "interleaved output capture".to_string(),
+                )
+                .with_mime_type("text/plain"),
+            ));
+        }
+    }
 
     // Determine if command failed: non-zero exit code.
     // exit_code is None when the post-exit drain times out (background child
@@ -684,7 +740,7 @@ mod tests {
         };
 
         // Act
-        let result = format_shell_output_phase(&output, &params);
+        let result = format_shell_output_phase(&output, &params, 0, 0);
 
         // Assert
         assert!(
@@ -720,7 +776,7 @@ mod tests {
         };
 
         // Act
-        let result = format_shell_output_phase(&output, &params);
+        let result = format_shell_output_phase(&output, &params, 0, 0);
 
         // Assert
         assert!(
@@ -756,7 +812,7 @@ mod tests {
         };
 
         // Act
-        let result = format_shell_output_phase(&output, &params);
+        let result = format_shell_output_phase(&output, &params, 0, 0);
 
         // Assert
         assert!(

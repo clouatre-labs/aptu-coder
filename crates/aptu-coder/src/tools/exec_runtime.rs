@@ -19,11 +19,21 @@ pub(crate) const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
 /// early via `notifications/cancelled`, which kills and reaps the child.
 pub(crate) const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 300;
 
-/// Max bytes to buffer from child stdout during drain (matches handle_output_persist cap).
-pub(crate) const MAX_DRAIN_STDOUT_BYTES: usize = 30_000;
+/// Max bytes to buffer from child stdout during drain (512KB).
+///
+/// Deliberately larger than the `handle_output_persist` display caps
+/// (30_000/10_000) so overflow slot files hold (nearly) complete output.
+/// Worst case buffers ~512KB per in-flight call in the unbounded mpsc
+/// channel; memory scales linearly with concurrent calls.
+pub(crate) const MAX_DRAIN_STDOUT_BYTES: usize = 512_000;
 
-/// Max bytes to buffer from child stderr during drain (matches handle_output_persist cap).
-pub(crate) const MAX_DRAIN_STDERR_BYTES: usize = 10_000;
+/// Max bytes to buffer from child stderr during drain (256KB).
+///
+/// Deliberately larger than the `handle_output_persist` display cap
+/// (10_000) so overflow slot files hold (nearly) complete output.
+/// Combined with stdout, worst case buffers ~768KB per in-flight call in
+/// the unbounded mpsc channels; memory scales linearly with concurrency.
+pub(crate) const MAX_DRAIN_STDERR_BYTES: usize = 256_000;
 
 /// Result of a timed command execution.
 pub(crate) struct ExecutionResult {
