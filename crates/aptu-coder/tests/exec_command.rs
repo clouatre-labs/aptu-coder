@@ -352,21 +352,39 @@ async fn test_exec_command_overflow_to_temp_file() {
     );
 }
 
-#[tokio::test]
-async fn test_exec_command_overflow_path_hint_in_text() {
-    // Assert that content[0].text contains 'Full output available at:' when
-    // stdout overflow persists to slot files.
-    let resp = call_exec_command_raw(serde_json::json!({
-        "command": "seq 1 3000"
-    }))
-    .await;
+/// Issues an overflow-producing `command` up to 5 times until the slot file
+/// referenced by `path_key` in structuredContent exceeds `min_bytes` (the
+/// 500ms drain window may capture less than the full output under heavy test
+/// load). Returns (structuredContent, content array, slot path, slot bytes).
+async fn overflow_call_with_retry(
+    command: &str,
+    path_key: &str,
+    min_bytes: u64,
+) -> (serde_json::Value, serde_json::Value, String, u64) {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let resp = call_exec_command_raw(serde_json::json!({
+            "command": command
+        }))
+        .await;
 
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.contains("Full output available at:"),
-        "text should contain overflow path hint: {text}"
-    );
+        let sc = &resp["result"]["structuredContent"];
+        assert_eq!(sc["output_truncated"], true, "should be truncated: {sc}");
+
+        let p = sc[path_key].as_str().expect("slot path set");
+        let bytes = std::fs::metadata(p).expect("slot file should exist").len();
+        if bytes > min_bytes || attempt >= 5 {
+            return (
+                resp["result"]["structuredContent"].clone(),
+                resp["result"]["content"].clone(),
+                p.to_string(),
+                bytes,
+            );
+        }
+    }
 }
+
 #[tokio::test]
 async fn test_exec_command_slot_isolation() {
     // Test that overflow calls use slot identifiers (0-7) visible in structuredContent.stdout_path.
@@ -400,40 +418,17 @@ async fn test_exec_command_slot_isolation() {
 async fn test_exec_command_large_stdout_slot_file_and_resource_link() {
     // >30KB stdout: slot file must exceed the old 30KB drain cap and result
     // content must carry a ResourceLink with a file:// URI matching stdout_path,
-    // plus a truncation hint with byte counts. Retried because the 500ms drain
-    // window may capture less than the full output under heavy test load.
-    let stdout_path;
-    let slot_bytes;
-    let has_stdout_uri_link;
-    let hint_text;
-    let mut attempt = 0;
-    loop {
-        attempt += 1;
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "seq 1 10000"
-        }))
-        .await;
+    // plus a truncation hint with byte counts.
+    let (_sc, content, stdout_path, slot_bytes) =
+        overflow_call_with_retry("seq 1 10000", "stdout_path", 30_000).await;
 
-        let sc = &resp["result"]["structuredContent"];
-        assert_eq!(sc["output_truncated"], true, "should be truncated: {sc}");
-
-        let p = sc["stdout_path"].as_str().expect("stdout_path set");
-        let bytes = std::fs::metadata(p).expect("slot file should exist").len();
-        let uri = format!("file://{p}");
-        let has_link = resp["result"]["content"]
-            .as_array()
-            .expect("content array")
-            .iter()
-            .any(|b| b["type"] == "resource_link" && b["uri"] == uri.as_str());
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-        if bytes > 30_000 || attempt >= 5 {
-            stdout_path = p.to_string();
-            slot_bytes = bytes;
-            has_stdout_uri_link = has_link;
-            hint_text = text.to_string();
-            break;
-        }
-    }
+    let uri = format!("file://{stdout_path}");
+    let has_stdout_uri_link = content
+        .as_array()
+        .expect("content array")
+        .iter()
+        .any(|b| b["type"] == "resource_link" && b["uri"] == uri.as_str());
+    let hint_text = content[0]["text"].as_str().unwrap_or("");
 
     assert!(
         slot_bytes > 30_000,
@@ -476,47 +471,23 @@ async fn test_exec_command_sub_cap_no_resource_link() {
 #[tokio::test]
 async fn test_exec_command_stderr_only_overflow_resource_link() {
     // stderr-only overflow: stderr slot file >10_000 bytes, ResourceLink for
-    // stderr_path, none for stdout. Retried because the 500ms drain window may
-    // capture less than the full output under heavy test load.
-    let stderr_path;
-    let slot_bytes;
-    let has_stderr_uri_link;
-    let has_empty_stdout_slot;
-    let mut attempt = 0;
-    loop {
-        attempt += 1;
-        let resp = call_exec_command_raw(serde_json::json!({
-            "command": "seq 1 5000 >&2"
-        }))
-        .await;
+    // stderr_path, none for stdout.
+    let (sc, content, stderr_path, slot_bytes) =
+        overflow_call_with_retry("seq 1 5000 >&2", "stderr_path", 10_000).await;
 
-        let sc = &resp["result"]["structuredContent"];
-        assert_eq!(sc["output_truncated"], true, "should be truncated: {sc}");
-
-        let p = sc["stderr_path"].as_str().expect("stderr_path set");
-        let bytes = std::fs::metadata(p)
-            .expect("stderr slot file should exist")
-            .len();
-        let uri = format!("file://{p}");
-        let has_link = resp["result"]["content"]
-            .as_array()
-            .expect("content array")
-            .iter()
-            .any(|b| b["type"] == "resource_link" && b["uri"] == uri.as_str());
-        let stdout_slot_bytes = sc["stdout_path"]
-            .as_str()
-            .map(std::fs::metadata)
-            .and_then(|r| r.ok())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        if bytes > 10_000 || attempt >= 5 {
-            stderr_path = p.to_string();
-            slot_bytes = bytes;
-            has_stderr_uri_link = has_link;
-            has_empty_stdout_slot = stdout_slot_bytes == 0;
-            break;
-        }
-    }
+    let uri = format!("file://{stderr_path}");
+    let has_stderr_uri_link = content
+        .as_array()
+        .expect("content array")
+        .iter()
+        .any(|b| b["type"] == "resource_link" && b["uri"] == uri.as_str());
+    let stdout_slot_bytes = sc["stdout_path"]
+        .as_str()
+        .map(std::fs::metadata)
+        .and_then(|r| r.ok())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let has_empty_stdout_slot = stdout_slot_bytes == 0;
 
     assert!(
         slot_bytes > 10_000,

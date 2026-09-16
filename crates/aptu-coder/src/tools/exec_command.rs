@@ -823,6 +823,19 @@ mod tests {
     }
 
     #[test]
+    fn test_capture_hint_with_bytes() {
+        // Arrange: non-zero byte count must be included in the hint
+        // Act
+        let hint = super::capture_hint("/tmp/slot-0/stdout", 1234);
+
+        // Assert
+        assert_eq!(
+            hint,
+            "output truncated; full capture at /tmp/slot-0/stdout (1234 bytes captured)\n"
+        );
+    }
+
+    #[test]
     fn exec_command_error_subtype_as_str_golden_list() {
         // Arrange: every current variant, matched exhaustively so adding a new
         // variant without updating this arm fails to compile.
