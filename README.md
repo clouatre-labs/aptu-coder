@@ -170,7 +170,8 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 |-----------|------|---------|-------------|
 | `summary` | boolean | auto | Compact output; auto-triggers above 50K chars |
 | `cursor` | string | -- | Pagination cursor from a previous response's `next_cursor` |
-| `page_size` | integer | 100 | Items per page |
+
+Page size is server-owned; there is no client `page_size` parameter (passing one returns INVALID_PARAMS).
 
 | Tool | Purpose | Languages |
 |------|---------|-----------|
@@ -179,8 +180,8 @@ All optional parameters may be omitted. Shared optional parameters for `analyze_
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
-| `edit_replace` | Replace a unique exact text block or all non-overlapping occurrences (replace_all=true); errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching; optional expected_content_hash (blake3 hex of raw bytes) rejects stale edits; concurrent edits to the same file are serialized per-path; returns occurrences_replaced count | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; optional `timeout_secs` (kill on expiry) and `drain_timeout_secs` (post-exit drain window); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter) | any |
+| `edit_replace` | Replace a unique exact text block or all non-overlapping occurrences (replace_all=true); errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching; optional expected_content_hash (blake3 hex of raw bytes) rejects stale edits; concurrent edits to the same file are serialized per-path; returns occurrences_replaced count. Batch form: pass `edits[]` (array of `{old_text, new_text, replace_all}`) instead of `old_text`/`new_text` to apply multiple replacements to one file atomically (any invalid edit aborts with per-index errors, no write) | all |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; the command is killed when the request is cancelled; server-owned post-exit drain window (500 ms default); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter) | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
@@ -232,7 +233,9 @@ analyze_symbol path: /my/project symbol: my_function cursor: eyJvZmZzZXQiOjUwfQ=
 
 The 30k stdout cap is data-driven: analysis of 27,981 observed `exec_command` calls shows only 0.33% exceed this limit. When any cap fires, `output_truncated: true` is set in the response and recorded in the JSONL metrics.
 
-`drain_timeout_secs` controls how long the server waits after the child exits for any background subprocess still holding the pipe open. Default is 500 ms (0 or omitted). Negative values return INVALID_PARAMS. When the drain window expires before the pipe closes, `output_truncated: true` is set.
+**Recovering capped output:** when output is capped, the response includes MCP resource links (`aptu-overflow://slot-{seq}/stdout`, `/stderr`, `/interleaved`) pointing to the full raw capture for that invocation (last-run-wins); read them via `resources/read`. If a filter capped the output, a hint line points to the pre-filter capture file.
+
+A server-owned post-exit drain window (500 ms) waits for any background subprocess still holding the pipe open. If it expires before the pipe closes, `exit_code` is `null` and `output_truncated: true` is set.
 
 **exec_command output filters**
 
