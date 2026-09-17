@@ -8,27 +8,12 @@
 //! path analysis, date arithmetic, legacy migration, and old-file cleanup.
 
 use crate::metrics::{MetricEvent, ToolMetrics, record_otel_metrics};
+use crate::tools::exec_runtime::atomic_write;
 use aptu_coder_core::file_lock::FileLockGuard;
 use aptu_coder_core::lang::language_for_extension;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
-
-/// Atomically writes `bytes` to `path` via a unique temp file in the same
-/// directory followed by `rename`, so concurrent readers/writers never observe
-/// an empty or partially written file. The temp name includes the pid and a
-/// per-process counter so concurrent writers never share a tmp file.
-async fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".to_string());
-    let tmp = path.with_file_name(format!(".{}.{}.{}.tmp", file_name, std::process::id(), n));
-    tokio::fs::write(&tmp, bytes).await?;
-    tokio::fs::rename(&tmp, path).await
-}
 use tokio::sync::mpsc;
 
 /// Receiver half of the metrics channel; drains events and writes them to daily-rotated JSONL files.

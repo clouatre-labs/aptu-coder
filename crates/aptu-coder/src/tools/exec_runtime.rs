@@ -387,71 +387,79 @@ pub(crate) async fn run_exec_impl_with_timeouts(
 
     // Apply filter if exit_code == 0
     if exit_code == Some(0) {
-        for compiled_rule in filter_table.iter() {
-            if compiled_rule.pattern.is_match(&command) {
-                let (filtered_stdout, stdout_effect) =
-                    crate::filters::apply_filter(compiled_rule, &output.stdout);
-                // Also filter interleaved: the response handler prefers interleaved when
-                // non-empty (which it always is for commands that write to both streams),
-                // so filtering only stdout would leave the LLM-visible output unfiltered.
-                // apply_filter is called separately on each field; there is no double-filtering
-                // because stdout and interleaved are independent strings assembled from the
-                // same source lines -- updating one does not affect the other.
-                let (filtered_interleaved, interleaved_effect) =
-                    crate::filters::apply_filter(compiled_rule, &output.interleaved);
-
-                // Persist full pre-filter output for capped streams, but only when
-                // no overflow slot file already exists for that stream (never
-                // overwrite overflow-persisted files).
-                let effect = if matches!(stdout_effect, crate::filters::FilterEffect::None) {
-                    interleaved_effect
-                } else {
-                    stdout_effect
-                };
-                if let crate::filters::FilterEffect::Capped { .. } = effect {
-                    if output.stdout_path.is_none() {
-                        let base = slot_base(slot);
-                        let _ = tokio::fs::create_dir_all(&base).await;
-                        let path = base.join("stdout");
-                        let pre_filter_stdout = output.stdout.clone();
-                        if atomic_write(&path, pre_filter_stdout.as_bytes())
-                            .await
-                            .is_ok()
-                        {
-                            output.stdout_path = Some(path.display().to_string());
-                        }
-                    }
-                    if output.interleaved_path.is_none() && !output.interleaved.is_empty() {
-                        let base = slot_base(slot);
-                        let _ = tokio::fs::create_dir_all(&base).await;
-                        let path = base.join("interleaved");
-                        let pre_filter_interleaved = output.interleaved.clone();
-                        if atomic_write(&path, pre_filter_interleaved.as_bytes())
-                            .await
-                            .is_ok()
-                        {
-                            output.interleaved_path = Some(path.display().to_string());
-                        }
-                    }
-                    output.filter_capped = true;
-                    output.filter_effect = Some(effect.to_string());
-                } else if let crate::filters::FilterEffect::Substituted { .. } = effect {
-                    output.filter_effect = Some(effect.to_string());
-                }
-
-                output.stdout = filtered_stdout;
-                output.interleaved = filtered_interleaved;
-                output.filter_applied = compiled_rule
-                    .rule
-                    .description
-                    .clone()
-                    .or_else(|| Some(compiled_rule.rule.match_command.clone()));
-                break;
-            }
-        }
+        apply_filter_rules(&mut output, &command, slot, filter_table).await;
     }
 
     (output, raw_stdout_bytes, raw_stderr_bytes)
+}
+
+/// Applies the first matching filter rule to `output.stdout`/`output.interleaved` and,
+/// when a `max_lines` cap fires, persists the full pre-filter output to slot files so
+/// the caller can recover it via resources/read. Never overwrites overflow-persisted
+/// slot files.
+async fn apply_filter_rules(
+    output: &mut ShellOutput,
+    command: &str,
+    slot: u32,
+    filter_table: &Arc<Vec<CompiledRule>>,
+) {
+    for compiled_rule in filter_table.iter() {
+        if !compiled_rule.pattern.is_match(command) {
+            continue;
+        }
+        let (filtered_stdout, stdout_effect) =
+            crate::filters::apply_filter(compiled_rule, &output.stdout);
+        // Also filter interleaved: the response handler prefers interleaved when
+        // non-empty (which it always is for commands that write to both streams),
+        // so filtering only stdout would leave the LLM-visible output unfiltered.
+        // apply_filter is called separately on each field; there is no double-filtering
+        // because stdout and interleaved are independent strings assembled from the
+        // same source lines -- updating one does not affect the other.
+        let (filtered_interleaved, interleaved_effect) =
+            crate::filters::apply_filter(compiled_rule, &output.interleaved);
+
+        let effect = if matches!(stdout_effect, crate::filters::FilterEffect::None) {
+            interleaved_effect
+        } else {
+            stdout_effect
+        };
+        if let crate::filters::FilterEffect::Capped { .. } = effect {
+            if output.stdout_path.is_none() && !output.stdout.is_empty() {
+                let path = slot_base(slot).join("stdout");
+                if persist_pre_filter(&path, &output.stdout).await {
+                    output.stdout_path = Some(path.display().to_string());
+                }
+            }
+            if output.interleaved_path.is_none() && !output.interleaved.is_empty() {
+                let path = slot_base(slot).join("interleaved");
+                if persist_pre_filter(&path, &output.interleaved).await {
+                    output.interleaved_path = Some(path.display().to_string());
+                }
+            }
+            output.filter_capped = true;
+            output.filter_effect = Some(effect.to_string());
+        } else if let crate::filters::FilterEffect::Substituted { .. } = effect {
+            output.filter_effect = Some(effect.to_string());
+        }
+
+        output.stdout = filtered_stdout;
+        output.interleaved = filtered_interleaved;
+        output.filter_applied = compiled_rule
+            .rule
+            .description
+            .clone()
+            .or_else(|| Some(compiled_rule.rule.match_command.clone()));
+        break;
+    }
+}
+
+/// Creates the slot directory if needed and atomically writes `content` to `path`.
+/// Returns false when the write fails (slot file left unset so no dangling link).
+async fn persist_pre_filter(path: &std::path::Path, content: &str) -> bool {
+    if let Some(base) = path.parent() {
+        let _ = tokio::fs::create_dir_all(base).await;
+    }
+    atomic_write(path, content.as_bytes()).await.is_ok()
 }
 
 /// Atomically writes `bytes` to `path` via a unique temp file in the same
@@ -459,14 +467,14 @@ pub(crate) async fn run_exec_impl_with_timeouts(
 /// empty or partially written slot file (rename is atomic on the same
 /// filesystem). The temp name includes the pid so parallel processes writing
 /// the same slot path never share a tmp file.
-async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = tmp_path(path);
     tokio::fs::write(&tmp, bytes).await?;
     tokio::fs::rename(&tmp, path).await
 }
 
 /// Synchronous counterpart of [`atomic_write`] for non-async contexts.
-fn atomic_write_sync(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn atomic_write_sync(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = tmp_path(path);
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)

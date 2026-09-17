@@ -362,11 +362,22 @@ async fn overflow_call_with_retry(
     path_key: &str,
     min_bytes: u64,
 ) -> (serde_json::Value, serde_json::Value, String, u64) {
+    overflow_call_with_retry_in(command, None, path_key, min_bytes).await
+}
+
+/// Like [`overflow_call_with_retry`] but runs `command` inside `working_dir`.
+async fn overflow_call_with_retry_in(
+    command: &str,
+    working_dir: Option<String>,
+    path_key: &str,
+    min_bytes: u64,
+) -> (serde_json::Value, serde_json::Value, String, u64) {
     let mut attempt = 0;
     loop {
         attempt += 1;
         let resp = call_exec_command_raw(serde_json::json!({
-            "command": command
+            "command": command,
+            "working_dir": working_dir,
         }))
         .await;
 
@@ -1196,11 +1207,45 @@ async fn exec_command_drain_budget_exhaustion() {
     assert!(!stdout.is_empty(), "stdout should be non-empty");
 }
 
+/// Creates a temp git repo with `commits` commits (one file, one line each).
+/// Self-contained so filter-cap tests never depend on the host checkout's
+/// history depth. Returns the repo path (TempDir is leaked; cleaned by OS tmp).
+fn make_temp_git_repo(commits: usize) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    let run = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .status()
+            .expect("git should be available");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    run(&["init", "-q"]);
+    for i in 0..commits {
+        let file = format!("f{i}.txt");
+        std::fs::write(path.join(&file), format!("line {i}\n")).expect("write file");
+        run(&["add", &file]);
+        run(&["commit", "-qm", &format!("c{i}")]);
+    }
+    std::mem::forget(dir);
+    path.display().to_string()
+}
+
 #[tokio::test]
 #[serial]
 async fn test_exec_command_filter_capped_notice_and_resource_link() {
+    let repo = make_temp_git_repo(30);
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "git log --oneline -30"
+        "command": "git log --oneline -30",
+        "working_dir": repo,
     }))
     .await;
 
@@ -1278,8 +1323,38 @@ async fn test_exec_command_uncapped_output_byte_identical() {
 #[tokio::test]
 #[serial]
 async fn test_exec_command_filter_cap_and_overflow_cooccurrence() {
+    // A single commit with a large file makes `git log -p` exceed 30 KB so
+    // both the byte overflow and the 20-line filter cap fire, regardless of
+    // the host checkout's history.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().to_path_buf();
+    let run = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .status()
+            .expect("git should be available");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    run(&["init", "-q"]);
+    let big: String = (0..4000)
+        .map(|i| format!("content line {i} with padding\n"))
+        .collect();
+    std::fs::write(path.join("big.txt"), &big).expect("write file");
+    run(&["add", "big.txt"]);
+    run(&["commit", "-qm", "big"]);
+    let repo = path.display().to_string();
+    std::mem::forget(dir);
+
     let (sc, content, stdout_path, slot_bytes) =
-        overflow_call_with_retry("git log -p", "stdout_path", 30_000).await;
+        overflow_call_with_retry_in("git log -p", Some(repo), "stdout_path", 30_000).await;
 
     assert_eq!(
         sc["output_truncated"], true,
@@ -1316,8 +1391,10 @@ async fn test_exec_command_filter_cap_and_overflow_cooccurrence() {
 #[tokio::test]
 #[serial]
 async fn test_exec_command_stderr_capped_only() {
+    let repo = make_temp_git_repo(30);
     let resp = call_exec_command_raw(serde_json::json!({
-        "command": "git log --oneline -30 1>&2"
+        "command": "git log --oneline -30 1>&2",
+        "working_dir": repo,
     }))
     .await;
 
