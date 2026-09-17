@@ -453,6 +453,7 @@ pub(crate) fn read_resource_impl(
     let (query, format) = parse_graph_uri(&request.uri)?;
 
     let graph = graph_store.get(query.repo_hash()).ok_or_else(|| {
+        // MCP 2026-07-28: SEP-2164 changes resource-not-found from -32002 to -32602; apply only when the server negotiates 2026-07-28.
         ErrorData::new(
             ErrorCode::RESOURCE_NOT_FOUND,
             "graph not built yet -- call analyze_symbol on this directory first to build the graph cache".to_string(),
