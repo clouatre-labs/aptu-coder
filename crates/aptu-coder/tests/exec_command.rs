@@ -4,6 +4,7 @@
 mod common;
 
 use common::call_tool_raw;
+use serial_test::serial;
 
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
@@ -1193,4 +1194,157 @@ async fn exec_command_drain_budget_exhaustion() {
 
     // stdout non-empty (has tail content)
     assert!(!stdout.is_empty(), "stdout should be non-empty");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_exec_command_filter_capped_notice_and_resource_link() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "git log --oneline -30"
+    }))
+    .await;
+
+    let sc = &resp["result"]["structuredContent"];
+    assert!(
+        sc["filter_capped"].as_bool().unwrap_or(false),
+        "filter_capped should be true for git log: {sc}"
+    );
+    assert!(
+        sc["filter_effect"]
+            .as_str()
+            .is_some_and(|e| e.contains("capped")),
+        "filter_effect should describe the cap: {sc}"
+    );
+
+    let content = resp["result"]["content"].as_array().expect("content array");
+    let link_uri = content
+        .iter()
+        .filter(|b| b["type"] == "resource_link")
+        .filter_map(|b| b["uri"].as_str())
+        .find(|u| u.starts_with("aptu-overflow://slot-"))
+        .expect("filter-capped run should emit a resource link")
+        .to_string();
+
+    let common_analyzer = common::make_test_analyzer();
+    let read = common::send_raw_request(
+        common_analyzer,
+        "resources/read",
+        serde_json::json!({"uri": link_uri}),
+    )
+    .await;
+    let text = read["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("resources/read text: {read}"));
+
+    // Assert: full pre-filter content, not the 20-line preview.
+    assert!(
+        text.lines().count() > 20,
+        "resource content should exceed the 20-line cap: {} lines",
+        text.lines().count()
+    );
+
+    let text_block = content[0]["text"].as_str().unwrap_or_default();
+    assert!(
+        text_block.contains("Output filtered: "),
+        "text block should contain the filter notice: {text_block}"
+    );
+    assert_eq!(
+        sc["output_truncated"], false,
+        "pipe overflow should not have fired: {sc}"
+    );
+}
+
+#[tokio::test]
+async fn test_exec_command_uncapped_output_byte_identical() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "echo hello"
+    }))
+    .await;
+
+    let sc = &resp["result"]["structuredContent"];
+    assert!(
+        !sc["filter_capped"].as_bool().unwrap_or(false),
+        "filter_capped must be false without a cap: {sc}"
+    );
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("text block");
+    assert_eq!(
+        text, "Command: echo hello\nExit code: 0\nOutput truncated: false\nOutput:\nhello\n",
+        "uncapped output text must remain byte-identical: {text}"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_exec_command_filter_cap_and_overflow_cooccurrence() {
+    let (sc, content, stdout_path, slot_bytes) =
+        overflow_call_with_retry("git log -p", "stdout_path", 30_000).await;
+
+    assert_eq!(
+        sc["output_truncated"], true,
+        "overflow should fire for git log -p"
+    );
+    assert_eq!(
+        sc["filter_capped"], true,
+        "filter cap should also fire for git log -p: {sc}"
+    );
+
+    let slot_text = std::fs::read_to_string(&stdout_path).expect("slot file should be readable");
+    assert!(
+        slot_text.lines().count() > 20,
+        "slot file must contain full pre-filter output, not the capped preview"
+    );
+    assert!(slot_bytes > 30_000, "slot file should exceed 30 KB");
+
+    let slot = stdout_path
+        .split("slot-")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .expect("stdout_path should contain slot identifier");
+    let uri = format!("aptu-overflow://slot-{slot}/stdout");
+    assert!(
+        content
+            .as_array()
+            .expect("content array")
+            .iter()
+            .any(|b| b["type"] == "resource_link" && b["uri"] == uri.as_str()),
+        "should contain a ResourceLink with uri {uri}"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_exec_command_stderr_capped_only() {
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "git log --oneline -30 1>&2"
+    }))
+    .await;
+
+    let sc = &resp["result"]["structuredContent"];
+    assert!(
+        sc["filter_capped"].as_bool().unwrap_or(false),
+        "interleaved (stderr) stream should be filter-capped: {sc}"
+    );
+    assert!(
+        !sc["output_truncated"].as_bool().unwrap_or(true),
+        "no pipe overflow for a small stderr-only command: {sc}"
+    );
+
+    let content = resp["result"]["content"].as_array().expect("content array");
+    let has_interleaved_link = content.iter().any(|b| {
+        b["type"] == "resource_link"
+            && b["uri"]
+                .as_str()
+                .is_some_and(|u| u.ends_with("/interleaved"))
+    });
+    assert!(
+        has_interleaved_link,
+        "should emit a resource link for the filter-capped interleaved capture: {content:?}"
+    );
+    let text_block = content[0]["text"].as_str().unwrap_or_default();
+    assert!(
+        text_block.contains("Output filtered: "),
+        "text block should contain the filter notice: {text_block}"
+    );
 }

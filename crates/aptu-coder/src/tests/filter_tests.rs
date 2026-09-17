@@ -2,7 +2,7 @@ use regex::Regex;
 
 use crate::ShellOutput;
 use crate::filters;
-use crate::filters::{CompiledRule, apply_filter, maybe_inject_no_stat};
+use crate::filters::{CompiledRule, FilterEffect, apply_filter, maybe_inject_no_stat};
 use crate::tools::exec_runtime::handle_output_persist;
 use aptu_coder_core::types;
 
@@ -28,8 +28,10 @@ fn test_filter_strip_lines_matching() {
     };
 
     let stdout = "Updating abc123..def456\n | 5 ++++\n | 3 ---\nFast-forward\n";
-    let filtered = apply_filter(&compiled, stdout);
+    let (filtered, effect) = apply_filter(&compiled, stdout);
 
+    // Rule matched but produced no cap or substitution.
+    assert_eq!(effect, FilterEffect::None);
     assert!(!filtered.contains("| 5 ++++"), "should strip stat lines");
     assert!(!filtered.contains("| 3 ---"), "should strip stat lines");
     assert!(
@@ -67,8 +69,15 @@ fn test_filter_on_empty_substitution() {
     };
 
     let stdout = "From github.com:user/repo\n  abc123..def456 main -> origin/main\n";
-    let filtered = apply_filter(&compiled, stdout);
+    let (filtered, effect) = apply_filter(&compiled, stdout);
 
+    assert_eq!(
+        effect,
+        FilterEffect::Substituted {
+            rule_name: "test fetch".to_string()
+        },
+        "on_empty substitution should report Substituted"
+    );
     assert_eq!(
         filtered, "ok fetched",
         "should return on_empty when all lines stripped"
@@ -110,7 +119,8 @@ fn test_filter_passthrough_on_failure() {
 
     // Simulate the guard: if exit_code == Some(0) { apply filter }
     if output.exit_code == Some(0) {
-        output.stdout = apply_filter(&compiled, &output.stdout);
+        let (filtered, _) = apply_filter(&compiled, &output.stdout);
+        output.stdout = filtered;
         output.filter_applied = compiled
             .rule
             .description
@@ -138,7 +148,8 @@ fn test_filter_passthrough_on_failure() {
     );
 
     if output2.exit_code == Some(0) {
-        output2.stdout = apply_filter(&compiled, &output2.stdout);
+        let (filtered, _) = apply_filter(&compiled, &output2.stdout);
+        output2.stdout = filtered;
         output2.filter_applied = compiled
             .rule
             .description
@@ -234,7 +245,9 @@ fn test_filter_applied_field_present() {
     let stdout = "On branch main\nnothing to commit\n";
 
     // Call apply_filter() and verify the returned string is filtered
-    let filtered = apply_filter(&compiled, stdout);
+    let (filtered, effect) = apply_filter(&compiled, stdout);
+    // Two lines below max_lines: no cap, no substitution.
+    assert_eq!(effect, FilterEffect::None);
     assert!(
         !filtered.contains("On branch"),
         "apply_filter should strip matching lines"
@@ -284,7 +297,7 @@ fn test_filter_keep_lines_matching() {
     };
 
     let stdout = "   Compiling mylib v0.1.0\ntest foo::bar ... ok\ntest foo::baz ... FAILED\ntest result: FAILED\n";
-    let filtered = filters::apply_filter(&compiled, stdout);
+    let (filtered, _) = filters::apply_filter(&compiled, stdout);
 
     assert!(filtered.contains("test foo::bar"), "should keep test lines");
     assert!(
@@ -314,8 +327,16 @@ fn test_filter_max_lines_cap() {
     };
 
     let stdout = "line1\nline2\nline3\nline4\nline5\n";
-    let filtered = filters::apply_filter(&compiled, stdout);
+    let (filtered, effect) = filters::apply_filter(&compiled, stdout);
 
+    assert_eq!(
+        effect,
+        FilterEffect::Capped {
+            rule_name: "test max lines".to_string(),
+            max_lines: 3,
+        },
+        "max_lines truncation should report Capped"
+    );
     assert_eq!(filtered.lines().count(), 3, "should cap at 3 lines");
     assert!(filtered.contains("line1"));
     assert!(filtered.contains("line3"));
@@ -347,7 +368,7 @@ fn test_filter_git_show_strips_patch_hunks() {
     };
 
     let stdout = "commit abc123\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,4 @@\n-old line\n+new line\n context line\n";
-    let filtered = filters::apply_filter(&compiled, stdout);
+    let (filtered, _) = filters::apply_filter(&compiled, stdout);
 
     assert!(
         filtered.contains("--- a/src/lib.rs"),
@@ -385,7 +406,7 @@ fn test_filter_on_empty_from_empty_input() {
     };
 
     assert_eq!(
-        filters::apply_filter(&compiled, ""),
+        filters::apply_filter(&compiled, "").0,
         "ok (working tree clean)",
         "on_empty should fire on empty input"
     );
@@ -414,7 +435,7 @@ fn test_filter_applied_to_interleaved_with_both_streams() {
     let interleaved = " | 42  ++++++++++++\nFrom https://github.com/example/repo\n";
 
     // Act
-    let result = filters::apply_filter(&compiled, interleaved);
+    let (result, _) = filters::apply_filter(&compiled, interleaved);
 
     // Assert: strip-matched line gone; stderr-origin line present
     assert!(
@@ -449,9 +470,13 @@ fn test_on_empty_substitution_in_interleaved() {
     let interleaved = "Already up to date.\nFrom https://github.com/example/repo\n";
 
     // Act
-    let result = filters::apply_filter(&compiled, interleaved);
+    let (result, effect) = filters::apply_filter(&compiled, interleaved);
 
     // Assert: on_empty substitution text returned
+    assert!(
+        matches!(effect, FilterEffect::Substituted { .. }),
+        "on_empty should report Substituted for interleaved"
+    );
     assert_eq!(
         result, "ok (up-to-date)",
         "on_empty should be returned when filter strips all lines in interleaved"

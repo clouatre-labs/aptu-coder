@@ -389,16 +389,58 @@ pub(crate) async fn run_exec_impl_with_timeouts(
     if exit_code == Some(0) {
         for compiled_rule in filter_table.iter() {
             if compiled_rule.pattern.is_match(&command) {
-                let filtered_stdout = crate::filters::apply_filter(compiled_rule, &output.stdout);
-                output.stdout = filtered_stdout;
+                let (filtered_stdout, stdout_effect) =
+                    crate::filters::apply_filter(compiled_rule, &output.stdout);
                 // Also filter interleaved: the response handler prefers interleaved when
                 // non-empty (which it always is for commands that write to both streams),
                 // so filtering only stdout would leave the LLM-visible output unfiltered.
                 // apply_filter is called separately on each field; there is no double-filtering
                 // because stdout and interleaved are independent strings assembled from the
                 // same source lines -- updating one does not affect the other.
-                output.interleaved =
+                let (filtered_interleaved, interleaved_effect) =
                     crate::filters::apply_filter(compiled_rule, &output.interleaved);
+
+                // Persist full pre-filter output for capped streams, but only when
+                // no overflow slot file already exists for that stream (never
+                // overwrite overflow-persisted files).
+                let effect = if matches!(stdout_effect, crate::filters::FilterEffect::None) {
+                    interleaved_effect
+                } else {
+                    stdout_effect
+                };
+                if let crate::filters::FilterEffect::Capped { .. } = effect {
+                    if output.stdout_path.is_none() {
+                        let base = slot_base(slot);
+                        let _ = tokio::fs::create_dir_all(&base).await;
+                        let path = base.join("stdout");
+                        let pre_filter_stdout = output.stdout.clone();
+                        if atomic_write(&path, pre_filter_stdout.as_bytes())
+                            .await
+                            .is_ok()
+                        {
+                            output.stdout_path = Some(path.display().to_string());
+                        }
+                    }
+                    if output.interleaved_path.is_none() && !output.interleaved.is_empty() {
+                        let base = slot_base(slot);
+                        let _ = tokio::fs::create_dir_all(&base).await;
+                        let path = base.join("interleaved");
+                        let pre_filter_interleaved = output.interleaved.clone();
+                        if atomic_write(&path, pre_filter_interleaved.as_bytes())
+                            .await
+                            .is_ok()
+                        {
+                            output.interleaved_path = Some(path.display().to_string());
+                        }
+                    }
+                    output.filter_capped = true;
+                    output.filter_effect = Some(effect.to_string());
+                } else if let crate::filters::FilterEffect::Substituted { .. } = effect {
+                    output.filter_effect = Some(effect.to_string());
+                }
+
+                output.stdout = filtered_stdout;
+                output.interleaved = filtered_interleaved;
                 output.filter_applied = compiled_rule
                     .rule
                     .description
@@ -410,6 +452,35 @@ pub(crate) async fn run_exec_impl_with_timeouts(
     }
 
     (output, raw_stdout_bytes, raw_stderr_bytes)
+}
+
+/// Atomically writes `bytes` to `path` via a unique temp file in the same
+/// directory followed by `rename`, so concurrent readers never observe an
+/// empty or partially written slot file (rename is atomic on the same
+/// filesystem). The temp name includes the pid so parallel processes writing
+/// the same slot path never share a tmp file.
+async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = tmp_path(path);
+    tokio::fs::write(&tmp, bytes).await?;
+    tokio::fs::rename(&tmp, path).await
+}
+
+/// Synchronous counterpart of [`atomic_write`] for non-async contexts.
+fn atomic_write_sync(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = tmp_path(path);
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Unique sibling temp path for `path`: `.{name}.{pid}.{n}.tmp`.
+fn tmp_path(path: &std::path::Path) -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string());
+    path.with_file_name(format!("{}.{}.{}.tmp", file_name, std::process::id(), n))
 }
 
 /// Filesystem base directory for an overflow slot: `{temp_dir}/aptu-coder-overflow/slot-{slot}`.
@@ -440,7 +511,7 @@ pub(crate) async fn persist_interleaved_overflow(
     let base = slot_base(slot);
     let _ = tokio::fs::create_dir_all(&base).await;
     let interleaved_file = base.join("interleaved");
-    let _ = tokio::fs::write(&interleaved_file, interleaved.as_bytes()).await;
+    let _ = atomic_write(&interleaved_file, interleaved.as_bytes()).await;
     let path = interleaved_file.display().to_string();
     // Tail preview: show the most recent output, respecting char boundaries.
     let tail_start = interleaved.len().saturating_sub(max_bytes);
@@ -488,11 +559,21 @@ pub(crate) fn handle_output_persist(
     let stdout_path = base.join("stdout");
     let stderr_path = base.join("stderr");
 
-    let _ = std::fs::write(&stdout_path, stdout.as_bytes());
-    let _ = std::fs::write(&stderr_path, stderr.as_bytes());
-
-    let stdout_path_str = stdout_path.display().to_string();
-    let stderr_path_str = stderr_path.display().to_string();
+    // Only persist non-empty streams: an empty stream has no content to
+    // expose via resources/read, and writing it would clobber a concurrent
+    // process's non-empty slot file (slot paths are shared across processes).
+    let stdout_path_str = if stdout.is_empty() {
+        None
+    } else {
+        let _ = atomic_write_sync(&stdout_path, stdout.as_bytes());
+        Some(stdout_path.display().to_string())
+    };
+    let stderr_path_str = if stderr.is_empty() {
+        None
+    } else {
+        let _ = atomic_write_sync(&stderr_path, stderr.as_bytes());
+        Some(stderr_path.display().to_string())
+    };
 
     // Truncate stdout if it exceeds byte limit
     let stdout_preview = if stdout_byte_overflow {
@@ -523,8 +604,8 @@ pub(crate) fn handle_output_persist(
     (
         stdout_preview,
         stderr_preview,
-        Some(stdout_path_str),
-        Some(stderr_path_str),
+        stdout_path_str,
+        stderr_path_str,
         byte_truncated,
     )
 }

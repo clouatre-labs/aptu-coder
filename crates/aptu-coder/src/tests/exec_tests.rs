@@ -495,3 +495,26 @@ async fn test_run_exec_impl_cancellation_kills_and_reaps_child() {
     assert_eq!(raw_so, 0);
     assert_eq!(raw_se, 0);
 }
+
+#[tokio::test]
+async fn test_run_exec_impl_timed_out_leaves_filter_capped_false() {
+    let filter_table =
+        std::sync::Arc::new(crate::filters::load_filter_table(std::path::Path::new(".")));
+    assert!(!filter_table.is_empty(), "repo filter table non-empty");
+    let (output, raw_so, raw_se) = run_exec_impl_with_timeouts(
+        "git log --oneline -30".to_string(),
+        None,
+        None,
+        0,
+        None,
+        &filter_table,
+        tokio_util::sync::CancellationToken::new(),
+        std::time::Duration::from_millis(1),
+        std::time::Duration::from_millis(500),
+    )
+    .await;
+    let _ = (raw_so, raw_se);
+    assert!(output.timed_out && output.exit_code.is_none());
+    assert!(!output.filter_capped);
+    assert!(output.filter_effect.is_none());
+}
