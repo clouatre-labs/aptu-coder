@@ -949,3 +949,76 @@ async fn test_edit_replace_batch_success_resets_guard() {
         "call 6 should NOT be stale_context after batch success but got: {sixth_msg}"
     );
 }
+
+/// A batch with a matching expected_content_hash succeeds.
+#[tokio::test]
+async fn test_edit_replace_batch_with_matching_content_hash() {
+    let (temp_dir, file_name, working_dir) = batch_setup("alpha beta\n");
+    let hash = blake3::hash(
+        std::fs::read(temp_dir.path().join(file_name))
+            .expect("read file")
+            .as_slice(),
+    )
+    .to_hex()
+    .to_string();
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "edits": [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "beta", "new_text": "BETA"}
+            ],
+            "expected_content_hash": hash,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "batch with matching hash should succeed: {resp}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp_dir.path().join(file_name)).unwrap(),
+        "ALPHA BETA\n"
+    );
+}
+
+/// Batch structuredContent must satisfy the tool's declared output schema:
+/// every required field present. Guards against the batch response shape
+/// drifting from EditReplaceOutput (regression for missing occurrences_replaced).
+#[tokio::test]
+async fn test_edit_replace_batch_structured_content_matches_output_schema() {
+    let (_temp_dir, file_name, working_dir) = batch_setup("one two\n");
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "edits": [
+                {"old_text": "one", "new_text": "1"},
+                {"old_text": "two", "new_text": "2"}
+            ],
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+    let structured = resp["result"]["structuredContent"]
+        .as_object()
+        .expect("batch success should carry structuredContent");
+    let schema = serde_json::to_value(schemars::schema_for!(aptu_coder_core::EditReplaceOutput))
+        .expect("output schema should serialize");
+    for required in schema["required"].as_array().expect("schema required list") {
+        let field = required.as_str().expect("required field name");
+        assert!(
+            structured.contains_key(field),
+            "batch structuredContent missing required output-schema field '{field}': {structured:?}"
+        );
+    }
+    let edits = structured["edits"].as_array().expect("batch edits array");
+    assert_eq!(edits.len(), 2, "per-edit results for both edits: {edits:?}");
+    assert_eq!(
+        structured["occurrences_replaced"].as_u64(),
+        Some(2),
+        "batch total occurrences_replaced"
+    );
+}
