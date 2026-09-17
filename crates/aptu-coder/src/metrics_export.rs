@@ -8,6 +8,7 @@
 //! path analysis, date arithmetic, legacy migration, and old-file cleanup.
 
 use crate::metrics::{MetricEvent, ToolMetrics, record_otel_metrics};
+use crate::tools::exec_runtime::atomic_write;
 use aptu_coder_core::file_lock::FileLockGuard;
 use aptu_coder_core::lang::language_for_extension;
 use std::path::{Path, PathBuf};
@@ -251,7 +252,7 @@ impl MetricsWriter {
                     "total_output_chars": total_output_chars_sum
                 });
                 if let Ok(json_str) = serde_json::to_string(&summary)
-                    && let Err(e) = tokio::fs::write(&export_path, json_str).await
+                    && let Err(e) = atomic_write(Path::new(&export_path), json_str.as_bytes()).await
                 {
                     tracing::warn!(
                         error = %e,

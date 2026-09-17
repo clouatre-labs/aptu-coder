@@ -303,6 +303,17 @@ fn format_shell_output_phase(
 
     // Build truncation notice with slot file paths if present
     let mut truncation_notice = String::new();
+    // Hint selection: filter-capped slot files get a dedicated hint that names
+    // the filter as the cause and states the last-run-wins retention policy;
+    // overflow slot files keep the byte-count capture hint. Uncapped output
+    // (neither flag) emits neither, keeping the text byte-identical.
+    let hint = |path: &str, bytes: u64| -> String {
+        if output.filter_capped {
+            filter_capture_hint(path)
+        } else {
+            capture_hint(path, bytes)
+        }
+    };
     if output.stdout_path.is_some()
         || output.stderr_path.is_some()
         || output.interleaved_path.is_some()
@@ -319,28 +330,43 @@ fn format_shell_output_phase(
         // Byte-count hint per overflow path; skipped when the raw counter is 0
         // (timed_out / drain-abort results report no raw counts).
         if let Some(ref p) = output.stdout_path {
-            let _ = write!(truncation_notice, "{}", capture_hint(p, raw_stdout_bytes));
+            let _ = write!(truncation_notice, "{}", hint(p, raw_stdout_bytes));
         }
         if let Some(ref p) = output.stderr_path {
-            let _ = write!(truncation_notice, "{}", capture_hint(p, raw_stderr_bytes));
+            let _ = write!(truncation_notice, "{}", hint(p, raw_stderr_bytes));
         }
         if let Some(ref p) = output.interleaved_path {
             let _ = write!(
                 truncation_notice,
                 "{}",
-                capture_hint(p, raw_stdout_bytes + raw_stderr_bytes)
+                hint(p, raw_stdout_bytes + raw_stderr_bytes)
             );
         }
     }
 
+    // Filter notice: emitted only when a built-in rule capped the output, so
+    // uncapped output stays byte-identical to the pre-filter-surface format.
+    let filter_line = if output.filter_capped {
+        format!(
+            "Output filtered: {}\n",
+            output
+                .filter_effect
+                .as_deref()
+                .unwrap_or("filter rule applied")
+        )
+    } else {
+        String::new()
+    };
+
     format!(
-        "Command: {}\nExit code: {}\nOutput truncated: {}\n{}{}",
+        "Command: {}\nExit code: {}\nOutput truncated: {}\n{}{}{}",
         params.command,
         output
             .exit_code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "null".to_string()),
         output.output_truncated,
+        filter_line,
         truncation_notice,
         output_text,
     )
@@ -353,6 +379,14 @@ fn capture_hint(path: &str, bytes: u64) -> String {
     } else {
         format!("output truncated; full capture at {path}\n")
     }
+}
+
+/// Hint line for a filter-capped slot file; names the filter as the cause and
+/// documents the last-run-wins retention of the slot directory.
+fn filter_capture_hint(path: &str) -> String {
+    format!(
+        "output filter-capped; full pre-filter capture at {path} (filter-capped slot file, last-run-wins; readable via resources/read)\n"
+    )
 }
 
 /// Free-function implementation of the `exec_command` tool handler.
@@ -519,12 +553,13 @@ pub(crate) async fn exec_command_impl(
         TextContent::new(text.clone()).with_annotations(Annotations::default().with_priority(0.0)),
     )];
 
-    // MCP resource links for overflow slot files: emitted only when output was
-    // truncated AND at least one capture path is set. URIs use the
+    // MCP resource links for overflow slot files: emitted when output was
+    // truncated OR a filter cap persisted pre-filter output (filter-capped
+    // slot files exist even when output_truncated is false). URIs use the
     // aptu-overflow:// scheme, readable via resources/read; the truncation
     // notice still prints the filesystem path. Links are valid until the slot
     // is overwritten (last-run-wins retention).
-    if output_truncated {
+    if output_truncated || output.filter_capped {
         if output.stdout_path.is_some() {
             content_blocks.push(ContentBlock::resource_link(
                 Resource::new(
@@ -740,6 +775,8 @@ mod tests {
             stderr_path: None,
             interleaved_path: None,
             filter_applied: None,
+            filter_capped: false,
+            filter_effect: None,
             timed_out: false,
         };
         let params = ExecCommandParams {
@@ -776,6 +813,8 @@ mod tests {
             stderr_path: Some("/tmp/aptu-coder-overflow/slot-1/stderr".to_string()),
             interleaved_path: None,
             filter_applied: None,
+            filter_capped: false,
+            filter_effect: None,
             timed_out: false,
         };
         let params = ExecCommandParams {
@@ -812,6 +851,8 @@ mod tests {
             stderr_path: None,
             interleaved_path: Some("/tmp/aptu-coder-overflow/slot-2/interleaved".to_string()),
             filter_applied: None,
+            filter_capped: false,
+            filter_effect: None,
             timed_out: false,
         };
         let params = ExecCommandParams {

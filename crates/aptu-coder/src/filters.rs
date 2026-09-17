@@ -298,8 +298,45 @@ pub(crate) fn maybe_inject_no_stat(command: &str) -> String {
     command.to_string()
 }
 
+/// Outcome of applying a filter rule to a stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FilterEffect {
+    /// `max_lines` truncated the output.
+    Capped { rule_name: String, max_lines: usize },
+    /// `on_empty` replaced empty output.
+    Substituted { rule_name: String },
+    /// Rule matched but produced no cap or substitution.
+    None,
+}
+
+impl std::fmt::Display for FilterEffect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilterEffect::Capped {
+                rule_name,
+                max_lines,
+            } => write!(
+                f,
+                "output capped to {max_lines} lines by filter rule '{rule_name}'"
+            ),
+            FilterEffect::Substituted { rule_name } => {
+                write!(f, "empty output replaced by filter rule '{rule_name}'")
+            }
+            FilterEffect::None => write!(f, "no filtering effect"),
+        }
+    }
+}
+
 /// Apply filter rule to stdout: strip/keep/cap lines, substitute on_empty if needed.
-pub(crate) fn apply_filter(compiled_rule: &CompiledRule, stdout: &str) -> String {
+///
+/// Returns the filtered text plus a [`FilterEffect`] describing what happened.
+pub(crate) fn apply_filter(compiled_rule: &CompiledRule, stdout: &str) -> (String, FilterEffect) {
+    let rule_name = compiled_rule
+        .rule
+        .description
+        .clone()
+        .unwrap_or_else(|| compiled_rule.rule.match_command.clone());
+
     let mut lines: Vec<&str> = stdout.lines().collect();
 
     // Strip lines matching any strip pattern
@@ -318,16 +355,23 @@ pub(crate) fn apply_filter(compiled_rule: &CompiledRule, stdout: &str) -> String
     }
 
     // Cap to max_lines
-    if let Some(max) = compiled_rule.rule.max_lines {
+    let mut effect = FilterEffect::None;
+    if let Some(max) = compiled_rule.rule.max_lines
+        && lines.len() > max
+    {
         lines.truncate(max);
+        effect = FilterEffect::Capped {
+            rule_name: rule_name.clone(),
+            max_lines: max,
+        };
     }
 
     // If result is empty and on_empty is set, return on_empty
     if lines.is_empty()
         && let Some(on_empty) = &compiled_rule.rule.on_empty
     {
-        return on_empty.clone();
+        return (on_empty.clone(), FilterEffect::Substituted { rule_name });
     }
 
-    lines.join("\n")
+    (lines.join("\n"), effect)
 }
