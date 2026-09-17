@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! File write utilities for the `edit_overwrite` and `edit_replace` tools.
 
-use crate::types::{EditOverwriteOutput, EditReplaceOutput};
+use crate::types::{BatchEdit, EditOverwriteOutput, EditReplaceOutput};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -46,6 +46,29 @@ pub enum EditError {
         actual: String,
         path: String,
     },
+    #[error("batch edits failed validation: {}", format_batch_failures(.failures))]
+    BatchValidationFailed {
+        /// Per-index failure details, sorted by index.
+        failures: Vec<BatchFailure>,
+    },
+}
+
+/// Formats per-index batch failures for the [`EditError`] Display impl.
+fn format_batch_failures(failures: &[BatchFailure]) -> String {
+    failures
+        .iter()
+        .map(|f| format!("edit {}: {}", f.index, f.message))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Per-index failure detail for [`EditError::BatchValidationFailed`].
+#[derive(Debug, Clone)]
+pub struct BatchFailure {
+    /// Zero-based index of the failed edit in the request `edits[]` array.
+    pub index: usize,
+    /// Human-readable reason including the 1-based line number where relevant.
+    pub message: String,
 }
 
 fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
@@ -244,6 +267,9 @@ pub(crate) fn edit_replace_block_inner(
             bytes_before,
             bytes_after,
             occurrences_replaced,
+            // Single-edit response shape is unchanged: batch-only fields stay unset.
+            content_hash: None,
+            edits: None,
         })
     } else {
         // Single-match path (existing behavior)
@@ -269,8 +295,149 @@ pub(crate) fn edit_replace_block_inner(
             bytes_before,
             bytes_after,
             occurrences_replaced: 1,
+            content_hash: None,
+            edits: None,
         })
     }
+}
+
+/// Applies multiple exact-text replacements to one file atomically.
+///
+/// All edits validate against one content snapshot (a single blake3 hash check when
+/// `expected_content_hash` is `Some`) and apply via one sorted-span splice followed by one
+/// atomic write. Any invalid edit aborts the entire batch with
+/// [`EditError::BatchValidationFailed`] and no write.
+pub fn edit_replace_batch(
+    path: &Path,
+    edits: &[BatchEdit],
+    expected_content_hash: Option<&str>,
+) -> Result<EditReplaceOutput, EditError> {
+    if path.is_dir() {
+        return Err(EditError::NotAFile(path.to_path_buf()));
+    }
+    let content = std::fs::read_to_string(path)?;
+    // Staleness check: hash the raw bytes once, before any validation runs.
+    if let Some(expected_hash) = expected_content_hash {
+        let actual_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+        if actual_hash != expected_hash {
+            return Err(EditError::StaleContentHash {
+                expected: expected_hash.to_string(),
+                actual: actual_hash,
+                path: path.display().to_string(),
+            });
+        }
+    }
+    let bytes_before = content.len();
+    // One normalize and one CRLF offset index per batch call.
+    let norm_content = normalize_for_match(&content);
+    let crlf_positions = build_crlf_positions(&content);
+    let line_at = |offset: usize| {
+        norm_content[..offset]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1
+    };
+
+    // Collect match spans in original byte space, recording per-index failures.
+    let mut all_spans: Vec<(usize, usize, usize)> = Vec::new(); // (start, end, edit_index)
+    let mut failures: Vec<BatchFailure> = Vec::new();
+    for (index, edit) in edits.iter().enumerate() {
+        let mut push = |message: String| failures.push(BatchFailure { index, message });
+        let norm_old = normalize_for_match(&edit.old_text);
+        if norm_old.is_empty() {
+            push("old_text must not be empty".to_string());
+            continue;
+        }
+        let norm_old_len = norm_old.len();
+        let matches: Vec<usize> = norm_content
+            .match_indices(norm_old.as_ref())
+            .map(|(o, _)| o)
+            .collect();
+        if matches.is_empty() {
+            push(format!(
+                "old_text not found in {} — verify the text matches exactly, including whitespace and newlines",
+                path.display()
+            ));
+            continue;
+        }
+        if matches.len() > 1 && !edit.replace_all.unwrap_or(false) {
+            let lines = matches
+                .iter()
+                .map(|&o| line_at(o).to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            push(format!(
+                "old_text appears {} times in {} (lines {lines}) — make old_text longer and more specific to uniquely identify the block",
+                matches.len(),
+                path.display()
+            ));
+            continue;
+        }
+        for norm_start in matches {
+            let start = norm_to_original_offset(norm_start, &crlf_positions);
+            let end = norm_to_original_offset(norm_start + norm_old_len, &crlf_positions);
+            all_spans.push((start, end, index));
+        }
+    }
+
+    // Sort spans by start; reject intersecting regions. Adjacent (abutting) regions are
+    // allowed: matches were collected against one pre-splice snapshot, so the splice is
+    // deterministic regardless of adjacency.
+    all_spans.sort_by_key(|&(start, end, index)| (start, end, index));
+    let mut last_end: Option<usize> = None;
+    for &(start, end, index) in &all_spans {
+        if let Some(prev_end) = last_end.filter(|&prev_end| start < prev_end) {
+            last_end = Some(end.max(prev_end));
+            failures.push(BatchFailure {
+                index,
+                message: format!(
+                    "edit region (bytes {start}..{end}) overlaps an earlier edit region ending at byte {prev_end}; all edits must target non-overlapping regions"
+                ),
+            });
+            continue;
+        }
+        last_end = Some(match last_end {
+            Some(prev_end) => prev_end.max(end),
+            None => end,
+        });
+    }
+
+    if !failures.is_empty() {
+        failures.sort_by_key(|f| f.index);
+        return Err(EditError::BatchValidationFailed { failures });
+    }
+
+    // Single last_end splice over original bytes.
+    let mut result = String::with_capacity(bytes_before);
+    let mut cursor = 0usize;
+    let mut per_edit_counts = vec![0usize; edits.len()];
+    for (start, end, index) in all_spans {
+        result.push_str(&content[cursor..start]);
+        result.push_str(&edits[index].new_text);
+        cursor = end;
+        per_edit_counts[index] += 1;
+    }
+    result.push_str(&content[cursor..]);
+    let bytes_after = result.len();
+    write_file_atomic(path, &result)?;
+    Ok(EditReplaceOutput {
+        path: path.display().to_string(),
+        bytes_before,
+        bytes_after,
+        occurrences_replaced: per_edit_counts.iter().sum(),
+        edits: Some(
+            edits
+                .iter()
+                .enumerate()
+                .map(|(index, _)| crate::types::BatchEditResult {
+                    index,
+                    occurrences_replaced: per_edit_counts[index],
+                })
+                .collect(),
+        ),
+        content_hash: Some(blake3::hash(result.as_bytes()).to_hex().to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -542,5 +709,118 @@ mod tests {
         let output = std::fs::read(&path).unwrap();
         // Expected: "XYZ\r\nb\nXYZ\r\nc\nXYZ\r\nd"
         assert_eq!(output, b"XYZ\r\nb\nXYZ\r\nc\nXYZ\r\nd");
+    }
+
+    /// Builds a batch edit item with `replace_all` unset.
+    fn be(old_text: &str, new_text: &str) -> BatchEdit {
+        BatchEdit {
+            old_text: old_text.into(),
+            new_text: new_text.into(),
+            replace_all: None,
+        }
+    }
+
+    #[test]
+    fn edit_replace_batch_happy_path_mixed_single_and_replace_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("batch.txt");
+        std::fs::write(&path, "a b a c a d").unwrap();
+        let mut replace_all_edit = be("a", "X");
+        replace_all_edit.replace_all = Some(true);
+        let out = edit_replace_batch(&path, &[be("b", "B"), replace_all_edit], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "X B X c X d");
+        assert_eq!(
+            (
+                out.edits.as_ref().unwrap()[0].occurrences_replaced,
+                out.edits.as_ref().unwrap()[1].occurrences_replaced
+            ),
+            (1, 3)
+        );
+        assert_eq!(
+            out.content_hash.as_deref(),
+            Some(
+                blake3::hash(&std::fs::read(&path).unwrap())
+                    .to_hex()
+                    .as_str()
+            )
+        );
+    }
+
+    /// Asserts the batch fails validation with a failure at `expected_index`.
+    fn assert_rejected(path: &Path, edits: &[BatchEdit], expected_index: usize) {
+        match edit_replace_batch(path, edits, None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert!(failures.iter().any(|f| f.index == expected_index));
+            }
+            other => panic!("expected BatchValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_replace_batch_rejection_and_crlf_cases() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cases.txt");
+        // Overlap: intersecting spans rejected at the later index; file untouched.
+        std::fs::write(&path, "hello world").unwrap();
+        assert_rejected(&path, &[be("hello", "X"), be("hello w", "Y")], 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
+        // Duplicate old_text rejected at the later index.
+        std::fs::write(&path, "target here").unwrap();
+        assert_rejected(&path, &[be("target", "A"), be("target", "B")], 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "target here");
+        // One invalid edit aborts the batch; bytes stay bit-identical.
+        std::fs::write(&path, b"keep\r\nme").unwrap();
+        let edits = vec![be("keep", "changed"), be("missing", "x")];
+        assert!(matches!(
+            edit_replace_batch(&path, &edits, None),
+            Err(EditError::BatchValidationFailed { .. })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep\r\nme");
+        // Edit spanning a CRLF boundary keeps surrounding CRLF bytes intact.
+        std::fs::write(&path, b"foo\r\nbar\r\nbaz").unwrap();
+        let out = edit_replace_batch(&path, &[be("bar\r\nbaz", "qux")], None).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"foo\r\nqux");
+        assert_eq!(out.edits.as_ref().unwrap()[0].occurrences_replaced, 1);
+    }
+
+    #[test]
+    fn edit_replace_batch_empty_oldtext_fails_index_and_empty_edits_rejected_upstream() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty_item.txt");
+        std::fs::write(&path, "content").unwrap();
+        match edit_replace_batch(&path, &[be("", "x")], None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert_eq!((failures.len(), failures[0].index), (1, 0));
+                assert!(failures[0].message.contains("must not be empty"));
+            }
+            other => panic!("expected BatchValidationFailed, got {other:?}"),
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "content");
+    }
+
+    #[test]
+    fn edit_replace_batch_allows_abutting_regions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("abut.txt");
+        std::fs::write(&path, "abcd").unwrap();
+        let out = edit_replace_batch(&path, &[be("ab", "X"), be("cd", "Y")], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "XY");
+        assert_eq!(out.occurrences_replaced, 2);
+    }
+
+    #[test]
+    fn edit_replace_batch_stale_hash_rejected_before_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stale_batch.txt");
+        std::fs::write(&path, "hello").unwrap();
+        let err = edit_replace_batch(
+            &path,
+            &[be("missing", "x")],
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+        )
+        .unwrap_err();
+        // Stale hash takes precedence over per-edit validation failures.
+        std::assert_matches!(err, EditError::StaleContentHash { .. });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
     }
 }

@@ -827,3 +827,198 @@ async fn test_edit_replace_replace_all_no_stale_context_trip() {
         "call 6 should NOT be stale_context after replace_all success but got: {sixth_msg}"
     );
 }
+
+/// Creates a temp file (cwd-rooted temp dir) for batch edit_replace tests.
+fn batch_setup(content: &str) -> (tempfile::TempDir, &'static str, String) {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    std::fs::write(temp_dir.path().join("test.txt"), content).expect("should write file");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8")
+        .to_string();
+    (temp_dir, "test.txt", working_dir)
+}
+
+/// Requests with both edits[] and top-level old_text are rejected INVALID_PARAMS.
+#[tokio::test]
+async fn test_edit_replace_batch_and_old_text_mutually_exclusive() {
+    let (temp_dir, file_name, working_dir) = batch_setup("content here");
+
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "content",
+            "new_text": "replaced",
+            "edits": [{"old_text": "content", "new_text": "replaced"}],
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(msg.contains("not both"), "msg: {msg}");
+    assert_eq!(
+        std::fs::read_to_string(temp_dir.path().join(file_name)).unwrap(),
+        "content here"
+    );
+}
+
+/// A batch with expected_content_hash mismatch counts as exactly one circuit-breaker
+/// increment: the 6th consecutive stale batch trips EDIT_STALE_CONTEXT.
+#[tokio::test]
+async fn test_edit_replace_batch_stale_hash_increments_guard_once() {
+    let (_temp_dir, file_name, working_dir) = batch_setup("stable content\n");
+
+    let bad_params = serde_json::json!({
+        "path": file_name,
+        "edits": [{"old_text": "stable", "new_text": "x"}],
+        "expected_content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "working_dir": working_dir
+    });
+    let calls: Vec<(&str, serde_json::Value)> = vec![("edit_replace", bad_params); 6];
+    let responses = call_tool_raw_seq(calls).await;
+
+    for (i, resp) in responses.iter().enumerate().take(4) {
+        let msg = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            msg.contains("Content hash mismatch"),
+            "call {} expected stale_content_hash: {msg}",
+            i + 1
+        );
+    }
+    for (i, resp) in responses.iter().enumerate().take(6).skip(4) {
+        let msg = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            msg.contains("EDIT_STALE_CONTEXT"),
+            "call {} should trip stale_context but got: {msg}",
+            i + 1
+        );
+    }
+}
+
+/// A successful batch resets the circuit breaker so later failures do not trip immediately.
+#[tokio::test]
+async fn test_edit_replace_batch_success_resets_guard() {
+    let (temp_dir, file_name, working_dir) = batch_setup("token one\n");
+    let bad = serde_json::json!({
+        "path": file_name,
+        "edits": [
+            {"old_text": "token", "new_text": "x"},
+            {"old_text": "missing", "new_text": "y"}
+        ],
+        "working_dir": working_dir
+    });
+    let ok = serde_json::json!({
+        "path": file_name,
+        "edits": [{"old_text": "token", "new_text": "TOKEN"}],
+        "working_dir": working_dir
+    });
+    let mut calls: Vec<(&str, serde_json::Value)> = vec![("edit_replace", bad.clone()); 4];
+    calls.push(("edit_replace", ok));
+    std::fs::write(temp_dir.path().join(file_name), "token one\n")
+        .expect("re-write file for success call");
+    calls.push(("edit_replace", bad));
+
+    let responses = call_tool_raw_seq(calls).await;
+    for (i, resp) in responses.iter().take(4).enumerate() {
+        assert!(
+            resp["result"]["isError"].as_bool().unwrap_or(false),
+            "call {} expected error: {resp}",
+            i + 1
+        );
+    }
+    assert!(
+        !responses[4]["result"]["isError"].as_bool().unwrap_or(true),
+        "call 5 (batch success) expected success: {resp}",
+        resp = responses[4]
+    );
+    let sixth_msg = responses[5]["result"]["content"][0]["text"]
+        .as_str()
+        .expect("call 6 should have text");
+    assert!(
+        !sixth_msg.contains("EDIT_STALE_CONTEXT"),
+        "call 6 should NOT be stale_context after batch success but got: {sixth_msg}"
+    );
+}
+
+/// A batch with a matching expected_content_hash succeeds.
+#[tokio::test]
+async fn test_edit_replace_batch_with_matching_content_hash() {
+    let (temp_dir, file_name, working_dir) = batch_setup("alpha beta\n");
+    let hash = blake3::hash(
+        std::fs::read(temp_dir.path().join(file_name))
+            .expect("read file")
+            .as_slice(),
+    )
+    .to_hex()
+    .to_string();
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "edits": [
+                {"old_text": "alpha", "new_text": "ALPHA"},
+                {"old_text": "beta", "new_text": "BETA"}
+            ],
+            "expected_content_hash": hash,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(true),
+        "batch with matching hash should succeed: {resp}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp_dir.path().join(file_name)).unwrap(),
+        "ALPHA BETA\n"
+    );
+}
+
+/// Batch structuredContent must satisfy the tool's declared output schema:
+/// every required field present. Guards against the batch response shape
+/// drifting from EditReplaceOutput (regression for missing occurrences_replaced).
+#[tokio::test]
+async fn test_edit_replace_batch_structured_content_matches_output_schema() {
+    let (_temp_dir, file_name, working_dir) = batch_setup("one two\n");
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "edits": [
+                {"old_text": "one", "new_text": "1"},
+                {"old_text": "two", "new_text": "2"}
+            ],
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+    let structured = resp["result"]["structuredContent"]
+        .as_object()
+        .expect("batch success should carry structuredContent");
+    let schema = serde_json::to_value(schemars::schema_for!(aptu_coder_core::EditReplaceOutput))
+        .expect("output schema should serialize");
+    for required in schema["required"].as_array().expect("schema required list") {
+        let field = required.as_str().expect("required field name");
+        assert!(
+            structured.contains_key(field),
+            "batch structuredContent missing required output-schema field '{field}': {structured:?}"
+        );
+    }
+    let edits = structured["edits"].as_array().expect("batch edits array");
+    assert_eq!(edits.len(), 2, "per-edit results for both edits: {edits:?}");
+    assert_eq!(
+        structured["occurrences_replaced"].as_u64(),
+        Some(2),
+        "batch total occurrences_replaced"
+    );
+}

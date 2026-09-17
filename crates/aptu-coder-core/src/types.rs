@@ -903,12 +903,13 @@ pub struct EditReplaceParams {
     pub path: String,
     /// Optional base directory for path resolution (default: server CWD).
     pub working_dir: Option<String>,
-    /// Exact text block to find and replace. When `replace_all` is false (default), must appear
-    /// exactly once; fails with `ambiguous` if multiple matches are found. When `replace_all` is
-    /// true, every non-overlapping occurrence is replaced. Must be non-empty.
-    pub old_text: String,
-    /// Replacement text. Pass empty string to delete every matched block.
-    pub new_text: String,
+    /// Exact text block to find and replace; must be non-empty. Mutually exclusive with
+    /// `edits`: provide either `old_text`/`new_text` (single edit) or `edits` (batch).
+    #[serde(default)]
+    pub old_text: Option<String>,
+    /// Replacement text; empty string deletes every matched block. Mutually exclusive with `edits`.
+    #[serde(default)]
+    pub new_text: Option<String>,
     /// When `true`, replaces every non-overlapping occurrence of `old_text` in a single pass
     /// (sed `s/old/new/g` semantics). Returns `INVALID_PARAMS` if `old_text` is empty.
     /// When `false` (default), `old_text` must appear exactly once; fails with `ambiguous` if
@@ -923,6 +924,40 @@ pub struct EditReplaceParams {
     /// Omit to skip the staleness check (backward compatible).
     #[serde(default)]
     pub expected_content_hash: Option<String>,
+    /// Batch edits applied atomically to one file; mutually exclusive with `old_text`/`new_text`.
+    #[serde(default)]
+    pub edits: Option<Vec<BatchEdit>>,
+}
+
+/// One edit item within an `edits[]` batch for `edit_replace`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct BatchEdit {
+    /// Exact text to find within the file.
+    pub old_text: String,
+    /// Replacement text.
+    pub new_text: String,
+    /// When true, replace every non-overlapping occurrence of `old_text`.
+    #[serde(default)]
+    pub replace_all: Option<bool>,
+}
+
+/// Per-edit result within a successful batch `edit_replace` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct BatchEditResult {
+    /// Zero-based index of the edit in the `edits[]` request array.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub index: usize,
+    /// Number of occurrences replaced by this edit.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub occurrences_replaced: usize,
 }
 
 #[non_exhaustive]
@@ -946,12 +981,20 @@ pub struct EditReplaceOutput {
     /// Number of occurrences replaced. Always 1 when `replace_all` is false (default single-match
     /// path). When `replace_all` is true, reflects the actual substitution count (0 triggers a
     /// `not_found` error before this field is populated, so a successful response always has
-    /// `occurrences_replaced >= 1`).
+    /// `occurrences_replaced >= 1`). When the batch (`edits[]`) form is used, this is the
+    /// total number of occurrences replaced across all edits in the batch.
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::integer_schema")
     )]
     pub occurrences_replaced: usize,
+    /// Blake3 hex hash of the file bytes after the edit. Present only when the batch
+    /// (`edits[]`) form was used.
+    #[serde(default)]
+    pub content_hash: Option<String>,
+    /// Per-edit results. Present only when the batch (`edits[]`) form was used.
+    #[serde(default)]
+    pub edits: Option<Vec<BatchEditResult>>,
 }
 
 /// Filter rule for command output post-processing.

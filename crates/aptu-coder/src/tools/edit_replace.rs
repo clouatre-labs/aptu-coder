@@ -190,6 +190,37 @@ fn stale_context_error_msg(threshold: u8, param_path: &str) -> String {
     )
 }
 
+/// Emits the stale-context trip metric and builds the EDIT_STALE_CONTEXT error response.
+///
+/// Shared by the not_found/ambiguous trip arms in `handle_edit_error` and the batch
+/// coordinator's stale trip path.
+fn stale_context_trip_result(
+    ctx: &EditHandlerContext<'_>,
+    dur: u64,
+    param_path: &str,
+    working_dir_used: bool,
+) -> CallToolResult {
+    ctx.metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+            .param_path_depth(crate::metrics::path_component_count(param_path))
+            .error_type(Some("invalid_params".to_string()))
+            .error_subtype(Some("stale_context".to_string()))
+            .session_id(ctx.sid.clone())
+            .seq(Some(ctx.seq))
+            .working_dir_used(working_dir_used)
+            .build(),
+    );
+    err_to_tool_result(ErrorData::new(
+        rmcp::model::ErrorCode::INVALID_PARAMS,
+        stale_context_error_msg(EDIT_STALE_THRESHOLD, param_path),
+        Some(error_meta(
+            "validation",
+            false,
+            "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
+        )),
+    ))
+}
+
 /// Converts an `aptu_coder_core::EditError` into a `CallToolResult` and sends the
 /// appropriate metric event.
 ///
@@ -217,25 +248,7 @@ fn handle_edit_error(
             span.record("error.type", "invalid_params");
             let tripped = guard.increment(&notfound_path);
             if tripped {
-                ctx.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(param_path))
-                        .error_type(Some("invalid_params".to_string()))
-                        .error_subtype(Some("stale_context".to_string()))
-                        .session_id(ctx.sid.clone())
-                        .seq(Some(ctx.seq))
-                        .working_dir_used(working_dir_used)
-                        .build(),
-                );
-                return err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    stale_context_error_msg(EDIT_STALE_THRESHOLD, param_path),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
-                    )),
-                ));
+                return stale_context_trip_result(ctx, dur, param_path, working_dir_used);
             }
             ctx.metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
@@ -270,25 +283,7 @@ fn handle_edit_error(
             span.record("error.type", "invalid_params");
             let tripped = guard.increment(&ambiguous_path);
             if tripped {
-                ctx.metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(param_path))
-                        .error_type(Some("invalid_params".to_string()))
-                        .error_subtype(Some("stale_context".to_string()))
-                        .session_id(ctx.sid.clone())
-                        .seq(Some(ctx.seq))
-                        .working_dir_used(working_dir_used)
-                        .build(),
-                );
-                return err_to_tool_result(ErrorData::new(
-                    rmcp::model::ErrorCode::INVALID_PARAMS,
-                    stale_context_error_msg(EDIT_STALE_THRESHOLD, param_path),
-                    Some(error_meta(
-                        "validation",
-                        false,
-                        "re-read the file with analyze_file or analyze_module, then retry with old_text from the live content",
-                    )),
-                ));
+                return stale_context_trip_result(ctx, dur, param_path, working_dir_used);
             }
             ctx.metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
@@ -395,6 +390,37 @@ fn handle_edit_error(
                 Some(meta),
             ))
         }
+        aptu_coder_core::EditError::BatchValidationFailed { failures } => {
+            // Circuit breaker was already incremented once by the coordinator for the
+            // entire batch; this arm only formats the combined per-index diagnostic.
+            span.record("error.type", "invalid_params");
+            ctx.metrics_tx.send(
+                crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
+                    .param_path_depth(crate::metrics::path_component_count(param_path))
+                    .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some("batch_validation_failed".to_string()))
+                    .session_id(ctx.sid.clone())
+                    .seq(Some(ctx.seq))
+                    .working_dir_used(working_dir_used)
+                    .build(),
+            );
+            let per_index = failures
+                .iter()
+                .map(|f| format!("  edit {}: {}", f.index, f.message))
+                .collect::<Vec<_>>()
+                .join("\n");
+            err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!(
+                    "batch edits failed validation; the file was not modified:\n{per_index}\nFix the failed edits and retry."
+                ),
+                Some(error_meta(
+                    "validation",
+                    true,
+                    "fix the failed edits and retry; the file was not modified",
+                )),
+            ))
+        }
         aptu_coder_core::EditError::Io(io_err) => {
             span.record("error.type", "internal_error");
             ctx.metrics_tx.send(
@@ -490,37 +516,99 @@ pub(crate) async fn edit_replace(
         )
     };
 
+    // Mutual exclusion and emptiness validation for the batch vs single-edit forms.
+    let invalid_params_msg = match (
+        params.edits.is_some(),
+        params.old_text.is_some(),
+        params.edits.as_ref().is_some_and(|e| e.is_empty()),
+    ) {
+        (true, true, _) => Some(
+            "invalid params: provide either edits[] (batch) or old_text/new_text (single edit), not both",
+        ),
+        (false, false, _) => Some(
+            "invalid params: provide either edits[] (batch) or old_text/new_text (single edit)",
+        ),
+        (_, _, true) => Some("invalid params: edits[] must not be empty when provided"),
+        _ => None,
+    };
+
+    let mut guard = StaleContextGuard::new(ctx.sid.clone(), Arc::clone(ctx.edit_failure_counts));
+
+    if let Some(msg) = invalid_params_msg {
+        return Ok(handle_edit_error(
+            aptu_coder_core::EditError::InvalidParams(msg.to_string()),
+            span,
+            t_start,
+            &param_path,
+            params.old_text.as_deref().unwrap_or_default(),
+            &mut guard,
+            &ctx,
+            working_dir_used,
+        ));
+    }
+
+    let batch_edits = params.edits;
+    let resolved_path_for_batch = resolved_path.clone();
     let old_text = params.old_text.clone();
+    let old_text_for_errors = old_text.clone();
     let new_text = params.new_text.clone();
     let replace_all = params.replace_all.unwrap_or(false);
     let expected_content_hash = params.expected_content_hash.clone();
+    let is_batch = batch_edits.is_some();
     let handle = tokio::task::spawn_blocking(move || {
         // Acquire the per-path lock as the first line inside spawn_blocking,
-        // holding it across the entire read-modify-write cycle.
+        // holding it across the entire read-modify-write cycle (and across the
+        // entire batch read-validate-write when batching).
         // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
         // this is fatal and should propagate.
         #[allow(clippy::expect_used)]
         let _guard = path_lock.lock().expect("per-path edit lock poisoned");
-        aptu_coder_core::edit_replace_block(
-            &resolved_path,
-            &old_text,
-            &new_text,
-            replace_all,
-            expected_content_hash.as_deref(),
-        )
+        if let Some(edits) = &batch_edits {
+            aptu_coder_core::edit_replace_batch(
+                &resolved_path,
+                edits,
+                expected_content_hash.as_deref(),
+            )
+        } else {
+            aptu_coder_core::edit_replace_block(
+                &resolved_path,
+                old_text.as_deref().unwrap_or_default(),
+                new_text.as_deref().unwrap_or_default(),
+                replace_all,
+                expected_content_hash.as_deref(),
+            )
+        }
     });
-
-    let mut guard = StaleContextGuard::new(ctx.sid.clone(), Arc::clone(ctx.edit_failure_counts));
 
     let output: EditReplaceOutput = match handle.await {
         Ok(Ok(v)) => v,
         Ok(Err(edit_err)) => {
+            // For batches, BatchValidationFailed/StaleContentHash increment the guard exactly
+            // once here (their arms do not increment); NotFound/Ambiguous increment once
+            // inside handle_edit_error. Single-edit behavior is unchanged: stale-hash failures
+            // do not count toward the circuit breaker.
+            if is_batch
+                && matches!(
+                    edit_err,
+                    aptu_coder_core::EditError::BatchValidationFailed { .. }
+                        | aptu_coder_core::EditError::StaleContentHash { .. }
+                )
+                && guard.increment(&resolved_path_for_batch.display().to_string())
+            {
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                return Ok(stale_context_trip_result(
+                    &ctx,
+                    dur,
+                    &param_path,
+                    working_dir_used,
+                ));
+            }
             return Ok(handle_edit_error(
                 edit_err,
                 span,
                 t_start,
                 &param_path,
-                &params.old_text,
+                &old_text_for_errors.unwrap_or_default(),
                 &mut guard,
                 &ctx,
                 working_dir_used,
@@ -548,13 +636,21 @@ pub(crate) async fn edit_replace(
         }
     };
 
-    let text = format!(
-        "Edited {}: {} bytes -> {} bytes",
-        output.path, output.bytes_before, output.bytes_after
-    );
-    let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
-        .with_meta(Some(no_cache_meta()));
-    let structured = match serde_json::to_value(&output).map_err(|e| {
+    let text = if is_batch {
+        format!(
+            "Edited {}: {} bytes -> {} bytes ({} batch edits applied)",
+            output.path,
+            output.bytes_before,
+            output.bytes_after,
+            output.edits.as_ref().map_or(0, Vec::len)
+        )
+    } else {
+        format!(
+            "Edited {}: {} bytes -> {} bytes",
+            output.path, output.bytes_before, output.bytes_after
+        )
+    };
+    let structured_value = match serde_json::to_value(&output).map_err(|e| {
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("serialization failed: {e}"),
@@ -564,7 +660,10 @@ pub(crate) async fn edit_replace(
         Ok(v) => v,
         Err(e) => return Ok(err_to_tool_result(e)),
     };
-    result.structured_content = Some(structured);
+
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
+        .with_meta(Some(no_cache_meta()));
+    result.structured_content = Some(structured_value);
     ctx.cache
         .invalidate_file(&std::path::PathBuf::from(&param_path));
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
