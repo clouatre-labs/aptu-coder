@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! File write utilities for the `edit_overwrite` and `edit_replace` tools.
 
-use crate::types::{BatchEdit, EditOverwriteOutput, EditReplaceBatchOutput, EditReplaceOutput};
+use crate::types::{BatchEdit, EditOverwriteOutput, EditReplaceOutput};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -311,7 +311,7 @@ pub fn edit_replace_batch(
     path: &Path,
     edits: &[BatchEdit],
     expected_content_hash: Option<&str>,
-) -> Result<EditReplaceBatchOutput, EditError> {
+) -> Result<EditReplaceOutput, EditError> {
     if path.is_dir() {
         return Err(EditError::NotAFile(path.to_path_buf()));
     }
@@ -381,28 +381,25 @@ pub fn edit_replace_batch(
         }
     }
 
-    // Sort spans by start; reject intersecting or adjacent (start == prev_end) regions.
+    // Sort spans by start; reject intersecting regions. Adjacent (abutting) regions are
+    // allowed: matches were collected against one pre-splice snapshot, so the splice is
+    // deterministic regardless of adjacency.
     all_spans.sort_by_key(|&(start, end, index)| (start, end, index));
     let mut last_end: Option<usize> = None;
     for &(start, end, index) in &all_spans {
-        let prev_end = match last_end {
-            Some(prev_end) if start <= prev_end => prev_end,
-            _ => {
-                last_end = Some(end);
-                continue;
-            }
-        };
-        let (why, limit) = if start < prev_end {
+        if let Some(prev_end) = last_end.filter(|&prev_end| start < prev_end) {
             last_end = Some(end.max(prev_end));
-            ("overlaps", "non-overlapping")
-        } else {
-            ("abuts", "non-adjacent")
-        };
-        failures.push(BatchFailure {
-            index,
-            message: format!(
-                "edit region (bytes {start}..{end}) {why} an earlier edit region ending at byte {prev_end}; all edits must target {limit} regions"
-            ),
+            failures.push(BatchFailure {
+                index,
+                message: format!(
+                    "edit region (bytes {start}..{end}) overlaps an earlier edit region ending at byte {prev_end}; all edits must target non-overlapping regions"
+                ),
+            });
+            continue;
+        }
+        last_end = Some(match last_end {
+            Some(prev_end) => prev_end.max(end),
+            None => end,
         });
     }
 
@@ -424,20 +421,22 @@ pub fn edit_replace_batch(
     result.push_str(&content[cursor..]);
     let bytes_after = result.len();
     write_file_atomic(path, &result)?;
-    Ok(EditReplaceBatchOutput {
+    Ok(EditReplaceOutput {
         path: path.display().to_string(),
         bytes_before,
         bytes_after,
-        edits: edits
-            .iter()
-            .enumerate()
-            .map(|(index, _)| crate::types::BatchEditResult {
-                index,
-                status: "applied".to_string(),
-                occurrences_replaced: per_edit_counts[index],
-            })
-            .collect(),
-        content_hash: blake3::hash(result.as_bytes()).to_hex().to_string(),
+        occurrences_replaced: per_edit_counts.iter().sum(),
+        edits: Some(
+            edits
+                .iter()
+                .enumerate()
+                .map(|(index, _)| crate::types::BatchEditResult {
+                    index,
+                    occurrences_replaced: per_edit_counts[index],
+                })
+                .collect(),
+        ),
+        content_hash: Some(blake3::hash(result.as_bytes()).to_hex().to_string()),
     })
 }
 
@@ -732,16 +731,18 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "X B X c X d");
         assert_eq!(
             (
-                out.edits[0].occurrences_replaced,
-                out.edits[1].occurrences_replaced
+                out.edits.as_ref().unwrap()[0].occurrences_replaced,
+                out.edits.as_ref().unwrap()[1].occurrences_replaced
             ),
             (1, 3)
         );
         assert_eq!(
-            out.content_hash,
-            blake3::hash(&std::fs::read(&path).unwrap())
-                .to_hex()
-                .to_string()
+            out.content_hash.as_deref(),
+            Some(
+                blake3::hash(&std::fs::read(&path).unwrap())
+                    .to_hex()
+                    .as_str()
+            )
         );
     }
 
@@ -779,7 +780,7 @@ mod tests {
         std::fs::write(&path, b"foo\r\nbar\r\nbaz").unwrap();
         let out = edit_replace_batch(&path, &[be("bar\r\nbaz", "qux")], None).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"foo\r\nqux");
-        assert_eq!(out.edits[0].occurrences_replaced, 1);
+        assert_eq!(out.edits.as_ref().unwrap()[0].occurrences_replaced, 1);
     }
 
     #[test]
@@ -795,6 +796,16 @@ mod tests {
             other => panic!("expected BatchValidationFailed, got {other:?}"),
         }
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "content");
+    }
+
+    #[test]
+    fn edit_replace_batch_allows_abutting_regions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("abut.txt");
+        std::fs::write(&path, "abcd").unwrap();
+        let out = edit_replace_batch(&path, &[be("ab", "X"), be("cd", "Y")], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "XY");
+        assert_eq!(out.occurrences_replaced, 2);
     }
 
     #[test]

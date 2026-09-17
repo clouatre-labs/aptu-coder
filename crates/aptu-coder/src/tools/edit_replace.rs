@@ -77,12 +77,6 @@ impl StaleContextGuard {
     }
 }
 
-/// Outcome of an `edit_replace` dispatch: either the single-edit path or the batch path.
-enum EditOutcome {
-    Single(EditReplaceOutput),
-    Batch(aptu_coder_core::types::EditReplaceBatchOutput),
-}
-
 /// Resolves and validates the target path for an edit operation.
 ///
 /// Returns `Ok(PathBuf)` on success, or `Err(CallToolResult)` when path validation
@@ -553,12 +547,14 @@ pub(crate) async fn edit_replace(
         ));
     }
 
-    let batch_edits = params.edits.clone();
+    let batch_edits = params.edits;
     let resolved_path_for_batch = resolved_path.clone();
     let old_text = params.old_text.clone();
+    let old_text_for_errors = old_text.clone();
     let new_text = params.new_text.clone();
     let replace_all = params.replace_all.unwrap_or(false);
     let expected_content_hash = params.expected_content_hash.clone();
+    let is_batch = batch_edits.is_some();
     let handle = tokio::task::spawn_blocking(move || {
         // Acquire the per-path lock as the first line inside spawn_blocking,
         // holding it across the entire read-modify-write cycle (and across the
@@ -573,7 +569,6 @@ pub(crate) async fn edit_replace(
                 edits,
                 expected_content_hash.as_deref(),
             )
-            .map(EditOutcome::Batch)
         } else {
             aptu_coder_core::edit_replace_block(
                 &resolved_path,
@@ -582,21 +577,23 @@ pub(crate) async fn edit_replace(
                 replace_all,
                 expected_content_hash.as_deref(),
             )
-            .map(EditOutcome::Single)
         }
     });
 
-    let outcome: EditOutcome = match handle.await {
+    let output: EditReplaceOutput = match handle.await {
         Ok(Ok(v)) => v,
         Ok(Err(edit_err)) => {
-            // BatchValidationFailed/StaleContentHash increment the guard exactly once
-            // here (their arms do not increment); NotFound/Ambiguous increment once
-            // inside handle_edit_error.
-            if matches!(
-                edit_err,
-                aptu_coder_core::EditError::BatchValidationFailed { .. }
-                    | aptu_coder_core::EditError::StaleContentHash { .. }
-            ) && guard.increment(&resolved_path_for_batch.display().to_string())
+            // For batches, BatchValidationFailed/StaleContentHash increment the guard exactly
+            // once here (their arms do not increment); NotFound/Ambiguous increment once
+            // inside handle_edit_error. Single-edit behavior is unchanged: stale-hash failures
+            // do not count toward the circuit breaker.
+            if is_batch
+                && matches!(
+                    edit_err,
+                    aptu_coder_core::EditError::BatchValidationFailed { .. }
+                        | aptu_coder_core::EditError::StaleContentHash { .. }
+                )
+                && guard.increment(&resolved_path_for_batch.display().to_string())
             {
                 let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
                 return Ok(stale_context_trip_result(
@@ -611,7 +608,7 @@ pub(crate) async fn edit_replace(
                 span,
                 t_start,
                 &param_path,
-                params.old_text.as_deref().unwrap_or_default(),
+                &old_text_for_errors.unwrap_or_default(),
                 &mut guard,
                 &ctx,
                 working_dir_used,
@@ -639,26 +636,21 @@ pub(crate) async fn edit_replace(
         }
     };
 
-    let (structured_value, text) = match &outcome {
-        EditOutcome::Single(output) => (
-            serde_json::to_value(output),
-            format!(
-                "Edited {}: {} bytes -> {} bytes",
-                output.path, output.bytes_before, output.bytes_after
-            ),
-        ),
-        EditOutcome::Batch(output) => (
-            serde_json::to_value(output),
-            format!(
-                "Edited {}: {} bytes -> {} bytes ({} batch edits applied)",
-                output.path,
-                output.bytes_before,
-                output.bytes_after,
-                output.edits.len()
-            ),
-        ),
+    let text = if is_batch {
+        format!(
+            "Edited {}: {} bytes -> {} bytes ({} batch edits applied)",
+            output.path,
+            output.bytes_before,
+            output.bytes_after,
+            output.edits.as_ref().map_or(0, Vec::len)
+        )
+    } else {
+        format!(
+            "Edited {}: {} bytes -> {} bytes",
+            output.path, output.bytes_before, output.bytes_after
+        )
     };
-    let structured_value = match structured_value.map_err(|e| {
+    let structured_value = match serde_json::to_value(&output).map_err(|e| {
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("serialization failed: {e}"),
@@ -675,10 +667,7 @@ pub(crate) async fn edit_replace(
     ctx.cache
         .invalidate_file(&std::path::PathBuf::from(&param_path));
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-    match &outcome {
-        EditOutcome::Single(output) => guard.reset(&output.path),
-        EditOutcome::Batch(output) => guard.reset(&output.path),
-    }
+    guard.reset(&output.path);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("edit_replace", "ok", dur)
             .output_chars(text.len())

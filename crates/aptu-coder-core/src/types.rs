@@ -952,39 +952,12 @@ pub struct BatchEditResult {
         schemars(schema_with = "crate::schema_helpers::integer_schema")
     )]
     pub index: usize,
-    /// `applied` for a successful edit (failed edits abort the whole batch).
-    pub status: String,
     /// Number of occurrences replaced by this edit.
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::integer_schema")
     )]
     pub occurrences_replaced: usize,
-}
-
-/// Output of a batch `edit_replace` operation, serialized into the tool response.
-#[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct EditReplaceBatchOutput {
-    /// Path of the file that was edited.
-    pub path: String,
-    /// File size in bytes before the batch.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::integer_schema")
-    )]
-    pub bytes_before: usize,
-    /// File size in bytes after the batch.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::integer_schema")
-    )]
-    pub bytes_after: usize,
-    /// Per-edit results, in request order.
-    pub edits: Vec<BatchEditResult>,
-    /// Blake3 hex hash of the file bytes after the batch.
-    pub content_hash: String,
 }
 
 #[non_exhaustive]
@@ -1008,13 +981,15 @@ pub struct EditReplaceOutput {
     /// Number of occurrences replaced. Always 1 when `replace_all` is false (default single-match
     /// path). When `replace_all` is true, reflects the actual substitution count (0 triggers a
     /// `not_found` error before this field is populated, so a successful response always has
-    /// `occurrences_replaced >= 1`).
+    /// `occurrences_replaced >= 1`). When the batch (`edits[]`) form is used, this is the
+    /// total number of occurrences replaced across all edits in the batch.
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::integer_schema")
     )]
     pub occurrences_replaced: usize,
-    /// Blake3 hex hash of the file bytes after the edit. Batch path only.
+    /// Blake3 hex hash of the file bytes after the edit. Present only when the batch
+    /// (`edits[]`) form was used.
     #[serde(default)]
     pub content_hash: Option<String>,
     /// Per-edit results. Present only when the batch (`edits[]`) form was used.

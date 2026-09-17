@@ -895,10 +895,8 @@ async fn test_edit_replace_batch_stale_hash_increments_guard_once() {
             i + 1
         );
     }
-    for i in 4..6 {
-        let msg = responses[i]["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap_or("");
+    for (i, resp) in responses.iter().enumerate().take(6).skip(4) {
+        let msg = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
         assert!(
             msg.contains("EDIT_STALE_CONTEXT"),
             "call {} should trip stale_context but got: {msg}",
