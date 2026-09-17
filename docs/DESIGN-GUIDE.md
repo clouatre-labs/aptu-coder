@@ -104,7 +104,7 @@ Returns a tree with LOC, function count, and class count."
 |---|---|---|
 | Summary (`summary=true`) | Totals and directory tree only; no per-file function lists | Lowest token cost |
 | Full (`summary=false` or default on small dirs) | All functions, classes, imports per file | Complete fidelity |
-| Paginated (`cursor` + `page_size`) | Results exceed page_size; resume from last cursor | Chunked output |
+| Paginated (`cursor`) | Results exceed the server-owned page size; resume from last cursor | Chunked output |
 
 *Table 2: Output modes and when to use each.*
 
@@ -294,7 +294,7 @@ Ordered checklist for building a new MCP server applying the principles in this 
 4. **Define output schema.** Summary mode, full mode, and pagination are first-class output concerns. Design them before implementation.
 5. **Apply no-cache metadata.** Mark every tool response as non-cacheable to prevent stale results in client caches.
 6. **Design for small models first.** Write descriptions and error messages as if only Haiku or Mistral Small will read them. Test with small models before testing with Sonnet.
-7. **Add cursor pagination.** Any output that can exceed a token budget should support `cursor` + `page_size` for resumable chunked output.
+7. **Add cursor pagination.** Any output that can exceed a token budget should support an opaque `cursor` for resumable chunked output; page size is server-owned.
 8. **Add summary mode.** Any output that agents use for orientation should have a compact `summary=true` mode.
 9. **Set annotation posture.** Set `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` on every tool before shipping. Use different postures for different tool families (e.g., read-only vs. write-capable).
 10. **Add observability.** Instrument each tool handler with a fire-and-forget channel metric. Do not block the hot path.
