@@ -412,6 +412,17 @@ pub(crate) async fn run_exec_impl_with_timeouts(
     (output, raw_stdout_bytes, raw_stderr_bytes)
 }
 
+/// Filesystem base directory for an overflow slot: `{temp_dir}/aptu-coder-overflow/slot-{slot}`.
+///
+/// Shared by the write path (`handle_output_persist`, `persist_interleaved_overflow`)
+/// and the read path (`resources.rs` overflow URI handling) so both always derive the
+/// same path from validated fields only.
+pub(crate) fn slot_base(slot: u32) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("aptu-coder-overflow")
+        .join(format!("slot-{slot}"))
+}
+
 /// Handles output persistence by writing to slot files only when output overflows the line limit.
 /// Writes full stdout/stderr to:
 ///   {temp_dir}/aptu-coder-overflow/slot-{slot}/{stdout,stderr}
@@ -426,9 +437,7 @@ pub(crate) async fn persist_interleaved_overflow(
     if interleaved.len() <= max_bytes {
         return (interleaved, None);
     }
-    let base = std::env::temp_dir()
-        .join("aptu-coder-overflow")
-        .join(format!("slot-{slot}"));
+    let base = slot_base(slot);
     let _ = tokio::fs::create_dir_all(&base).await;
     let interleaved_file = base.join("interleaved");
     let _ = tokio::fs::write(&interleaved_file, interleaved.as_bytes()).await;
@@ -473,9 +482,7 @@ pub(crate) fn handle_output_persist(
     }
 
     // Overflow: write slot files and return last-N-lines preview.
-    let base = std::env::temp_dir()
-        .join("aptu-coder-overflow")
-        .join(format!("slot-{slot}"));
+    let base = slot_base(slot);
     let _ = std::fs::create_dir_all(&base);
 
     let stdout_path = base.join("stdout");

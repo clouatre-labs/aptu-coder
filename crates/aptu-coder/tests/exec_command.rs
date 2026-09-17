@@ -417,12 +417,17 @@ async fn test_exec_command_slot_isolation() {
 #[tokio::test]
 async fn test_exec_command_large_stdout_slot_file_and_resource_link() {
     // >30KB stdout: slot file must exceed the old 30KB drain cap and result
-    // content must carry a ResourceLink with a file:// URI matching stdout_path,
-    // plus a truncation hint with byte counts.
+    // content must carry a ResourceLink with an aptu-overflow:// URI derived
+    // from the stdout_path slot, plus a truncation hint with byte counts.
     let (_sc, content, stdout_path, slot_bytes) =
         overflow_call_with_retry("seq 1 10000", "stdout_path", 30_000).await;
 
-    let uri = format!("file://{stdout_path}");
+    let slot = stdout_path
+        .split("slot-")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .expect("stdout_path should contain slot identifier");
+    let uri = format!("aptu-overflow://slot-{slot}/stdout");
     let has_stdout_uri_link = content
         .as_array()
         .expect("content array")
@@ -434,7 +439,6 @@ async fn test_exec_command_large_stdout_slot_file_and_resource_link() {
         slot_bytes > 30_000,
         "slot stdout file should exceed 30_000 bytes (drain budget raised): {slot_bytes}"
     );
-    let uri = format!("file://{stdout_path}");
     assert!(
         has_stdout_uri_link,
         "should contain a ResourceLink with uri {uri}"
@@ -475,7 +479,12 @@ async fn test_exec_command_stderr_only_overflow_resource_link() {
     let (sc, content, stderr_path, slot_bytes) =
         overflow_call_with_retry("seq 1 5000 >&2", "stderr_path", 10_000).await;
 
-    let uri = format!("file://{stderr_path}");
+    let slot = stderr_path
+        .split("slot-")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .expect("stderr_path should contain slot identifier");
+    let uri = format!("aptu-overflow://slot-{slot}/stderr");
     let has_stderr_uri_link = content
         .as_array()
         .expect("content array")
@@ -493,10 +502,9 @@ async fn test_exec_command_stderr_only_overflow_resource_link() {
         slot_bytes > 10_000,
         "stderr slot file should exceed 10_000 bytes: {slot_bytes}"
     );
-    let uri = format!("file://{stderr_path}");
     assert!(
         has_stderr_uri_link,
-        "should contain a ResourceLink for stderr_path {uri}"
+        "should contain a ResourceLink for stderr slot: {uri}"
     );
     assert!(
         has_empty_stdout_slot,

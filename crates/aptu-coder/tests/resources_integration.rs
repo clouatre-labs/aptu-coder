@@ -637,3 +637,87 @@ async fn test_resources_read_bidirectional_format_text() {
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Happy path: exec_command with output large enough to truncate emits an
+/// aptu-overflow:// resource_link whose URI reads back the full capture
+/// (including the trailing marker line) via resources/read.
+#[tokio::test]
+#[serial]
+async fn test_overflow_resource_link_readable() {
+    // Arrange: ~39k chars of stdout (exceeds the 30k stdout cap) with a known
+    // marker at the end.
+    let call = send_request(
+        "tools/call",
+        json!({
+            "name": "exec_command",
+            "arguments": {
+                "command": "seq 1 5000; echo APTU_OVERFLOW_MARKER_991",
+            }
+        }),
+    )
+    .await;
+
+    // Act: find the stdout overflow resource_link in the response.
+    let content = call
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .expect("exec_command result content");
+    let link_uri = content
+        .iter()
+        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("resource_link"))
+        .filter_map(|b| b.get("uri").and_then(|u| u.as_str()))
+        .find(|u| u.starts_with("aptu-overflow://slot-") && u.ends_with("/stdout"))
+        .expect("expected aptu-overflow stdout resource link");
+
+    let read = send_request("resources/read", json!({"uri": link_uri})).await;
+    let contents = read
+        .get("result")
+        .and_then(|r| r.get("contents"))
+        .and_then(|c| c.as_array())
+        .expect("resources/read result contents");
+    let first = contents.first().expect("non-empty contents");
+    assert_eq!(
+        first.get("mimeType").and_then(|m| m.as_str()),
+        Some("text/plain")
+    );
+    let text = first.get("text").and_then(|t| t.as_str()).expect("text");
+    assert!(
+        text.contains("APTU_OVERFLOW_MARKER_991"),
+        "overflow capture should contain the trailing marker"
+    );
+    assert!(
+        text.contains("5000"),
+        "overflow capture should contain early lines"
+    );
+}
+
+/// Edge case: traversal-style and malformed overflow URIs are rejected without
+/// touching the filesystem, and a valid but nonexistent slot returns
+/// RESOURCE_NOT_FOUND (-32002).
+#[tokio::test]
+#[serial]
+async fn test_overflow_resource_read_rejects_bad_uris() {
+    for uri in [
+        "aptu-overflow://slot-0/../../etc/passwd",
+        "aptu-overflow://nonexistent",
+        "aptu-overflow://slot-%2e%2e/stdout",
+    ] {
+        let read = send_request("resources/read", json!({"uri": uri})).await;
+        let err = read.get("error").expect("expected JSON-RPC error");
+        assert_ne!(
+            err.get("code").and_then(|c| c.as_i64()),
+            Some(-32002),
+            "traversal/malformed URI {uri} must not be classified as not-found"
+        );
+    }
+
+    // Valid URI shape but no such slot file: RESOURCE_NOT_FOUND.
+    let read = send_request(
+        "resources/read",
+        json!({"uri": "aptu-overflow://slot-4294967295/stdout"}),
+    )
+    .await;
+    let err = read.get("error").expect("expected JSON-RPC error");
+    assert_eq!(err.get("code").and_then(|c| c.as_i64()), Some(-32002));
+}
