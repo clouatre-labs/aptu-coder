@@ -73,7 +73,9 @@ pub use analyze::{
     analyze_module_file, analyze_str,
 };
 pub use config::AnalysisConfig;
-pub use edit::{EditError, edit_overwrite_content, edit_replace_block};
+pub use edit::{
+    BatchFailure, EditError, edit_overwrite_content, edit_replace_batch, edit_replace_block,
+};
 pub use graph::{GraphError, InternalCallChain};
 pub use lang::{language_for_extension, supported_languages};
 pub use pagination::{CursorData, PaginationError};
@@ -81,11 +83,11 @@ pub use parser::ParserError;
 pub use traversal::{TraversalError, WalkEntry};
 pub use types::{
     AnalysisMode, AnalyzeDirectoryParams, AnalyzeFileField, AnalyzeFileParams, AnalyzeModuleParams,
-    AnalyzeSymbolParams, CallEdge, CallInfo, ClassInfo, DefUseKind, DefUseSite,
-    EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams, FileInfo,
-    FilterRule, FunctionInfo, ImplTraitInfo, ImportInfo, ModuleFunctionInfo, ModuleImportInfo,
-    ModuleInfo, OutputControlParams, PaginationParams, ReferenceInfo, ReferenceType,
-    SemanticAnalysis, SymbolMatchMode,
+    AnalyzeSymbolParams, BatchEdit, BatchEditResult, CallEdge, CallInfo, ClassInfo, DefUseKind,
+    DefUseSite, EditOverwriteOutput, EditOverwriteParams, EditReplaceBatchOutput,
+    EditReplaceOutput, EditReplaceParams, FileInfo, FilterRule, FunctionInfo, ImplTraitInfo,
+    ImportInfo, ModuleFunctionInfo, ModuleImportInfo, ModuleInfo, OutputControlParams,
+    PaginationParams, ReferenceInfo, ReferenceType, SemanticAnalysis, SymbolMatchMode,
 };
 
 /// Captures from a custom tree-sitter query.
