@@ -295,7 +295,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
-        description = "Tree-view of directory with LOC, function/class counts, test markers. Respects .gitignore. Paginates with an opaque cursor; fixed server page size 50. Default max_depth=3. Large dirs (1000+ files) auto-compact to summary; pass summary=false for per-file list. git_ref restricts to files changed since a branch/tag/commit. Empty directories return zero counts.",
+        description = "Tree-view of a directory with LOC, function/class counts, and test markers. Respects .gitignore. Paginates with an opaque cursor; page size is server-owned (50). Large dirs (1000+ files) auto-compact to summary; pass summary=false for the per-file list. git_ref restricts to files changed since a branch/tag/commit.",
         output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
             title = "Analyze Directory",
@@ -367,7 +367,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file. Fails if directory path supplied; use analyze_directory instead. Paginates with an opaque cursor; fixed server page size 50. Use fields=[\"functions\",\"classes\",\"imports\"] to limit sections. git_ref not supported. Use analyze_module for a lightweight function/import index (~75% smaller). Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories and analyze_module for a lightweight function/import index (~75% smaller). Paginates with an opaque cursor; page size is server-owned (50). git_ref not supported. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
         annotations(
             title = "Analyze File",
@@ -426,7 +426,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call graph (default), import_lookup (files importing a module path), def_use (write/read sites). Paginates with an opaque cursor; fixed server page size 20. Fails if file path supplied; fails if impl_only=true on non-Rust directory; fails if summary=true and cursor. match_mode controls name matching; git_ref restricts to changed files.",
+        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call_graph (default), import_lookup (files importing a module path), def_use (write/read sites). Paginates with an opaque cursor; page size is server-owned (20). Fails if file path supplied or if impl_only=true on a non-Rust directory. git_ref restricts to changed files.",
         output_schema = schema_for_type::<analyze::FocusedAnalysisOutput>(),
         annotations(
             title = "Analyze Symbol",
@@ -493,7 +493,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Lightweight function and import index for a single source file with minimal token cost: name, line_count, language, function names with line numbers, import list only (~75% smaller than analyze_file). Fails if directory path supplied. Pagination and git_ref not supported. Use analyze_file for signatures, types, or class details. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Lightweight function and import index for a single source file with minimal token cost: file name, line count, language, function names with line numbers, and the import list (~75% smaller than analyze_file). Fails if directory path supplied; use analyze_file for signatures, types, or class details. Pagination and git_ref not supported. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
             title = "Analyze Module",
@@ -654,7 +654,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set). Output capped at 30 KB stdout / 10 KB stderr / 2000 lines. Set working_dir to the target directory; write commands with relative paths only. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. Server-side execution timeout is 300 seconds (DEFAULT_EXEC_TIMEOUT_SECS); a runaway child is killed and reported as timed_out. Post-exit pipe drain uses a 500 ms default (DEFAULT_DRAIN_TIMEOUT_MS). Timeouts are not client-configurable; send notifications/cancelled to kill a running command early (the child is killed and reaped; no response is returned for cancelled requests). Built-in, exit-code-gated filter rules (git diff/log/status, cargo build/test, ...) may strip, cap, or substitute command output before it is returned; structuredContent.filter_applied names the rule when one applies, and structuredContent.filter_capped/filter_effect report a cap or substitution along with a resource link to the full pre-filter output.",
+        description = "Execute shell command via sh -c (or $SHELL if set); returns stdout, stderr, and exit code. Output capped (30k chars stdout / 10k stderr / 2000 lines); when capped, full captures are exposed as aptu-overflow:// resource links. Set working_dir to the target directory; use relative paths. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. A 300 s server-side timeout kills runaway children; send notifications/cancelled to cancel early. Built-in filters may strip, cap, or substitute output of known CLI tools (git, cargo); structuredContent names the applied rule and links the full pre-filter output.",
         output_schema = schema_for_type::<ShellOutput>(),
         annotations(
             title = "Exec Command",
