@@ -520,26 +520,35 @@ pub(crate) async fn exec_command_impl(
     )];
 
     // MCP resource links for overflow slot files: emitted only when output was
-    // truncated AND at least one capture path is set. Uses file:// URIs
-    // matching the paths printed in the truncation notice.
+    // truncated AND at least one capture path is set. URIs use the
+    // aptu-overflow:// scheme, readable via resources/read; the truncation
+    // notice still prints the filesystem path. Links are valid until the slot
+    // is overwritten (last-run-wins retention).
     if output_truncated {
-        if let Some(ref p) = output.stdout_path {
-            content_blocks.push(ContentBlock::resource_link(
-                Resource::new(format!("file://{p}"), "stdout capture".to_string())
-                    .with_mime_type("text/plain"),
-            ));
-        }
-        if let Some(ref p) = output.stderr_path {
-            content_blocks.push(ContentBlock::resource_link(
-                Resource::new(format!("file://{p}"), "stderr capture".to_string())
-                    .with_mime_type("text/plain"),
-            ));
-        }
-        if let Some(ref p) = output.interleaved_path {
+        if output.stdout_path.is_some() {
             content_blocks.push(ContentBlock::resource_link(
                 Resource::new(
-                    format!("file://{p}"),
-                    "interleaved output capture".to_string(),
+                    format!("aptu-overflow://slot-{seq}/stdout"),
+                    "stdout capture (last-run-wins; readable via resources/read)".to_string(),
+                )
+                .with_mime_type("text/plain"),
+            ));
+        }
+        if output.stderr_path.is_some() {
+            content_blocks.push(ContentBlock::resource_link(
+                Resource::new(
+                    format!("aptu-overflow://slot-{seq}/stderr"),
+                    "stderr capture (last-run-wins; readable via resources/read)".to_string(),
+                )
+                .with_mime_type("text/plain"),
+            ));
+        }
+        if output.interleaved_path.is_some() {
+            content_blocks.push(ContentBlock::resource_link(
+                Resource::new(
+                    format!("aptu-overflow://slot-{seq}/interleaved"),
+                    "interleaved output capture (last-run-wins; readable via resources/read)"
+                        .to_string(),
                 )
                 .with_mime_type("text/plain"),
             ));

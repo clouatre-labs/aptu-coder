@@ -123,8 +123,81 @@ fn percent_decode_uri_component(s: &str) -> Result<String, ErrorData> {
         .map(|cow| cow.into_owned())
 }
 
+/// Overflow output stream variants parsed from `aptu-overflow://` URIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverflowStream {
+    Stdout,
+    Stderr,
+    Interleaved,
+}
+
+impl OverflowStream {
+    fn file_name(self) -> &'static str {
+        match self {
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+            Self::Interleaved => "interleaved",
+        }
+    }
+}
+
+/// Validate a percent-decoded URI segment: non-empty and free of path separators
+/// or `..` traversal components.
+fn segment_is_safe(decoded: &str) -> bool {
+    !decoded.is_empty()
+        && !decoded.contains('/')
+        && !decoded.contains('\\')
+        && !decoded.contains("..")
+}
+
+/// Parse an `aptu-overflow://slot-{decimal-u32}/{stdout|stderr|interleaved}` URI.
+///
+/// Returns `None` for any other scheme or malformed URI. The slot must parse
+/// fully as a `u32` (digits only, no leading `+` or whitespace, no overflow);
+/// there is no 0-7 range cap because slot numbers are unbounded session
+/// sequence values. Segments are percent-decoded before validation, and decoded
+/// segments containing `/`, `\`, `..`, or empty are rejected so the filesystem
+/// path can always be rebuilt from validated fields via `slot_base()`.
+pub(crate) fn parse_overflow_uri(uri: &str) -> Option<(u32, OverflowStream)> {
+    let rest = uri.strip_prefix("aptu-overflow://")?;
+    let (slot_part, stream_part) = rest.split_once('/')?;
+    if stream_part.contains('/') {
+        return None;
+    }
+    let slot_part = slot_part.strip_prefix("slot-")?;
+    let slot_decoded = percent_decode_str(slot_part).decode_utf8().ok()?;
+    if !segment_is_safe(&slot_decoded) {
+        return None;
+    }
+    // Reject anything that is not a plain full decimal u32: digits only (this
+    // excludes leading '+', whitespace, signs, and underscores).
+    if !slot_decoded.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let slot: u32 = slot_decoded.parse().ok()?;
+    let stream_decoded = percent_decode_str(stream_part).decode_utf8().ok()?;
+    if !segment_is_safe(&stream_decoded) {
+        return None;
+    }
+    let stream = match stream_decoded.as_ref() {
+        "stdout" => OverflowStream::Stdout,
+        "stderr" => OverflowStream::Stderr,
+        "interleaved" => OverflowStream::Interleaved,
+        _ => return None,
+    };
+    Some((slot, stream))
+}
+
 /// Classify resource URIs without retaining any caller-controlled content.
 pub(crate) fn classify_uri_kind(uri: &str) -> String {
+    if uri.starts_with("aptu-overflow://") {
+        return match parse_overflow_uri(uri) {
+            Some((_, OverflowStream::Stdout)) => "overflow_stdout".to_string(),
+            Some((_, OverflowStream::Stderr)) => "overflow_stderr".to_string(),
+            Some((_, OverflowStream::Interleaved)) => "overflow_interleaved".to_string(),
+            None => "unknown".to_string(),
+        };
+    }
     let path = uri
         .strip_prefix("aptu-coder://")
         .and_then(|value| value.split('?').next())
@@ -450,6 +523,40 @@ pub(crate) fn read_resource_impl(
     request: ReadResourceRequestParams,
     graph_store: &GraphDiskStore,
 ) -> Result<ReadResourceResponse, ErrorData> {
+    // Overflow slot URIs are dispatched before graph parsing; the filesystem
+    // path is rebuilt only from validated fields (never the raw URI path).
+    if let Some((slot, stream)) = parse_overflow_uri(&request.uri) {
+        let path = crate::tools::exec_runtime::slot_base(slot).join(stream.file_name());
+        let text = std::fs::read_to_string(&path).map_err(|_| {
+            ErrorData::new(
+                ErrorCode::RESOURCE_NOT_FOUND,
+                format!(
+                    "overflow capture not found for slot {slot} ({}); slot files are retained only until the slot is overwritten by a later run",
+                    stream.file_name()
+                ),
+                None,
+            )
+        })?;
+        if text.is_empty() {
+            return Err(ErrorData::new(
+                ErrorCode::RESOURCE_NOT_FOUND,
+                format!(
+                    "overflow capture for slot {slot} ({}) is empty",
+                    stream.file_name()
+                ),
+                None,
+            ));
+        }
+        return Ok(ReadResourceResponse::Complete(ReadResourceResult::new(
+            vec![ResourceContents::TextResourceContents {
+                uri: request.uri.clone(),
+                mime_type: Some("text/plain".to_string()),
+                text,
+                meta: None,
+            }],
+        )));
+    }
+
     let (query, format) = parse_graph_uri(&request.uri)?;
 
     let graph = graph_store.get(query.repo_hash()).ok_or_else(|| {
@@ -577,6 +684,66 @@ mod tests {
         ] {
             assert_eq!(classify_uri_kind(uri), "unknown", "URI: {uri}");
         }
+    }
+
+    #[test]
+    fn test_parse_overflow_uri_valid_slots() {
+        // Happy path: slot 0 and slot u32::MAX both accepted, all streams.
+        for stream in ["stdout", "stderr", "interleaved"] {
+            let uri = format!("aptu-overflow://slot-0/{stream}");
+            let (slot, parsed) = parse_overflow_uri(&uri).unwrap();
+            assert_eq!(slot, 0);
+            assert_eq!(parsed.file_name(), stream);
+        }
+        let (slot, parsed) = parse_overflow_uri("aptu-overflow://slot-4294967295/stdout").unwrap();
+        assert_eq!(slot, u32::MAX);
+        assert_eq!(parsed, OverflowStream::Stdout);
+    }
+
+    #[test]
+    fn test_parse_overflow_uri_rejects_malformed() {
+        for uri in [
+            // Leading '+' and whitespace are not plain decimal digits.
+            "aptu-overflow://slot-+1/stdout",
+            "aptu-overflow://slot-%201/stdout",
+            "aptu-overflow://slot- 1/stdout",
+            // Digits overflowing u32.
+            "aptu-overflow://slot-4294967296/stdout",
+            "aptu-overflow://slot-99999999999999999999/stdout",
+            // Percent-encoded traversal segments.
+            "aptu-overflow://slot-%2e%2e/stdout",
+            "aptu-overflow://slot-0/%2e%2e",
+            "aptu-overflow://slot-0/std%2fout",
+            // Unknown stream, wrong scheme, empty segments.
+            "aptu-overflow://slot-0/unknown",
+            "aptu-overflow://slot-0/",
+            "aptu-overflow://slot-/stdout",
+            "aptu-overflow://0/stdout",
+            "file:///tmp/stdout",
+            "aptu-coder://graph/repo/subgraph/sym",
+        ] {
+            assert!(parse_overflow_uri(uri).is_none(), "URI: {uri}");
+        }
+    }
+
+    #[test]
+    fn test_classify_uri_kind_overflow() {
+        assert_eq!(
+            classify_uri_kind("aptu-overflow://slot-3/stdout"),
+            "overflow_stdout"
+        );
+        assert_eq!(
+            classify_uri_kind("aptu-overflow://slot-3/stderr"),
+            "overflow_stderr"
+        );
+        assert_eq!(
+            classify_uri_kind("aptu-overflow://slot-3/interleaved"),
+            "overflow_interleaved"
+        );
+        assert_eq!(
+            classify_uri_kind("aptu-overflow://slot-x/stdout"),
+            "unknown"
+        );
     }
 
     /// Build a graph with `caller` calling `callee` via a Calls edge.
