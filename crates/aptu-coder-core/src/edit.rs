@@ -121,6 +121,124 @@ fn build_crlf_positions(original: &str) -> Vec<usize> {
     positions
 }
 
+/// Per-line trim-end index over normalized content.
+///
+/// Maps offsets in a "trimmed" representation (every line with trailing
+/// whitespace removed, newlines preserved) back to offsets in the normalized
+/// content. This is separate from [`build_crlf_positions`]/[`norm_to_original_offset`],
+/// which only handle CRLF normalization.
+struct TrimEndIndex {
+    /// Normalized content with per-line trailing whitespace removed.
+    trimmed: String,
+    /// For each line: offset where the line's trimmed body starts in `trimmed`.
+    line_trim_starts: Vec<usize>,
+    /// For each line: offset where the line starts in the normalized content.
+    line_norm_starts: Vec<usize>,
+    /// Length of the normalized content.
+    norm_len: usize,
+}
+
+impl TrimEndIndex {
+    /// Map an offset in `trimmed` back to the corresponding normalized offset.
+    fn map_to_norm(&self, off: usize) -> usize {
+        // SAFETY of arithmetic: `off <= trimmed.len()` by construction from match
+        // spans, and the first line's trim start is 0, so the subtract-1 is safe.
+        let idx = self.line_trim_starts.partition_point(|&s| s <= off) - 1;
+        self.line_norm_starts[idx] + (off - self.line_trim_starts[idx])
+    }
+
+    /// Map the end offset of a match in `trimmed` back to a normalized offset.
+    ///
+    /// When the match ends at the end of a trimmed line, the mapped offset
+    /// extends past the line's trailing whitespace and newline: those bytes are
+    /// consumed by the splice.
+    fn map_end_to_norm(&self, off: usize) -> usize {
+        let at_line_end =
+            off == self.trimmed.len() || self.trimmed.as_bytes().get(off) == Some(&b'\n');
+        if !at_line_end {
+            return self.map_to_norm(off);
+        }
+        let idx = self.line_trim_starts.partition_point(|&s| s <= off) - 1;
+        if idx + 1 < self.line_norm_starts.len() {
+            self.line_norm_starts[idx + 1]
+        } else {
+            self.norm_len
+        }
+    }
+}
+
+/// Build a [`TrimEndIndex`] over normalized content: each line's trailing
+/// whitespace is stripped (newline preserved) and per-line offset tables are
+/// recorded for mapping back to normalized coordinates.
+fn build_trim_end_index(norm: &str) -> TrimEndIndex {
+    let mut trimmed = String::with_capacity(norm.len());
+    let mut line_trim_starts = Vec::new();
+    let mut line_norm_starts = Vec::new();
+    let mut trim_off = 0usize;
+    let mut norm_off = 0usize;
+    for line in norm.split_inclusive('\n') {
+        line_trim_starts.push(trim_off);
+        line_norm_starts.push(norm_off);
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        let t = body.trim_end();
+        trimmed.push_str(t);
+        trim_off += t.len();
+        if line.ends_with('\n') {
+            trimmed.push('\n');
+            trim_off += 1;
+        }
+        norm_off += line.len();
+    }
+    TrimEndIndex {
+        trimmed,
+        line_trim_starts,
+        line_norm_starts,
+        norm_len: norm.len(),
+    }
+}
+
+/// Strip per-line trailing whitespace from a normalized multi-line string,
+/// preserving newlines. Used to transform `old_text` for trim-end comparison.
+fn trim_end_lines(norm: &str) -> String {
+    let mut out = String::with_capacity(norm.len());
+    for line in norm.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        out.push_str(body.trim_end());
+        if line.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Find all occurrences of `norm_old` in `norm_content` where each line matches
+/// after per-line trim-end comparison. Returns `(start, end)` spans in ORIGINAL
+/// content byte coordinates (trailing whitespace of matched lines is included,
+/// i.e. consumed by the splice). Uses its own per-line trim-end offset table,
+/// not `norm_to_original_offset`, for the trim-end span mapping.
+fn find_trim_end_matches(
+    norm_content: &str,
+    norm_old: &str,
+    crlf_positions: &[usize],
+) -> Vec<(usize, usize)> {
+    let trimmed_old = trim_end_lines(norm_old);
+    if trimmed_old.is_empty() {
+        return Vec::new();
+    }
+    let index = build_trim_end_index(norm_content);
+    let mut spans = Vec::new();
+    for (start, _) in index.trimmed.match_indices(trimmed_old.as_str()) {
+        let end = start + trimmed_old.len();
+        let norm_start = index.map_to_norm(start);
+        let norm_end = index.map_end_to_norm(end);
+        spans.push((
+            norm_to_original_offset(norm_start, crlf_positions),
+            norm_to_original_offset(norm_end, crlf_positions),
+        ));
+    }
+    spans
+}
+
 /// Map a normalized byte offset back to the corresponding original byte offset
 /// using a pre-built CRLF position index.
 ///
@@ -205,8 +323,24 @@ pub(crate) fn edit_replace_block_inner(
     // Build CRLF offset index once. When no CRLF is present (Cow::Borrowed),
     // the index is empty and offset mapping is identity.
     let crlf_positions = build_crlf_positions(&content);
-    let count = norm_content.matches(norm_old.as_ref()).count();
-    match count {
+    // Exact-first matching: collect match spans in original byte space. Only
+    // when there are zero exact matches, fall back silently to per-line
+    // trim-end matching (also in original byte space).
+    let exact_matches: Vec<(usize, usize)> = norm_content
+        .match_indices(norm_old.as_ref())
+        .map(|(offset, _)| {
+            (
+                norm_to_original_offset(offset, &crlf_positions),
+                norm_to_original_offset(offset + norm_old.len(), &crlf_positions),
+            )
+        })
+        .collect();
+    let matches = if exact_matches.is_empty() {
+        find_trim_end_matches(&norm_content, norm_old.as_ref(), &crlf_positions)
+    } else {
+        exact_matches
+    };
+    match matches.len() {
         0 => {
             let first_20_lines = content.lines().take(20).collect::<Vec<_>>().join("\n");
             return Err(EditError::NotFound {
@@ -214,17 +348,10 @@ pub(crate) fn edit_replace_block_inner(
                 first_20_lines,
             });
         }
-        1 if !replace_all => {}
-        n if !replace_all => {
-            let match_lines: Vec<usize> = norm_content
-                .match_indices(norm_old.as_ref())
-                .map(|(offset, _)| {
-                    norm_content[..offset]
-                        .bytes()
-                        .filter(|&b| b == b'\n')
-                        .count()
-                        + 1
-                })
+        n if n > 1 && !replace_all => {
+            let match_lines: Vec<usize> = matches
+                .iter()
+                .map(|(start, _)| content[..*start].bytes().filter(|&b| b == b'\n').count() + 1)
                 .collect();
             return Err(EditError::Ambiguous {
                 count: n,
@@ -232,20 +359,13 @@ pub(crate) fn edit_replace_block_inner(
                 match_lines,
             });
         }
-        _ => {} // replace_all=true: fall through to single-pass splice
+        _ => {} // single match, or replace_all=true: fall through to single-pass splice
     }
     let bytes_before = content.len();
 
-    if replace_all {
-        // Single-pass over original normalized content: collect all match spans,
-        // then splice new_text between unmatched spans in original byte space.
-        let mut matches: Vec<(usize, usize)> = Vec::new();
-        for (norm_start, _m) in norm_content.match_indices(norm_old.as_ref()) {
-            let original_start = norm_to_original_offset(norm_start, &crlf_positions);
-            let original_end =
-                norm_to_original_offset(norm_start + norm_old.len(), &crlf_positions);
-            matches.push((original_start, original_end));
-        }
+    {
+        // Single-pass over original content: splice new_text between unmatched
+        // spans in original byte space.
         let occurrences_replaced = matches.len();
         let old_span_total: usize = matches.iter().map(|(s, e)| e - s).sum();
         // capacity upper bound: existing bytes + new bytes added - old bytes removed
@@ -268,33 +388,6 @@ pub(crate) fn edit_replace_block_inner(
             bytes_after,
             occurrences_replaced,
             // Single-edit response shape is unchanged: batch-only fields stay unset.
-            content_hash: None,
-            edits: None,
-        })
-    } else {
-        // Single-match path (existing behavior)
-        // SAFETY: match was verified above via count check; find must succeed.
-        // If count verification logic changes, this expect() site must be re-audited.
-        #[allow(clippy::expect_used)]
-        let norm_match_offset = norm_content
-            .find(norm_old.as_ref())
-            .expect("match was verified above via count check; find must succeed");
-        let original_start = norm_to_original_offset(norm_match_offset, &crlf_positions);
-        let original_end =
-            norm_to_original_offset(norm_match_offset + norm_old.len(), &crlf_positions);
-        let updated = [
-            &content[..original_start],
-            new_text,
-            &content[original_end..],
-        ]
-        .concat();
-        let bytes_after = updated.len();
-        write_file_atomic(path, &updated)?;
-        Ok(EditReplaceOutput {
-            path: path.display().to_string(),
-            bytes_before,
-            bytes_after,
-            occurrences_replaced: 1,
             content_hash: None,
             edits: None,
         })
@@ -355,10 +448,33 @@ pub fn edit_replace_batch(
             .map(|(o, _)| o)
             .collect();
         if matches.is_empty() {
-            push(format!(
-                "old_text not found in {} — verify the text matches exactly, including whitespace and newlines",
-                path.display()
-            ));
+            // Exact-first: on zero exact matches, fall back silently to per-line
+            // trim-end matching. Spans are already in original byte space.
+            let spans = find_trim_end_matches(&norm_content, norm_old.as_ref(), &crlf_positions);
+            if spans.is_empty() {
+                push(format!(
+                    "old_text not found in {} — verify the text matches exactly, including whitespace and newlines",
+                    path.display()
+                ));
+                continue;
+            }
+            if spans.len() > 1 && !edit.replace_all.unwrap_or(false) {
+                let lines = spans
+                    .iter()
+                    .map(|(s, _)| content[..*s].bytes().filter(|&b| b == b'\n').count() + 1)
+                    .map(|l| l.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                push(format!(
+                    "old_text appears {} times in {} (lines {lines}) — make old_text longer and more specific to uniquely identify the block",
+                    spans.len(),
+                    path.display()
+                ));
+                continue;
+            }
+            for (start, end) in spans {
+                all_spans.push((start, end, index));
+            }
             continue;
         }
         if matches.len() > 1 && !edit.replace_all.unwrap_or(false) {
@@ -822,5 +938,99 @@ mod tests {
         // Stale hash takes precedence over per-edit validation failures.
         std::assert_matches!(err, EditError::StaleContentHash { .. });
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+    }
+
+    #[test]
+    fn edit_replace_block_trim_end_fallback_when_no_exact_match() {
+        // Fallback fires when the exact match is absent: lines carry trailing
+        // whitespace that the old_text lacks. Original trailing bytes are consumed.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fallback.txt");
+        std::fs::write(&path, "foo  \nbar\t\nbaz").unwrap();
+        let result = edit_replace_block(&path, "foo\nbar", "qux\n", false, None).unwrap();
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(output, "qux\nbaz");
+        assert_eq!(result.bytes_before, 14); // "foo  \nbar\t\nbaz"
+        assert_eq!(result.bytes_after, 7); // "qux\nbaz"
+        assert_eq!(result.occurrences_replaced, 1);
+    }
+
+    #[test]
+    fn edit_replace_block_exact_match_wins_over_trim_end_occurrence() {
+        // Covered behavior: the existing trailing_spaces_distinct test pins that
+        // an exact match wins over a trim-end-only occurrence. Re-assert here in
+        // the fallback family: content has both a trailing-space block and an
+        // exact block; the exact block must be replaced, and the trailing-space
+        // block must remain untouched (no fallback firing).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exact_wins.txt");
+        std::fs::write(&path, "foo  \nbar\nfoo\nbar").unwrap();
+        let result = edit_replace_block(&path, "foo\nbar", "X", false, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "foo  \nbar\nX");
+        assert_eq!(result.occurrences_replaced, 1);
+    }
+
+    #[test]
+    fn edit_replace_block_trim_end_fallback_multi_match_is_ambiguous() {
+        // Fallback producing multiple occurrences with replace_all=false is ambiguous.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ambiguous_fb.txt");
+        std::fs::write(&path, "foo \nbar \nfoo\t\nbar").unwrap();
+        let err = edit_replace_block(&path, "foo\nbar", "x", false, None).unwrap_err();
+        std::assert_matches!(&err, EditError::Ambiguous { count: 2, match_lines, .. } if match_lines == &[1, 3]);
+        // File must be unmodified.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "foo \nbar \nfoo\t\nbar"
+        );
+    }
+
+    #[test]
+    fn edit_replace_block_trim_end_fallback_replace_all_mixed_crlf() {
+        // Fallback with replace_all=true replaces all trim-end occurrences using
+        // correct original-byte spans in mixed CRLF + trailing-space content.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("all_fb.txt");
+        std::fs::write(&path, b"x a  \r\nb\r\nx a \r\nb").unwrap();
+        let result = edit_replace_block(&path, "x a\nb", "R", true, None).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"RR");
+        assert_eq!(result.occurrences_replaced, 2);
+        assert_eq!(result.bytes_before, 17);
+        assert_eq!(result.bytes_after, 2);
+    }
+
+    #[test]
+    fn edit_replace_batch_trim_end_fallback_leaves_other_edits_unaffected() {
+        // Batch edit with no exact match succeeds via trim-end fallback while the
+        // other edit applies normally; non-overlap checks hold in original-byte space.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("batch_fb.txt");
+        std::fs::write(&path, "foo  \nbar\nother").unwrap();
+        let out =
+            edit_replace_batch(&path, &[be("foo\nbar", "X"), be("other", "Y")], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "XY");
+        assert_eq!(
+            (
+                out.edits.as_ref().unwrap()[0].occurrences_replaced,
+                out.edits.as_ref().unwrap()[1].occurrences_replaced
+            ),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn edit_replace_batch_trim_end_fallback_not_found_still_fails() {
+        // Fallback finds nothing: the edit fails validation and the file is untouched.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("batch_nf.txt");
+        std::fs::write(&path, "hello  \nworld").unwrap();
+        match edit_replace_batch(&path, &[be("missing\ntext", "x")], None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert_eq!(failures.len(), 1);
+                assert!(failures[0].message.contains("not found"));
+            }
+            other => panic!("expected BatchValidationFailed, got {other:?}"),
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello  \nworld");
     }
 }

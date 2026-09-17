@@ -744,4 +744,49 @@ mod tests {
         let c = counts.lock().unwrap();
         assert_eq!(c.len(), 1);
     }
+
+    /// Regression test for issue 1572: file.txt and its symlink must resolve to
+    /// the same canonical path so the StaleContextGuard counts failures under a
+    /// single (session, canonical path) key regardless of which path was used.
+    #[cfg(unix)]
+    #[test]
+    fn symlink_and_target_resolve_to_same_stale_guard_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("file.txt");
+        std::fs::write(&target, "hello").unwrap();
+        let link = dir.path().join("link.txt");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&target, &link).unwrap();
+        }
+
+        let span = tracing::Span::none();
+        let wd = dir.path().to_str().unwrap();
+        let resolved_target = resolve_edit_path("file.txt", Some(wd), &span).unwrap();
+        let resolved_link = resolve_edit_path("link.txt", Some(wd), &span).unwrap();
+        // Both paths canonicalize to the same target.
+        assert_eq!(resolved_target, resolved_link);
+
+        // The edit succeeds through each path.
+        let via_target =
+            aptu_coder_core::edit_replace_block(&resolved_target, "hello", "hi", false, None)
+                .unwrap();
+        assert_eq!(via_target.occurrences_replaced, 1);
+        std::fs::write(&target, "hello").unwrap();
+        let via_link =
+            aptu_coder_core::edit_replace_block(&resolved_link, "hello", "hi", false, None)
+                .unwrap();
+        assert_eq!(via_link.occurrences_replaced, 1);
+
+        // Stale-context failures through either path share one guard key.
+        let counts: Arc<Mutex<HashMap<(String, String), u8>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let mut guard = StaleContextGuard::new(Some("sid".to_string()), Arc::clone(&counts));
+        for _ in 0..(EDIT_STALE_THRESHOLD - 1) {
+            assert!(!guard.increment(&resolved_link.display().to_string()));
+        }
+        assert!(guard.increment(&resolved_target.display().to_string()));
+        assert_eq!(counts.lock().unwrap().len(), 1);
+    }
 }
