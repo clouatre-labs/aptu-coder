@@ -112,7 +112,6 @@ fn test_filter_passthrough_on_failure() {
     let mut output = ShellOutput::new(
         stdout.to_string(),
         "".to_string(),
-        "".to_string(),
         Some(1), // non-zero exit
         false,
     );
@@ -141,7 +140,6 @@ fn test_filter_passthrough_on_failure() {
     // The guard condition passes, so filter_applied is set and stdout is filtered
     let mut output2 = ShellOutput::new(
         stdout.to_string(),
-        "".to_string(),
         "".to_string(),
         Some(0), // zero exit
         false,
@@ -258,7 +256,7 @@ fn test_filter_applied_field_present() {
     );
 
     // Simulate the guard and field assignment from run_exec_impl
-    let mut output = ShellOutput::new(filtered, "".to_string(), "".to_string(), Some(0), false);
+    let mut output = ShellOutput::new(filtered, "".to_string(), Some(0), false);
 
     // Set filter_applied as run_exec_impl does
     output.filter_applied = compiled

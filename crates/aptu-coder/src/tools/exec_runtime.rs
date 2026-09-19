@@ -248,7 +248,7 @@ pub(crate) async fn run_exec_impl(
     resolved_path: Option<&str>,
     filter_table: &Arc<Vec<CompiledRule>>,
     ct: tokio_util::sync::CancellationToken,
-) -> (ShellOutput, u64, u64) {
+) -> (ShellOutput, String, Option<String>, u64, u64) {
     run_exec_impl_with_timeouts(
         command,
         working_dir_path,
@@ -277,7 +277,7 @@ pub(crate) async fn run_exec_impl_with_timeouts(
     ct: tokio_util::sync::CancellationToken,
     exec_timeout: std::time::Duration,
     drain_timeout: std::time::Duration,
-) -> (ShellOutput, u64, u64) {
+) -> (ShellOutput, String, Option<String>, u64, u64) {
     let mut cmd = build_exec_command(
         &command,
         working_dir_path.as_ref(),
@@ -292,10 +292,11 @@ pub(crate) async fn run_exec_impl_with_timeouts(
                 ShellOutput::new(
                     String::new(),
                     format!("failed to spawn command: {e}"),
-                    format!("failed to spawn command: {e}"),
                     None,
                     false,
                 ),
+                format!("failed to spawn command: {e}"),
+                None,
                 0,
                 0,
             );
@@ -366,31 +367,39 @@ pub(crate) async fn run_exec_impl_with_timeouts(
     output_truncated = output_truncated || stdout_path.is_some() || byte_truncated;
 
     // Handle interleaved overflow: cap at INTERLEAVED_MAX_BYTES and write to slot file if needed
-    let (interleaved_preview, interleaved_path) =
+    let (interleaved_preview, mut interleaved_path) =
         persist_interleaved_overflow(interleaved_str, INTERLEAVED_MAX_BYTES, slot).await;
     if interleaved_path.is_some() {
         output_truncated = true;
     }
 
-    let mut output = ShellOutput::new(
-        stdout,
-        stderr,
-        interleaved_preview,
-        exit_code,
-        output_truncated,
-    );
+    let mut output = ShellOutput::new(stdout, stderr, exit_code, output_truncated);
     output.output_collection_error = output_collection_error;
     output.stdout_path = stdout_path;
     output.stderr_path = stderr_path;
-    output.interleaved_path = interleaved_path;
     output.timed_out = timed_out;
 
     // Apply filter if exit_code == 0
+    let mut interleaved = interleaved_preview;
     if exit_code == Some(0) {
-        apply_filter_rules(&mut output, &command, slot, filter_table).await;
+        apply_filter_rules(
+            &mut output,
+            &mut interleaved,
+            &mut interleaved_path,
+            &command,
+            slot,
+            filter_table,
+        )
+        .await;
     }
 
-    (output, raw_stdout_bytes, raw_stderr_bytes)
+    (
+        output,
+        interleaved,
+        interleaved_path,
+        raw_stdout_bytes,
+        raw_stderr_bytes,
+    )
 }
 
 /// Applies the first matching filter rule to `output.stdout`/`output.interleaved` and,
@@ -399,6 +408,8 @@ pub(crate) async fn run_exec_impl_with_timeouts(
 /// slot files.
 async fn apply_filter_rules(
     output: &mut ShellOutput,
+    interleaved: &mut String,
+    interleaved_path: &mut Option<String>,
     command: &str,
     slot: u32,
     filter_table: &Arc<Vec<CompiledRule>>,
@@ -416,7 +427,7 @@ async fn apply_filter_rules(
         // because stdout and interleaved are independent strings assembled from the
         // same source lines -- updating one does not affect the other.
         let (filtered_interleaved, interleaved_effect) =
-            crate::filters::apply_filter(compiled_rule, &output.interleaved);
+            crate::filters::apply_filter(compiled_rule, interleaved);
 
         let effect = if matches!(stdout_effect, crate::filters::FilterEffect::None) {
             interleaved_effect
@@ -430,10 +441,10 @@ async fn apply_filter_rules(
                     output.stdout_path = Some(path.display().to_string());
                 }
             }
-            if output.interleaved_path.is_none() && !output.interleaved.is_empty() {
+            if interleaved_path.is_none() && !interleaved.is_empty() {
                 let path = slot_base(slot).join("interleaved");
-                if persist_pre_filter(&path, &output.interleaved).await {
-                    output.interleaved_path = Some(path.display().to_string());
+                if persist_pre_filter(&path, interleaved).await {
+                    *interleaved_path = Some(path.display().to_string());
                 }
             }
             output.filter_capped = true;
@@ -443,7 +454,7 @@ async fn apply_filter_rules(
         }
 
         output.stdout = filtered_stdout;
-        output.interleaved = filtered_interleaved;
+        *interleaved = filtered_interleaved;
         output.filter_applied = compiled_rule
             .rule
             .description

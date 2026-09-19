@@ -254,17 +254,18 @@ async fn spawn_and_collect_phase(
     filter_table: &Arc<Vec<CompiledRule>>,
     ct: tokio_util::sync::CancellationToken,
     span: &tracing::Span,
-) -> Result<(ShellOutput, u64, u64), CallToolResult> {
-    let (output, raw_stdout_bytes, raw_stderr_bytes) = run_exec_impl(
-        command,
-        working_dir_path,
-        params.stdin.clone(),
-        seq,
-        resolved_path_str,
-        filter_table,
-        ct,
-    )
-    .await;
+) -> Result<(ShellOutput, String, Option<String>, u64, u64), CallToolResult> {
+    let (output, interleaved, interleaved_path, raw_stdout_bytes, raw_stderr_bytes) =
+        run_exec_impl(
+            command,
+            working_dir_path,
+            params.stdin.clone(),
+            seq,
+            resolved_path_str,
+            filter_table,
+            ct,
+        )
+        .await;
 
     // Short-circuit on timeout or cancellation: return error before any output
     // processing. (rmcp drops this response when the request was cancelled, but
@@ -282,7 +283,13 @@ async fn spawn_and_collect_phase(
         return Err(result);
     }
 
-    Ok((output, raw_stdout_bytes, raw_stderr_bytes))
+    Ok((
+        output,
+        interleaved,
+        interleaved_path,
+        raw_stdout_bytes,
+        raw_stderr_bytes,
+    ))
 }
 
 /// Phase 4: Format output text and apply truncation limits.
@@ -290,15 +297,17 @@ async fn spawn_and_collect_phase(
 /// Returns the formatted output text string.
 fn format_shell_output_phase(
     output: &ShellOutput,
+    interleaved: &str,
+    interleaved_path: Option<&String>,
     params: &ExecCommandParams,
     raw_stdout_bytes: u64,
     raw_stderr_bytes: u64,
 ) -> String {
     // Use interleaved if non-empty; fall back to separated stdout/stderr for empty-output commands
-    let output_text = if output.interleaved.is_empty() {
+    let output_text = if interleaved.is_empty() {
         format!("Stdout:\n{}\n\nStderr:\n{}", output.stdout, output.stderr)
     } else {
-        format!("Output:\n{}", output.interleaved)
+        format!("Output:\n{}", interleaved)
     };
 
     // Build truncation notice with slot file paths if present
@@ -314,17 +323,14 @@ fn format_shell_output_phase(
             capture_hint(path, bytes)
         }
     };
-    if output.stdout_path.is_some()
-        || output.stderr_path.is_some()
-        || output.interleaved_path.is_some()
-    {
+    if output.stdout_path.is_some() || output.stderr_path.is_some() || interleaved_path.is_some() {
         if let Some(ref p) = output.stdout_path {
             let _ = writeln!(truncation_notice, "Full output available at: {p}");
         }
         if let Some(ref p) = output.stderr_path {
             let _ = writeln!(truncation_notice, "Full stderr available at: {p}");
         }
-        if let Some(ref p) = output.interleaved_path {
+        if let Some(p) = interleaved_path {
             let _ = writeln!(truncation_notice, "Full output available at: {p}");
         }
         // Byte-count hint per overflow path; skipped when the raw counter is 0
@@ -335,7 +341,7 @@ fn format_shell_output_phase(
         if let Some(ref p) = output.stderr_path {
             let _ = write!(truncation_notice, "{}", hint(p, raw_stderr_bytes));
         }
-        if let Some(ref p) = output.interleaved_path {
+        if let Some(p) = interleaved_path {
             let _ = write!(
                 truncation_notice,
                 "{}",
@@ -495,38 +501,39 @@ pub(crate) async fn exec_command_impl(
 
     // Phase 3: Spawn and collect
     let resolved_path_str = resolved_path.as_deref();
-    let (mut output, raw_stdout_bytes, raw_stderr_bytes) = match spawn_and_collect_phase(
-        command.clone(),
-        working_dir_path.clone(),
-        &params,
-        seq,
-        resolved_path_str,
-        &filter_table,
-        ct,
-        &span,
-    )
-    .await
-    {
-        Ok(o) => o,
-        Err(result) => {
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ))
-                    .error_type(Some("timeout".to_string()))
-                    .session_id(sid)
-                    .seq(Some(seq))
-                    .timed_out(true)
-                    .output_truncated(Some(false))
-                    .stdin_provided(stdin_provided)
-                    .working_dir_used(working_dir_used)
-                    .build(),
-            );
-            return Ok(result);
-        }
-    };
+    let (mut output, interleaved, interleaved_path, raw_stdout_bytes, raw_stderr_bytes) =
+        match spawn_and_collect_phase(
+            command.clone(),
+            working_dir_path.clone(),
+            &params,
+            seq,
+            resolved_path_str,
+            &filter_table,
+            ct,
+            &span,
+        )
+        .await
+        {
+            Ok(o) => o,
+            Err(result) => {
+                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                metrics_tx.send(
+                    crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+                        .param_path_depth(crate::metrics::path_component_count(
+                            param_path.as_deref().unwrap_or(""),
+                        ))
+                        .error_type(Some("timeout".to_string()))
+                        .session_id(sid)
+                        .seq(Some(seq))
+                        .timed_out(true)
+                        .output_truncated(Some(false))
+                        .stdin_provided(stdin_provided)
+                        .working_dir_used(working_dir_used)
+                        .build(),
+                );
+                return Ok(result);
+            }
+        };
 
     let exit_code = output.exit_code;
     let output_truncated = output.output_truncated;
@@ -537,7 +544,14 @@ pub(crate) async fn exec_command_impl(
     }
 
     // Phase 4: Format output
-    let text = format_shell_output_phase(&output, &params, raw_stdout_bytes, raw_stderr_bytes);
+    let text = format_shell_output_phase(
+        &output,
+        &interleaved,
+        interleaved_path.as_ref(),
+        &params,
+        raw_stdout_bytes,
+        raw_stderr_bytes,
+    );
 
     // Sync output_truncated to the struct before serialization (fix #1266)
     output.output_truncated = output_truncated;
@@ -578,7 +592,7 @@ pub(crate) async fn exec_command_impl(
                 .with_mime_type("text/plain"),
             ));
         }
-        if output.interleaved_path.is_some() {
+        if interleaved_path.is_some() {
             content_blocks.push(ContentBlock::resource_link(
                 Resource::new(
                     format!("aptu-overflow://slot-{seq}/interleaved"),
@@ -767,13 +781,11 @@ mod tests {
         let output = ShellOutput {
             stdout: "hello".to_string(),
             stderr: String::new(),
-            interleaved: String::new(),
             exit_code: Some(0),
             output_truncated: true,
             output_collection_error: None,
             stdout_path: Some("/tmp/aptu-coder-overflow/slot-0/stdout".to_string()),
             stderr_path: None,
-            interleaved_path: None,
             filter_applied: None,
             filter_capped: false,
             filter_effect: None,
@@ -786,7 +798,7 @@ mod tests {
         };
 
         // Act
-        let result = format_shell_output_phase(&output, &params, 0, 0);
+        let result = format_shell_output_phase(&output, "", None, &params, 0, 0);
 
         // Assert
         assert!(
@@ -805,13 +817,11 @@ mod tests {
         let output = ShellOutput {
             stdout: String::new(),
             stderr: "error".to_string(),
-            interleaved: String::new(),
             exit_code: Some(1),
             output_truncated: true,
             output_collection_error: None,
             stdout_path: None,
             stderr_path: Some("/tmp/aptu-coder-overflow/slot-1/stderr".to_string()),
-            interleaved_path: None,
             filter_applied: None,
             filter_capped: false,
             filter_effect: None,
@@ -824,7 +834,7 @@ mod tests {
         };
 
         // Act
-        let result = format_shell_output_phase(&output, &params, 0, 0);
+        let result = format_shell_output_phase(&output, "", None, &params, 0, 0);
 
         // Assert
         assert!(
@@ -840,16 +850,16 @@ mod tests {
     #[test]
     fn test_format_shell_output_interleaved_path_hint() {
         // Arrange: ShellOutput with only interleaved_path set
+        let interleaved = "output".to_string();
+        let interleaved_path = Some("/tmp/aptu-coder-overflow/slot-2/interleaved".to_string());
         let output = ShellOutput {
             stdout: String::new(),
             stderr: String::new(),
-            interleaved: "output".to_string(),
             exit_code: Some(0),
             output_truncated: true,
             output_collection_error: None,
             stdout_path: None,
             stderr_path: None,
-            interleaved_path: Some("/tmp/aptu-coder-overflow/slot-2/interleaved".to_string()),
             filter_applied: None,
             filter_capped: false,
             filter_effect: None,
@@ -862,7 +872,14 @@ mod tests {
         };
 
         // Act
-        let result = format_shell_output_phase(&output, &params, 0, 0);
+        let result = format_shell_output_phase(
+            &output,
+            &interleaved,
+            interleaved_path.as_ref(),
+            &params,
+            0,
+            0,
+        );
 
         // Assert
         assert!(

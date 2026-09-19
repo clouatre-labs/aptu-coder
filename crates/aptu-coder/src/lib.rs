@@ -38,7 +38,7 @@ pub(crate) mod shell_write;
 pub(crate) mod tools;
 pub(crate) mod validation;
 
-pub use metrics::{MetricEvent, MetricsSender, MetricsWriter, migrate_legacy_metrics_dir};
+pub use metrics::{MetricEvent, MetricsSender, MetricsWriter};
 pub use otel::{
     ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,
 };
@@ -80,8 +80,6 @@ pub struct ShellOutput {
     pub stdout: String,
     /// Standard error from the command.
     pub stderr: String,
-    /// Stdout and stderr interleaved in arrival order.
-    pub interleaved: String,
     /// Exit code; null if the process could not be waited on (e.g. drain timeout from a background process holding pipes).
     pub exit_code: Option<i32>,
     /// True if the post-exit drain timed out (backgrounded process kept pipes open).
@@ -98,9 +96,6 @@ pub struct ShellOutput {
     /// Path to the slot file containing full stderr (if output was persisted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_path: Option<String>,
-    /// Path to the slot file containing full interleaved output (if output was persisted).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interleaved_path: Option<String>,
     /// Description of the filter applied to stdout (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_applied: Option<String>,
@@ -123,20 +118,17 @@ impl ShellOutput {
     pub fn new(
         stdout: String,
         stderr: String,
-        interleaved: String,
         exit_code: Option<i32>,
         output_truncated: bool,
     ) -> Self {
         Self {
             stdout,
             stderr,
-            interleaved,
             exit_code,
             output_truncated,
             output_collection_error: None,
             stdout_path: None,
             stderr_path: None,
-            interleaved_path: None,
             filter_applied: None,
             filter_capped: false,
             filter_effect: None,
@@ -257,6 +249,30 @@ impl CodeAnalyzer {
         .await
     }
 
+    /// Shared telemetry preamble for tool handlers: emits the "received"
+    /// metric, clones the session/client metadata (in order: session_id,
+    /// client_name, client_version), and extracts the W3C Trace Context from
+    /// the request `_meta`. Returns the (seq, sid) pair for exit metrics.
+    async fn begin_tool_call(
+        &self,
+        tool: &'static str,
+        meta: &rmcp::model::RequestMetaObject,
+    ) -> (u32, Option<String>) {
+        let (seq, sid) = self.emit_received_metric(tool).await;
+        let session_id = self.session_id.lock().await.clone();
+        let client_name = self.client_name.lock().await.clone();
+        let client_version = self.client_version.lock().await.clone();
+        extract_and_set_trace_context(
+            Some(meta),
+            ClientMetadata {
+                session_id,
+                client_name,
+                client_version,
+            },
+        );
+        (seq, sid)
+    }
+
     /// Delegates to [`tools::server::handle_overview_mode`].
     /// Kept for test access; production path goes through `analyze_directory` shim.
     #[cfg(test)]
@@ -313,18 +329,9 @@ impl CodeAnalyzer {
         let mut params = params.0;
         params.max_depth = params.max_depth.or(Some(3));
         let t_start = std::time::Instant::now();
-        let (seq, sid) = self.emit_received_metric("analyze_directory").await;
-        let session_id = self.session_id.lock().await.clone();
-        let client_name = self.client_name.lock().await.clone();
-        let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
+        let (seq, sid) = self
+            .begin_tool_call("analyze_directory", &context.meta)
+            .await;
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -384,18 +391,7 @@ impl CodeAnalyzer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
         let t_start = std::time::Instant::now();
-        let (seq, sid) = self.emit_received_metric("analyze_file").await;
-        let session_id = self.session_id.lock().await.clone();
-        let client_name = self.client_name.lock().await.clone();
-        let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
+        let (seq, sid) = self.begin_tool_call("analyze_file", &context.meta).await;
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -443,18 +439,7 @@ impl CodeAnalyzer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
         let t_start = std::time::Instant::now();
-        let (seq, sid) = self.emit_received_metric("analyze_symbol").await;
-        let session_id = self.session_id.lock().await.clone();
-        let client_name = self.client_name.lock().await.clone();
-        let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
+        let (seq, sid) = self.begin_tool_call("analyze_symbol", &context.meta).await;
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -510,18 +495,7 @@ impl CodeAnalyzer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
         let t_start = std::time::Instant::now();
-        let (seq, sid) = self.emit_received_metric("analyze_module").await;
-        let session_id = self.session_id.lock().await.clone();
-        let client_name = self.client_name.lock().await.clone();
-        let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
+        let (seq, sid) = self.begin_tool_call("analyze_module", &context.meta).await;
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -566,19 +540,7 @@ impl CodeAnalyzer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
         let t_start = std::time::Instant::now();
-        let (seq, sid) = self.emit_received_metric("edit_overwrite").await;
-        // Extract W3C Trace Context from request _meta if present
-        let session_id = self.session_id.lock().await.clone();
-        let client_name = self.client_name.lock().await.clone();
-        let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
+        let (seq, sid) = self.begin_tool_call("edit_overwrite", &context.meta).await;
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
@@ -619,19 +581,7 @@ impl CodeAnalyzer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = params.0;
         let t_start = std::time::Instant::now();
-        let (seq, sid) = self.emit_received_metric("edit_replace").await;
-        // Extract W3C Trace Context from request _meta if present
-        let session_id = self.session_id.lock().await.clone();
-        let client_name = self.client_name.lock().await.clone();
-        let client_version = self.client_version.lock().await.clone();
-        extract_and_set_trace_context(
-            Some(&context.meta),
-            ClientMetadata {
-                session_id,
-                client_name,
-                client_version,
-            },
-        );
+        let (seq, sid) = self.begin_tool_call("edit_replace", &context.meta).await;
         let span = tracing::Span::current();
         span.record("gen_ai.system", "mcp");
         span.record("gen_ai.operation.name", "execute_tool");
