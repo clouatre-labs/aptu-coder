@@ -9,7 +9,6 @@
 
 // Re-export types from metrics_export so the lib.rs re-export chain stays intact.
 pub use crate::metrics_export::MetricsWriter;
-pub use crate::metrics_export::migrate_legacy_metrics_dir;
 // Re-export helpers used by tool handlers via crate::metrics::*
 pub(crate) use crate::metrics_export::{
     path_component_count, path_file_ext, path_language, unix_ms,

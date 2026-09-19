@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-//! Metrics file I/O: JSONL writing, rotation, cleanup, migration.
+//! Metrics file I/O: JSONL writing, rotation, cleanup.
 //!
 //! Contains [`MetricsWriter`], the receiver half of the metrics channel that
 //! drains events and appends them to daily-rotated JSONL files under the XDG
 //! data directory. Also provides helper functions for file-level concerns:
-//! path analysis, date arithmetic, legacy migration, and old-file cleanup.
+//! path analysis, date arithmetic, and old-file cleanup.
 
 use crate::metrics::{MetricEvent, ToolMetrics, record_otel_metrics};
 use crate::tools::exec_runtime::atomic_write;
@@ -426,44 +426,9 @@ pub(crate) fn current_date_str() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// Migrate legacy metrics directory from `code-analyze-mcp` to `aptu-coder`.
-///
-/// - If the old directory exists and the new one does not, rename it and log info.
-/// - If both exist, log a warning and do nothing.
-/// - If neither exists, do nothing.
-///
-/// Returns `Ok(())` on success, propagating any I/O errors.
-pub fn migrate_legacy_metrics_dir() -> std::io::Result<()> {
-    let home =
-        std::env::var("HOME").map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
-    migrate_legacy_metrics_dir_impl(&home)
-}
-
-fn migrate_legacy_metrics_dir_impl(home: &str) -> std::io::Result<()> {
-    let old_dir = PathBuf::from(home).join(".local/share/code-analyze-mcp");
-    let new_dir = PathBuf::from(home).join(".local/share/aptu-coder");
-
-    let old_exists = old_dir.is_dir();
-    let new_exists = new_dir.is_dir();
-
-    if old_exists && !new_exists {
-        std::fs::rename(&old_dir, &new_dir)?;
-        tracing::info!(
-            "Migrated legacy metrics directory from {:?} to {:?}",
-            old_dir,
-            new_dir
-        );
-    } else if old_exists && new_exists {
-        tracing::warn!("Both legacy and new metrics directories exist; not migrating");
-    }
-    // If old does not exist, nothing to do.
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     /// Serializes tests that mutate `APTU_CODER_METRICS_EXPORT_FILE` to prevent parallel
@@ -471,61 +436,6 @@ mod tests {
     async fn metrics_export_lock() -> tokio::sync::MutexGuard<'static, ()> {
         static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
         LOCK.lock().await
-    }
-
-    #[test]
-    fn test_migrate_legacy_only_old_exists() {
-        // Arrange
-        let tmp_home = TempDir::new().unwrap();
-        let home_str = tmp_home.path().to_str().unwrap();
-        let old_path = tmp_home.path().join(".local/share/code-analyze-mcp");
-        let new_path = tmp_home.path().join(".local/share/aptu-coder");
-        fs::create_dir_all(&old_path).unwrap();
-        assert!(!new_path.exists());
-
-        // Act
-        let result = migrate_legacy_metrics_dir_impl(home_str);
-
-        // Assert
-        assert!(result.is_ok());
-        assert!(!old_path.exists(), "old dir should be moved");
-        assert!(new_path.is_dir(), "new dir should exist");
-    }
-
-    #[test]
-    fn test_migrate_legacy_both_exist() {
-        // Arrange
-        let tmp_home = TempDir::new().unwrap();
-        let home_str = tmp_home.path().to_str().unwrap();
-        let old_path = tmp_home.path().join(".local/share/code-analyze-mcp");
-        let new_path = tmp_home.path().join(".local/share/aptu-coder");
-        fs::create_dir_all(&old_path).unwrap();
-        fs::create_dir_all(&new_path).unwrap();
-
-        // Act
-        let result = migrate_legacy_metrics_dir_impl(home_str);
-
-        // Assert
-        assert!(result.is_ok());
-        assert!(old_path.is_dir(), "old dir should remain");
-        assert!(new_path.is_dir(), "new dir should remain");
-    }
-
-    #[test]
-    fn test_migrate_legacy_neither_exists() {
-        // Arrange
-        let tmp_home = TempDir::new().unwrap();
-        let home_str = tmp_home.path().to_str().unwrap();
-        let old_path = tmp_home.path().join(".local/share/code-analyze-mcp");
-        let new_path = tmp_home.path().join(".local/share/aptu-coder");
-
-        // Act
-        let result = migrate_legacy_metrics_dir_impl(home_str);
-
-        // Assert
-        assert!(result.is_ok());
-        assert!(!old_path.exists(), "old dir should not exist");
-        assert!(!new_path.exists(), "new dir should not exist");
     }
 
     #[test]
