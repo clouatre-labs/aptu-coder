@@ -393,7 +393,7 @@ async fn test_run_exec_impl_raw_byte_counters() {
     // should reflect the actual bytes received, not zero.
     let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
     let ct = tokio_util::sync::CancellationToken::new();
-    let (output, raw_so, raw_se) = run_exec_impl(
+    let (output, _il, _ilp, raw_so, raw_se) = run_exec_impl(
         "echo hello && echo world >&2".to_string(),
         None,
         None,
@@ -419,7 +419,7 @@ async fn test_run_exec_impl_raw_counters_exceed_budget() {
     let large_line = "x".repeat(1000);
     let cmd = format!("for i in $(seq 1 50); do echo {}; done", large_line);
     let ct = tokio_util::sync::CancellationToken::new();
-    let (output, raw_so, _raw_se) =
+    let (output, _il, _ilp, raw_so, _raw_se) =
         run_exec_impl(cmd, None, None, 0, None, &filter_table, ct).await;
 
     // Raw counter should exceed the 30k budget
@@ -435,7 +435,7 @@ async fn test_run_exec_impl_raw_counters_zero_on_timeout() {
     // drain task is aborted before any output is collected.
     let filter_table = std::sync::Arc::new(Vec::<CompiledRule>::new());
     let ct = tokio_util::sync::CancellationToken::new();
-    let (output, raw_so, raw_se) = run_exec_impl_with_timeouts(
+    let (output, _il, _ilp, raw_so, raw_se) = run_exec_impl_with_timeouts(
         "sleep 2".to_string(),
         None,
         None,
@@ -481,7 +481,7 @@ async fn test_run_exec_impl_cancellation_kills_and_reaps_child() {
         panic!("run_exec_impl did not return within 10s of cancellation");
     };
 
-    let (output, raw_so, raw_se) = tokio::select! {
+    let (output, _il, _ilp, raw_so, raw_se) = tokio::select! {
         biased;
         res = run_fut => res,
         _ = cancel_fut => unreachable!("cancel_fut panics before completing"),
@@ -501,7 +501,7 @@ async fn test_run_exec_impl_timed_out_leaves_filter_capped_false() {
     let filter_table =
         std::sync::Arc::new(crate::filters::load_filter_table(std::path::Path::new(".")));
     assert!(!filter_table.is_empty(), "repo filter table non-empty");
-    let (output, raw_so, raw_se) = run_exec_impl_with_timeouts(
+    let (output, _il, _ilp, raw_so, raw_se) = run_exec_impl_with_timeouts(
         "git log --oneline -30".to_string(),
         None,
         None,
