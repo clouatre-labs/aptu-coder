@@ -8,7 +8,7 @@
 use aptu_coder_core::analyze;
 use aptu_coder_core::cache::{CacheTier, CallGraphCache, StructuralGraphCache};
 use aptu_coder_core::pagination::{CursorData, PaginationMode, decode_cursor, encode_cursor};
-use aptu_coder_core::schema_helpers::MAX_FOLLOW_DEPTH;
+use aptu_coder_core::schema_helpers::MAX_TOOL_DEPTH;
 
 /// Fixed server-side page size for analyze_symbol. Clients cannot override it.
 const ANALYZE_SYMBOL_PAGE_SIZE: usize = 20;
@@ -46,7 +46,6 @@ pub(crate) struct FocusedAnalysisParams {
     pub(crate) path: std::path::PathBuf,
     pub(crate) symbol: String,
     pub(crate) match_mode: SymbolMatchMode,
-    pub(crate) follow_depth: u32,
     pub(crate) max_depth: Option<u32>,
     pub(crate) impl_only: Option<bool>,
     pub(crate) def_use: bool,
@@ -61,12 +60,12 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     PathIsFile,
     /// `summary=true` combined with a pagination `cursor`.
     SummaryCursorConflict,
-    /// `mode=import_lookup` combined with `match_mode`, `follow_depth`, or `impl_only`.
+    /// `mode=import_lookup` combined with `match_mode`, `max_depth`, or `impl_only`.
     ModeParamConflict,
     /// Non-call-graph `mode` without a non-empty `symbol`.
     ModeMissingSymbol,
-    /// `follow_depth` exceeds `MAX_FOLLOW_DEPTH`.
-    FollowDepthExceeded,
+    /// `max_depth` exceeds `MAX_TOOL_DEPTH`.
+    MaxDepthExceeded,
     /// The pagination `cursor` failed to decode.
     InvalidCursor,
     /// `git_ref` filtering failed (not a git repo, git unavailable, etc.).
@@ -92,7 +91,7 @@ impl AnalyzeSymbolErrorSubtype {
             Self::SummaryCursorConflict => "summary_cursor_conflict",
             Self::ModeParamConflict => "mode_param_conflict",
             Self::ModeMissingSymbol => "mode_missing_symbol",
-            Self::FollowDepthExceeded => "follow_depth_exceeded",
+            Self::MaxDepthExceeded => "max_depth_exceeded",
             Self::InvalidCursor => "invalid_cursor",
             Self::GitRefFilterFailed => "git_ref_filter_failed",
             Self::PaginationModeInvalid => "pagination_mode_invalid",
@@ -372,7 +371,7 @@ async fn handle_import_lookup(
                     .as_ref()
                     .map(|m| format!("{:?}", m).to_lowercase()),
             )
-            .follow_depth(params.follow_depth)
+            .follow_depth(max_depth_val)
             .mode(
                 params
                     .mode
@@ -471,6 +470,17 @@ async fn handle_call_graph(
 
     // Surface cache tier in structuredContent for observability and testing.
     output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
+
+    // Server-side warning for deep traversals: output size grows exponentially
+    // with graph branching, so levels above 2 deserve an explicit heads-up in
+    // the tool output (previously tied to the removed follow_depth parameter).
+    let resolved_depth = params.max_depth.unwrap_or(1);
+    if resolved_depth > 2 {
+        output.formatted = format!(
+            "WARNING: max_depth={resolved_depth} may produce very large output; \
+             output size grows exponentially with graph branching. Prefer 1-2.\n"
+        ) + &output.formatted;
+    }
 
     let page_size = ANALYZE_SYMBOL_PAGE_SIZE;
     let (offset, cursor_mode) = match decode_call_graph_cursor(&params) {
@@ -617,7 +627,7 @@ async fn handle_call_graph(
                     .as_ref()
                     .map(|m| format!("{:?}", m).to_lowercase()),
             )
-            .follow_depth(params.follow_depth)
+            .follow_depth(max_depth_val)
             .mode(
                 params
                     .mode
@@ -686,31 +696,29 @@ fn validate_top_level_preconditions(
 
     let mode = resolve_mode(params);
     if mode == SymbolAnalysisMode::ImportLookup
-        && (params.match_mode.is_some()
-            || params.follow_depth.is_some()
-            || params.impl_only.is_some())
+        && (params.match_mode.is_some() || params.max_depth.is_some() || params.impl_only.is_some())
     {
         return Err((
             invalid_params_result(
                 span,
-                "mode=import_lookup rejects match_mode, follow_depth, and impl_only; \
+                "mode=import_lookup rejects match_mode, max_depth, and impl_only; \
                  remove those parameters or use mode=call_graph",
-                "remove match_mode/follow_depth/impl_only when mode=import_lookup",
+                "remove match_mode/max_depth/impl_only when mode=import_lookup",
             ),
             AnalyzeSymbolErrorSubtype::ModeParamConflict,
         ));
     }
 
-    if let Some(depth) = params.follow_depth
-        && depth > MAX_FOLLOW_DEPTH
+    if let Some(depth) = params.max_depth
+        && depth > MAX_TOOL_DEPTH
     {
         return Err((
             invalid_params_result(
                 span,
-                format!("follow_depth={depth} exceeds the maximum of {MAX_FOLLOW_DEPTH}"),
-                "reduce follow_depth to 3 or lower",
+                format!("max_depth={depth} exceeds the maximum of {MAX_TOOL_DEPTH}"),
+                "reduce max_depth to 3 or lower",
             ),
-            AnalyzeSymbolErrorSubtype::FollowDepthExceeded,
+            AnalyzeSymbolErrorSubtype::MaxDepthExceeded,
         ));
     }
 
@@ -914,7 +922,7 @@ mod tests {
             AnalyzeSymbolErrorSubtype::SummaryCursorConflict,
             AnalyzeSymbolErrorSubtype::ModeParamConflict,
             AnalyzeSymbolErrorSubtype::ModeMissingSymbol,
-            AnalyzeSymbolErrorSubtype::FollowDepthExceeded,
+            AnalyzeSymbolErrorSubtype::MaxDepthExceeded,
             AnalyzeSymbolErrorSubtype::InvalidCursor,
             AnalyzeSymbolErrorSubtype::GitRefFilterFailed,
             AnalyzeSymbolErrorSubtype::PaginationModeInvalid,
@@ -929,7 +937,7 @@ mod tests {
                 AnalyzeSymbolErrorSubtype::SummaryCursorConflict => "summary_cursor_conflict",
                 AnalyzeSymbolErrorSubtype::ModeParamConflict => "mode_param_conflict",
                 AnalyzeSymbolErrorSubtype::ModeMissingSymbol => "mode_missing_symbol",
-                AnalyzeSymbolErrorSubtype::FollowDepthExceeded => "follow_depth_exceeded",
+                AnalyzeSymbolErrorSubtype::MaxDepthExceeded => "max_depth_exceeded",
                 AnalyzeSymbolErrorSubtype::InvalidCursor => "invalid_cursor",
                 AnalyzeSymbolErrorSubtype::GitRefFilterFailed => "git_ref_filter_failed",
                 AnalyzeSymbolErrorSubtype::PaginationModeInvalid => "pagination_mode_invalid",
@@ -949,14 +957,14 @@ mod tests {
     #[tokio::test]
     async fn analyze_symbol_handler_import_lookup_mode_with_exclusive_params_sets_conflict_subtype()
     {
-        // Arrange: mode=import_lookup rejects match_mode/follow_depth/impl_only.
+        // Arrange: mode=import_lookup rejects match_mode/max_depth/impl_only.
         let (ctx, mut rx) = test_context();
         let path = "/definitely-nonexistent-dir-abcxyz123".to_string();
         let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
             "path": path,
             "symbol": "std::collections",
             "mode": "import_lookup",
-            "follow_depth": 1,
+            "max_depth": 1,
         }))
         .expect("valid AnalyzeSymbolParams JSON");
         let call = test_call(path.clone());
@@ -971,14 +979,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn analyze_symbol_handler_follow_depth_above_max_sets_follow_depth_exceeded_subtype() {
-        // Arrange: follow_depth exceeds MAX_FOLLOW_DEPTH (3).
+    async fn analyze_symbol_handler_max_depth_above_max_sets_max_depth_exceeded_subtype() {
+        // Arrange: max_depth exceeds MAX_TOOL_DEPTH (3).
         let (ctx, mut rx) = test_context();
         let path = "/definitely-nonexistent-dir-abcxyz123".to_string();
         let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
             "path": path,
             "symbol": "foo",
-            "follow_depth": 4,
+            "max_depth": 4,
         }))
         .expect("valid AnalyzeSymbolParams JSON");
         let call = test_call(path.clone());
@@ -989,10 +997,7 @@ mod tests {
         // Assert
         let event = rx.try_recv().expect("expected an error metric event");
         assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
-        assert_eq!(
-            event.error_subtype.as_deref(),
-            Some("follow_depth_exceeded")
-        );
+        assert_eq!(event.error_subtype.as_deref(), Some("max_depth_exceeded"));
     }
 
     #[test]

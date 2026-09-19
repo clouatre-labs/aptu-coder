@@ -470,7 +470,7 @@ impl CodeAnalyzer {
         };
         let ct = context.ct.clone();
         let param_path = params.path.clone();
-        let max_depth_val = params.follow_depth;
+        let max_depth_val = params.max_depth;
         let ctx = tools::AnalyzeSymbolContext {
             metrics_tx: self.metrics_tx.clone(),
             call_graph_cache: self.call_graph_cache.clone(),
