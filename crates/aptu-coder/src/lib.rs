@@ -38,7 +38,7 @@ pub(crate) mod shell_write;
 pub(crate) mod tools;
 pub(crate) mod validation;
 
-pub use metrics::{MetricEvent, MetricsSender, MetricsWriter, migrate_legacy_metrics_dir};
+pub use metrics::{MetricEvent, MetricsSender, MetricsWriter};
 pub use otel::{
     ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,
 };
