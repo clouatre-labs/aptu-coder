@@ -42,7 +42,6 @@ async fn test_no_cache_meta_on_pagination_error() {
         serde_json::json!({
             "path": ".",
             "symbol": "test_symbol",
-            "follow_depth": 1,
             "max_depth": 3,
                         "mode": "def_use",
             "cursor": "INVALID_CORRUPTED_CURSOR_12345"

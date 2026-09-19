@@ -235,17 +235,10 @@ pub struct AnalyzeSymbolParams {
     /// Symbol matching mode (default: exact). exact: case-sensitive exact match. insensitive: case-insensitive exact match. prefix: case-insensitive prefix match. contains: case-insensitive substring match.
     pub match_mode: Option<SymbolMatchMode>,
 
-    /// Call graph traversal depth for this tool (default 1). Level 1 = direct callers and callees; level 2 = one more hop, etc. Output size grows exponentially with graph branching. Warn user on levels above 2. Hard cap of 3.
+    /// Maximum traversal depth. For call graph mode this is the graph traversal depth (default 1); level 1 = direct callers and callees, level 2 = one more hop, etc. It also caps directory walking. Unset means graph depth 1 and unlimited directory walk. Warn user on levels above 2. Hard cap of 3.
     #[cfg_attr(
         feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::follow_depth_schema")
-    )]
-    pub follow_depth: Option<u32>,
-
-    /// Maximum directory traversal depth. Unset means unlimited. Use 2-3 for large monorepos.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::option_integer_schema")
+        schemars(schema_with = "crate::schema_helpers::max_depth_schema")
     )]
     pub max_depth: Option<u32>,
 
@@ -259,12 +252,12 @@ pub struct AnalyzeSymbolParams {
     #[serde(default)]
     pub impl_only: Option<bool>,
 
-    /// Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/follow_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty.
+    /// Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/max_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty.
     #[serde(default)]
     #[cfg_attr(
         feature = "schemars",
         schemars(
-            description = "Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/follow_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty."
+            description = "Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/max_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty."
         )
     )]
     pub mode: Option<SymbolAnalysisMode>,

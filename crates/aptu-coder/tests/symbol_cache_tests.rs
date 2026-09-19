@@ -122,7 +122,7 @@ async fn test_analyze_symbol_call_graph_cache_hit() {
     let params = serde_json::json!({
         "path": dir.path().to_str().unwrap(),
         "symbol": "inner",
-        "follow_depth": 1
+        "max_depth": 1
     });
 
     // Act: two sequential calls sharing the same CodeAnalyzer (and call_graph_cache).
@@ -156,7 +156,7 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     let params = serde_json::json!({
         "path": dir.path().to_str().unwrap(),
         "symbol": "inner",
-        "follow_depth": 1
+        "max_depth": 1
     });
 
     // First pair: populate cache, confirm L1 hit on second call.
