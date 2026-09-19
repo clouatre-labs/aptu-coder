@@ -210,11 +210,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_provider = init_log_appender();
     let meter_provider = init_meter();
 
-    // Migrate legacy metrics directory if needed
-    if let Err(e) = aptu_coder::migrate_legacy_metrics_dir() {
-        tracing::warn!("Failed to migrate legacy metrics directory: {e}");
-    }
-
     // Create shared peer for CodeAnalyzer::new (used by Streamable HTTP session manager)
     let peer = Arc::new(TokioMutex::new(None));
 
