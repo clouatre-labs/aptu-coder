@@ -80,8 +80,6 @@ pub struct ShellOutput {
     pub stdout: String,
     /// Standard error from the command.
     pub stderr: String,
-    /// Stdout and stderr interleaved in arrival order.
-    pub interleaved: String,
     /// Exit code; null if the process could not be waited on (e.g. drain timeout from a background process holding pipes).
     pub exit_code: Option<i32>,
     /// True if the post-exit drain timed out (backgrounded process kept pipes open).
@@ -98,9 +96,6 @@ pub struct ShellOutput {
     /// Path to the slot file containing full stderr (if output was persisted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_path: Option<String>,
-    /// Path to the slot file containing full interleaved output (if output was persisted).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interleaved_path: Option<String>,
     /// Description of the filter applied to stdout (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_applied: Option<String>,
@@ -123,20 +118,17 @@ impl ShellOutput {
     pub fn new(
         stdout: String,
         stderr: String,
-        interleaved: String,
         exit_code: Option<i32>,
         output_truncated: bool,
     ) -> Self {
         Self {
             stdout,
             stderr,
-            interleaved,
             exit_code,
             output_truncated,
             output_collection_error: None,
             stdout_path: None,
             stderr_path: None,
-            interleaved_path: None,
             filter_applied: None,
             filter_capped: false,
             filter_effect: None,
