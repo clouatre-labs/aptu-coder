@@ -532,20 +532,29 @@ async fn test_handler_interleaved_ordering() {
     }))
     .await;
 
-    // Act: inspect structuredContent.interleaved
+    // Act: inspect structuredContent and the text block. The interleaved text
+    // is no longer a structuredContent field; it reaches the model only via the
+    // text block ("Output:" section).
     let sc = &resp["result"]["structuredContent"];
-    let interleaved = sc["interleaved"].as_str().unwrap_or("");
+    let text_block = resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
 
-    // Assert: both lines are captured in the single interleaved field.
-    // Exact ordering is non-deterministic (merge polls both streams); we verify
-    // that both streams contribute to the interleaved output.
+    // Assert: structuredContent carries stdout/stderr/paths but no interleaved
+    // keys (the duplicate fields were dropped).
     assert!(
-        interleaved.contains("stdout_line"),
-        "interleaved missing stdout_line: {interleaved}"
+        sc.get("interleaved").is_none() && sc.get("interleaved_path").is_none(),
+        "structuredContent should not contain interleaved keys: {sc}"
+    );
+    // Both streams still contribute to the interleaved text block.
+    // Exact ordering is non-deterministic (merge polls both streams).
+    assert!(
+        text_block.contains("stdout_line"),
+        "text block missing stdout_line: {text_block}"
     );
     assert!(
-        interleaved.contains("stderr_line"),
-        "interleaved missing stderr_line: {interleaved}"
+        text_block.contains("stderr_line"),
+        "text block missing stderr_line: {text_block}"
     );
     // Verify structuredContent.stdout and .stderr are populated separately too
     assert!(
@@ -565,13 +574,7 @@ fn test_handler_output_collection_error() {
     // is difficult to trigger deterministically in an integration test, so we
     // verify the struct-level contract here.
     use aptu_coder::ShellOutput;
-    let mut output = ShellOutput::new(
-        "out".into(),
-        "err".into(),
-        "out\nerr\n".into(),
-        Some(0),
-        false,
-    );
+    let mut output = ShellOutput::new("out".into(), "err".into(), Some(0), false);
     assert!(
         output.output_collection_error.is_none(),
         "output_collection_error must be None by default"
