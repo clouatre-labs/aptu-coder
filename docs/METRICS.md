@@ -95,9 +95,9 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `exec_command` | `heredoc_error` | Heredoc validation failed (malformed or unterminated heredoc). |
 | `analyze_symbol` | `path_is_file` | `path` argument points to a file instead of a directory. |
 | `analyze_symbol` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
-| `analyze_symbol` | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `follow_depth`, or `impl_only`. |
+| `analyze_symbol` | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `max_depth`, or `impl_only`. |
 | `analyze_symbol` | `mode_missing_symbol` | Non-call-graph `mode` without a non-empty `symbol`. |
-| `analyze_symbol` | `follow_depth_exceeded` | `follow_depth` exceeds `MAX_FOLLOW_DEPTH`. |
+| `analyze_symbol` | `max_depth_exceeded` | `max_depth` exceeds `MAX_TOOL_DEPTH`. |
 | `analyze_symbol` | `invalid_cursor` | The pagination `cursor` failed to decode. |
 | `analyze_symbol` | `git_ref_filter_failed` | `git_ref` filtering failed (not a git repo, git unavailable, etc.). |
 | `analyze_symbol` | `pagination_mode_invalid` | Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`. |
