@@ -93,7 +93,10 @@ async fn call_tool_twice_sequential(
     (resp1, resp2)
 }
 
-/// Return the `cache_tier` string from a successful analyze_symbol response's structuredContent.
+/// Return the `cache_tier` string from a structuredContent if present.
+///
+/// The field was removed from all analyze-tool responses (alpha policy); the
+/// cache tier now surfaces only via metrics. Assertions below lock in absence.
 fn extract_cache_tier(resp: &serde_json::Value) -> Option<String> {
     resp["result"]["structuredContent"]
         .get("cache_tier")
@@ -129,21 +132,15 @@ async fn test_analyze_symbol_call_graph_cache_hit() {
     assert!(is_success(&resp1), "first call must succeed; got: {resp1}");
     assert!(is_success(&resp2), "second call must succeed; got: {resp2}");
 
-    let tier1 = extract_cache_tier(&resp1);
     assert!(
-        matches!(
-            tier1.as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "first call must be a cache miss; got: {tier1:?}"
+        extract_cache_tier(&resp1).is_none(),
+        "cache_tier must be absent"
     );
 
     // Assert: second call returns L1Memory tier (same analyzer instance, unchanged directory).
-    let tier2 = extract_cache_tier(&resp2);
-    assert_eq!(
-        tier2.as_deref(),
-        Some("l1_memory"),
-        "second call on unchanged input must be an L1 cache hit; got: {tier2:?}; resp: {resp2}"
+    assert!(
+        extract_cache_tier(&resp2).is_none(),
+        "cache_tier must be absent"
     );
 }
 
@@ -167,16 +164,12 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     assert!(is_success(&resp1), "pair1 call1 must succeed");
     assert!(is_success(&resp2), "pair1 call2 must succeed");
     assert!(
-        matches!(
-            extract_cache_tier(&resp1).as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "pair1 call1 must be a miss"
+        extract_cache_tier(&resp1).is_none(),
+        "cache_tier must be absent"
     );
-    assert_eq!(
-        extract_cache_tier(&resp2).as_deref(),
-        Some("l1_memory"),
-        "pair1 call2 must be an L1 hit (cache populated)"
+    assert!(
+        extract_cache_tier(&resp2).is_none(),
+        "cache_tier must be absent"
     );
 
     // Advance mtime: sleep >= 1 s so the filesystem registers a new mtime.
@@ -191,18 +184,12 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     assert!(is_success(&resp3), "pair2 call1 must succeed");
     assert!(is_success(&resp4), "pair2 call2 must succeed");
 
-    let tier3 = extract_cache_tier(&resp3);
     assert!(
-        matches!(
-            tier3.as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "after mtime change, first call on fresh analyzer must be a miss; got: {tier3:?}"
+        extract_cache_tier(&resp3).is_none(),
+        "cache_tier must be absent"
     );
-    let tier4 = extract_cache_tier(&resp4);
-    assert_eq!(
-        tier4.as_deref(),
-        Some("l1_memory"),
-        "after mtime change, second call on same analyzer must be L1 hit; got: {tier4:?}"
+    assert!(
+        extract_cache_tier(&resp4).is_none(),
+        "cache_tier must be absent"
     );
 }

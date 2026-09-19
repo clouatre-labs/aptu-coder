@@ -150,6 +150,10 @@ pub enum AnalyzeFileField {
     Classes,
     /// Include import statements.
     Imports,
+    /// Include symbol references.
+    References,
+    /// Include caller-callee call pairs.
+    Calls,
     /// Include all sections (equivalent to omitting fields parameter).
     All,
 }
@@ -165,7 +169,7 @@ pub struct AnalyzeFileParams {
     )]
     pub path: String,
 
-    /// Limit output to specific sections. Valid values: "functions", "classes", "imports", "all".
+    /// Limit output to specific sections. Valid values: "functions", "classes", "imports", "references", "calls", "all".
     /// The FILE header (path, line count, section counts) is always emitted regardless.
     /// Omitting this field returns all sections (current behavior).
     /// Ignored when summary=true (summary takes precedence).
@@ -475,12 +479,16 @@ pub struct SemanticAnalysis {
     pub classes: Vec<ClassInfo>,
     /// Flat list of imports; each entry carries its full module path and imported symbols.
     pub imports: Vec<ImportInfo>,
+    /// Symbol references. Omitted from output when empty (projection-gated).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<ReferenceInfo>,
     /// Call frequency map (function name -> count).
     #[serde(skip)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub call_frequency: HashMap<String, usize>,
     /// Caller-callee pairs extracted from call expressions.
+    /// Omitted from output when empty (projection-gated).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CallInfo>,
     /// `impl Trait for Type` blocks found in this file (Rust only).
     #[serde(skip)]
@@ -519,16 +527,21 @@ impl SemanticAnalysis {
 
     /// Return a filtered copy of this `SemanticAnalysis` based on the requested field set.
     ///
-    /// - `None` (or a slice containing `AnalyzeFileField::All`) returns a full clone.
-    /// - Otherwise each of `functions`, `classes`, and `imports` is populated only when the
-    ///   corresponding `AnalyzeFileField` variant is present in `fields`.
-    /// - `references`, `calls`, `impl_traits`, and `def_use_sites` are always preserved
-    ///   unchanged.
+    /// - `None` returns a clone with `references` and `calls` zero-filled: the default
+    ///   response carries only functions, classes, and imports.
+    /// - A slice containing `AnalyzeFileField::All` returns a full clone.
+    /// - Otherwise each of `functions`, `classes`, `imports`, `references`, and `calls` is
+    ///   populated only when the corresponding `AnalyzeFileField` variant is present in
+    ///   `fields`.
+    /// - `impl_traits`, and `def_use_sites` are always preserved unchanged.
     /// - `call_frequency` is preserved only when `Functions` is in the projected fields.
     #[must_use]
     pub fn project(&self, fields: Option<&[AnalyzeFileField]>) -> Self {
         let Some(fields) = fields else {
-            return self.clone();
+            let mut out = self.clone();
+            out.references = Vec::new();
+            out.calls = Vec::new();
+            return out;
         };
 
         // Single pass: derive a presence bitmask so each variant is checked exactly once.
@@ -536,6 +549,8 @@ impl SemanticAnalysis {
         let mut want_functions = false;
         let mut want_classes = false;
         let mut want_imports = false;
+        let mut want_references = false;
+        let mut want_calls = false;
         for f in fields {
             match f {
                 AnalyzeFileField::All => {
@@ -545,6 +560,8 @@ impl SemanticAnalysis {
                 AnalyzeFileField::Functions => want_functions = true,
                 AnalyzeFileField::Classes => want_classes = true,
                 AnalyzeFileField::Imports => want_imports = true,
+                AnalyzeFileField::References => want_references = true,
+                AnalyzeFileField::Calls => want_calls = true,
             }
         }
         if want_all {
@@ -567,13 +584,21 @@ impl SemanticAnalysis {
             } else {
                 Vec::new()
             },
-            references: self.references.clone(),
+            references: if want_references {
+                self.references.clone()
+            } else {
+                Vec::new()
+            },
             call_frequency: if want_functions {
                 self.call_frequency.clone()
             } else {
                 HashMap::new()
             },
-            calls: self.calls.clone(),
+            calls: if want_calls {
+                self.calls.clone()
+            } else {
+                Vec::new()
+            },
             impl_traits: self.impl_traits.clone(),
             def_use_sites: self.def_use_sites.clone(),
         }
@@ -828,12 +853,69 @@ mod tests {
         }
     }
 
+    fn make_sa_with_refs_and_calls() -> SemanticAnalysis {
+        let mut sa = make_sa("fn_ref", 1);
+        sa.references = vec![ReferenceInfo {
+            symbol: "helper".to_string(),
+            reference_type: ReferenceType::Usage,
+            location: "src/lib.rs".to_string(),
+            line: 7,
+        }];
+        sa.calls = vec![CallInfo {
+            caller: "outer".to_string(),
+            callee: "inner".to_string(),
+            line: 9,
+            column: 4,
+            arg_count: None,
+        }];
+        sa
+    }
+
     #[test]
     fn test_project_fields_none_preserves_call_frequency() {
         let sa = make_sa("foo", 3);
         let projected = sa.project(None);
         assert_eq!(projected.functions.len(), 1);
         assert_eq!(projected.call_frequency.len(), 1);
+    }
+
+    #[test]
+    fn test_project_fields_references_gates_references() {
+        // Arrange: an analysis with one reference; project only functions.
+        let sa = make_sa_with_refs_and_calls();
+        let projected = sa.project(Some(&[AnalyzeFileField::Functions]));
+        assert!(projected.references.is_empty());
+        assert!(projected.calls.is_empty());
+
+        // Act: project with references requested.
+        let projected = sa.project(Some(&[AnalyzeFileField::References]));
+
+        // Assert: references preserved, calls still zero-filled.
+        assert_eq!(projected.references.len(), 1);
+        assert!(projected.calls.is_empty());
+    }
+
+    #[test]
+    fn test_project_fields_calls_gates_calls() {
+        // Arrange: an analysis with one call; project only calls.
+        let sa = make_sa_with_refs_and_calls();
+        let projected = sa.project(Some(&[AnalyzeFileField::Calls]));
+
+        // Assert: calls preserved, references zero-filled.
+        assert_eq!(projected.calls.len(), 1);
+        assert!(projected.references.is_empty());
+    }
+
+    #[test]
+    fn test_project_fields_none_zeroes_references_and_calls() {
+        // Arrange/Act: default projection (no fields requested).
+        let sa = make_sa_with_refs_and_calls();
+        let projected = sa.project(None);
+
+        // Assert: references/calls zero-filled; other sections preserved.
+        assert!(projected.references.is_empty());
+        assert!(projected.calls.is_empty());
+        assert_eq!(projected.functions.len(), 1);
     }
 
     #[test]

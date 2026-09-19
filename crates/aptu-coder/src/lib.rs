@@ -478,7 +478,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Lightweight function and import index for a single source file with minimal token cost: file name, line count, language, function names with line numbers, and the import list (~75% smaller than analyze_file). Fails if directory path supplied; use analyze_file for signatures, types, or class details. Pagination and git_ref not supported. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Lightweight function and import index for a single source file with minimal token cost: file name, line count, language, function names with line numbers, and the import list (~75% smaller than analyze_file). Fails if directory path supplied; use analyze_file for signatures, types, or class details. Pagination and git_ref not supported; responses are always a single complete response with no next_cursor field and no follow-up page call. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         output_schema = schema_for_type::<types::ModuleInfo>(),
         annotations(
             title = "Analyze Module",

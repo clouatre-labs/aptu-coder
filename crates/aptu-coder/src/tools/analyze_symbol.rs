@@ -469,8 +469,7 @@ async fn handle_call_graph(
         }
     };
 
-    // Surface cache tier in structuredContent for observability and testing.
-    output.cache_tier = Some(graph_cache_tier.as_str().to_owned());
+    // Surface cache hit state in metrics for observability.
 
     let page_size = ANALYZE_SYMBOL_PAGE_SIZE;
     let (offset, cursor_mode) = match decode_call_graph_cursor(&params) {

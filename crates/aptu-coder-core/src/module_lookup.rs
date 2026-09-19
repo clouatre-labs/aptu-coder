@@ -112,7 +112,6 @@ pub fn analyze_import_lookup(
         test_callers: None,
         callees: None,
         def_use_sites: vec![],
-        cache_tier: None,
     })
 }
 
