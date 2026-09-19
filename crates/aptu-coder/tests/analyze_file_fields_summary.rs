@@ -53,3 +53,58 @@ async fn analyze_file_fields_with_summary_true_silently_ignores_fields() {
         "unexpected tallies line format: {tally}"
     );
 }
+
+/// analyze_file default response (no fields): structuredContent semantic data
+/// must not carry references or calls keys; only functions/classes/imports.
+#[tokio::test]
+async fn analyze_file_default_response_omits_references_and_calls() {
+    // Arrange: a real source file in the repo; no fields projection requested.
+    let path = "src/lib.rs";
+
+    // Act: call analyze_file with only the path.
+    let resp = call_tool_raw("analyze_file", serde_json::json!({ "path": path })).await;
+
+    // Assert: success, and no references/calls keys in structuredContent.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    let structured = &resp["result"]["structuredContent"]["semantic"];
+    assert!(
+        structured.get("references").is_none(),
+        "references must be absent by default: {structured}"
+    );
+    assert!(
+        structured.get("calls").is_none(),
+        "calls must be absent by default: {structured}"
+    );
+}
+
+/// analyze_file with fields=[references, calls]: the requested sections appear.
+#[tokio::test]
+async fn analyze_file_fields_references_and_calls_are_projected() {
+    // Arrange: a real source file and an explicit references+calls projection.
+    let path = "src/lib.rs";
+
+    // Act: call analyze_file requesting references and calls sections.
+    let resp = call_tool_raw(
+        "analyze_file",
+        serde_json::json!({ "path": path, "fields": ["references", "calls"] }),
+    )
+    .await;
+
+    // Assert: success, and both requested keys are present in structuredContent.
+    assert!(
+        !resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected success but got error: {resp}"
+    );
+    let structured = &resp["result"]["structuredContent"]["semantic"];
+    assert!(
+        structured.get("references").is_some(),
+        "references must be present when requested: {structured}"
+    );
+    assert!(
+        structured.get("calls").is_some(),
+        "calls must be present when requested: {structured}"
+    );
+}

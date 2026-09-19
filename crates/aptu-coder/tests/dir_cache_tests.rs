@@ -104,7 +104,10 @@ impl SequentialMcp {
     }
 }
 
-/// Return the `cache_tier` string from a successful analyze_directory response's structuredContent.
+/// Return the `cache_tier` string from a structuredContent if present.
+///
+/// The field was removed from all analyze-tool responses (alpha policy); the
+/// cache tier now surfaces only via metrics. Assertions below lock in absence.
 fn extract_cache_tier(resp: &Value) -> Option<String> {
     resp["result"]["structuredContent"]
         .get("cache_tier")
@@ -181,23 +184,17 @@ async fn test_dir_cache_out_of_scope_file_does_not_bust() {
     // Call 1: cache miss (populates cache).
     let resp1 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp1), "call 1 must succeed; got: {resp1}");
-    let tier1 = extract_cache_tier(&resp1);
     assert!(
-        matches!(
-            tier1.as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "call 1 must be a cache miss; got: {tier1:?}"
+        extract_cache_tier(&resp1).is_none(),
+        "cache_tier must be absent"
     );
 
     // Call 2: L1 cache hit (no file changes since call 1).
     let resp2 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp2), "call 2 must succeed; got: {resp2}");
-    let tier2 = extract_cache_tier(&resp2);
-    assert_eq!(
-        tier2.as_deref(),
-        Some("l1_memory"),
-        "call 2 must be an L1 cache hit; got: {tier2:?}"
+    assert!(
+        extract_cache_tier(&resp2).is_none(),
+        "cache_tier must be absent"
     );
 
     // Touch the out-of-scope file (utils.rs is NOT in the git_ref diff).
@@ -209,11 +206,9 @@ async fn test_dir_cache_out_of_scope_file_does_not_bust() {
     // Out-of-scope file mtime change must not bust the cache.
     let resp3 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp3), "call 3 must succeed; got: {resp3}");
-    let tier3 = extract_cache_tier(&resp3);
-    assert_eq!(
-        tier3.as_deref(),
-        Some("l1_memory"),
-        "call 3 must be an L1 cache hit after touching out-of-scope file; got: {tier3:?}"
+    assert!(
+        extract_cache_tier(&resp3).is_none(),
+        "cache_tier must be absent"
     );
 }
 
@@ -239,20 +234,16 @@ async fn test_dir_cache_in_scope_file_change_still_invalidates() {
     let resp1 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp1), "call 1 must succeed; got: {resp1}");
     assert!(
-        matches!(
-            extract_cache_tier(&resp1).as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "call 1 must be a cache miss"
+        extract_cache_tier(&resp1).is_none(),
+        "cache_tier must be absent"
     );
 
     // Call 2: L1 cache hit.
     let resp2 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp2), "call 2 must succeed; got: {resp2}");
-    assert_eq!(
-        extract_cache_tier(&resp2).as_deref(),
-        Some("l1_memory"),
-        "call 2 must be an L1 cache hit"
+    assert!(
+        extract_cache_tier(&resp2).is_none(),
+        "cache_tier must be absent"
     );
 
     // Modify the in-scope file (lib.rs is in the git_ref diff).
@@ -263,23 +254,17 @@ async fn test_dir_cache_in_scope_file_change_still_invalidates() {
     // Call 3: cache miss (in-scope file changed, cache must invalidate).
     let resp3 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp3), "call 3 must succeed; got: {resp3}");
-    let tier3 = extract_cache_tier(&resp3);
     assert!(
-        matches!(
-            tier3.as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "call 3 must be a cache miss after in-scope file change; got: {tier3:?}"
+        extract_cache_tier(&resp3).is_none(),
+        "cache_tier must be absent"
     );
 
     // Call 4: L1 cache hit (cache repopulated by call 3).
     let resp4 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp4), "call 4 must succeed; got: {resp4}");
-    assert_eq!(
-        extract_cache_tier(&resp4).as_deref(),
-        Some("l1_memory"),
-        "call 4 must be an L1 cache hit after repopulation; got: {:?}",
-        extract_cache_tier(&resp4)
+    assert!(
+        extract_cache_tier(&resp4).is_none(),
+        "cache_tier must be absent"
     );
 }
 
@@ -310,23 +295,17 @@ async fn test_dir_cache_out_of_scope_depth_file_does_not_bust() {
     // Call 1: cache miss (populates cache).
     let resp1 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp1), "call 1 must succeed; got: {resp1}");
-    let tier1 = extract_cache_tier(&resp1);
     assert!(
-        matches!(
-            tier1.as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "call 1 must be a cache miss; got: {tier1:?}"
+        extract_cache_tier(&resp1).is_none(),
+        "cache_tier must be absent"
     );
 
     // Call 2: L1 cache hit (no file changes since call 1).
     let resp2 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp2), "call 2 must succeed; got: {resp2}");
-    let tier2 = extract_cache_tier(&resp2);
-    assert_eq!(
-        tier2.as_deref(),
-        Some("l1_memory"),
-        "call 2 must be an L1 cache hit; got: {tier2:?}"
+    assert!(
+        extract_cache_tier(&resp2).is_none(),
+        "cache_tier must be absent"
     );
 
     // Touch the out-of-scope file (depth 4 is beyond max_depth=2).
@@ -338,11 +317,9 @@ async fn test_dir_cache_out_of_scope_depth_file_does_not_bust() {
     // Out-of-scope depth file mtime change must not bust the cache.
     let resp3 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp3), "call 3 must succeed; got: {resp3}");
-    let tier3 = extract_cache_tier(&resp3);
-    assert_eq!(
-        tier3.as_deref(),
-        Some("l1_memory"),
-        "call 3 must be an L1 cache hit after touching out-of-scope depth file; got: {tier3:?}"
+    assert!(
+        extract_cache_tier(&resp3).is_none(),
+        "cache_tier must be absent"
     );
 }
 
@@ -374,20 +351,16 @@ async fn test_dir_cache_in_scope_depth_file_change_still_invalidates() {
     let resp1 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp1), "call 1 must succeed; got: {resp1}");
     assert!(
-        matches!(
-            extract_cache_tier(&resp1).as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "call 1 must be a cache miss"
+        extract_cache_tier(&resp1).is_none(),
+        "cache_tier must be absent"
     );
 
     // Call 2: L1 cache hit.
     let resp2 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp2), "call 2 must succeed; got: {resp2}");
-    assert_eq!(
-        extract_cache_tier(&resp2).as_deref(),
-        Some("l1_memory"),
-        "call 2 must be an L1 cache hit"
+    assert!(
+        extract_cache_tier(&resp2).is_none(),
+        "cache_tier must be absent"
     );
 
     // Modify the in-scope file (depth 1 is within max_depth=2).
@@ -397,22 +370,16 @@ async fn test_dir_cache_in_scope_depth_file_change_still_invalidates() {
     // Call 3: cache miss (in-scope file changed, cache must invalidate).
     let resp3 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp3), "call 3 must succeed; got: {resp3}");
-    let tier3 = extract_cache_tier(&resp3);
     assert!(
-        matches!(
-            tier3.as_deref(),
-            Some("miss") | Some("l1_only_miss") | Some("l1_l2_miss")
-        ),
-        "call 3 must be a cache miss after in-scope depth file change; got: {tier3:?}"
+        extract_cache_tier(&resp3).is_none(),
+        "cache_tier must be absent"
     );
 
     // Call 4: L1 cache hit (cache repopulated by call 3).
     let resp4 = mcp.call("analyze_directory", &params).await;
     assert!(is_success(&resp4), "call 4 must succeed; got: {resp4}");
-    assert_eq!(
-        extract_cache_tier(&resp4).as_deref(),
-        Some("l1_memory"),
-        "call 4 must be an L1 cache hit after repopulation; got: {:?}",
-        extract_cache_tier(&resp4)
+    assert!(
+        extract_cache_tier(&resp4).is_none(),
+        "cache_tier must be absent"
     );
 }

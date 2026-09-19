@@ -461,7 +461,6 @@ fn analyze_focused_with_progress_with_entries_internal(
             test_callers: None,
             callees: None,
             def_use_sites: vec![],
-            cache_tier: None,
         });
     }
 
@@ -598,7 +597,6 @@ fn analyze_focused_with_progress_with_entries_internal(
                 unfiltered_caller_count: 0,
                 impl_trait_caller_count: 0,
                 def_use_sites,
-                cache_tier: None,
             });
         }
     }
@@ -670,7 +668,6 @@ fn analyze_focused_with_progress_with_entries_internal(
         unfiltered_caller_count,
         impl_trait_caller_count,
         def_use_sites,
-        cache_tier: None,
     })
 }
 

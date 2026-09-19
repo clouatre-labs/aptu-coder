@@ -310,7 +310,6 @@ mod disk_cache_tests {
             test_callers: None,
             callees: None,
             def_use_sites: Vec::new(),
-            cache_tier: None,
         };
 
         // Act

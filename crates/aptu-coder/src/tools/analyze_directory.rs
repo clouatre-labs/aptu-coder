@@ -252,8 +252,6 @@ pub(crate) async fn analyze_directory_handler(
         Err(arc) => (*arc).clone(),
     };
 
-    output.cache_tier = Some(dir_cache_hit.as_str().to_owned());
-
     if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
