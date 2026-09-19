@@ -113,7 +113,7 @@ pub(crate) async fn run_focused_with_auto_summary(
     let config_initial = analyze::FocusedAnalysisConfig {
         focus: analysis_params.symbol.clone(),
         match_mode: analysis_params.match_mode.clone(),
-        follow_depth: analysis_params.follow_depth,
+        follow_depth: analysis_params.max_depth.unwrap_or(1),
         max_depth: analysis_params.max_depth,
         ast_recursion_limit: None,
         use_summary: use_summary_for_task,
@@ -293,7 +293,7 @@ pub(crate) async fn handle_focused_mode(
         path,
         &entries,
         params.git_ref.as_deref(),
-        params.follow_depth.unwrap_or(1),
+        params.max_depth.unwrap_or(1),
         &params.match_mode.clone().unwrap_or_default(),
         params.impl_only.unwrap_or(false),
         None,
@@ -305,7 +305,7 @@ pub(crate) async fn handle_focused_mode(
     }
 
     // Compute L2 disk cache key by streaming CallGraphCacheKey fields through blake3.
-    // Same pattern as analyze_directory: root_path + git_ref + follow_depth + match_mode
+    // Same pattern as analyze_directory: root_path + git_ref + max_depth + match_mode
     // + impl_only + per-file mtimes.
     let disk_key = {
         let mut hasher = blake3::Hasher::new();
@@ -313,7 +313,7 @@ pub(crate) async fn handle_focused_mode(
         if let Some(ref git_ref) = params.git_ref {
             hasher.update(git_ref.as_bytes());
         }
-        hasher.update(&params.follow_depth.unwrap_or(1).to_le_bytes());
+        hasher.update(&params.max_depth.unwrap_or(1).to_le_bytes());
         let match_mode_str =
             match serde_json::to_string(&params.match_mode.clone().unwrap_or_default()) {
                 Ok(s) => s,
@@ -366,7 +366,6 @@ pub(crate) async fn handle_focused_mode(
         path: path.to_path_buf(),
         symbol: params.symbol.clone(),
         match_mode: params.match_mode.clone().unwrap_or_default(),
-        follow_depth: params.follow_depth.unwrap_or(1),
         max_depth: params.max_depth,
         impl_only: params.impl_only,
         def_use: params.mode.as_ref() == Some(&SymbolAnalysisMode::DefUse),
