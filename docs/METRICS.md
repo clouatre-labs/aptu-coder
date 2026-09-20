@@ -56,7 +56,7 @@ Each line in the JSONL file is one JSON object:
 | `is_paginated` | `bool` | For resources, true when the request contains `cursor=`, including malformed cursors; otherwise indicates tool continuation pages. Omitted from JSONL when `false`. |
 | `fields_projected` | `bool` | `true` when the `fields` projection parameter was supplied on `analyze_file`. Omitted from JSONL when `false`. |
 | `match_mode` | `string \| null` | The `match_mode` value passed to `analyze_symbol` (e.g. `"exact"`, `"contains"`); `null` when not set (defaults to `exact` in the handler). Omitted from JSONL when `null`. |
-| `follow_depth` | `u32 \| null` | The `follow_depth` value passed to `analyze_symbol`; `null` when the parameter was not explicitly supplied. Omitted from JSONL when `null`. |
+| `follow_depth` | `u32 \| null` | Effective call-graph traversal depth for `analyze_symbol` (field name kept for schema continuity; the value is derived from the `max_depth` parameter — the former `follow_depth` parameter was removed). `null` when `max_depth` was not explicitly supplied. Omitted from JSONL when `null`. |
 | `mode` | `string \| null` | The `mode` value passed to `analyze_symbol` (`"call_graph"`, `"import_lookup"`, or `"def_use"`); `null` when not set (defaults to `call_graph` in the handler). Omitted from JSONL when `null`. |
 | `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
 | `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
@@ -151,9 +151,8 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `is_paginated` | `false` (omitted when false; `true` only when a `cursor` was supplied) |
 | `fields_projected` | `false` (omitted when false; `true` only when `fields` was supplied on `analyze_file`) |
 | `match_mode` | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
-| `follow_depth` | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
-| `import_lookup` | `false` (omitted when false; `true` only when `import_lookup=true` was set) |
-| `def_use` | `false` (omitted when false; `true` only when `def_use=true` was set) |
+| `follow_depth` | `null` (omitted when null; derived from the `max_depth` parameter on `analyze_symbol`) |
+| `import_lookup` / `def_use` | removed (superseded by the `mode` field; only emitted by older server versions) |
 | `impl_only` | `false` (omitted when false; `true` only when `impl_only=true` was set) |
 | `stdin_provided` | `false` (omitted when false; `true` only when `stdin` was supplied to `exec_command`) |
 | `working_dir_used` | `false` (omitted when false; `true` only when `working_dir` was supplied) |

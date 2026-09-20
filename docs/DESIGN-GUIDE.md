@@ -212,7 +212,7 @@ The annotation posture for this server is stable and locked until new MCP SEPs l
 
 *Table 4: Tool annotation posture by family. See [ROADMAP.md](ROADMAP.md) for the rationale and SEP tracking references.*
 
-`readOnlyHint: true` on `analyze_*` tools allows clients to call them autonomously without a confirmation step, which is the correct behavior for a passive code analysis server. `readOnlyHint: false` on `edit_*` tools signals that they perform writes; cautious clients may require confirmation before execution. `openWorldHint: false` on all tools signals that results are deterministic given the input path, not dependent on external network state.
+`readOnlyHint: true` on `analyze_*` tools allows clients to call them autonomously without a confirmation step, which is the correct behavior for a passive code analysis server. `readOnlyHint: false` on `edit_*` tools signals that they perform writes; cautious clients may require confirmation before execution. `openWorldHint: false` on all tools except `exec_command` signals that results are deterministic given the input path, not dependent on external network state; `exec_command` runs arbitrary child processes and is correctly marked `openWorldHint: true`.
 
 ### 7.1 rmcp Compile-Time Limitations
 

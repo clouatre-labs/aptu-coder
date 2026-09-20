@@ -28,12 +28,12 @@ These values are safe to record as span attributes and appear in all tool spans.
 | `service.version` | semver string | `env!("CARGO_PKG_VERSION")` at init |
 | `path` | filesystem path | analyze/edit params |
 | `symbol` | symbol name | `analyze_symbol` param |
-| `follow_depth`, `max_depth` | integers | analyze params |
+| `max_depth` | integer | `analyze_symbol` param (recorded in JSONL under the legacy field name `follow_depth`) |
 | `match_mode`, `impl_only`, `import_lookup` | bounded enums/bools | analyze params |
 | `summary`, `git_ref` | bool/optional string | analyze params |
 | `working_dir` | filesystem path | exec_command param |
 | `exit_code` | integer | exec_command result |
-| `timed_out`, `output_truncated` | booleans | exec_command result |
+| `timed_out` (includes cancellation kills), `output_truncated` | booleans | exec_command result |
 | `error` | boolean | error paths |
 | `error.type` | error category string | error paths |
 | `cache_hit`, `auto_summary`, `truncated` | booleans | span events |
