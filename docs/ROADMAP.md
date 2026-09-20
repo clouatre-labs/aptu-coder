@@ -86,7 +86,7 @@ All source, docs, benchmark tooling, env vars, and binary references updated. En
 - `CODE_ANALYZE_DIR_CACHE_CAPACITY` → `APTU_CODER_DIR_CACHE_CAPACITY`
 - `CODE_ANALYZE_FILE_CACHE_CAPACITY` → `APTU_CODER_FILE_CACHE_CAPACITY`
 
-`migrate_legacy_metrics_dir()` handles XDG data path migration at runtime for existing users with metrics data in the old directory.
+`migrate_legacy_metrics_dir()` handled XDG data path migration at runtime for existing users with metrics data in the old directory. (This one-time migration was removed in #1584; servers 0.34.3+ no longer perform it.)
 
 ### [Complete] Fortran handler: module extraction and call graph (#828)
 
@@ -179,7 +179,7 @@ Several incremental improvements to the metrics schema and runtime behavior:
 - **#1147, #1148, #1149**: L2 on-disk call-graph cache added to `analyze_symbol`. Cache is keyed by canonical path + git HEAD SHA. Configurable via `APTU_CODER_DISK_CACHE_DIR` (default: `$XDG_DATA_HOME/aptu-coder/analysis-cache`) and `APTU_CODER_DISK_CACHE_DISABLED=1`. `cache_tier: l1_memory | l2_disk` added to `MetricEvent`; `cache_write_failure` field tracks disk write failures.
 - **#1150, #1154**: `language` field added to JSONL `MetricEvent` schema. Populated for `analyze_file` and `analyze_module` calls with the human-readable language name (e.g., `"rust"`, `"python"`). Omitted from JSONL when null for backward compatibility.
 - **#1153**: `exec_command` now rejects heredoc syntax (`<<MARKER`) where the closing delimiter is absent before spawning the child process, returning `INVALID_PARAMS` with a diagnostic message.
-- **#1155**: `timeout_secs` parameter re-added to `exec_command` (was removed in #1122). When set to a positive integer, the child process is killed after that many seconds; `timed_out: true` is set in `ShellOutput` and `MetricEvent`; `exit_code` is null. A value of 0 or omitted means no limit.
+- **#1155**: `timeout_secs` parameter re-added to `exec_command` (was removed in #1122). When set to a positive integer, the child process is killed after that many seconds; `timed_out: true` is set in `ShellOutput` and `MetricEvent`; `exit_code` is null. A value of 0 or omitted means no limit. (Superseded in #1552: client-configurable timeout parameters were removed; the child is killed by the server-side 300 s cap or via `CancellationToken` on request cancellation.)
 - **#1156**: `call_frequency` on `analyze_symbol` output is now filtered out when the `Functions` field is not in the projected fields set, reducing response size for callers that only request caller/callee lists.
 - **#1124**: Raw path interpolation removed from model-visible error messages (security fix).
 - **#1125**: `edit_replace` accepts empty `new_text` to delete the matched block. `max_depth` defaults to 3 when omitted. Login shell PATH snapshot on macOS now uses `$SHELL` first for correct profile sourcing.
