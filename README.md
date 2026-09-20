@@ -35,7 +35,7 @@ AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.
 | Native | 877k tokens, $2.85 | 2162k tokens, $2.21 |
 | **Savings** | **46% fewer tokens, 42% cheaper** | **68% fewer tokens, 68% cheaper** |
 
-A real end-to-end multi-agent run against this repository itself: five refactoring issues (#1578–#1582) fixed by the [coder skill](https://github.com/clouatre-labs/agentic-coder-skill) in one orchestrated session — 16 subagent spawns, ~1h42m, three human interventions — producing PRs #1584–#1588, all merged with CI green. [Case study](https://github.com/clouatre-labs/agentic-coder-skill/blob/main/docs/examples/2026-09-aptu-coder-5-issues.md).
+A real end-to-end multi-agent run against this repository itself: five refactoring issues (#1578–#1582) fixed by the [coder skill](https://github.com/clouatre-labs/agentic-coder-skill) in one orchestrated session — 23 subagent spawns (5 scout, 1 guard, 10 build, 7 check), ~1h42m, three human interventions — producing PRs #1584–#1588, all merged with CI green. [Case study](https://github.com/clouatre-labs/agentic-coder-skill/blob/main/docs/examples/2026-09-aptu-coder-5-issues.md).
 
 ## Overview
 
