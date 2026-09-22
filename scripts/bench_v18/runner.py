@@ -36,9 +36,17 @@ STAGES = ["wiring_smoke", "smoke", "pilot", "sealed"]
 PROVIDER = "zai"
 MODEL = "glm-5.3-flash"
 
-# Per-arm flag set, verbatim per merged #1603 methodology.
+# Per-arm flag set. --no-extensions is intentionally absent: MCP support in
+# pi is provided by the pi-mcp-adapter package, which is itself an extension
+# and would be disabled by that flag (verified live: with --no-extensions
+# plus a fresh shadow dir, the shadow-dir mcp.json is never read and the
+# MCP arm exposes zero MCP tools). Ambient-configuration isolation is
+# instead provided by the PI_CODING_AGENT_DIR shadow dir: the launcher's
+# real agent dir is fully shadowed, so ambient extensions, skills, and
+# mcp.json cannot leak. Each shadow dir carries a minimal settings.json
+# naming only the packages that arm needs.
 COMMON_FLAGS = [
-    "--no-extensions", "--no-skills", "--no-context-files",
+    "--no-skills", "--no-context-files",
 ]
 NATIVE_TOOLS = ["--tools", "read,bash"]
 MCP_EXCLUDE = ["--exclude-tools", "edit_overwrite,edit_replace,exec_command"]
@@ -59,16 +67,23 @@ def build_invocation(
     agent_dir.mkdir(parents=True, exist_ok=True)
     if arm == "native":
         (agent_dir / "mcp.json").write_text('{"mcpServers": {}}\n')
+        (agent_dir / "settings.json").write_text('{"packages": []}\n')
         arm_flags = NATIVE_TOOLS
     else:
+        # directTools: true surfaces the four analysis tools directly by
+        # name (aptu-coder_analyze_directory etc.) instead of behind the
+        # adapter's mcp search/call gateway tool; verified live.
         (agent_dir / "mcp.json").write_text(json.dumps({
             "mcpServers": {
                 "aptu-coder": {
                     "type": "stdio",
                     "command": "aptu-coder",
+                    "directTools": True,
                 },
             },
         }) + "\n")
+        (agent_dir / "settings.json").write_text(
+            '{"packages": ["npm:pi-mcp-adapter"]}\n')
         arm_flags = MCP_EXCLUDE
     cmd = ["pi", "-p", "--mode", "json", "--provider", PROVIDER,
            "--model", MODEL, *COMMON_FLAGS, *arm_flags,

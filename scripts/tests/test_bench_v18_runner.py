@@ -140,3 +140,30 @@ def test_invocation_pins_preregistered_model(tmp_path):
     assert "--model" in cmd and "glm-5.3-flash" in cmd
     i_p, i_m = cmd.index("--provider"), cmd.index("--model")
     assert cmd[i_p + 1] == "zai" and cmd[i_m + 1] == "glm-5.3-flash"
+
+
+def test_shadow_dirs_carry_isolation_config(tmp_path):
+    for arm in ("native", "mcp"):
+        runner.build_invocation(
+            arm, tmp_path,
+            tmp_path / "sessions" / "x" / "t" / arm, "prompt",
+        )
+        agent_dir = tmp_path / f"agent-{arm}"
+        mcp = json.loads((agent_dir / "mcp.json").read_text())
+        settings = json.loads((agent_dir / "settings.json").read_text())
+        if arm == "native":
+            assert mcp == {"mcpServers": {}}
+            assert settings == {"packages": []}
+        else:
+            server = mcp["mcpServers"]["aptu-coder"]
+            assert server["type"] == "stdio"
+            assert server["directTools"] is True
+            assert settings == {"packages": ["npm:pi-mcp-adapter"]}
+
+
+def test_common_flags_do_not_disable_extensions():
+    cmd, _ = runner.build_invocation(
+        "mcp", Path("/tmp"), Path("/tmp/s/x/t/mcp"), "p",
+    )
+    assert "--no-extensions" not in cmd
+    assert "--no-skills" in cmd and "--no-context-files" in cmd

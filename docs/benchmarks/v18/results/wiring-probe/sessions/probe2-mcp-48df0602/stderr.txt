@@ -1,0 +1,7 @@
+
+added 44 packages, and audited 45 packages in 1s
+
+19 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities

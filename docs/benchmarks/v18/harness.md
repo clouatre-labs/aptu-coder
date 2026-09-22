@@ -38,16 +38,19 @@ from issue 1604 and how they fit the merged v18 methodology
 Common to both arms:
 
 ```text
-pi -p --mode json --provider zai --model glm-5.3-flash --no-extensions --no-skills --no-context-files --session-dir <abs>/sessions/<run-id>
+pi -p --mode json --provider zai --model glm-5.3-flash --no-skills --no-context-files --session-dir <abs>/sessions/<run-id>
 ```
 
 Native arm adds `--tools read,bash` and runs with
 `PI_CODING_AGENT_DIR=<abs>/agent-native` containing an `mcp.json` with zero
-MCP servers. MCP arm adds
+MCP servers and a `settings.json` with `{"packages": []}`. MCP arm adds
 `--exclude-tools edit_overwrite,edit_replace,exec_command` and runs with
 `PI_CODING_AGENT_DIR=<abs>/agent-mcp` whose `mcp.json` registers exactly
-one stdio server (aptu-coder). Shadow dirs are freshly created and empty
-per run; all paths are absolute.
+one stdio server (aptu-coder, `directTools: true`) alongside a
+`settings.json` with `{"packages": ["npm:pi-mcp-adapter"]}` — MCP support
+in pi is provided by that package, so `--no-extensions` is not used (it
+would disable the adapter; ambient isolation comes from the shadow dir
+itself). Shadow dirs are freshly created per run; all paths are absolute.
 
 ## Budget enforcement
 
