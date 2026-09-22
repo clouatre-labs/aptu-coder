@@ -109,21 +109,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.extract_version.outputs.version }}
         run: |
-          # Idempotent: skip creation if release already exists; if creation fails with 422
-          # (concurrent race), the final view confirms existence and exits 0.
-          # Created as a DRAFT now; the final publish-release job flips it public after
-          # all producers succeed (immutable-release prerequisite).
-          if [ -f "releases/v${VERSION}.md" ]; then
-            NOTES=(--notes-file "releases/v${VERSION}.md")
+          # Idempotent and rerun-safe: if the release already exists it must be a
+          # draft; a published (immutable) release must fail fast because
+          # rerunning the release workflow for a published release is not
+          # supported (use release-repair.yml for pre-immutability releases
+          # only). Created as a DRAFT now; the final publish-release job flips
+          # it public after all producers succeed.
+          if gh release view "v${VERSION}" --json isDraft --jq '.isDraft' &>/dev/null; then
+            # A genuine API failure above makes the first view fail, so this
+            # branch only runs when the release exists; a second failure here
+            # would exit non-zero and abort the step.
+            if [ "$(gh release view "v${VERSION}" --json isDraft --jq '.isDraft')" != "true" ]; then
+              echo "Release v${VERSION} already exists and is published; rerunning the release workflow is not supported. Use release-repair.yml only for pre-immutability releases." >&2
+              exit 1
+            fi
+            echo "Release v${VERSION} exists as draft; skipping creation."
           else
-            NOTES=(--generate-notes)
-          fi
-          gh release view "v${VERSION}" &>/dev/null \
-            || gh release create "v${VERSION}" \
+            if [ -f "releases/v${VERSION}.md" ]; then
+              NOTES=(--notes-file "releases/v${VERSION}.md")
+            else
+              NOTES=(--generate-notes)
+            fi
+            gh release create "v${VERSION}" \
               --title "v${VERSION}" \
               --draft \
               "${NOTES[@]}" \
-            || gh release view "v${VERSION}" &>/dev/null
+            || gh release view "v${VERSION}" --json isDraft --jq '.isDraft' &>/dev/null
+          fi
 
       - name: Dry run - skip release creation
         if: ${{ env.DRY_RUN == 'true' }}
