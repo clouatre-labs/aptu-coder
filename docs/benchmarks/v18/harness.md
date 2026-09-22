@@ -38,7 +38,7 @@ from issue 1604 and how they fit the merged v18 methodology
 Common to both arms:
 
 ```text
-pi -p --mode json --no-extensions --no-skills --no-context-files --session-dir <abs>/sessions/<run-id>
+pi -p --mode json --provider zai --model glm-5.3-flash --no-extensions --no-skills --no-context-files --session-dir <abs>/sessions/<run-id>
 ```
 
 Native arm adds `--tools read,bash` and runs with
