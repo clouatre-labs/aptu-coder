@@ -6,6 +6,29 @@ mod common;
 use common::call_tool_raw;
 use serial_test::serial;
 
+/// Assert that exec_command output strips ANSI escape sequences: the plain
+/// text survives and no ESC (0x1b) byte reaches the delivered output.
+#[tokio::test]
+async fn exec_command_output_is_ansi_stripped() {
+    // Arrange: command emitting ANSI escape sequences on stdout.
+    // Act: execute via the MCP tool harness.
+    let resp = call_exec_command_raw(serde_json::json!({
+        "command": "printf '\\033[31mred\\033[0m\\n'"
+    }))
+    .await;
+
+    // Assert: plain text present, no ESC byte anywhere in the payload.
+    let payload = serde_json::to_string(&resp).expect("serialize response");
+    assert!(
+        payload.contains("red"),
+        "output should contain plain text 'red': {payload}"
+    );
+    assert!(
+        !payload.contains('\u{1b}'),
+        "output must not contain ESC bytes: {payload}"
+    );
+}
+
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
 }

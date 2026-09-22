@@ -32,6 +32,7 @@
 pub mod analyze;
 /// Internal implementation details for focused analysis. Use the `analyze` module for the public API.
 pub(crate) mod analyze_focused;
+pub mod ansi;
 pub mod cache;
 pub mod cache_disk;
 pub mod completion;
