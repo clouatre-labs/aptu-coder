@@ -12,6 +12,7 @@ is maintainer-only post-merge.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import uuid
@@ -202,11 +203,18 @@ def run_session(
 
 _KEY_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.IGNORECASE)
 
+# Credentials the child harness itself requires: pi resolves provider auth
+# from the environment or from auth.json under the agent dir, and the
+# benchmark's fresh PI_CODING_AGENT_DIR shadow dir contains no auth.json,
+# so the pre-registered provider key must survive the scrub.
+PROVIDER_KEY_ALLOWLIST = frozenset({"ZAI_API_KEY"})
+
 
 def _safe_env() -> dict[str, str]:
     """Pass through the environment minus obvious credential variables."""
     return {
-        k: v for k, v in __import__("os").environ.items() if not _KEY_RE.search(k)
+        k: v for k, v in os.environ.items()
+        if not (_KEY_RE.search(k) and k not in PROVIDER_KEY_ALLOWLIST)
     }
 
 

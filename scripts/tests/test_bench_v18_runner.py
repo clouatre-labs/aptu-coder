@@ -120,3 +120,13 @@ def test_synthetic_cost_kill_end_to_end(tmp_path):
 def test_run_ids_are_opaque_and_random():
     a, b = runner.new_run_id(), runner.new_run_id()
     assert a != b and len(a) == 32
+
+
+def test_safe_env_preserves_provider_key_and_strips_other_secrets(monkeypatch):
+    monkeypatch.setenv("ZAI_API_KEY", "provider-key")
+    monkeypatch.setenv("SOME_SERVICE_API_KEY", "other-secret")
+    monkeypatch.setenv("SOME_SERVICE_TOKEN", "other-token")
+    env = runner._safe_env()
+    assert env["ZAI_API_KEY"] == "provider-key"
+    assert "SOME_SERVICE_API_KEY" not in env
+    assert "SOME_SERVICE_TOKEN" not in env
