@@ -111,10 +111,18 @@ jobs:
         run: |
           # Idempotent: skip creation if release already exists; if creation fails with 422
           # (concurrent race), the final view confirms existence and exits 0.
+          # Created as a DRAFT now; the final publish-release job flips it public after
+          # all producers succeed (immutable-release prerequisite).
+          if [ -f "releases/v${VERSION}.md" ]; then
+            NOTES=(--notes-file "releases/v${VERSION}.md")
+          else
+            NOTES=(--generate-notes)
+          fi
           gh release view "v${VERSION}" &>/dev/null \
             || gh release create "v${VERSION}" \
               --title "v${VERSION}" \
-              --generate-notes \
+              --draft \
+              "${NOTES[@]}" \
             || gh release view "v${VERSION}" &>/dev/null
 
       - name: Dry run - skip release creation
@@ -357,9 +365,9 @@ jobs:
           
           for target in "${targets[@]}"; do
             MCPB_NAME="aptu-coder-${VERSION}-${target}.mcpb"
-            DOWNLOAD_URL="https://github.com/clouatre-labs/aptu-coder/releases/download/${RELEASE_TAG}/${MCPB_NAME}"
-            
-            curl -fsSL "$DOWNLOAD_URL" -o "/tmp/${MCPB_NAME}"
+            # Authenticated download required because draft release assets are not
+            # publicly reachable (the release is still a draft at this point).
+            gh release download "${RELEASE_TAG}" -p "${MCPB_NAME}" -O "/tmp/${MCPB_NAME}"
             
             sha=$(sha256sum "/tmp/${MCPB_NAME}" | cut -d' ' -f1)
             shas["${target}"]="$sha"
@@ -463,3 +471,20 @@ jobs:
           # propagates within 10-15s but spikes under load.
           PUBLISH_GRACE_SLEEP: 30
         run: cargo release publish --execute --no-confirm
+
+  # This job must remain last so the published release is complete: immutable
+  # releases lock assets and notes at publish time, so publishing is the final
+  # step after every producer job has succeeded.
+  publish-release:
+    name: Publish Release
+    needs: [create-release, build-and-attest, update-homebrew, generate-mcpb, publish-registry, publish]
+    if: ${{ env.DRY_RUN != 'true' }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: gh release edit "v${VERSION}" --draft=false --latest

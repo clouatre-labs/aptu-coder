@@ -4,6 +4,9 @@ name: Repair Release
 # Use this when the main release workflow partially failed (e.g., binaries missing).
 # After this workflow completes, run publish-registry-manual.yml separately
 # to republish to the MCP registry.
+# Re-uploads assets with --clobber to an existing release; this is incompatible
+# with GitHub immutable releases once enabled (assets are locked after publish).
+# Intended for repairs on pre-immutability releases only.
 
 on:
   workflow_dispatch:
