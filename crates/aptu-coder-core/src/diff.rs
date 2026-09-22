@@ -97,7 +97,8 @@ impl HunkBuilder {
 /// newline never concatenate records. When the byte or changed-line cap is
 /// hit, emission stops at line granularity, hunk headers are recomputed from
 /// the lines actually emitted, and a `[... diff truncated]` marker is
-/// appended. Identical inputs yield an empty patch.
+/// appended. The marker's bytes are reserved within the cap, so the final
+/// patch is always at most 2 KiB. Identical inputs yield an empty patch.
 #[must_use]
 pub fn unified_diff(old: &str, new: &str) -> DiffOutcome {
     if old == new {
@@ -143,8 +144,10 @@ pub fn unified_diff(old: &str, new: &str) -> DiffOutcome {
                 if !line.ends_with('\n') {
                     line.push('\n');
                 }
+                // Reserve room for the truncation marker so the FINAL
+                // emitted patch (including the marker) stays within the cap.
                 if patch.len() + hunk.header().len() + hunk.body.len() + line.len()
-                    > MAX_PATCH_BYTES
+                    > MAX_PATCH_BYTES - TRUNCATION_MARKER.len()
                 {
                     truncated = true;
                     stop = true;
@@ -267,6 +270,17 @@ mod tests {
         assert!(outcome.patch.contains("+PLAIN\n"));
         assert!(outcome.patch.contains("-reverse\n"));
         assert!(outcome.patch.contains("+tail\n"));
+    }
+
+    #[test]
+    fn final_patch_never_exceeds_cap_when_truncation_fires() {
+        let filler = "y".repeat(60);
+        let old: String = (0..60).map(|i| format!("{filler}{i:04}\n")).collect();
+        let new: String = (0..60).map(|i| format!("{filler}Z{i:03}\n")).collect();
+        let outcome = unified_diff(&old, &new);
+        assert!(outcome.truncated);
+        assert!(outcome.patch.ends_with(TRUNCATION_MARKER));
+        assert!(outcome.patch.len() <= MAX_PATCH_BYTES);
     }
 
     #[test]

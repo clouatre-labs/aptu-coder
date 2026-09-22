@@ -185,3 +185,34 @@ async fn edit_overwrite_include_diff_whole_file_and_empty_patch_suppressed() {
     );
     drop(dir);
 }
+
+#[tokio::test]
+async fn edit_overwrite_include_diff_binary_pre_edit_emits_no_diff() {
+    // Arrange: pre-edit file is not valid UTF-8, so no reliable baseline
+    // exists and the diff fence must be suppressed.
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = dir.path().to_str().expect("utf-8").to_string();
+    let name = "diff_binary.bin";
+    std::fs::write(dir.path().join(name), [0xFF, 0xFE, 0x00, 0x01]).expect("should write binary");
+
+    // Act
+    let resp = call_tool_raw(
+        "edit_overwrite",
+        serde_json::json!({
+            "path": name,
+            "content": "text content\n",
+            "working_dir": working_dir,
+            "include_diff": true
+        }),
+    )
+    .await;
+
+    // Assert: summary and structured fields remain, but no diff fence.
+    let text = success_text(&resp, "text block");
+    assert!(text.starts_with("Wrote "));
+    assert!(!text.contains("```diff"));
+    let sc = &resp["result"]["structuredContent"];
+    assert_eq!(sc["diff_truncated"], serde_json::json!(false));
+    assert_eq!(sc["diff_bytes"], serde_json::json!(0));
+}

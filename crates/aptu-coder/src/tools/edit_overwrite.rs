@@ -79,16 +79,30 @@ pub(crate) async fn edit_overwrite(
     let include_diff = params.include_diff.unwrap_or(false);
     let handle = tokio::task::spawn_blocking(move || {
         // Capture pre-edit content before writing so the include_diff patch is
-        // a whole-file unified diff of the overwrite. A failed pre-read (e.g.
-        // the path does not exist yet) is treated as an empty pre-edit document
-        // so the diff shows the file creation.
-        let pre_edit =
-            include_diff.then(|| std::fs::read_to_string(&resolved_path).unwrap_or_default());
+        // a whole-file unified diff of the overwrite. A missing pre-edit file
+        // is treated as an empty pre-edit document so the diff shows the file
+        // creation. Any other pre-read failure or non-UTF-8 (binary) content
+        // provides no reliable baseline, so no diff is emitted.
+        let pre_edit: Option<Option<String>> = if !include_diff {
+            None
+        } else {
+            Some(match std::fs::read(&resolved_path) {
+                // A missing pre-edit file is a creation; diff against empty.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(String::new()),
+                // Read errors or non-UTF-8 (binary) content: no reliable
+                // baseline, so no diff is emitted.
+                other => other.ok().and_then(|bytes| String::from_utf8(bytes).ok()),
+            })
+        };
         let result = aptu_coder_core::edit_overwrite_content(&resolved_path, &content);
         let diff_outcome = match (include_diff, pre_edit, &result) {
-            (true, Some(before), Ok(_)) => {
-                let after = std::fs::read_to_string(&resolved_path).unwrap_or_default();
-                aptu_coder_core::diff::unified_diff(&before, &after)
+            (true, Some(Some(before)), Ok(_)) => {
+                let after = std::fs::read(&resolved_path)
+                    .ok()
+                    .and_then(|bytes| String::from_utf8(bytes).ok());
+                after.map_or_else(aptu_coder_core::diff::DiffOutcome::default, |after| {
+                    aptu_coder_core::diff::unified_diff(&before, &after)
+                })
             }
             _ => aptu_coder_core::diff::DiffOutcome::default(),
         };
