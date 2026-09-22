@@ -42,7 +42,7 @@ Run IDs are opaque randomized values carrying no arm/model/task-family informati
 
 ## Run ladder (nothing touches the sealed run until cheaper stages pass)
 
-1. **Wiring smoke (1 live call):** verify aptu-coder MCP reachable from the harness cwd via a pre-flight `analyze_directory` on a fixture path (the v17 pre-flight gate, retained) — this call runs in its own single pi session, counted in the cost table below; capture exact MCP tool names pi exposes and assert they equal the pre-registered allowlist set; verify usage/token telemetry lands in the session JSONL.
+1. **Wiring smoke (2 sessions, 1 live call — one session per arm):** the MCP-arm session verifies aptu-coder MCP reachable from the harness cwd via a single live pre-flight `analyze_directory` on a fixture path (the v17 pre-flight gate, retained), captures the exposed MCP tool names and asserts they equal the pre-registered allowlist set, and verifies usage/token telemetry lands in the session JSONL; the native-arm session asserts pi exposes zero MCP tools/servers (ambient-leak guard). Both sessions count in the cost table below.
 2. **Smoke:** one task pair (2 live sessions). Budget guard: if combined spend exceeds USD 0.10, abort and diagnose before proceeding.
 3. **Pilot:** 10 task pairs (20 sessions), explicitly outside the sealed dataset; results inspected for harness defects only. Per-session spend guard: a session whose metered cost exceeds USD 0.25 is killed and the defect rule applies.
 4. **Full sealed run:** N = 40 task pairs (80 sessions), frozen config (no runner/prompt/flag changes once begun; any defect aborts and the full run re-executes from scratch — the v17 defect rule, retained). Same per-session USD 0.25 spend guard; a full-abort re-execution must still fit the remaining budget.
@@ -66,12 +66,12 @@ Arithmetic (verified list prices, Z.AI, 2026-09; re-verify on the run date and r
 - Rates: input USD 0.075/1M, output USD 0.25/1M.
 - Assumed mean session size for a small paired analysis task: 100k input (native-arm reading is input-heavy; this is deliberately conservative) + 4k output = USD 0.0085/session.
 - Ladder totals:
-  - Wiring smoke + smoke: 3 sessions (1 wiring-smoke session carrying the single live pre-flight `analyze_directory` call, plus 2 smoke sessions) = USD 0.03 (stage budget cap: USD 0.10).
+  - Wiring smoke + smoke: 4 sessions (2 wiring-smoke sessions — one per arm — plus 2 smoke sessions) = USD 0.03 (stage budget cap: USD 0.10).
   - Pilot: 20 sessions = USD 0.17 (stage budget cap: USD 0.60).
   - Sealed run: 80 sessions = USD 0.68 (stage budget cap: USD 2.00).
   - One full-abort re-execution of the sealed run: +USD 0.68 (held in reserve).
 - Planned total: about USD 0.90; ceiling with full contingency and 3x cost overrun per session: still under USD 5.
-- If the fallback model is claude-haiku-4-5 (USD 1/5 per 1M), the same conservative session profile costs USD 0.12/session (0.10 input + 0.02 output). At that rate the full planned ladder (103 sessions: 3 smoke + 20 pilot + 80 sealed) would cost about USD 12.36 and far exceed the USD 5 ceiling, so the claude-haiku-4-5 fallback is viable only if the ladder is re-cut at pilot time within the remaining budget (smaller N and/or smaller pilot, computed from actual sessions remaining at that point); if the remaining budget cannot absorb the re-cut plan, the run aborts rather than switching models. Decide at pilot time, before the sealed run.
+- If the fallback model is claude-haiku-4-5 (USD 1/5 per 1M), the same conservative session profile costs USD 0.12/session (0.10 input + 0.02 output). At that rate the full planned ladder (104 sessions: 4 smoke + 20 pilot + 80 sealed) would cost about USD 12.48 and far exceed the USD 5 ceiling, so the claude-haiku-4-5 fallback is viable only if the ladder is re-cut at pilot time within the remaining budget (smaller N and/or smaller pilot, computed from actual sessions remaining at that point); if the remaining budget cannot absorb the re-cut plan, the run aborts rather than switching models. Decide at pilot time, before the sealed run.
 
 Enforcement, not just estimation: the runner meters cost per session from the JSONL usage fields, kills any session above USD 0.25, and halts the ladder when a stage cap is hit. Exceeding USD 5 total is a defect that stops execution.
 
