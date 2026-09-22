@@ -137,6 +137,14 @@ pub struct MetricEvent {
     /// single-edit form. Only populated for `edit_replace`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_count: Option<usize>,
+    /// Whether the include_diff patch was truncated by the caps. Only populated
+    /// for `edit_replace`/`edit_overwrite` when `include_diff=true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_truncated: Option<bool>,
+    /// Byte length of the include_diff patch. Only populated for
+    /// `edit_replace`/`edit_overwrite` when `include_diff=true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_bytes: Option<usize>,
 }
 
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
@@ -180,6 +188,8 @@ pub(crate) struct MetricEventBuilder {
     stdout_bytes_raw: Option<u64>,
     stderr_bytes_raw: Option<u64>,
     edit_count: Option<usize>,
+    diff_truncated: Option<bool>,
+    diff_bytes: Option<usize>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -367,6 +377,16 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    pub(crate) fn diff_truncated(mut self, v: Option<bool>) -> Self {
+        self.diff_truncated = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn diff_bytes(mut self, v: Option<usize>) -> Self {
+        self.diff_bytes = v;
+        self
+    }
+    #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
@@ -407,6 +427,8 @@ impl MetricEventBuilder {
             stdout_bytes_raw: self.stdout_bytes_raw,
             stderr_bytes_raw: self.stderr_bytes_raw,
             edit_count: self.edit_count,
+            diff_truncated: self.diff_truncated,
+            diff_bytes: self.diff_bytes,
         }
     }
 }
@@ -511,13 +533,21 @@ pub(crate) fn record_otel_metrics(event: &MetricEvent) {
 
     let error_type = event.error_type.as_deref().unwrap_or("success");
     let (method, tool_name) = otel_labels(event);
-    let attributes = [
+    // Fixed attributes must live in this array or OTel drops them; the optional
+    // diff attributes are appended only when the edit tools set them.
+    let mut attributes = vec![
         KeyValue::new("gen_ai.tool.name", tool_name),
         KeyValue::new("error.type", error_type.to_string()),
         KeyValue::new("mcp.method.name", method),
         KeyValue::new("mcp.protocol.version", ProtocolVersion::LATEST.as_str()),
         KeyValue::new("network.transport", "pipe"),
     ];
+    if let Some(v) = event.diff_truncated {
+        attributes.push(KeyValue::new("diff.truncated", v));
+    }
+    if let Some(v) = event.diff_bytes {
+        attributes.push(KeyValue::new("diff.bytes", v as i64));
+    }
 
     histogram.record(event.duration_ms as f64 / 1000.0, &attributes);
     counter.add(1, &attributes);
@@ -698,6 +728,8 @@ mod tests {
             stdout_bytes_raw: None,
             stderr_bytes_raw: None,
             edit_count: None,
+            diff_truncated: None,
+            diff_bytes: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;
@@ -731,6 +763,24 @@ fn test_metric_event_builder_edit_count_serializes() {
     let single = MetricEventBuilder::new("analyze_file", "ok", 10).build();
     let json = serde_json::to_string(&single).unwrap();
     assert!(!json.contains("edit_count"));
+}
+
+#[test]
+fn test_metric_event_builder_diff_fields_serialize() {
+    // include_diff=true edit events carry diff_truncated and diff_bytes; other
+    // tools omit the fields entirely (skip_serializing_if).
+    let with_diff = MetricEventBuilder::new("edit_replace", "ok", 10)
+        .diff_truncated(Some(true))
+        .diff_bytes(Some(512))
+        .build();
+    let json = serde_json::to_string(&with_diff).unwrap();
+    assert!(json.contains(r#""diff_truncated":true"#));
+    assert!(json.contains(r#""diff_bytes":512"#));
+
+    let without_diff = MetricEventBuilder::new("analyze_file", "ok", 10).build();
+    let json = serde_json::to_string(&without_diff).unwrap();
+    assert!(!json.contains("diff_truncated"));
+    assert!(!json.contains("diff_bytes"));
 }
 
 #[test]

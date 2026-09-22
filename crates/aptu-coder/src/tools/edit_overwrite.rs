@@ -4,7 +4,7 @@
 //!
 //! See `tools/mod.rs` for the extraction pattern rules.
 
-use aptu_coder_core::types::{EditOverwriteOutput, EditOverwriteParams};
+use aptu_coder_core::types::EditOverwriteParams;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use tracing::instrument;
 
@@ -76,11 +76,26 @@ pub(crate) async fn edit_overwrite(
     }
 
     let content = params.content.clone();
+    let include_diff = params.include_diff.unwrap_or(false);
     let handle = tokio::task::spawn_blocking(move || {
-        aptu_coder_core::edit_overwrite_content(&resolved_path, &content)
+        // Capture pre-edit content before writing so the include_diff patch is
+        // a whole-file unified diff of the overwrite. A failed pre-read (e.g.
+        // the path does not exist yet) is treated as an empty pre-edit document
+        // so the diff shows the file creation.
+        let pre_edit =
+            include_diff.then(|| std::fs::read_to_string(&resolved_path).unwrap_or_default());
+        let result = aptu_coder_core::edit_overwrite_content(&resolved_path, &content);
+        let diff_outcome = match (include_diff, pre_edit, &result) {
+            (true, Some(before), Ok(_)) => {
+                let after = std::fs::read_to_string(&resolved_path).unwrap_or_default();
+                aptu_coder_core::diff::unified_diff(&before, &after)
+            }
+            _ => aptu_coder_core::diff::DiffOutcome::default(),
+        };
+        result.map(|output| (output, diff_outcome))
     });
 
-    let output: EditOverwriteOutput = match handle.await {
+    let (mut output, diff_outcome) = match handle.await {
         Ok(Ok(v)) => v,
         Ok(Err(aptu_coder_core::EditError::NotAFile(_))) => {
             span.record("error", true);
@@ -186,7 +201,20 @@ pub(crate) async fn edit_overwrite(
         }
     };
 
-    let text = format!("Wrote {} bytes to {}", output.bytes_written, output.path);
+    if include_diff {
+        output.diff_truncated = Some(diff_outcome.truncated);
+        output.diff_bytes = Some(diff_outcome.bytes);
+    }
+    let mut text = format!("Wrote {} bytes to {}", output.bytes_written, output.path);
+    // Single text block: append the fenced patch to the summary (suppress when empty).
+    if include_diff && !diff_outcome.patch.is_empty() {
+        text.push_str("\n\n```diff\n");
+        text.push_str(&diff_outcome.patch);
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str("```");
+    }
     let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
         .with_meta(Some(no_cache_meta()));
     let structured = match serde_json::to_value(&output).map_err(|e| {
@@ -225,6 +253,8 @@ pub(crate) async fn edit_overwrite(
             .session_id(ctx.sid)
             .seq(Some(ctx.seq))
             .working_dir_used(working_dir_used)
+            .diff_truncated(include_diff.then_some(diff_outcome.truncated))
+            .diff_bytes(include_diff.then_some(diff_outcome.bytes))
             .build(),
     );
     Ok(result)

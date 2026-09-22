@@ -954,6 +954,9 @@ pub struct EditOverwriteParams {
     pub working_dir: Option<String>,
     /// UTF-8 content to write.
     pub content: String,
+    /// Append a capped unified diff patch to the response text. Default `false`.
+    #[serde(default)]
+    pub include_diff: Option<bool>,
 }
 
 #[non_exhaustive]
@@ -968,6 +971,15 @@ pub struct EditOverwriteOutput {
         schemars(schema_with = "crate::schema_helpers::integer_schema")
     )]
     pub bytes_written: usize,
+    /// Whether the diff patch was truncated by the caps.
+    #[serde(default)]
+    pub diff_truncated: Option<bool>,
+    /// Byte length of the returned diff patch.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub diff_bytes: Option<usize>,
 }
 
 #[non_exhaustive]
@@ -1002,6 +1014,10 @@ pub struct EditReplaceParams {
     /// Batch edits applied atomically to one file; mutually exclusive with `old_text`/`new_text`.
     #[serde(default)]
     pub edits: Option<Vec<BatchEdit>>,
+    /// Append a capped unified diff patch (pre-batch vs post-batch for batches).
+    /// Default `false`.
+    #[serde(default)]
+    pub include_diff: Option<bool>,
 }
 
 /// One edit item within an `edits[]` batch for `edit_replace`.
@@ -1070,6 +1086,15 @@ pub struct EditReplaceOutput {
     /// Per-edit results. Present only when the batch (`edits[]`) form was used.
     #[serde(default)]
     pub edits: Option<Vec<BatchEditResult>>,
+    /// Whether the diff patch was truncated by the caps.
+    #[serde(default)]
+    pub diff_truncated: Option<bool>,
+    /// Byte length of the returned diff patch.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub diff_bytes: Option<usize>,
 }
 
 /// Filter rule for command output post-processing.

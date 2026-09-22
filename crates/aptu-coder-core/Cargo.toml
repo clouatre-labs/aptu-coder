@@ -41,6 +41,7 @@ tokio-util = { workspace = true }
 tempfile = { workspace = true }
 petgraph = { version = "0.8", features = ["serde-1"] }  # graph/structural.rs: petgraph DiGraph<Node, Edge> with serde
 postcard = { version = "1", default-features = false, features = ["alloc"] }  # graph/store.rs: binary encoding for graph cache
+similar = "3.2"  # diff.rs: TextDiff unified patches for include_diff edit output
 tree-sitter-rust = { workspace = true }
 tree-sitter-go = { workspace = true }
 tree-sitter-cpp = { workspace = true }

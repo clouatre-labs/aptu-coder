@@ -269,6 +269,9 @@ pub fn edit_overwrite_content(
     Ok(EditOverwriteOutput {
         path: path.display().to_string(),
         bytes_written: content.len(),
+        // Diff fields are populated by the MCP handler when include_diff=true.
+        diff_truncated: None,
+        diff_bytes: None,
     })
 }
 
@@ -390,6 +393,8 @@ pub(crate) fn edit_replace_block_inner(
             // Single-edit response shape is unchanged: batch-only fields stay unset.
             content_hash: None,
             edits: None,
+            diff_truncated: None,
+            diff_bytes: None,
         })
     }
 }
@@ -553,6 +558,8 @@ pub fn edit_replace_batch(
                 .collect(),
         ),
         content_hash: Some(blake3::hash(result.as_bytes()).to_hex().to_string()),
+        diff_truncated: None,
+        diff_bytes: None,
     })
 }
 

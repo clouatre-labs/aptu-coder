@@ -523,7 +523,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_overwrite",
         title = "Edit Overwrite",
-        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Works on any file type. Use edit_replace for targeted single-block edits.",
+        description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Works on any file type. Use edit_replace for targeted single-block edits. Pass include_diff=true to append a capped unified diff of the file to the response.",
         output_schema = schema_for_type::<EditOverwriteOutput>(),
         annotations(
             title = "Edit Overwrite",
@@ -564,7 +564,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Batch form: pass edits[] (array of {old_text, new_text, replace_all}) instead of old_text/new_text — mutually exclusive — to apply multiple replacements to one file atomically; all edits validate against one content snapshot, any invalid edit aborts the batch with per-index errors and no write, and a successful batch returns per-edit results plus a post-edit content_hash. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file.",
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Batch form: pass edits[] (array of {old_text, new_text, replace_all}) instead of old_text/new_text — mutually exclusive — to apply multiple replacements to one file atomically; all edits validate against one content snapshot, any invalid edit aborts the batch with per-index errors and no write, and a successful batch returns per-edit results plus a post-edit content_hash. On invalid_params, re-read with analyze_file or analyze_module and retry. Pass include_diff=true to append a capped unified diff (pre-batch vs post-batch for batches) to the response. Use edit_overwrite to replace the whole file.",
         output_schema = schema_for_type::<EditReplaceOutput>(),
         annotations(
             title = "Edit Replace",

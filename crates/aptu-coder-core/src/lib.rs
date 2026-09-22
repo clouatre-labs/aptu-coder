@@ -36,6 +36,7 @@ pub mod cache;
 pub mod cache_disk;
 pub mod completion;
 mod config;
+pub mod diff;
 pub mod edit;
 pub mod file_lock;
 pub mod formatter;

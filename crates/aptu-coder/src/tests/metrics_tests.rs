@@ -186,6 +186,8 @@ fn test_metric_chars_threshold_breach_fires() {
         stdout_bytes_raw: None,
         stderr_bytes_raw: None,
         edit_count: None,
+        diff_truncated: None,
+        diff_bytes: None,
     };
     assert!(
         event.chars_threshold_breach,
@@ -236,6 +238,8 @@ fn test_metric_chars_threshold_breach_no_fire() {
         stdout_bytes_raw: None,
         stderr_bytes_raw: None,
         edit_count: None,
+        diff_truncated: None,
+        diff_bytes: None,
     };
     assert!(
         !event.chars_threshold_breach,

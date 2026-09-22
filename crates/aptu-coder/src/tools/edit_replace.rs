@@ -584,6 +584,8 @@ pub(crate) async fn edit_replace(
     let replace_all = params.replace_all.unwrap_or(false);
     let expected_content_hash = params.expected_content_hash.clone();
     let is_batch = batch_edits.is_some();
+    let include_diff = params.include_diff.unwrap_or(false);
+    let (diff_tx, diff_rx) = std::sync::mpsc::channel();
     let handle = tokio::task::spawn_blocking(move || {
         // Acquire the per-path lock as the first line inside spawn_blocking,
         // holding it across the entire read-modify-write cycle (and across the
@@ -592,7 +594,11 @@ pub(crate) async fn edit_replace(
         // this is fatal and should propagate.
         #[allow(clippy::expect_used)]
         let _guard = path_lock.lock().expect("per-path edit lock poisoned");
-        if let Some(edits) = &batch_edits {
+        // Pre-edit captured inside the lock: patch is pre- vs post-edit.
+        let pre_edit = include_diff
+            .then(|| std::fs::read_to_string(&resolved_path).ok())
+            .flatten();
+        let result = if let Some(edits) = &batch_edits {
             aptu_coder_core::edit_replace_batch(
                 &resolved_path,
                 edits,
@@ -606,7 +612,16 @@ pub(crate) async fn edit_replace(
                 replace_all,
                 expected_content_hash.as_deref(),
             )
-        }
+        };
+        let diff_outcome = match (include_diff, pre_edit, &result) {
+            (true, Some(before), Ok(_)) => {
+                let after = std::fs::read_to_string(&resolved_path).unwrap_or_default();
+                aptu_coder_core::diff::unified_diff(&before, &after)
+            }
+            _ => aptu_coder_core::diff::DiffOutcome::default(),
+        };
+        diff_tx.send(diff_outcome).ok();
+        result
     });
 
     let output: EditReplaceOutput = match handle.await {
@@ -668,7 +683,13 @@ pub(crate) async fn edit_replace(
         }
     };
 
-    let text = if is_batch {
+    let diff_outcome = diff_rx.recv().unwrap_or_default();
+    let mut output = output;
+    if include_diff {
+        output.diff_truncated = Some(diff_outcome.truncated);
+        output.diff_bytes = Some(diff_outcome.bytes);
+    }
+    let mut text = if is_batch {
         format!(
             "Edited {}: {} bytes -> {} bytes ({} batch edits applied)",
             output.path,
@@ -682,6 +703,15 @@ pub(crate) async fn edit_replace(
             output.path, output.bytes_before, output.bytes_after
         )
     };
+    // Single text block: append the fenced patch to the summary (suppress when empty).
+    if include_diff && !diff_outcome.patch.is_empty() {
+        text.push_str("\n\n```diff\n");
+        text.push_str(&diff_outcome.patch);
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str("```");
+    }
     let structured_value = match serde_json::to_value(&output).map_err(|e| {
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -708,6 +738,16 @@ pub(crate) async fn edit_replace(
             .seq(Some(ctx.seq))
             .working_dir_used(working_dir_used)
             .edit_count(edit_count)
+            .diff_truncated(if include_diff {
+                Some(diff_outcome.truncated)
+            } else {
+                None
+            })
+            .diff_bytes(if include_diff {
+                Some(diff_outcome.bytes)
+            } else {
+                None
+            })
             .build(),
     );
     Ok(result)
