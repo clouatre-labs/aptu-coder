@@ -29,6 +29,13 @@ STAGE_BUDGET_CAPS_USD = {
 }
 STAGES = ["wiring_smoke", "smoke", "pilot", "sealed"]
 
+# Pre-registered model (methodology "Model (one)"); pi only honors explicit
+# --provider/--model flags (PI_PROVIDER/PI_MODEL are session-state outputs,
+# not selection inputs), so the manifest-pinned model must be on the command
+# line or sessions silently fall back to the harness default provider.
+PROVIDER = "zai"
+MODEL = "glm-5.3-flash"
+
 # Per-arm flag set, verbatim per merged #1603 methodology.
 COMMON_FLAGS = [
     "--no-extensions", "--no-skills", "--no-context-files",
@@ -63,7 +70,8 @@ def build_invocation(
             },
         }) + "\n")
         arm_flags = MCP_EXCLUDE
-    cmd = ["pi", "-p", "--mode", "json", *COMMON_FLAGS, *arm_flags,
+    cmd = ["pi", "-p", "--mode", "json", "--provider", PROVIDER,
+           "--model", MODEL, *COMMON_FLAGS, *arm_flags,
            "--session-dir", str(session_dir.resolve()), prompt]
     env = {"PI_CODING_AGENT_DIR": str(agent_dir.resolve())}
     return cmd, env
