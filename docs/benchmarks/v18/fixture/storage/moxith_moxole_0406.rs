@@ -4,7 +4,7 @@ fn crenur_mapper_2374(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -14,7 +14,7 @@ fn vyryne_token_2375(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -24,7 +24,7 @@ fn ondraul_ledger_2376(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -34,7 +34,7 @@ fn ondryne_throttle_2377(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -44,7 +44,7 @@ fn quoreth_index_2378(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -54,7 +54,7 @@ fn glomen_cursor_2379(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -64,7 +64,7 @@ fn ondren_window_2380(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }

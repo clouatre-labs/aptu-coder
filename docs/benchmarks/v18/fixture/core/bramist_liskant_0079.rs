@@ -4,7 +4,7 @@ fn bramist_frame_0474(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -14,7 +14,7 @@ fn moxor_queue_0475(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -24,7 +24,7 @@ fn sylvurn_cache_0476(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -34,7 +34,7 @@ fn ondrir_router_0477(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -44,7 +44,7 @@ fn paxist_mapper_0478(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }

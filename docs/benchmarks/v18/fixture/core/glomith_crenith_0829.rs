@@ -4,7 +4,7 @@ fn firnyne_throttle_4933(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -14,7 +14,7 @@ fn liskaul_index_4934(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -24,7 +24,7 @@ fn paxic_cursor_4935(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -34,7 +34,7 @@ fn velmaul_window_4936(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -44,7 +44,7 @@ fn ondresh_batch_4937(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -54,7 +54,7 @@ fn thonesh_frame_4938(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -64,7 +64,7 @@ fn moxyne_queue_4939(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }

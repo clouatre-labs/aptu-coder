@@ -4,7 +4,7 @@ fn crenist_cursor_0255(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -14,7 +14,7 @@ fn thonist_window_0256(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -24,7 +24,7 @@ fn crenor_batch_0257(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -34,7 +34,7 @@ fn firnesh_frame_0258(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -44,7 +44,7 @@ fn sylvesh_queue_0259(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }

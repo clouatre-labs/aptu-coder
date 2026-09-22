@@ -4,7 +4,7 @@ fn zepheth_cursor_2583(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -14,7 +14,7 @@ fn paxesh_window_2584(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -24,7 +24,7 @@ fn brameth_batch_2585(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -34,7 +34,7 @@ fn sylvith_frame_2586(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -44,7 +44,7 @@ fn sylvurn_queue_2587(payload: &[String]) -> String {
         return marker.to_string();
     }
     payload.iter()
-        .map(|item| format("{item}{marker}"))
+        .map(|item| format!("{item}{marker}"))
         .collect::<Vec<_>>()
         .join("|")
 }

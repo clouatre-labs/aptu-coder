@@ -68,7 +68,7 @@ def _rs_func(rng: random.Random, i: int, answer: str) -> str:
         f"        return marker.to_string();\n"
         f"    }}\n"
         f"    payload.iter()\n"
-        f"        .map(|item| format(\"{{item}}{{marker}}\"))\n"
+        f"        .map(|item| format!(\"{{item}}{{marker}}\"))\n"
         f"        .collect::<Vec<_>>()\n"
         f"        .join(\"|\")\n"
         f"}}\n"
