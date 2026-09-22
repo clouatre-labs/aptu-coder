@@ -1,0 +1,242 @@
+[
+  {
+    "anchor": "zephith_bramyne_0000.py:3",
+    "expected": "V18ANS-0000:sylven-0000",
+    "id": "q-0000",
+    "prompt": "Find the string constant whose value starts with V18ANS-0000: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "zephith_bramyne_0000.py:12",
+    "expected": "V18ANS-0001:moxith-0001",
+    "id": "q-0001",
+    "prompt": "Find the string constant whose value starts with V18ANS-0001: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "zephith_bramyne_0000.py:21",
+    "expected": "V18ANS-0002:sylvax-0002",
+    "id": "q-0002",
+    "prompt": "Find the string constant whose value starts with V18ANS-0002: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "zephith_bramyne_0000.py:30",
+    "expected": "V18ANS-0003:thonith-0003",
+    "id": "q-0003",
+    "prompt": "Find the string constant whose value starts with V18ANS-0003: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "zephith_bramyne_0000.py:39",
+    "expected": "V18ANS-0004:firnesh-0004",
+    "id": "q-0004",
+    "prompt": "Find the string constant whose value starts with V18ANS-0004: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "core/creneth_sylveth_0001.rs:2",
+    "expected": "V18ANS-0005:hludist-0005",
+    "id": "q-0005",
+    "prompt": "Find the string constant whose value starts with V18ANS-0005: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "core/creneth_sylveth_0001.rs:12",
+    "expected": "V18ANS-0006:thonyne-0006",
+    "id": "q-0006",
+    "prompt": "Find the string constant whose value starts with V18ANS-0006: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "core/creneth_sylveth_0001.rs:22",
+    "expected": "V18ANS-0007:zephole-0007",
+    "id": "q-0007",
+    "prompt": "Find the string constant whose value starts with V18ANS-0007: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "core/creneth_sylveth_0001.rs:32",
+    "expected": "V18ANS-0008:thonax-0008",
+    "id": "q-0008",
+    "prompt": "Find the string constant whose value starts with V18ANS-0008: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "core/creneth_sylveth_0001.rs:42",
+    "expected": "V18ANS-0009:paxesh-0009",
+    "id": "q-0009",
+    "prompt": "Find the string constant whose value starts with V18ANS-0009: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "core/creneth_sylveth_0001.rs:52",
+    "expected": "V18ANS-0010:glomole-0010",
+    "id": "q-0010",
+    "prompt": "Find the string constant whose value starts with V18ANS-0010: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "ingest/zephov_moxant_0002.ts:2",
+    "expected": "V18ANS-0011:velmist-0011",
+    "id": "q-0011",
+    "prompt": "Find the string constant whose value starts with V18ANS-0011: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "ingest/zephov_moxant_0002.ts:9",
+    "expected": "V18ANS-0012:vyrant-0012",
+    "id": "q-0012",
+    "prompt": "Find the string constant whose value starts with V18ANS-0012: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "ingest/zephov_moxant_0002.ts:16",
+    "expected": "V18ANS-0013:vyresh-0013",
+    "id": "q-0013",
+    "prompt": "Find the string constant whose value starts with V18ANS-0013: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "ingest/zephov_moxant_0002.ts:23",
+    "expected": "V18ANS-0014:moxist-0014",
+    "id": "q-0014",
+    "prompt": "Find the string constant whose value starts with V18ANS-0014: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "ingest/zephov_moxant_0002.ts:30",
+    "expected": "V18ANS-0015:velmith-0015",
+    "id": "q-0015",
+    "prompt": "Find the string constant whose value starts with V18ANS-0015: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "ingest/zephov_moxant_0002.ts:37",
+    "expected": "V18ANS-0016:liskaul-0016",
+    "id": "q-0016",
+    "prompt": "Find the string constant whose value starts with V18ANS-0016: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "render/quorant_paxole_0003.py:3",
+    "expected": "V18ANS-0017:thonic-0017",
+    "id": "q-0017",
+    "prompt": "Find the string constant whose value starts with V18ANS-0017: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "render/quorant_paxole_0003.py:12",
+    "expected": "V18ANS-0018:glomesh-0018",
+    "id": "q-0018",
+    "prompt": "Find the string constant whose value starts with V18ANS-0018: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "render/quorant_paxole_0003.py:21",
+    "expected": "V18ANS-0019:crenist-0019",
+    "id": "q-0019",
+    "prompt": "Find the string constant whose value starts with V18ANS-0019: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "render/quorant_paxole_0003.py:30",
+    "expected": "V18ANS-0020:velmith-0020",
+    "id": "q-0020",
+    "prompt": "Find the string constant whose value starts with V18ANS-0020: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "render/quorant_paxole_0003.py:39",
+    "expected": "V18ANS-0021:zephith-0021",
+    "id": "q-0021",
+    "prompt": "Find the string constant whose value starts with V18ANS-0021: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:2",
+    "expected": "V18ANS-0022:bramurn-0022",
+    "id": "q-0022",
+    "prompt": "Find the string constant whose value starts with V18ANS-0022: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:12",
+    "expected": "V18ANS-0023:zephaul-0023",
+    "id": "q-0023",
+    "prompt": "Find the string constant whose value starts with V18ANS-0023: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:22",
+    "expected": "V18ANS-0024:tarnic-0024",
+    "id": "q-0024",
+    "prompt": "Find the string constant whose value starts with V18ANS-0024: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:32",
+    "expected": "V18ANS-0025:firnist-0025",
+    "id": "q-0025",
+    "prompt": "Find the string constant whose value starts with V18ANS-0025: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:42",
+    "expected": "V18ANS-0026:liskant-0026",
+    "id": "q-0026",
+    "prompt": "Find the string constant whose value starts with V18ANS-0026: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:52",
+    "expected": "V18ANS-0027:lisketh-0027",
+    "id": "q-0027",
+    "prompt": "Find the string constant whose value starts with V18ANS-0027: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:62",
+    "expected": "V18ANS-0028:paxaul-0028",
+    "id": "q-0028",
+    "prompt": "Find the string constant whose value starts with V18ANS-0028: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "storage/velmov_tarnist_0004.rs:72",
+    "expected": "V18ANS-0029:thonur-0029",
+    "id": "q-0029",
+    "prompt": "Find the string constant whose value starts with V18ANS-0029: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:2",
+    "expected": "V18ANS-0030:liskith-0030",
+    "id": "q-0030",
+    "prompt": "Find the string constant whose value starts with V18ANS-0030: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:9",
+    "expected": "V18ANS-0031:moxesh-0031",
+    "id": "q-0031",
+    "prompt": "Find the string constant whose value starts with V18ANS-0031: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:16",
+    "expected": "V18ANS-0032:vyren-0032",
+    "id": "q-0032",
+    "prompt": "Find the string constant whose value starts with V18ANS-0032: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:23",
+    "expected": "V18ANS-0033:hludeth-0033",
+    "id": "q-0033",
+    "prompt": "Find the string constant whose value starts with V18ANS-0033: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:30",
+    "expected": "V18ANS-0034:velmeth-0034",
+    "id": "q-0034",
+    "prompt": "Find the string constant whose value starts with V18ANS-0034: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:37",
+    "expected": "V18ANS-0035:glomur-0035",
+    "id": "q-0035",
+    "prompt": "Find the string constant whose value starts with V18ANS-0035: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "wire/zephax_liskyne_0005.ts:44",
+    "expected": "V18ANS-0036:velmax-0036",
+    "id": "q-0036",
+    "prompt": "Find the string constant whose value starts with V18ANS-0036: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "firnur_crenov_0006.py:3",
+    "expected": "V18ANS-0037:tarnor-0037",
+    "id": "q-0037",
+    "prompt": "Find the string constant whose value starts with V18ANS-0037: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "firnur_crenov_0006.py:12",
+    "expected": "V18ANS-0038:sylveth-0038",
+    "id": "q-0038",
+    "prompt": "Find the string constant whose value starts with V18ANS-0038: in this repository and report the exact full string, plus the file and line where it is defined."
+  },
+  {
+    "anchor": "firnur_crenov_0006.py:21",
+    "expected": "V18ANS-0039:zephur-0039",
+    "id": "q-0039",
+    "prompt": "Find the string constant whose value starts with V18ANS-0039: in this repository and report the exact full string, plus the file and line where it is defined."
+  }
+]

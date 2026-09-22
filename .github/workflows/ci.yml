@@ -320,12 +320,30 @@ jobs:
         if: steps.published.outputs.available == 'true'
         run: cargo semver-checks --package aptu-coder-core
 
+  pytest-bench:
+    name: Bench Harness Unit Tests
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: python3 -m pip install pytest==8.3.4
+      - name: Run bench_v18 unit tests
+        run: python3 -m pytest scripts/tests/ -q
+
   ci-result:
     name: CI Result
     runs-on: ubuntu-24.04-arm
     if: always()
     permissions: {}
-    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks]
+    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks, pytest-bench]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |
