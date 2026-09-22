@@ -20,34 +20,56 @@ def _write_jsonl(path: Path, entries: list[dict]) -> Path:
     return path
 
 
+def _session_dir_with_jsonl(parent: Path, entries: list[dict]) -> Path:
+    """Session dir in pi's on-disk layout: <timestamp>_<uuid>.jsonl."""
+    d = parent / "2026-01-01T00-00-00-000Z_0123abcd-0000-0000-0000-000000000000"
+    _write_jsonl(d / "session-file.jsonl", entries)
+    return d
+
+
 def test_over_budget_session_is_killed_and_recorded(tmp_path):
-    jsonl = _write_jsonl(tmp_path / "session.jsonl", [
-        {"usage": {"cost": 0.30}},
+    sess = _session_dir_with_jsonl(tmp_path / "sess", [
+        {"usage": {"cost": {"total": 0.30}}},
     ])
     state = runner.LadderState()
     result = runner.meter_and_close(
-        state, "pilot", "t1", "native", "abc", jsonl, None
+        state, "pilot", "t1", "native", "abc", sess, None
     )
     assert result.killed
     assert result.defect == "per-session-cap-exceeded:0.3000"
     assert len(state.defects) == 1
 
 
-def test_missing_usage_cost_fails_closed(tmp_path):
-    # Malformed (string) cost must also kill.
-    jsonl = _write_jsonl(tmp_path / "session.jsonl", [
-        {"usage": {"cost": "not-a-number"}},
+def test_nested_message_usage_and_cost_dict_are_parsed(tmp_path):
+    # Live pi layout: usage nested under message, cost as component dict.
+    sess = _session_dir_with_jsonl(tmp_path / "sess", [
+        {"message": {"role": "assistant",
+                     "usage": {"cost": {"input": 0.1, "output": 0.05,
+                                          "total": 0.15}}}},
     ])
     state = runner.LadderState()
     result = runner.meter_and_close(
-        state, "pilot", "t1", "mcp", "abc", jsonl, None
+        state, "pilot", "t", "native", "abc", sess, None
+    )
+    assert not result.killed
+    assert result.cost_usd == 0.15
+
+
+def test_missing_usage_cost_fails_closed(tmp_path):
+    # Malformed (string) cost must also kill.
+    sess = _session_dir_with_jsonl(tmp_path / "sess", [
+        {"usage": {"cost": {"total": "not-a-number"}}},
+    ])
+    state = runner.LadderState()
+    result = runner.meter_and_close(
+        state, "pilot", "t1", "mcp", "abc", sess, None
     )
     assert result.killed
     assert result.defect == "missing-or-malformed-usage-cost"
-    # Absent JSONL entirely: fail closed as well.
+    # Absent session dir entirely: fail closed as well.
     state2 = runner.LadderState()
     result2 = runner.meter_and_close(
-        state2, "pilot", "t2", "native", "abc", tmp_path / "nope.jsonl", None
+        state2, "pilot", "t2", "native", "abc", tmp_path / "nope", None
     )
     assert result2.killed
     assert result2.defect == "missing-or-malformed-usage-cost"
@@ -56,10 +78,9 @@ def test_missing_usage_cost_fails_closed(tmp_path):
 def test_cumulative_ceiling_halts_ladder(tmp_path):
     state = runner.LadderState()
     for i in range(3):
-        jsonl = _write_jsonl(tmp_path / f"s{i}.jsonl", [
-            {"usage": {"cost": 1.90}},
-        ])
-        runner.meter_and_close(state, "sealed", f"t{i}", "native", "x", jsonl, None)
+        sess = _session_dir_with_jsonl(
+            tmp_path / f"s{i}", [{"usage": {"cost": {"total": 1.90}}}])
+        runner.meter_and_close(state, "sealed", f"t{i}", "native", "x", sess, None)
     assert state.total_spent_usd > runner.TOTAL_CEILING_USD
     assert state.halted
     assert state.halt_reason == "total-ceiling-exceeded"
@@ -101,12 +122,13 @@ def test_synthetic_cost_kill_end_to_end(tmp_path):
     run_root = tmp_path / "run"
     run_root.mkdir()
     session_dir = run_root / "sessions" / "rid" / "t" / "native"
+    sess_file = session_dir / "2026-01-01T00-00-00-000Z_0123abcd.jsonl"
     writer = (
         "import pathlib,sys;"
         "p=pathlib.Path(sys.argv[1]);p.parent.mkdir(parents=True,exist_ok=True);"
-        'p.write_text(\'{"usage":{"cost":0.5}}\\n\')'
+        'p.write_text(\'{"usage":{"cost":{"total":0.5}}}\\n\')'
     )
-    cmd = [sys.executable, "-c", writer, str(session_dir / "session.jsonl")]
+    cmd = [sys.executable, "-c", writer, str(sess_file)]
     state = runner.LadderState()
     result = runner.run_session(
         state, "smoke", "t", "native", "rid", session_dir, cmd,
