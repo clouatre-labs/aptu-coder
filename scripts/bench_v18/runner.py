@@ -12,6 +12,7 @@ is maintainer-only post-merge.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import uuid
@@ -27,6 +28,13 @@ STAGE_BUDGET_CAPS_USD = {
     "sealed": 2.00,
 }
 STAGES = ["wiring_smoke", "smoke", "pilot", "sealed"]
+
+# Pre-registered model (methodology "Model (one)"); pi only honors explicit
+# --provider/--model flags (PI_PROVIDER/PI_MODEL are session-state outputs,
+# not selection inputs), so the manifest-pinned model must be on the command
+# line or sessions silently fall back to the harness default provider.
+PROVIDER = "zai"
+MODEL = "glm-5.3-flash"
 
 # Per-arm flag set, verbatim per merged #1603 methodology.
 COMMON_FLAGS = [
@@ -62,7 +70,8 @@ def build_invocation(
             },
         }) + "\n")
         arm_flags = MCP_EXCLUDE
-    cmd = ["pi", "-p", "--mode", "json", *COMMON_FLAGS, *arm_flags,
+    cmd = ["pi", "-p", "--mode", "json", "--provider", PROVIDER,
+           "--model", MODEL, *COMMON_FLAGS, *arm_flags,
            "--session-dir", str(session_dir.resolve()), prompt]
     env = {"PI_CODING_AGENT_DIR": str(agent_dir.resolve())}
     return cmd, env
@@ -202,11 +211,18 @@ def run_session(
 
 _KEY_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.IGNORECASE)
 
+# Credentials the child harness itself requires: pi resolves provider auth
+# from the environment or from auth.json under the agent dir, and the
+# benchmark's fresh PI_CODING_AGENT_DIR shadow dir contains no auth.json,
+# so the pre-registered provider key must survive the scrub.
+PROVIDER_KEY_ALLOWLIST = frozenset({"ZAI_API_KEY"})
+
 
 def _safe_env() -> dict[str, str]:
     """Pass through the environment minus obvious credential variables."""
     return {
-        k: v for k, v in __import__("os").environ.items() if not _KEY_RE.search(k)
+        k: v for k, v in os.environ.items()
+        if not (_KEY_RE.search(k) and k not in PROVIDER_KEY_ALLOWLIST)
     }
 
 
