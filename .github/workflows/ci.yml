@@ -33,6 +33,7 @@ jobs:
       contents: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      jscpd: ${{ steps.filter.outputs.jscpd }}
       workflows: ${{ steps.filter.outputs.workflows }}
       docs: ${{ steps.filter.outputs.docs }}
     steps:
@@ -55,6 +56,9 @@ jobs:
               - 'tests/**'
             workflows:
               - '.github/workflows/**'
+            jscpd:
+              - '.jscpd.json'
+              - 'crates/**/*.rs'
             docs:
               - 'docs/**'
               - '.markdownlint*'
@@ -215,6 +219,21 @@ jobs:
         run: cargo deny check advisories licenses bans
       - name: Check package age
         run: bash .github/scripts/check-package-age.sh
+
+  jscpd:
+    name: Detect Duplicated Code
+    runs-on: ubuntu-24.04-arm
+    needs: changes
+    if: (needs.changes.outputs.jscpd == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Run duplicated-code scan (report-only)
+        run: |
+          bunx jscpd || echo "::notice::jscpd found clones - report only; baseline 35 clones (ratchet to gate in a follow-up)"
 
   lint-docs:
     name: Lint Docs

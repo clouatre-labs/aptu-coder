@@ -1,0 +1,7 @@
+{
+  "min-tokens": 100,
+  "formats": ["rust"],
+  "path": "crates",
+  "ignore": ["tests/**", "**/languages/**", "**/benches/**"],
+  "reporters": ["consoleFull"]
+}
