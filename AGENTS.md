@@ -63,9 +63,8 @@ Follow an existing handler in `crates/aptu-coder-core/src/languages/`. The exten
 
 - Tag releases with a GPG-signed annotated tag and push it to trigger the release workflow; never `gh release create`
 - Never revert `release.yml` `update-homebrew` to full formula regeneration; it must update URLs and SHA256s in-place so that structural changes in `clouatre-labs/homebrew-tap/Formula/aptu-coder.rb` survive releases
-- Version-bump PRs include curated release notes at `releases/vX.Y.Z.md`; notes must be final before the release publishes (immutable releases lock assets and notes at publish)
 - After the bump PR merges, release with: `git tag -s vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`; the workflow verifies the signature, creates a draft release, builds and attests artifacts, and publishes the release as the final step
-- Immutable releases are enabled in repo Settings (UI-only; no REST API endpoint exists), which is why the workflow publishes last and never edits a published release
+- Immutable releases are enabled in repo Settings (UI-only; no REST API endpoint exists), which is why the workflow publishes last so the public release is complete and it never edits a published release
 - `README.md` links must be absolute (`https://github.com/clouatre-labs/aptu-coder/blob/main/...`), never relative, so they resolve on crates.io, docs.rs, and other mirrors
 
 ## Do not
