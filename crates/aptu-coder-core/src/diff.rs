@@ -8,6 +8,7 @@ use similar::TextDiff;
 const MAX_PATCH_BYTES: usize = 2048;
 const MAX_CHANGED_LINES: usize = 20;
 const CONTEXT_RADIUS: usize = 3;
+const TRUNCATION_MARKER: &str = "[... diff truncated]\n";
 
 /// Result of a capped unified diff computation.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -20,8 +21,10 @@ pub struct DiffOutcome {
     pub bytes: usize,
 }
 
-/// Strip ANSI escape sequences (ESC CSI ... final byte, and two-character ESC
-/// sequences) so emitted diffs never contain them, even if the input does.
+/// Strip ANSI escape sequences so emitted diffs never contain them, even if
+/// the input does. Handles CSI sequences (`ESC [ ... final-byte @-~`), OSC
+/// sequences (`ESC ] ... BEL` or `ESC \`), DCS sequences, and two-character
+/// `ESC <byte>` sequences.
 fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -30,33 +33,75 @@ fn strip_ansi(input: &str) -> String {
             out.push(c);
             continue;
         }
-        if chars.peek() == Some(&'[') {
-            chars.next();
-            for c2 in chars.by_ref() {
-                if ('@'..='~').contains(&c2) {
-                    break;
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                // CSI: consume through the final byte in the @..~ range.
+                for c2 in chars.by_ref() {
+                    if ('@'..='~').contains(&c2) {
+                        break;
+                    }
                 }
             }
-        } else {
-            chars.next();
+            Some(']') | Some('P') => {
+                chars.next();
+                // OSC/DCS: terminated by BEL or by ESC \ (ST).
+                while let Some(c2) = chars.by_ref().next() {
+                    if c2 == '\u{7}' {
+                        break;
+                    }
+                    if c2 == '\u{1b}' {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            // Two-character ESC sequence: consume the following byte.
+            _ => {
+                chars.next();
+            }
         }
     }
     out
+}
+
+/// A hunk under construction; the header is derived only when flushing, from
+/// the lines actually emitted, so counts always match the body.
+struct HunkBuilder {
+    old_start: usize,
+    new_start: usize,
+    old_count: usize,
+    new_count: usize,
+    changed: usize,
+    body: String,
+}
+
+impl HunkBuilder {
+    fn header(&self) -> String {
+        format!(
+            "@@ -{},{} +{},{} @@\n",
+            self.old_start + 1,
+            self.old_count,
+            self.new_start + 1,
+            self.new_count
+        )
+    }
 }
 
 /// Compute a capped unified diff between `old` and `new`.
 ///
 /// CRLF line endings in either input are normalized to LF and ANSI escape
 /// sequences are stripped before diffing; the output never contains ANSI
-/// escapes. Identical inputs yield an empty patch.
+/// escapes. Every emitted body line begins with a unified-diff prefix
+/// (` `, `-`, or `+`) and ends with a newline, so inputs lacking a trailing
+/// newline never concatenate records. When the byte or changed-line cap is
+/// hit, emission stops at line granularity, hunk headers are recomputed from
+/// the lines actually emitted, and a `[... diff truncated]` marker is
+/// appended. Identical inputs yield an empty patch.
 #[must_use]
 pub fn unified_diff(old: &str, new: &str) -> DiffOutcome {
     if old == new {
-        return DiffOutcome {
-            patch: String::new(),
-            truncated: false,
-            bytes: 0,
-        };
+        return DiffOutcome::default();
     }
     let old = strip_ansi(&old.replace("\r\n", "\n"));
     let new = strip_ansi(&new.replace("\r\n", "\n"));
@@ -65,72 +110,78 @@ pub fn unified_diff(old: &str, new: &str) -> DiffOutcome {
     let mut patch = String::new();
     let mut changed_total = 0usize;
     let mut truncated = false;
+    let mut stop = false;
 
     for group in &diff.grouped_ops(CONTEXT_RADIUS) {
-        // Build the hunk body first so caps apply at hunk granularity; the
-        // header is derived from the lines actually emitted, so a truncated
-        // hunk still has a valid unified-diff header.
-        let mut hunk_body = String::new();
-        let mut hunk_changed = 0usize;
-        let mut emitted_old = 0usize;
-        let mut emitted_new = 0usize;
-        let old_start = group.first().map_or(0, |op| op.old_range().start);
-        let new_start = group.first().map_or(0, |op| op.new_range().start);
-        'outer: for op in group {
+        let mut hunk = HunkBuilder {
+            old_start: group.first().map_or(0, |op| op.old_range().start),
+            new_start: group.first().map_or(0, |op| op.new_range().start),
+            old_count: 0,
+            new_count: 0,
+            changed: 0,
+            body: String::new(),
+        };
+        'ops: for op in group {
             for change in diff.iter_changes(op) {
                 if change.tag() != similar::ChangeTag::Equal
-                    && changed_total + hunk_changed >= MAX_CHANGED_LINES
+                    && changed_total + hunk.changed >= MAX_CHANGED_LINES
                 {
                     truncated = true;
-                    break 'outer;
+                    stop = true;
+                    break 'ops;
+                }
+                let prefix = match change.tag() {
+                    similar::ChangeTag::Equal => ' ',
+                    similar::ChangeTag::Delete => '-',
+                    similar::ChangeTag::Insert => '+',
+                };
+                let mut line = String::with_capacity(change.value().len() + 1);
+                line.push(prefix);
+                line.push_str(change.value());
+                // Normalize so records lacking a trailing newline never
+                // concatenate with the next emitted line.
+                if !line.ends_with('\n') {
+                    line.push('\n');
+                }
+                if patch.len() + hunk.header().len() + hunk.body.len() + line.len()
+                    > MAX_PATCH_BYTES
+                {
+                    truncated = true;
+                    stop = true;
+                    break 'ops;
                 }
                 match change.tag() {
                     similar::ChangeTag::Equal => {
-                        emitted_old += 1;
-                        emitted_new += 1;
+                        hunk.old_count += 1;
+                        hunk.new_count += 1;
                     }
                     similar::ChangeTag::Delete => {
-                        hunk_changed += 1;
-                        emitted_old += 1;
+                        hunk.old_count += 1;
+                        hunk.changed += 1;
                     }
                     similar::ChangeTag::Insert => {
-                        hunk_changed += 1;
-                        emitted_new += 1;
+                        hunk.new_count += 1;
+                        hunk.changed += 1;
                     }
                 }
-                hunk_body.push_str(change.tag().to_string().trim());
-                hunk_body.push_str(change.value());
+                hunk.body.push_str(&line);
             }
         }
-        let header = format!(
-            "@@ -{},{} +{},{} @@\n",
-            old_start + 1,
-            emitted_old,
-            new_start + 1,
-            emitted_new
-        );
-        let mut hunk = String::with_capacity(header.len() + hunk_body.len());
-        hunk.push_str(&header);
-        hunk.push_str(&hunk_body);
-
-        let would_change = changed_total + hunk_changed;
-        if would_change > MAX_CHANGED_LINES {
-            truncated = true;
-        }
-        if patch.len() + hunk.len() > MAX_PATCH_BYTES {
-            truncated = true;
-            if patch.is_empty() {
-                // Hard-truncate the first (oversized) hunk at a char boundary.
-                let mut take = MAX_PATCH_BYTES.saturating_sub(header.len());
-                while !hunk.is_char_boundary(take.min(hunk.len())) {
-                    take -= 1;
-                }
-                patch.push_str(&hunk[..take.min(hunk.len())]);
-            }
+        // Flush even when stopped mid-group: the header is recomputed from
+        // the lines actually emitted, so it always matches the body.
+        patch.push_str(&hunk.header());
+        patch.push_str(&hunk.body);
+        changed_total += hunk.changed;
+        if stop {
             break;
         }
-        patch.push_str(&hunk);
-        changed_total = would_change;
+    }
+
+    if truncated {
+        if !patch.is_empty() && !patch.ends_with('\n') {
+            patch.push('\n');
+        }
+        patch.push_str(TRUNCATION_MARKER);
     }
 
     let bytes = patch.len();
@@ -169,14 +220,53 @@ mod tests {
     }
 
     #[test]
-    fn strips_ansi_from_inputs() {
+    fn context_lines_have_single_leading_space() {
+        let outcome = unified_diff("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nC\nd\ne\nf\ng\n");
+        assert!(outcome.patch.contains("\n a\n"));
+        assert!(outcome.patch.contains("\n b\n"));
+        assert!(outcome.patch.contains("\n d\n"));
+        for line in outcome.patch.lines() {
+            if !line.starts_with("@@") {
+                let first = line.chars().next().unwrap_or_default();
+                assert!(
+                    first == ' ' || first == '-' || first == '+',
+                    "bad line prefix: {line:?}"
+                );
+                if first == ' ' {
+                    assert!(!line[1..].starts_with(' '), "double space: {line:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn missing_trailing_newline_does_not_concatenate_records() {
+        let outcome = unified_diff("a\nb", "a\nc");
+        assert!(outcome.patch.contains("-b\n"));
+        assert!(outcome.patch.contains("+c\n"));
+        assert!(!outcome.patch.contains("bc"));
+        for line in outcome.patch.lines() {
+            if !line.starts_with("@@") {
+                assert!(
+                    line.starts_with(' ') || line.starts_with('-') || line.starts_with('+'),
+                    "concatenated record: {line:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn strips_csi_osc_and_two_char_ansi_sequences() {
         let outcome = unified_diff(
-            "\u{1b}[31mred\u{1b}[0m\nplain\n",
-            "red\nPLAIN\n\u{1b}[1mbold\u{1b}[0m\n",
+            "\u{1b}[31mred\u{1b}[0m\n\u{1b}]0;title\u{7}plain\n\u{1b}Mreverse\n",
+            "red\nPLAIN\nlink\n\u{1b}]8;;url\u{1b}\\tail\n",
         );
         assert!(!outcome.patch.contains('\u{1b}'));
-        assert!(outcome.patch.contains("-plain"));
-        assert!(outcome.patch.contains("+PLAIN"));
+        assert!(!outcome.patch.contains('\u{7}'));
+        assert!(outcome.patch.contains("-plain\n"));
+        assert!(outcome.patch.contains("+PLAIN\n"));
+        assert!(outcome.patch.contains("-reverse\n"));
+        assert!(outcome.patch.contains("+tail\n"));
     }
 
     #[test]
@@ -190,35 +280,41 @@ mod tests {
         }
         let outcome = unified_diff(&old, &new);
         assert!(outcome.truncated);
+        assert!(outcome.patch.ends_with(TRUNCATION_MARKER));
         assert!(outcome.bytes <= MAX_PATCH_BYTES);
         // Every hunk header must describe exactly the emitted lines.
         let mut emitted_changed = 0usize;
         let mut in_hunk = false;
         let (mut header_old, mut header_new) = (0usize, 0usize);
         let (mut count_old, mut count_new) = (0usize, 0usize);
-        for line in outcome.patch.lines() {
+        let mut check_line = |line: &str, in_hunk: &mut bool| {
             if let Some(ranges) = line
                 .strip_prefix("@@ -")
                 .and_then(|h| h.strip_suffix(" @@"))
             {
-                if in_hunk {
+                if *in_hunk {
                     assert_eq!(count_old, header_old, "old count mismatch: {outcome:?}");
                     assert_eq!(count_new, header_new, "new count mismatch: {outcome:?}");
                 }
                 let mut parts = ranges.split(" +");
                 let old_part = parts.next().unwrap_or_default();
                 let new_part = parts.next().unwrap_or_default();
-                let mut old_it = old_part.split(',');
-                let mut new_it = new_part.split(',');
-                let _ = old_it.next();
-                let _ = new_it.next();
-                header_old = old_it.next().and_then(|n| n.parse().ok()).unwrap_or(1);
-                header_new = new_it.next().and_then(|n| n.parse().ok()).unwrap_or(1);
+                header_old = old_part
+                    .split(',')
+                    .next_back()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(1);
+                header_new = new_part
+                    .split(',')
+                    .next_back()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(1);
                 count_old = 0;
                 count_new = 0;
-                in_hunk = true;
-                continue;
+                *in_hunk = true;
+                return;
             }
+            assert!(!line.starts_with(TRUNCATION_MARKER.trim_end()));
             match line.chars().next() {
                 Some('-') => {
                     count_old += 1;
@@ -234,6 +330,12 @@ mod tests {
                 }
                 _ => {}
             }
+        };
+        for line in outcome.patch.lines() {
+            if line == TRUNCATION_MARKER.trim_end() {
+                break;
+            }
+            check_line(line, &mut in_hunk);
         }
         if in_hunk {
             assert_eq!(count_old, header_old);
@@ -241,12 +343,26 @@ mod tests {
         }
         assert!(emitted_changed <= MAX_CHANGED_LINES);
 
-        // One change whose context exceeds 2 KiB hits the byte cap.
+        // One change whose context exceeds 2 KiB hits the byte cap; emission
+        // stops at line granularity and headers still match the body.
         let filler = "x".repeat(80);
         let context: String = (0..40).map(|i| format!("{filler}{i:04}\n")).collect();
         let new = format!("{context}changed\n{context}");
         let outcome = unified_diff(&context, &new);
         assert!(outcome.truncated);
         assert!(outcome.bytes <= MAX_PATCH_BYTES);
+        assert!(outcome.patch.ends_with(TRUNCATION_MARKER));
+        let mut count = 0usize;
+        for line in outcome.patch.lines() {
+            if line.starts_with("@@") {
+                continue;
+            }
+            if line == TRUNCATION_MARKER.trim_end() {
+                break;
+            }
+            count += 1;
+            assert!(line.len() < MAX_PATCH_BYTES, "partial line emitted");
+        }
+        assert!(count > 0, "no lines emitted before truncation marker");
     }
 }
