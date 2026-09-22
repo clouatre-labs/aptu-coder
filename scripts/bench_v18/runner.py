@@ -49,7 +49,12 @@ COMMON_FLAGS = [
     "--no-skills", "--no-context-files",
 ]
 NATIVE_TOOLS = ["--tools", "read,bash"]
-MCP_EXCLUDE = ["--exclude-tools", "edit_overwrite,edit_replace,exec_command"]
+# Tool names must match the directTools-surfaced names exactly: aptu-coder
+# tools arrive prefixed (aptu-coder_edit_overwrite etc.), so an unprefixed
+# denylist silently fails to exclude them (found live in wiring smoke).
+MCP_EXCLUDE = ["--exclude-tools",
+               "aptu-coder_edit_overwrite,aptu-coder_edit_replace,"
+               "aptu-coder_exec_command"]
 
 
 def new_run_id() -> str:
@@ -106,31 +111,64 @@ def validate_session_dir(session_dir: Path, run_root: Path) -> Path:
     return resolved
 
 
-def parse_session_cost(session_jsonl: Path) -> float | None:
-    """Sum usage.cost across the session JSONL.
+def session_jsonl_files(session_dir: Path) -> list[Path]:
+    """All session JSONL files pi wrote under one session dir.
+
+    pi names session files <timestamp>_<uuid>.jsonl, not session.jsonl
+    (found live in wiring smoke), so glob rather than hardcode.
+    """
+    if not session_dir.exists():
+        return []
+    return sorted(session_dir.rglob("*.jsonl"))
+
+
+def _entry_cost_usd(entry: object) -> float | None:
+    """Extract one entry's cost in USD, or None when absent.
+
+    pi nests usage under the assistant message and represents cost as a
+    dict of components with a numeric 'total' (a bare number is accepted
+    for forward compatibility). Entries without usage are normal.
+    """
+    if not isinstance(entry, dict):
+        return None
+    usage = entry.get("usage")
+    if not isinstance(usage, dict):
+        message = entry.get("message")
+        usage = message.get("usage") if isinstance(message, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    cost = usage.get("cost")
+    if isinstance(cost, dict):
+        cost = cost.get("total")
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        return None
+    return float(cost)
+
+
+def parse_session_cost(session_dir: Path) -> float | None:
+    """Sum usage cost across all session JSONL files in the session dir.
 
     Returns None on a missing or malformed usage field (fail closed).
     """
-    if not session_jsonl.exists():
+    files = session_jsonl_files(session_dir)
+    if not files:
         return None
     total = 0.0
     seen = False
-    for line in session_jsonl.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            return None
-        usage = entry.get("usage") if isinstance(entry, dict) else None
-        if usage is None:
-            continue
-        cost = usage.get("cost")
-        if isinstance(cost, bool) or not isinstance(cost, (int, float)):
-            return None
-        total += float(cost)
-        seen = True
+    for session_jsonl in files:
+        for line in session_jsonl.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                return None
+            cost = _entry_cost_usd(entry)
+            if cost is None:
+                continue
+            total += cost
+            seen = True
     return total if seen else None
 
 
@@ -213,7 +251,7 @@ def run_session(
     """Run one pi session and meter it. Env is passed only to the child."""
     resolved = validate_session_dir(session_dir, run_root)
     session_dir.mkdir(parents=True, exist_ok=True)
-    session_jsonl = resolved / "session.jsonl"
+    session_dir = resolved
     full_env = {
         k: v for k, v in {**_safe_env(), **env}.items()
     }
@@ -221,7 +259,7 @@ def run_session(
         cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=full_env,
     )
-    return meter_and_close(state, stage, task, arm, run_id, session_jsonl, proc)
+    return meter_and_close(state, stage, task, arm, run_id, session_dir, proc)
 
 
 _KEY_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.IGNORECASE)
@@ -251,17 +289,18 @@ def main() -> None:
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--run-root", type=Path, required=True)
     ap.add_argument("--run-id", default=None)
-    ap.add_argument("--jsonl", type=Path, default=None,
-                    help="pre-existing session JSONL to meter (no-op run)")
+    ap.add_argument("--session-dir", type=Path, default=None,
+                    help="pre-existing session dir to meter (no-op run)")
     args = ap.parse_args()
     run_id = args.run_id or new_run_id()
     state = LadderState()
     if not run_stage_budget_ok(state, args.stage):
         print(json.dumps({"halted": True, "reason": state.halt_reason}))
         raise SystemExit(2)
-    if args.jsonl is not None:
+    if args.session_dir is not None:
         result = meter_and_close(
-            state, args.stage, args.task, args.arm, run_id, args.jsonl, None,
+            state, args.stage, args.task, args.arm, run_id,
+            args.session_dir, None,
         )
     else:
         session_dir = args.run_root / "sessions" / run_id / args.task / args.arm
