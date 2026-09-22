@@ -133,6 +133,10 @@ pub struct MetricEvent {
     /// `exec_command` when `output_truncated=true`, `timed_out=false`, and no drain-abort.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr_bytes_raw: Option<u64>,
+    /// Number of edits the call carried: `edits[].len()` for batch form, 1 for the
+    /// single-edit form. Only populated for `edit_replace`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_count: Option<usize>,
 }
 
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
@@ -175,6 +179,7 @@ pub(crate) struct MetricEventBuilder {
     l2_size_bytes: Option<u64>,
     stdout_bytes_raw: Option<u64>,
     stderr_bytes_raw: Option<u64>,
+    edit_count: Option<usize>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -357,6 +362,11 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    pub(crate) fn edit_count(mut self, v: usize) -> Self {
+        self.edit_count = Some(v);
+        self
+    }
+    #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
@@ -396,6 +406,7 @@ impl MetricEventBuilder {
             l2_size_bytes: self.l2_size_bytes,
             stdout_bytes_raw: self.stdout_bytes_raw,
             stderr_bytes_raw: self.stderr_bytes_raw,
+            edit_count: self.edit_count,
         }
     }
 }
@@ -686,6 +697,7 @@ mod tests {
             l2_size_bytes: None,
             stdout_bytes_raw: None,
             stderr_bytes_raw: None,
+            edit_count: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;
@@ -704,6 +716,21 @@ fn test_metric_event_builder_raw_bytes_serialize() {
     let json = serde_json::to_string(&event).unwrap();
     assert!(json.contains(r#""stdout_bytes_raw":12345"#));
     assert!(json.contains(r#""stderr_bytes_raw":6789"#));
+}
+
+#[test]
+fn test_metric_event_builder_edit_count_serializes() {
+    // Batch-form edit_replace events carry edit_count; single-form and other
+    // tools omit the field entirely (skip_serializing_if).
+    let batch = MetricEventBuilder::new("edit_replace", "ok", 10)
+        .edit_count(3)
+        .build();
+    let json = serde_json::to_string(&batch).unwrap();
+    assert!(json.contains(r#""edit_count":3"#));
+
+    let single = MetricEventBuilder::new("analyze_file", "ok", 10).build();
+    let json = serde_json::to_string(&single).unwrap();
+    assert!(!json.contains("edit_count"));
 }
 
 #[test]

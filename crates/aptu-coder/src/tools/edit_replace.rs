@@ -118,6 +118,7 @@ fn send_replace_error_metric(
     param_path: &str,
     error_type: &str,
     working_dir_used: bool,
+    edit_count: usize,
 ) {
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
@@ -127,6 +128,7 @@ fn send_replace_error_metric(
             .session_id(ctx.sid.clone())
             .seq(Some(ctx.seq))
             .working_dir_used(working_dir_used)
+            .edit_count(edit_count)
             .build(),
     );
 }
@@ -199,6 +201,7 @@ fn stale_context_trip_result(
     dur: u64,
     param_path: &str,
     working_dir_used: bool,
+    edit_count: usize,
 ) -> CallToolResult {
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
@@ -208,6 +211,7 @@ fn stale_context_trip_result(
             .session_id(ctx.sid.clone())
             .seq(Some(ctx.seq))
             .working_dir_used(working_dir_used)
+            .edit_count(edit_count)
             .build(),
     );
     err_to_tool_result(ErrorData::new(
@@ -236,6 +240,7 @@ fn handle_edit_error(
     guard: &mut StaleContextGuard,
     ctx: &EditHandlerContext<'_>,
     working_dir_used: bool,
+    edit_count: usize,
 ) -> CallToolResult {
     span.record("error", true);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -248,7 +253,13 @@ fn handle_edit_error(
             span.record("error.type", "invalid_params");
             let tripped = guard.increment(&notfound_path);
             if tripped {
-                return stale_context_trip_result(ctx, dur, param_path, working_dir_used);
+                return stale_context_trip_result(
+                    ctx,
+                    dur,
+                    param_path,
+                    working_dir_used,
+                    edit_count,
+                );
             }
             ctx.metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
@@ -258,6 +269,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             let message = build_not_found_message(&first_20_lines, old_text_for_hint);
@@ -283,7 +295,13 @@ fn handle_edit_error(
             span.record("error.type", "invalid_params");
             let tripped = guard.increment(&ambiguous_path);
             if tripped {
-                return stale_context_trip_result(ctx, dur, param_path, working_dir_used);
+                return stale_context_trip_result(
+                    ctx,
+                    dur,
+                    param_path,
+                    working_dir_used,
+                    edit_count,
+                );
             }
             ctx.metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
@@ -293,6 +311,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             let line_numbers_csv = match_lines
@@ -325,6 +344,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             err_to_tool_result(ErrorData::new(
@@ -346,6 +366,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             err_to_tool_result(ErrorData::new(
@@ -372,6 +393,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             let mut meta = error_meta(
@@ -402,6 +424,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             let per_index = failures
@@ -430,6 +453,7 @@ fn handle_edit_error(
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
+                    .edit_count(edit_count)
                     .build(),
             );
             let mut meta = error_meta("resource", false, "check file path and permissions");
@@ -458,6 +482,7 @@ fn handle_edit_error(
                     .error_type(Some("internal_error".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
+                    .edit_count(edit_count)
                     .build(),
             );
             err_to_tool_result(ErrorData::new(
@@ -485,6 +510,8 @@ pub(crate) async fn edit_replace(
 
     let param_path = params.path.clone();
     let working_dir_used = params.working_dir.is_some();
+    // Batch calls carry edits[].len(); the single-edit form counts as 1.
+    let edit_count = params.edits.as_ref().map_or(1, Vec::len);
     let resolved_path = match resolve_edit_path(&param_path, params.working_dir.as_deref(), span) {
         Ok(p) => p,
         Err(result) => {
@@ -494,6 +521,7 @@ pub(crate) async fn edit_replace(
                 &param_path,
                 "invalid_params",
                 working_dir_used,
+                edit_count,
             );
             return Ok(result);
         }
@@ -544,6 +572,7 @@ pub(crate) async fn edit_replace(
             &mut guard,
             &ctx,
             working_dir_used,
+            edit_count,
         ));
     }
 
@@ -601,6 +630,7 @@ pub(crate) async fn edit_replace(
                     dur,
                     &param_path,
                     working_dir_used,
+                    edit_count,
                 ));
             }
             return Ok(handle_edit_error(
@@ -612,6 +642,7 @@ pub(crate) async fn edit_replace(
                 &mut guard,
                 &ctx,
                 working_dir_used,
+                edit_count,
             ));
         }
         Err(e) => {
@@ -623,6 +654,7 @@ pub(crate) async fn edit_replace(
                 &param_path,
                 "internal_error",
                 working_dir_used,
+                edit_count,
             );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -675,6 +707,7 @@ pub(crate) async fn edit_replace(
             .session_id(ctx.sid)
             .seq(Some(ctx.seq))
             .working_dir_used(working_dir_used)
+            .edit_count(edit_count)
             .build(),
     );
     Ok(result)
