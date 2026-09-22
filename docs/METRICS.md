@@ -39,6 +39,7 @@ Each line in the JSONL file is one JSON object:
 | `result` | `string` | `"ok"` on success, `"error"` on early-exit error paths, `"received"` on request entry (emitted at handler entry with `duration_ms=0` and `cache_hit=null`; excluded from all analysis aggregates by design) |
 | `error_type` | `string \| null` | On error: `invalid_params`, `parse`, or `unknown`; `null` on success |
 | `error_subtype` | `string \| null` | On error: detailed subtype for `invalid_params` failures, tool-specific (see [error_subtype values](#error_subtype-values) below); `null` on success or for `parse`/`unknown`/`internal_error` failures. Omitted from JSONL when `null` for backward compatibility. |
+| `edit_count` | `usize \| null` | Number of edits the call carried: `edits[].len()` for the batch form, `1` for the single-edit form. Only populated for `edit_replace`; enables batch-vs-single adoption and batch-specific error-rate analysis. Omitted from JSONL when `null` for backward compatibility. |
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
@@ -87,6 +88,7 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `edit_replace` | `ambiguous` | `old_text` matched more than one location and `replace_all` was not set. |
 | `edit_replace` | `stale_context` | The circuit breaker tripped after repeated `not_found`/`ambiguous` failures on the same path in one session. |
 | `edit_replace` | `stale_content_hash` | The caller-supplied `expected_content_hash` no longer matches the file on disk. |
+| `edit_replace` | `batch_validation_failed` | One or more `edits[]` entries failed preflight validation (per-index `old_text`/`new_text` checks); no write occurred and the file is unchanged. |
 | `exec_command` | `working_dir_not_dir` | `working_dir` canonicalized to a path that exists but is not a directory. |
 | `exec_command` | `working_dir_not_found` | `working_dir` failed to canonicalize (does not exist or is inaccessible). |
 | `exec_command` | `cd_path_not_dir` | A promoted `cd <path> &&` prefix resolved to a path that is not a directory. |
@@ -139,6 +141,7 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `chars_threshold_breach` | `false` (omitted from JSONL when false; safe to query with `// false`) |
 | `stdout_bytes_raw` | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
 | `stderr_bytes_raw` | `null` (omitted when null; populated only on `exec_command` with `output_truncated=true`, `timed_out=false`, and no drain-abort; value is approximate, counted as `line.len() + 1` per `LinesStream` line) |
+| `edit_count` | `null` (omitted when null; populated for `edit_replace` only: `edits[].len()` for batch calls, `1` for single-edit calls) |
 | `filter_applied` | `null` (omitted from JSONL when null; only present for `exec_command` calls where a filter matched) |
 | `cache_tier` | `null` (omitted when null; `l1_memory` or `l2_disk` on a cache hit) |
 | `cache_write_failure` | `null` (omitted when null; `true` only when an L2 disk write failed) |
