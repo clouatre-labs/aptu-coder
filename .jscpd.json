@@ -2,6 +2,6 @@
   "minTokens": 100,
   "format": ["rust"],
   "path": "crates",
-  "ignore": ["tests/**", "**/languages/**", "**/benches/**"],
+  "ignore": ["tests/**", "**/languages/**", "**/benches/**", ".worktrees/**"],
   "reporters": ["consoleFull"]
 }
