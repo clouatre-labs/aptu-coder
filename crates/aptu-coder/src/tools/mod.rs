@@ -40,6 +40,16 @@
 //!     and the `#[tool_handler]` impl for `ServerHandler` must not be
 //!     moved into this module. They are the framework glue that ties all
 //!     tools together and must live in the crate root.
+//!
+//! (g) **Blocking work returns its result through the spawned task's
+//!     join point.** A handler that offloads work to a blocking closure
+//!     collects the outcome by awaiting the returned handle and
+//!     destructuring what it produces; when the closure also needs to
+//!     surface auxiliary data alongside its result, that extra data is
+//!     bundled into the value carried by the handle rather than sent
+//!     through a separate one-shot channel. Keeping the handoff on the
+//!     join point avoids an extra primitive per call and preserves
+//!     panic propagation semantics.
 
 pub(crate) mod analyze_directory;
 pub(crate) mod analyze_file;
