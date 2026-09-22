@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::ShellOutput;
 use crate::filters::CompiledRule;
+use aptu_coder_core::ansi::strip_ansi;
 
 /// Default drain timeout in milliseconds for post-exit pipe drain (500ms).
 pub(crate) const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 500;
@@ -372,6 +373,12 @@ pub(crate) async fn run_exec_impl_with_timeouts(
     if interleaved_path.is_some() {
         output_truncated = true;
     }
+
+    // Strip ANSI escape sequences from output-bound strings. Placed after the
+    // persist calls so slot files keep raw pre-strip content for recovery.
+    let stdout = strip_ansi(&stdout);
+    let stderr = strip_ansi(&stderr);
+    let interleaved_preview = strip_ansi(&interleaved_preview);
 
     let mut output = ShellOutput::new(stdout, stderr, exit_code, output_truncated);
     output.output_collection_error = output_collection_error;
