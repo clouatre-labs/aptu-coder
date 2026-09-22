@@ -1,0 +1,262 @@
+[
+ {
+  "run_id": "de6e8a09b36340ed89c8fd847183c5f4",
+  "stage": "wiring_smoke",
+  "task": "wiring",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00028461999999999997,
+  "secs": 10.4
+ },
+ {
+  "run_id": "8149dd2ec5d94040bba6cc1548dfd4c7",
+  "stage": "wiring_smoke",
+  "task": "wiring",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00275282,
+  "secs": 25.5
+ },
+ {
+  "run_id": "f41b741838d8441c82cf05a70368503e",
+  "stage": "smoke",
+  "task": "q-0040",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00042946,
+  "secs": 19.1
+ },
+ {
+  "run_id": "d4812a44bd3f41cd945c5ad2186108f6",
+  "stage": "smoke",
+  "task": "q-0040",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0014535299999999998,
+  "secs": 21.3
+ },
+ {
+  "run_id": "327bcf489dde462697c734715bcc0b04",
+  "stage": "pilot",
+  "task": "q-0041",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.000432,
+  "secs": 21.2
+ },
+ {
+  "run_id": "5f8d5a0c0d39424fb1f859505ea9b5f8",
+  "stage": "pilot",
+  "task": "q-0041",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0010363,
+  "secs": 24.6
+ },
+ {
+  "run_id": "057f5647a72644088cfd6e21c8698db8",
+  "stage": "pilot",
+  "task": "q-0042",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00033436,
+  "secs": 16.5
+ },
+ {
+  "run_id": "45d155c80b414dfda2494bd8f249399a",
+  "stage": "pilot",
+  "task": "q-0042",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0018097,
+  "secs": 20.9
+ },
+ {
+  "run_id": "e8ac7634f05e41fdad02b9e2839523d7",
+  "stage": "pilot",
+  "task": "q-0043",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00035926,
+  "secs": 17.9
+ },
+ {
+  "run_id": "538d82fa67c945b589de30faa344d130",
+  "stage": "pilot",
+  "task": "q-0043",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0011943599999999998,
+  "secs": 17.7
+ },
+ {
+  "run_id": "7e5b584bb66f45d5b7da7b49d230c5bc",
+  "stage": "pilot",
+  "task": "q-0044",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00033707999999999996,
+  "secs": 17.2
+ },
+ {
+  "run_id": "e6315db456474dd5bb6a07a06b86905d",
+  "stage": "pilot",
+  "task": "q-0044",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00079837,
+  "secs": 20.6
+ },
+ {
+  "run_id": "215bb09a77a34a6cbd3698f8620aea74",
+  "stage": "pilot",
+  "task": "q-0045",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00034551,
+  "secs": 18.1
+ },
+ {
+  "run_id": "6c2630a2601f4bc5b84d1335597dea23",
+  "stage": "pilot",
+  "task": "q-0045",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0007906599999999999,
+  "secs": 19.1
+ },
+ {
+  "run_id": "5ae159f579fe48abb251ef3e19e967fd",
+  "stage": "pilot",
+  "task": "q-0046",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00051753,
+  "secs": 20.5
+ },
+ {
+  "run_id": "f2a8a856c65e4e0a9d187877dab57d2c",
+  "stage": "pilot",
+  "task": "q-0046",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00084643,
+  "secs": 21.9
+ },
+ {
+  "run_id": "8a206fb715d54901896dc9f54950da35",
+  "stage": "pilot",
+  "task": "q-0047",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00041447999999999995,
+  "secs": 12.5
+ },
+ {
+  "run_id": "cbefc71b41f84e70a5735581c2cae75a",
+  "stage": "pilot",
+  "task": "q-0047",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0007023999999999999,
+  "secs": 17.5
+ },
+ {
+  "run_id": "15d2113cb618488ba960b519fbea11cf",
+  "stage": "pilot",
+  "task": "q-0048",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00032381,
+  "secs": 16.8
+ },
+ {
+  "run_id": "f01df64c0e7a4d4cb2344a59d10b121a",
+  "stage": "pilot",
+  "task": "q-0048",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00080352,
+  "secs": 16.8
+ },
+ {
+  "run_id": "ef92449faa3140ba91e3e8db9ac70576",
+  "stage": "pilot",
+  "task": "q-0049",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00037341,
+  "secs": 15.3
+ },
+ {
+  "run_id": "b358e630a68e4785b2e09ffb998e5788",
+  "stage": "pilot",
+  "task": "q-0049",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.0007601999999999999,
+  "secs": 16.7
+ },
+ {
+  "run_id": "22b6687736854e058ff071bd27951fdc",
+  "stage": "pilot",
+  "task": "q-0050",
+  "arm": "native",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00032540999999999994,
+  "secs": 14.1
+ },
+ {
+  "run_id": "c9ac4b3ad1ea455a9f5919ec98ab7555",
+  "stage": "pilot",
+  "task": "q-0050",
+  "arm": "mcp",
+  "killed": false,
+  "defect": null,
+  "cost_usd": 0.00071302,
+  "secs": 18.2
+ },
+ {
+  "run_id": "fc8ae867b33048efa2a08869336195c8",
+  "stage": "wiring_smoke(prefix)",
+  "task": "wiring",
+  "arm": "native",
+  "killed": true,
+  "defect": "missing-or-malformed-usage-cost",
+  "cost_usd": null,
+  "secs": 10.5
+ },
+ {
+  "run_id": "a283583cdfd845e9af4268922134a8ac",
+  "stage": "wiring_smoke(prefix)",
+  "task": "wiring",
+  "arm": "mcp",
+  "killed": true,
+  "defect": "missing-or-malformed-usage-cost",
+  "cost_usd": null,
+  "secs": 20.9
+ }
+]

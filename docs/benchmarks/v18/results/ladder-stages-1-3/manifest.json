@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-22T21:44:54Z",
+  "pi_version": "0.86.1",
+  "aptu_coder_version": "0.35.1",
+  "rg_version": "ripgrep 15.2.0",
+  "provider": "zai",
+  "model": "glm-5.3-flash",
+  "prices_per_1m_usd": {"input": 0.075, "output": 0.25},
+  "prices_reverified": true,
+  "fixture_sha256_tree": "df76ffb82a0f2a89ebe86876408c5b48a449619e18cba9ca88713b60cc0bf153",
+  "git_head": "d1557063732f62fcc74b243e33486105a8718129",
+  "prs_included": [1611, 1612, 1613],
+  "no_extensions_used": false,
+  "pytest": "35 passed"
+}
