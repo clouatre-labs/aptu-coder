@@ -6,10 +6,20 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex as TokioMutex;
 
-pub fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
+/// Build a test analyzer together with the receiving half of its metrics channel,
+/// so tests can assert on emitted events (including the one-time `schema_surface`).
+pub fn make_test_analyzer_with_metrics() -> (
+    aptu_coder::CodeAnalyzer,
+    tokio::sync::mpsc::UnboundedReceiver<aptu_coder::MetricEvent>,
+) {
     let peer = Arc::new(TokioMutex::new(None));
-    let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
-    aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(metrics_tx))
+    let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel();
+    let analyzer = aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(metrics_tx));
+    (analyzer, metrics_rx)
+}
+
+pub fn make_test_analyzer() -> aptu_coder::CodeAnalyzer {
+    make_test_analyzer_with_metrics().0
 }
 
 /// Send a single MCP request over a fresh in-process connection.

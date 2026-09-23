@@ -112,7 +112,13 @@ pub(crate) fn build_analyzer(
         ));
 
     crate::CodeAnalyzer {
-        tool_router: Arc::new(RwLock::new(crate::CodeAnalyzer::tool_router())),
+        tool_router: {
+            let tool_router = crate::CodeAnalyzer::tool_router();
+            // One-time schema-surface telemetry at server start; never per rotation
+            // or per request.
+            crate::metrics::emit_schema_surface(&metrics_tx, &tool_router.list_all());
+            Arc::new(RwLock::new(tool_router))
+        },
         cache: AnalysisCache::new(file_cap),
         disk_cache,
         peer,

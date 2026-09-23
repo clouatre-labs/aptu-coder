@@ -185,7 +185,10 @@ fn test_metric_chars_threshold_breach_fires() {
         l2_size_bytes: None,
         stdout_bytes_raw: None,
         stderr_bytes_raw: None,
+
         edit_count: None,
+        est_output_tokens: None,
+        schema_chars: None,
     };
     assert!(
         event.chars_threshold_breach,
@@ -235,7 +238,10 @@ fn test_metric_chars_threshold_breach_no_fire() {
         l2_size_bytes: None,
         stdout_bytes_raw: None,
         stderr_bytes_raw: None,
+
         edit_count: None,
+        est_output_tokens: None,
+        schema_chars: None,
     };
     assert!(
         !event.chars_threshold_breach,
