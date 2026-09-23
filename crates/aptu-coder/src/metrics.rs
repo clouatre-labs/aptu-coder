@@ -137,6 +137,16 @@ pub struct MetricEvent {
     /// single-edit form. Only populated for `edit_replace`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_count: Option<usize>,
+    /// Rough token estimate for the response payload: `output_chars / 4`. Only populated
+    /// on per-call events where a token estimate is useful; omitted otherwise. This is a
+    /// coarse heuristic (~4 chars per token), not a tokenizer-accurate count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub est_output_tokens: Option<u64>,
+    /// Per-tool serialized JSON-schema size in characters, captured once at server start
+    /// on the `schema_surface` event. Keys are tool names; values are
+    /// `serde_json::to_string(&tool.input_schema).len()`. `None` on all other events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_chars: Option<std::collections::BTreeMap<String, usize>>,
 }
 
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
@@ -180,6 +190,8 @@ pub(crate) struct MetricEventBuilder {
     stdout_bytes_raw: Option<u64>,
     stderr_bytes_raw: Option<u64>,
     edit_count: Option<usize>,
+    est_output_tokens: Option<u64>,
+    schema_chars: Option<std::collections::BTreeMap<String, usize>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -366,6 +378,20 @@ impl MetricEventBuilder {
         self.edit_count = Some(v);
         self
     }
+    /// Set an explicit token estimate. Per-call events are normally populated
+    /// centrally (output_chars / 4) in `MetricsWriter::receive_batch`; this setter
+    /// exists for handler-level overrides and the serialization unit tests.
+    #[allow(dead_code)]
+    #[must_use]
+    pub(crate) fn est_output_tokens(mut self, v: u64) -> Self {
+        self.est_output_tokens = Some(v);
+        self
+    }
+    #[must_use]
+    pub(crate) fn schema_chars(mut self, v: std::collections::BTreeMap<String, usize>) -> Self {
+        self.schema_chars = Some(v);
+        self
+    }
     #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
@@ -407,8 +433,33 @@ impl MetricEventBuilder {
             stdout_bytes_raw: self.stdout_bytes_raw,
             stderr_bytes_raw: self.stderr_bytes_raw,
             edit_count: self.edit_count,
+            est_output_tokens: self.est_output_tokens,
+            schema_chars: self.schema_chars,
         }
     }
+}
+
+/// Emit the one-time `schema_surface` metric event at server start.
+///
+/// Serializes each tool's `input_schema` to JSON and records its character length in a
+/// `BTreeMap` keyed by tool name. Serialization failures skip the individual tool so a
+/// metrics problem can never block startup. Sent fire-and-forget through the existing
+/// unbounded channel; the map total equals the event's `output_chars` slot.
+pub(crate) fn emit_schema_surface(sender: &MetricsSender, tools: &[rmcp::model::Tool]) {
+    let mut schema_chars = std::collections::BTreeMap::new();
+    for tool in tools {
+        let Ok(json) = serde_json::to_string(&tool.input_schema) else {
+            continue;
+        };
+        schema_chars.insert(tool.name.to_string(), json.len());
+    }
+    let total: usize = schema_chars.values().sum();
+    sender.send(
+        MetricEventBuilder::new("schema_surface", "ok", 0)
+            .output_chars(total)
+            .schema_chars(schema_chars)
+            .build(),
+    );
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -457,6 +508,14 @@ pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
     (otel_method_name(event.tool), event.tool)
 }
 
+/// Whether an event should be recorded to OpenTelemetry metrics. Receipt
+/// ("received") events and the synthetic `schema_surface` startup event are
+/// excluded: neither represents an actual tool call, and recording them would
+/// pollute latency histograms and increment `mcp.server.tool.calls`.
+fn should_record_otel(event: &MetricEvent) -> bool {
+    event.result != "received" && event.tool != "schema_surface"
+}
+
 /// Record a metric event to OTel metrics if the global meter provider is available.
 ///
 /// Records:
@@ -467,8 +526,9 @@ pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
 ///
 /// Instruments are initialized once via OnceLock to avoid rebuilding them on every call.
 pub(crate) fn record_otel_metrics(event: &MetricEvent) {
-    // Skip OTEL recording for "received" events (duration_ms=0 would pollute latency histograms)
-    if event.result == "received" {
+    // Skip OTEL recording for "received" events (duration_ms=0 would pollute latency
+    // histograms) and the synthetic schema_surface startup event (it is not a tool call)
+    if !should_record_otel(event) {
         return;
     }
 
@@ -541,6 +601,74 @@ pub(crate) fn record_otel_metrics(event: &MetricEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_est_output_tokens_serialized_when_some() {
+        let event = MetricEventBuilder::new("analyze_file", "ok", 10)
+            .output_chars(400)
+            .est_output_tokens(100)
+            .build();
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""est_output_tokens":100"#));
+    }
+
+    #[test]
+    fn test_should_record_otel_filters_receipt_and_schema_surface() {
+        let completion = MetricEventBuilder::new("analyze_file", "ok", 10).build();
+        assert!(should_record_otel(&completion));
+
+        let receipt = MetricEventBuilder::new("analyze_file", "received", 0).build();
+        assert!(!should_record_otel(&receipt));
+
+        let schema_surface = MetricEventBuilder::new("schema_surface", "ok", 0).build();
+        assert!(!should_record_otel(&schema_surface));
+    }
+
+    #[test]
+    fn test_est_output_tokens_omitted_when_none() {
+        let event = MetricEventBuilder::new("analyze_file", "ok", 10)
+            .output_chars(400)
+            .build();
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("est_output_tokens"));
+    }
+
+    #[test]
+    fn test_schema_chars_omitted_on_ordinary_events() {
+        let event = MetricEventBuilder::new("analyze_file", "ok", 10).build();
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("schema_chars"));
+    }
+
+    #[test]
+    fn test_emit_schema_surface_event_shape() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let tools = crate::CodeAnalyzer::list_tools();
+        emit_schema_surface(&MetricsSender(tx), &tools);
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.tool, "schema_surface");
+        assert_eq!(event.result, "ok");
+        assert!(rx.try_recv().is_err(), "exactly one schema_surface event");
+        let map = event.schema_chars.expect("schema_chars populated");
+        assert_eq!(map.len(), tools.len());
+        assert!(
+            map.values().all(|v| *v > 0),
+            "every schema has non-zero chars"
+        );
+        let total: usize = map.values().sum();
+        assert_eq!(event.output_chars, total);
+        assert!(total > 0);
+    }
+
+    #[test]
+    fn test_emit_schema_surface_empty_tool_list_does_not_panic() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        emit_schema_surface(&MetricsSender(tx), &[]);
+        let event = rx.try_recv().unwrap();
+        let map = event.schema_chars.expect("schema_chars populated");
+        assert!(map.is_empty());
+        assert_eq!(event.output_chars, 0);
+    }
 
     #[test]
     fn test_metric_event_serialization() {
@@ -698,6 +826,8 @@ mod tests {
             stdout_bytes_raw: None,
             stderr_bytes_raw: None,
             edit_count: None,
+            est_output_tokens: None,
+            schema_chars: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;

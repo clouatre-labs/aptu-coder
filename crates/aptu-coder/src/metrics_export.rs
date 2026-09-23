@@ -37,11 +37,16 @@ impl MetricsWriter {
     }
 
     /// Accumulate per-tool event counts for session summary export on shutdown.
+    /// Synthetic `schema_surface` startup events are excluded: they are not tool
+    /// calls and must not inflate call counts, durations, or output totals.
     fn accumulate_event(
         tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
         event: &MetricEvent,
     ) {
+        if event.tool == "schema_surface" {
+            return;
+        }
         let entry = tool_counts.entry(event.tool).or_default();
         entry.count += 1;
         entry.duration_ms += event.duration_ms;
@@ -141,13 +146,25 @@ impl MetricsWriter {
         tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
     ) -> Option<Vec<MetricEvent>> {
+        // Central token-estimate wiring: per-call completion events get
+        // est_output_tokens = output_chars / 4 (coarse ~4 chars/token heuristic);
+        // schema_surface events carry schema size data and receipt ("received")
+        // events carry no payload, so both are excluded.
+        const ESTIMATE: fn(&mut MetricEvent) = |e: &mut MetricEvent| {
+            if e.tool != "schema_surface" && e.result != "received" && e.est_output_tokens.is_none()
+            {
+                e.est_output_tokens = Some((e.output_chars / 4) as u64);
+            }
+        };
         let mut batch = Vec::new();
-        if let Some(event) = rx.recv().await {
+        if let Some(mut event) = rx.recv().await {
+            ESTIMATE(&mut event);
             Self::accumulate_event(tool_counts, export_session_id, &event);
             batch.push(event);
             for _ in 0..99 {
                 match rx.try_recv() {
-                    Ok(e) => {
+                    Ok(mut e) => {
+                        ESTIMATE(&mut e);
                         Self::accumulate_event(tool_counts, export_session_id, &e);
                         batch.push(e);
                     }
@@ -430,6 +447,93 @@ pub(crate) fn current_date_str() -> String {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn receive_batch_populates_est_output_tokens_on_per_call_events() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<MetricEvent>();
+        tx.send(MetricEvent {
+            tool: "analyze_file",
+            result: "ok",
+            output_chars: 400,
+            ..Default::default()
+        })
+        .unwrap();
+        tx.send(
+            crate::metrics::MetricEventBuilder::new("schema_surface", "ok", 0)
+                .output_chars(1234)
+                .build(),
+        )
+        .unwrap();
+        drop(tx);
+
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        let batch = MetricsWriter::receive_batch(&mut rx, &mut counts, &mut sid)
+            .await
+            .unwrap();
+        assert_eq!(batch[0].est_output_tokens, Some(100), "400 / 4 = 100");
+        assert!(batch[0].schema_chars.is_none());
+        assert_eq!(batch[1].est_output_tokens, None, "schema_surface excluded");
+    }
+
+    #[tokio::test]
+    async fn receive_batch_excludes_receipt_events_from_est_output_tokens() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<MetricEvent>();
+        tx.send(MetricEvent {
+            tool: "analyze_file",
+            result: "received",
+            output_chars: 400,
+            ..Default::default()
+        })
+        .unwrap();
+        tx.send(MetricEvent {
+            tool: "analyze_file",
+            result: "ok",
+            output_chars: 400,
+            ..Default::default()
+        })
+        .unwrap();
+        drop(tx);
+
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        let batch = MetricsWriter::receive_batch(&mut rx, &mut counts, &mut sid)
+            .await
+            .unwrap();
+        assert_eq!(
+            batch[0].est_output_tokens, None,
+            "receipt events carry no payload and get no estimate"
+        );
+        assert_eq!(batch[1].est_output_tokens, Some(100));
+    }
+
+    #[tokio::test]
+    async fn accumulate_event_excludes_schema_surface_from_call_counts() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("schema_surface", "ok", 0)
+                .output_chars(1234)
+                .build(),
+        );
+        assert!(
+            counts.is_empty(),
+            "synthetic schema_surface startup event must not count as a tool call"
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 5)
+                .output_chars(10)
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m: &ToolMetrics| m.count),
+            Some(1)
+        );
+    }
 
     /// Serializes tests that mutate `APTU_CODER_METRICS_EXPORT_FILE` to prevent parallel
     /// pollution.

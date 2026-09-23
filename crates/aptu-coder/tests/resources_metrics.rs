@@ -51,7 +51,11 @@ async fn read_with_event(
     let analyzer = aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(tx));
     let response =
         send_raw_request(analyzer, "resources/read", serde_json::json!({"uri": uri})).await;
-    let event = rx.recv().await.expect("read_resource emits one event");
+    // Skip the one-time schema_surface event emitted at CodeAnalyzer::new.
+    let mut event = rx.recv().await.expect("read_resource emits one event");
+    while event.tool == "schema_surface" {
+        event = rx.recv().await.expect("read_resource emits one event");
+    }
     (response, event)
 }
 
