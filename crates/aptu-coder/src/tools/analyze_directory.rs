@@ -219,8 +219,10 @@ pub(crate) async fn handle_overview_mode(
 }
 
 /// Emit a terminal `result="error"` metric on an `invalid_params` early return
-/// so every `"received"` receipt is paired with a completion event; otherwise
-/// the invocation disappears from the shutdown summary call_count.
+/// so the invocation does not disappear from the shutdown summary call_count.
+/// `error_type` reflects the failure class: `invalid_params` for validation
+/// failures, `internal_error` for walk/pagination failures.
+#[allow(clippy::too_many_arguments)]
 fn emit_validation_error(
     ctx: &AnalyzeDirectoryContext,
     params: &AnalyzeDirectoryParams,
@@ -229,12 +231,13 @@ fn emit_validation_error(
     t_start: std::time::Instant,
     param_path: &str,
     cursor: Option<&str>,
+    error_type: &str,
 ) {
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_directory", "error", dur)
             .param_path_depth(crate::metrics::path_component_count(param_path))
-            .error_type(Some("invalid_params".to_string()))
+            .error_type(Some(error_type.to_string()))
             .session_id(sid.clone())
             .seq(Some(seq))
             .summary_mode(params.output_control.summary.unwrap_or(false))
@@ -267,7 +270,21 @@ pub(crate) async fn analyze_directory_handler(
         Ok(v) => v,
         Err(e) => {
             span.record("error", true);
-            span.record("error.type", "internal_error");
+            let error_type = match e.code {
+                rmcp::model::ErrorCode::INVALID_PARAMS => "invalid_params",
+                _ => "internal_error",
+            };
+            span.record("error.type", error_type);
+            emit_validation_error(
+                ctx,
+                &params,
+                seq,
+                &sid,
+                t_start,
+                &param_path,
+                cursor,
+                error_type,
+            );
             return Ok(err_to_tool_result(e));
         }
     };
@@ -280,7 +297,16 @@ pub(crate) async fn analyze_directory_handler(
     if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
-        emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
+        emit_validation_error(
+            ctx,
+            &params,
+            seq,
+            &sid,
+            t_start,
+            &param_path,
+            cursor,
+            "invalid_params",
+        );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -325,7 +351,16 @@ pub(crate) async fn analyze_directory_handler(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
-                emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
+                emit_validation_error(
+                    ctx,
+                    &params,
+                    seq,
+                    &sid,
+                    t_start,
+                    &param_path,
+                    cursor,
+                    "invalid_params",
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -344,6 +379,16 @@ pub(crate) async fn analyze_directory_handler(
         Err(e) => {
             span.record("error", true);
             span.record("error.type", "internal_error");
+            emit_validation_error(
+                ctx,
+                &params,
+                seq,
+                &sid,
+                t_start,
+                &param_path,
+                cursor,
+                "internal_error",
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
                 e.to_string(),
@@ -408,4 +453,97 @@ pub(crate) async fn analyze_directory_handler(
             .build(),
     );
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aptu_coder_core::cache::AnalysisCache;
+
+    /// Builds a minimal `AnalyzeDirectoryContext` backed by an unbounded metrics
+    /// channel, returning the context and the receiving end so tests can inspect
+    /// emitted events.
+    fn test_context() -> (
+        AnalyzeDirectoryContext,
+        tokio::sync::mpsc::UnboundedReceiver<crate::metrics::MetricEvent>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let ctx = AnalyzeDirectoryContext {
+            cache: AnalysisCache::new(1),
+            disk_cache: Arc::new(aptu_coder_core::cache::DiskCache::new(
+                std::path::PathBuf::new(),
+                true,
+            )),
+            metrics_tx: crate::metrics::MetricsSender(tx),
+            sid: None,
+        };
+        (ctx, rx)
+    }
+
+    fn test_call(param_path: String) -> DirectoryHandlerCall {
+        DirectoryHandlerCall {
+            seq: 0,
+            sid: None,
+            t_start: std::time::Instant::now(),
+            param_path,
+            max_depth_val: None,
+            ct: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn handler_git_ref_failure_emits_single_terminal_error_event() {
+        // Arrange: a non-git directory with a git_ref filter forces
+        // handle_overview_mode to fail (walk succeeds, git_ref filter fails).
+        let (ctx, mut rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").expect("write temp file");
+        let path = dir.path().to_str().expect("valid utf8 path").to_string();
+        let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "max_depth": 1,
+            "git_ref": "nonexistent-ref",
+        }))
+        .expect("valid AnalyzeDirectoryParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let _ = analyze_directory_handler(&ctx, params, call, &tracing::Span::none()).await;
+
+        // Assert: exactly one terminal event, paired with the implicit receipt.
+        let event = rx.try_recv().expect("expected a terminal error metric");
+        assert_eq!(event.result, "error");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert!(
+            rx.try_recv().is_err(),
+            "no additional events should be emitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn emit_validation_error_internal_error_sends_terminal_event() {
+        // Arrange: covers the paginate_slice / internal failure classification.
+        let (ctx, mut rx) = test_context();
+        let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+            "path": "src",
+        }))
+        .expect("valid AnalyzeDirectoryParams JSON");
+
+        // Act
+        emit_validation_error(
+            &ctx,
+            &params,
+            0,
+            &None,
+            std::time::Instant::now(),
+            "src",
+            None,
+            "internal_error",
+        );
+
+        // Assert
+        let event = rx.try_recv().expect("expected a terminal error metric");
+        assert_eq!(event.result, "error");
+        assert_eq!(event.error_type.as_deref(), Some("internal_error"));
+    }
 }
