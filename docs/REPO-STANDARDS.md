@@ -25,7 +25,7 @@ This document maps every repo-level artifact to its purpose and the rationale be
 | `Cargo.toml` `[profile.ci]` | Inherits release; `lto=false`, `codegen-units=16` for faster CI builds without sacrificing correctness |
 | `Cargo.toml` `[workspace.lints.clippy]` | Hard-denies `undocumented_unsafe_blocks`, `unwrap_used`, `expect_used`; warn-tier `must_use_candidate`, `redundant_clone`, `needless_pass_by_value`, `large_enum_variant` staged for eventual promotion to `deny` once all violations are cleared (tracked in issue #1225) |
 | `.github/workflows/ci.yml` permissions block | Top-level `permissions:` block on every workflow. Use `contents: read` + `pull-requests: read` for CI workflows; set the minimum required permissions per job, noting that jobs using `actions/checkout` need at least `contents: read`. Required even after the org default was flipped to `read` on 2026-03-25, as defence in depth. |
-| Runner pin (`ubuntu-24.04-arm`) | Pin every job to `ubuntu-24.04-arm` rather than `ubuntu-latest`. `ubuntu-latest` resolves to the newest image mid-cycle and can silently change toolchain versions between runs. |
+| Runner pin (`ubuntu-26.04-arm`) | Pin every job to `ubuntu-26.04-arm` rather than `ubuntu-latest`. `ubuntu-latest` resolves to the newest image mid-cycle and can silently change toolchain versions between runs. |
 
 *Table 1: Repository artifact map and purpose of each file.*
 
@@ -39,7 +39,7 @@ This document maps every repo-level artifact to its purpose and the rationale be
 # CI Result aggregator job in ci.yml -- list every job in 'needs'
 ci-result:
   name: CI Result
-  runs-on: ubuntu-24.04-arm
+  runs-on: ubuntu-26.04-arm
   if: always()
   needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks]
   steps:
@@ -58,7 +58,7 @@ There is no standalone `format` job (`cargo fmt --check` is a step inside `lint`
 
 **Provenance attestation.** `build-and-attest.yml` generates a signed attestation via `actions/attest-build-provenance`. Consumers can verify with `gh attestation verify` before installing. `Cargo.lock` is committed and `cargo deny` enforces license and advisory checks in CI. Build provenance is covered by cosign signing and `actions/attest-build-provenance` (SLSA Build L3).
 
-**Runner pinning to ubuntu-24.04-arm.** `ubuntu-latest` is a moving alias; GitHub advances it to the next LTS image with short notice. Pinning to a specific image (`ubuntu-24.04-arm`) makes toolchain changes explicit and reviewable rather than silent. Renovate keeps the pin current via automated PRs.
+**Runner pinning to ubuntu-26.04-arm.** `ubuntu-latest` is a moving alias; GitHub advances it to the next LTS image with short notice. Pinning to a specific image (`ubuntu-26.04-arm`) makes toolchain changes explicit and reviewable rather than silent. Renovate keeps the pin current via automated PRs.
 
 **New dependency freshness gate.** The `deny` CI job runs `.github/scripts/check-package-age.sh` to verify new Cargo.lock entries were published >=7 days ago.
 
@@ -80,7 +80,7 @@ Do not raise the global threshold to accommodate a single outlier. The `reason` 
 
 1. **GitHub metadata:** Set topics, copy the 11-label taxonomy (names, colors, descriptions), create the two rulesets.
 2. **Templates:** Copy all three issue templates and the PR template; adapt wording to the target domain.
-3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-24.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (not `cargo test`). Set `CI Result` as the sole required status check in the branch ruleset. Copy `.commitlintrc.yml`.
+3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (not `cargo test`). Set `CI Result` as the sole required status check in the branch ruleset. Copy `.commitlintrc.yml`.
 4. **Release:** Copy `build-and-attest.yml` and `release.yml`; update distribution channel config.
 5. **Cargo profiles:** Copy the `[profile.release]` and `[profile.ci]` blocks verbatim.
 6. **Docs:** Add `ARCHITECTURE.md` for the target repo; link this document and the orchestration guide from README.
@@ -272,7 +272,7 @@ on:
     tags: ["v*.*.*"]
 jobs:
   publish:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     environment: publish
     permissions:
       id-token: write  # required to request an OIDC token
