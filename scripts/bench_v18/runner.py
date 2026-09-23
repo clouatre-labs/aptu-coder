@@ -55,6 +55,13 @@ NATIVE_TOOLS = ["--tools", "read,bash"]
 MCP_EXCLUDE = ["--exclude-tools",
                "aptu-coder_edit_overwrite,aptu-coder_edit_replace,"
                "aptu-coder_exec_command"]
+# Gateway arm: directTools: false routes every tool call through the
+# adapter's mcp search/call gateway tool; common flags only, no denylist.
+GATEWAY_FLAGS: list[str] = []
+# Search middle-path arm: directTools: "search" exposes only the search
+# tool directly; call still routes through the gateway. Common flags only.
+SEARCH_FLAGS: list[str] = []
+ARMS = ("native", "mcp", "mcp-gateway", "mcp-search")
 
 
 def new_run_id() -> str:
@@ -66,7 +73,7 @@ def build_invocation(
     arm: str, run_root: Path, session_dir: Path, prompt: str
 ) -> tuple[list[str], dict[str, str]]:
     """Build the (command, env) for one arm's pi invocation."""
-    if arm not in ("native", "mcp"):
+    if arm not in ARMS:
         raise ValueError(f"unknown arm: {arm}")
     agent_dir = run_root / f"agent-{arm}"
     agent_dir.mkdir(parents=True, exist_ok=True)
@@ -77,19 +84,25 @@ def build_invocation(
     else:
         # directTools: true surfaces the four analysis tools directly by
         # name (aptu-coder_analyze_directory etc.) instead of behind the
-        # adapter's mcp search/call gateway tool; verified live.
+        # adapter's mcp search/call gateway tool; verified live. The
+        # mcp-gateway and mcp-search arms probe the other points of that
+        # axis: false (full gateway round-trip) and "search" (search tool
+        # surfaced, calls still gated).
+        direct_tools = {"mcp": True, "mcp-gateway": False,
+                        "mcp-search": "search"}[arm]
         (agent_dir / "mcp.json").write_text(json.dumps({
             "mcpServers": {
                 "aptu-coder": {
                     "type": "stdio",
                     "command": "aptu-coder",
-                    "directTools": True,
+                    "directTools": direct_tools,
                 },
             },
         }) + "\n")
         (agent_dir / "settings.json").write_text(
             '{"packages": ["npm:pi-mcp-adapter"]}\n')
-        arm_flags = MCP_EXCLUDE
+        arm_flags = {"mcp": MCP_EXCLUDE, "mcp-gateway": GATEWAY_FLAGS,
+                     "mcp-search": SEARCH_FLAGS}[arm]
     cmd = ["pi", "-p", "--mode", "json", "--provider", PROVIDER,
            "--model", MODEL, *COMMON_FLAGS, *arm_flags,
            "--session-dir", str(session_dir.resolve()), prompt]
@@ -284,7 +297,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--stage", choices=STAGES, required=True)
-    ap.add_argument("--arm", choices=("native", "mcp"), required=True)
+    ap.add_argument("--arm", choices=ARMS, required=True)
     ap.add_argument("--task", required=True)
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--run-root", type=Path, required=True)
