@@ -512,7 +512,7 @@ pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
 /// ("received") events and the synthetic `schema_surface` startup event are
 /// excluded: neither represents an actual tool call, and recording them would
 /// pollute latency histograms and increment `mcp.server.tool.calls`.
-fn should_record_otel(event: &MetricEvent) -> bool {
+pub(crate) fn is_tool_call_event(event: &MetricEvent) -> bool {
     event.result != "received" && event.tool != "schema_surface"
 }
 
@@ -528,7 +528,7 @@ fn should_record_otel(event: &MetricEvent) -> bool {
 pub(crate) fn record_otel_metrics(event: &MetricEvent) {
     // Skip OTEL recording for "received" events (duration_ms=0 would pollute latency
     // histograms) and the synthetic schema_surface startup event (it is not a tool call)
-    if !should_record_otel(event) {
+    if !is_tool_call_event(event) {
         return;
     }
 
@@ -613,15 +613,15 @@ mod tests {
     }
 
     #[test]
-    fn test_should_record_otel_filters_receipt_and_schema_surface() {
+    fn test_is_tool_call_event_filters_receipt_and_schema_surface() {
         let completion = MetricEventBuilder::new("analyze_file", "ok", 10).build();
-        assert!(should_record_otel(&completion));
+        assert!(is_tool_call_event(&completion));
 
         let receipt = MetricEventBuilder::new("analyze_file", "received", 0).build();
-        assert!(!should_record_otel(&receipt));
+        assert!(!is_tool_call_event(&receipt));
 
         let schema_surface = MetricEventBuilder::new("schema_surface", "ok", 0).build();
-        assert!(!should_record_otel(&schema_surface));
+        assert!(!is_tool_call_event(&schema_surface));
     }
 
     #[test]

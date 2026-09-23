@@ -44,7 +44,7 @@ impl MetricsWriter {
         export_session_id: &mut Option<String>,
         event: &MetricEvent,
     ) {
-        if event.tool == "schema_surface" {
+        if !crate::metrics::is_tool_call_event(event) {
             return;
         }
         let entry = tool_counts.entry(event.tool).or_default();
@@ -151,8 +151,7 @@ impl MetricsWriter {
         // schema_surface events carry schema size data and receipt ("received")
         // events carry no payload, so both are excluded.
         const ESTIMATE: fn(&mut MetricEvent) = |e: &mut MetricEvent| {
-            if e.tool != "schema_surface" && e.result != "received" && e.est_output_tokens.is_none()
-            {
+            if crate::metrics::is_tool_call_event(e) && e.est_output_tokens.is_none() {
                 e.est_output_tokens = Some((e.output_chars / 4) as u64);
             }
         };
@@ -521,6 +520,34 @@ mod tests {
         assert!(
             counts.is_empty(),
             "synthetic schema_surface startup event must not count as a tool call"
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 5)
+                .output_chars(10)
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m: &ToolMetrics| m.count),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn accumulate_event_excludes_received_receipts_from_call_counts() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "received", 0)
+                .output_chars(1234)
+                .build(),
+        );
+        assert!(
+            counts.is_empty(),
+            "receipt event must not count as a tool call in shutdown summary"
         );
         MetricsWriter::accumulate_event(
             &mut counts,
