@@ -37,20 +37,26 @@ impl MetricsWriter {
     }
 
     /// Accumulate per-tool event counts for session summary export on shutdown.
-    /// Two kinds of events are excluded via the shared `is_tool_call_event`
-    /// predicate:
+    /// Three kinds of events are excluded via the shared `is_tool_call_event`
+    /// predicate or explicit checks:
     ///
     /// - Synthetic `schema_surface` startup events: they are not tool calls and
     ///   must not inflate call counts, durations, or output totals.
     /// - `result == "received"` receipt events: they are acknowledgment
     ///   duplicates of completed tool calls; counting them would double-report
     ///   every tool invocation in the shutdown summary.
+    /// - Events with `cache_write_failure == Some(true)`: they are synthetic
+    ///   signal events emitted after the real completion event when the L2
+    ///   disk cache write fails; counting them would double-report the
+    ///   invocation. They are excluded only here (not in the shared
+    ///   predicate) because they also drive the
+    ///   `mcp.server.tool.cache_write_failures_total` OTel counter.
     fn accumulate_event(
         tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
         event: &MetricEvent,
     ) {
-        if !crate::metrics::is_tool_call_event(event) {
+        if !crate::metrics::is_tool_call_event(event) || event.cache_write_failure == Some(true) {
             return;
         }
         let entry = tool_counts.entry(event.tool).or_default();
@@ -510,6 +516,35 @@ mod tests {
             "receipt events carry no payload and get no estimate"
         );
         assert_eq!(batch[1].est_output_tokens, Some(100));
+    }
+
+    #[tokio::test]
+    async fn accumulate_event_excludes_cache_write_failure_events_from_call_counts() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &MetricEvent {
+                tool: "analyze_file",
+                result: "ok",
+                duration_ms: 50,
+                output_chars: 400,
+                ..Default::default()
+            },
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 0)
+                .cache_write_failure(Some(true))
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m| m.count),
+            Some(1),
+            "synthetic cache-failure event must not inflate call_count"
+        );
     }
 
     #[tokio::test]
