@@ -31,7 +31,7 @@ env:
 jobs:
   validate-release:
     name: Validate Release Exists
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
     steps:
@@ -71,7 +71,7 @@ jobs:
     uses: ./.github/workflows/build-and-attest.yml
     with:
       target: aarch64-unknown-linux-musl
-      os: ubuntu-24.04
+      os: ubuntu-26.04
       cross: true
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
@@ -86,7 +86,7 @@ jobs:
     uses: ./.github/workflows/build-and-attest.yml
     with:
       target: x86_64-unknown-linux-musl
-      os: ubuntu-24.04
+      os: ubuntu-26.04
       cross: true
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
@@ -95,7 +95,7 @@ jobs:
     name: Update Homebrew Formula
     needs: [build-aarch64-apple-darwin, build-aarch64-unknown-linux-musl, build-x86_64-unknown-linux-musl]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout homebrew-tap repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -211,7 +211,7 @@ jobs:
     name: Generate MCPB Bundles
     needs: [build-aarch64-apple-darwin, build-aarch64-unknown-linux-musl, build-x86_64-unknown-linux-musl]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: write
     steps:
@@ -274,7 +274,7 @@ jobs:
     name: Update server.json
     needs: [generate-mcpb]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: write
       pull-requests: write
