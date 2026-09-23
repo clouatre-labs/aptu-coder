@@ -23,6 +23,10 @@ on:
         required: true
         type: string
         description: "Release version tag"
+      release_id:
+        required: true
+        type: string
+        description: "GitHub Release (draft) ID to upload assets to"
       dry_run:
         required: false
         type: boolean
@@ -67,37 +71,58 @@ jobs:
           shared-key: aptu-coder
           key: ${{ inputs.target }}
 
-      - name: Upload Rust binary
-        if: ${{ !inputs.dry_run }}
-        id: upload
-        uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1
-        with:
-          bin: aptu-coder
-          target: ${{ inputs.target }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checksum: sha256
-          archive: aptu-coder-${{ inputs.version }}-${{ inputs.target }}
-          ref: refs/tags/v${{ inputs.version }}
-
-      - name: Build binary (dry-run)
-        if: ${{ inputs.dry_run }}
+      - name: Build binary
         env:
           TARGET: ${{ inputs.target }}
         run: cargo build --locked --release --target "${TARGET}"
 
-      - name: Sign tarball with cosign
-        if: ${{ !inputs.dry_run }}
-        run: cosign sign-blob --yes --bundle "${{ steps.upload.outputs.tar }}.bundle" "${{ steps.upload.outputs.tar }}"
-
-      - name: Upload bundle to release
+      - name: Archive binary and checksum
         if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ inputs.target }}
           VERSION: ${{ inputs.version }}
-        run: gh release upload "v${VERSION}" "${{ steps.upload.outputs.tar }}.bundle" --clobber
+        run: |
+          set -euo pipefail
+          ARCHIVE="aptu-coder-${VERSION}-${TARGET}.tar.gz"
+          mkdir -p staging
+          cp "target/${TARGET}/release/aptu-coder" staging/aptu-coder
+          tar -czf "${ARCHIVE}" -C staging aptu-coder
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Sign tarball with cosign
+        if: ${{ !inputs.dry_run }}
+        env:
+          ARCHIVE: ${{ env.ARCHIVE }}
+        run: cosign sign-blob --yes --bundle "${ARCHIVE}.bundle" "${ARCHIVE}"
 
       - name: Attest build provenance
         if: ${{ !inputs.dry_run }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
-          subject-path: ${{ steps.upload.outputs.tar }}
+          subject-path: ${{ env.ARCHIVE }}
+
+      - name: Upload assets to draft release
+        # Immutable releases (owner-enforced) lock assets at publish time, so
+        # assets are uploaded to the draft release via the assets API; the
+        # publish-release job flips draft=false only after all uploads complete.
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          ARCHIVE: ${{ env.ARCHIVE }}
+        run: |
+          set -euo pipefail
+          UPLOAD_URL=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.upload_url' | sed 's/{.*}//')
+          for file in "${ARCHIVE}" "${ARCHIVE}.sha256" "${ARCHIVE}.bundle"; do
+            name=$(basename "${file}")
+            ASSET_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --jq ".[] | select(.name == \"${name}\") | .id")
+            if [ -n "${ASSET_ID}" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}"
+            fi
+            gh api --method POST "${UPLOAD_URL}?name=${name}" \
+              --input "${file}" \
+              -H "Content-Type: application/octet-stream" > /dev/null
+            echo "Uploaded ${name}"
+          done
