@@ -36,7 +36,7 @@ ORACLE = [
         "id": "q-c-loc-sym",
         "track": "C",
         "symbol": "sym",
-        "hop_depth": None,
+        "hop_depth": 1,
         "expected_files": ["a.py"],
     },
 ]
@@ -89,15 +89,76 @@ def test_filter_pilot_tasks_returns_matching_survivors():
 
 
 def test_track_c_generation_from_definition_index():
-    index = {"sym": ["lib.py"], "other": ["pkg/mod.rs"], "ghost": []}
+    index = {
+        "sym": ["lib.py"],
+        "other": ["pkg/mod.rs"],
+        "dup": ["a.py", "b.py"],
+        "ghost": [],
+    }
     tasks = generate_track_c_tasks(index)
     assert [t["id"] for t in tasks] == ["task-c-lookup-other", "task-c-lookup-sym"]
     by_id = {t["id"]: t for t in tasks}
     assert by_id["task-c-lookup-sym"]["expected_files"] == ["lib.py"]
     assert by_id["task-c-lookup-sym"]["track"] == "C"
-    assert by_id["task-c-lookup-sym"]["hop_depth"] is None
-    # Empty definition lists emit no task (nothing to look up).
+    # Track C stays hop-1 lookup (mcp-gateway tax-control gate).
+    assert all(t["hop_depth"] == 1 for t in tasks)
+    # Single-answer invariant: ambiguous (multi-file) and empty symbols
+    # are skipped.
+    assert "task-c-lookup-dup" not in by_id
     assert "task-c-lookup-ghost" not in by_id
+    assert all(len(t["expected_files"]) == 1 for t in tasks)
+
+
+def test_ambiguous_symbols_excluded_from_both_tracks():
+    from bench_v19.generate_tasks import collect_exclusions
+
+    entries = [
+        {
+            "id": "q-a-hop1-dup",
+            "track": "A",
+            "symbol": "dup",
+            "hop_depth": 1,
+            "expected_files": [],
+            "crosscheck_agrees": True,
+            "excluded_reason": (
+                "ambiguous symbol 'dup': defined in 2 files (a.py, b.py); "
+                "excluded from task generation"
+            ),
+        },
+        {
+            "id": "q-c-loc-dup",
+            "track": "C",
+            "symbol": "dup",
+            "hop_depth": 1,
+            "expected_files": ["a.py", "b.py"],
+            "excluded_reason": "ambiguous symbol 'dup'",
+        },
+        {
+            "id": "q-c-loc-ok",
+            "track": "C",
+            "symbol": "ok",
+            "hop_depth": 1,
+            "expected_files": ["ok.py"],
+            "excluded_reason": None,
+        },
+    ]
+    tasks = generate_tasks(entries)
+    assert [t["id"] for t in tasks] == ["task-q-c-loc-ok"]
+    assert tasks[0]["hop_depth"] == 1
+    exclusions = collect_exclusions(entries)
+    assert [e["id"] for e in exclusions] == ["q-a-hop1-dup", "q-c-loc-dup"]
+    assert all(e["reason"] for e in exclusions)
+
+
+def test_track_c_tasks_produce_mcp_gateway_cells_in_runner_gate():
+    from bench_v19 import runner as v19_runner
+
+    index = {"sym": ["lib.py"], "dup": ["a.py", "b.py"]}
+    tasks = generate_track_c_tasks(index)
+    cells = v19_runner.ladder_cells(tasks)
+    gateway = [c["task_id"] for c in cells if c["arm"] == "mcp-gateway"]
+    # hop_depth 1 + Track C admit the lookup cell to the tax-control arm.
+    assert gateway == ["task-c-lookup-sym"]
 
 
 def test_track_c_exempt_from_f1_gap_rule():
@@ -105,6 +166,7 @@ def test_track_c_exempt_from_f1_gap_rule():
     # Single answer by construction: divergence only, never the F1 gap.
     assert apply_discriminative_filter(task, 0.9, 0.1, divergent=True)
     assert not apply_discriminative_filter(task, 0.9, 0.1, divergent=False)
+    assert len(task["expected_files"]) == 1  # single-answer invariant
 
 
 def test_track_a_hop_stratification_derives_from_call_edge_bfs(tmp_path):

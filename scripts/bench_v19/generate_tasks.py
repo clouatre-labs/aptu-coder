@@ -4,9 +4,13 @@
 Track A: callers-template prompts stratified by hop depth 1/2/3 (the hop
 sweep is restricted to the callers template). Track C: lookup control
 prompts. Track C lookup tasks are generated directly from the
-tree-sitter definition index (single answer by construction, so Track C
-is exempt from the F1-gap rule and from the rg agreement cross-check,
-which is only defined for callers sets). Includes the
+tree-sitter definition index and only when the symbol has exactly one
+defining file (single-answer invariant, hop-1 lookup so the runner's
+mcp-gateway tax-control gate admits these cells). Track C is exempt
+from the F1-gap rule and from the rg agreement cross-check, which is
+only defined for callers sets. Ambiguous symbols (defined in more than
+one file) are excluded from both tracks fail-closed, with the
+exclusion reason recorded (see ``collect_exclusions``). Includes the
 discriminative-power filter (methodology "Task selection rule"):
 Track A tasks are kept when the F1 gap between arms is >= 0.2, except
 tasks whose oracle has exactly one ground-truth entity, which are
@@ -24,11 +28,15 @@ def generate_tasks(oracle_entries: list[dict]) -> list[dict]:
 
     Track A callers entries yield one task per hop depth; Track A tasks
     whose rg-vs-tree-sitter cross-check disagreed are dropped (the
-    methodology's double-extraction agreement filter). Track C lookup
-    entries yield one task each. Output is sorted by task id.
+    methodology's double-extraction agreement filter), as are entries
+    carrying an ``excluded_reason`` (ambiguous symbol, fail-closed).
+    Track C lookup entries yield one task each. Output is sorted by
+    task id.
     """
     tasks: list[dict] = []
     for entry in oracle_entries:
+        if entry.get("excluded_reason") is not None:
+            continue  # ambiguous symbol -> fail-closed exclusion
         if entry.get("track") == "A":
             if not entry.get("crosscheck_agrees", True):
                 continue  # double-extraction disagreement -> drop
@@ -54,25 +62,44 @@ def generate_tasks(oracle_entries: list[dict]) -> list[dict]:
                         f"Locate the definition of {entry['symbol']} and "
                         f"report its file path."
                     ),
-                    "hop_depth": None,
+                    "hop_depth": entry["hop_depth"],
                     "expected_files": entry["expected_files"],
                 }
             )
     return sorted(tasks, key=lambda t: t["id"])
 
 
+def collect_exclusions(oracle_entries: list[dict]) -> list[dict]:
+    """Recorded exclusion reasons for dropped oracle entries.
+
+    Fail-closed record of every entry excluded from task generation
+    because its symbol is ambiguous (defined in more than one file).
+    """
+    return [
+        {
+            "id": entry["id"],
+            "symbol": entry["symbol"],
+            "reason": entry["excluded_reason"],
+        }
+        for entry in oracle_entries
+        if entry.get("excluded_reason") is not None
+    ]
+
+
 def generate_track_c_tasks(definition_index: dict[str, list[str]]) -> list[dict]:
     """Track C lookup tasks straight from the tree-sitter definition index.
 
-    Each top-level definition yields a lookup task whose oracle answer is
-    the defining file path from the index (trivially exact, single answer
-    by construction).
+    Only symbols with exactly one defining file emit a task: a lookup
+    prompt must have a single answer, so multi-file (ambiguous) symbols
+    are skipped fail-closed. Each task is a hop-1 lookup (Track C stays
+    hop-1), which is what admits it to the mcp-gateway tax-control arm
+    in the runner gate.
     """
     tasks: list[dict] = []
     for symbol in sorted(definition_index):
         files = sorted(definition_index[symbol])
-        if not files:
-            continue
+        if len(files) != 1:
+            continue  # single-answer invariant: skip ambiguous/empty symbols
         tasks.append(
             {
                 "id": f"task-c-lookup-{symbol}",
@@ -80,7 +107,7 @@ def generate_track_c_tasks(definition_index: dict[str, list[str]]) -> list[dict]
                 "prompt": (
                     f"Locate the definition of {symbol} and report its file path."
                 ),
-                "hop_depth": None,
+                "hop_depth": 1,
                 "expected_files": files,
             }
         )

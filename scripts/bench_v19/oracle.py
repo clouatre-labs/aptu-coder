@@ -113,45 +113,100 @@ def build_definition_index(snapshot_root: Path) -> dict[str, list[str]]:
     return {name: sorted(files) for name, files in sorted(index.items())}
 
 
-def build_call_edges(snapshot_root: Path) -> list[tuple[str, str]]:
-    """Sorted (caller-file, callee-symbol) edges from tree-sitter call nodes."""
-    edges: set[tuple[str, str]] = set()
+def ambiguous_symbols(definition_index: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Symbols defined in more than one file (fail-closed ambiguity).
+
+    The definition index is keyed by unqualified symbol name, so a name
+    defined in several files cannot be resolved to a single definition.
+    Ambiguous symbols are excluded from Track A/Track C task generation
+    and contribute no call edges.
+    """
+    return {
+        symbol: files for symbol, files in definition_index.items() if len(files) > 1
+    }
+
+
+def _ambiguity_reason(
+    symbol: str, definition_index: dict[str, list[str]]
+) -> str | None:
+    """Exclusion reason when ``symbol`` is ambiguous, else None."""
+    files = definition_index.get(symbol, [])
+    if len(files) <= 1:
+        return None
+    return (
+        f"ambiguous symbol '{symbol}': defined in {len(files)} files "
+        f"({', '.join(files)}); excluded from task generation"
+    )
+
+
+def build_call_edges(
+    snapshot_root: Path, definition_index: dict[str, list[str]] | None = None
+) -> list[tuple[str, str, int]]:
+    """Sorted (caller-file, callee-symbol, line) edges from call nodes.
+
+    A callee name resolves to a definition only when it is unambiguous
+    in the definition index; ambiguous callees contribute no edges
+    (fail-closed: the documented over-approximation is dropped).
+    Lines are 1-based tree-sitter start rows of the call site.
+    """
+    index = (
+        definition_index
+        if definition_index is not None
+        else build_definition_index(snapshot_root)
+    )
+    ambiguous = ambiguous_symbols(index)
+    edges: set[tuple[str, str, int]] = set()
     for path, suffix in _iter_source_files(snapshot_root):
         rel = path.relative_to(snapshot_root).as_posix()
         query = _query_for(_CALL_QUERIES, suffix)
         tree = _parse(path, suffix)
-        for callee in _captured_names(tree.root_node, query):
-            edges.add((rel, callee))
+        for nodes in query.captures(tree.root_node).values():
+            for node in nodes:
+                callee = node.text.decode("utf-8")
+                if callee in ambiguous:
+                    continue
+                edges.add((rel, callee, node.start_point[0] + 1))
     return sorted(edges)
 
 
-def direct_callers(call_edges: list[tuple[str, str]], symbol: str) -> set[str]:
+def direct_callers(call_edges: list[tuple[str, str, int]], symbol: str) -> set[str]:
     """Files containing a call node whose callee is exactly ``symbol``."""
-    return {caller for caller, callee in call_edges if callee == symbol}
+    return {caller for caller, callee, _line in call_edges if callee == symbol}
+
+
+def caller_anchors(call_edges: list[tuple[str, str, int]], symbol: str) -> list[dict]:
+    """Sorted [{file, line}] call-site anchors for ``symbol``."""
+    return [
+        {"file": caller, "line": line}
+        for caller, callee, line in call_edges
+        if callee == symbol
+    ]
 
 
 def callers_oracle(snapshot_root: Path, symbol: str, hop_depth: int) -> list[str]:
     """Sorted caller file set at the given hop depth via BFS on call edges.
 
     hop 1 is the direct callers; hop k expands over files that call
-    symbols defined in the previous hop's caller files. The definition
-    file itself is never a caller.
+    symbols defined in the previous hop's caller files. A definition
+    file containing qualifying call sites is a legitimate caller
+    (recursion, sibling calls); it is never subtracted.
     """
     if hop_depth not in HOP_DEPTHS:
         raise ValueError(f"hop depth must be one of {HOP_DEPTHS}")
     _validate_symbol(symbol)
     index = build_definition_index(snapshot_root)
-    edges = build_call_edges(snapshot_root)
+    edges = build_call_edges(snapshot_root, index)
     callers_of_symbol: dict[str, set[str]] = defaultdict(set)
     symbols_defined_in: dict[str, set[str]] = defaultdict(set)
-    for caller, callee in edges:
+    for caller, callee, _line in edges:
         callers_of_symbol[callee].add(caller)
     for defined, files in index.items():
+        if len(files) > 1:
+            continue  # ambiguous symbols contribute no BFS joins
         for file in files:
             symbols_defined_in[file].add(defined)
-    definition_files = set(index.get(symbol, ()))
 
-    current = direct_callers(edges, symbol) - definition_files
+    current = direct_callers(edges, symbol)
     seen = set(current)
     for _ in range(hop_depth - 1):
         frontier: set[str] = set()
@@ -159,7 +214,6 @@ def callers_oracle(snapshot_root: Path, symbol: str, hop_depth: int) -> list[str
             for defined in sorted(symbols_defined_in.get(file, ())):
                 frontier |= callers_of_symbol.get(defined, set())
         frontier -= seen
-        frontier -= definition_files
         seen |= frontier
         current = frontier
     return sorted(seen)
@@ -218,9 +272,16 @@ def build_callers_oracle(snapshot_root: Path, symbol: str) -> list[dict]:
     The rg-vs-tree-sitter agreement is computed at hop 1, where both
     arms derive a directly comparable flat caller set; it is attached to
     every hop of the symbol (a textual-mention mismatch flags impurity
-    regardless of hop depth).
+    regardless of hop depth). Each entry carries the hop-1 call-site
+    anchors (``caller_anchors``: [{file, line}]). A symbol defined in
+    more than one file is ambiguous and carries an ``excluded_reason``;
+    the task generator must drop such entries (fail-closed).
     """
     symbol = _validate_symbol(symbol)
+    index = build_definition_index(snapshot_root)
+    edges = build_call_edges(snapshot_root, index)
+    anchors = caller_anchors(edges, symbol)
+    reason = _ambiguity_reason(symbol, index)
     agrees = crosscheck_agrees(
         snapshot_root, symbol, callers_oracle(snapshot_root, symbol, 1)
     )
@@ -235,14 +296,21 @@ def build_callers_oracle(snapshot_root: Path, symbol: str) -> list[dict]:
                 "symbol": symbol,
                 "hop_depth": hop,
                 "expected_files": expected,
+                "caller_anchors": anchors,
                 "crosscheck_agrees": agrees,
+                "excluded_reason": reason,
             }
         )
     return entries
 
 
 def build_lookup_oracle(snapshot_root: Path, symbol: str) -> dict:
-    """Track C entry: defining file straight from the tree-sitter index."""
+    """Track C entry: defining file straight from the tree-sitter index.
+
+    Track C stays hop-1 lookup (hop_depth 1), so the runner's
+    mcp-gateway tax-control gate admits these cells. An ambiguous
+    symbol carries an ``excluded_reason`` (fail-closed).
+    """
     symbol = _validate_symbol(symbol)
     index = build_definition_index(snapshot_root)
     return {
@@ -250,8 +318,9 @@ def build_lookup_oracle(snapshot_root: Path, symbol: str) -> dict:
         "track": "C",
         "template": "lookup",
         "symbol": symbol,
-        "hop_depth": None,
+        "hop_depth": 1,
         "expected_files": index.get(symbol, []),
+        "excluded_reason": _ambiguity_reason(symbol, index),
     }
 
 
