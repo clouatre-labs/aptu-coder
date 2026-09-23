@@ -9,7 +9,7 @@ Rust workspace with two crates:
 
 MCP tool surface and parameter schemas are documented by the tools themselves; do not duplicate them here. Tool handler logic lives in `crates/aptu-coder/src/tools/<tool>.rs`. Path validation lives in `src/validation.rs`; shell detection in `src/shell.rs`; exec output filtering (built-in rules, project-local `.aptu/filters.toml`, `schema_version` enforcement) in `src/filters.rs`. Read the relevant handler or module before touching those subsystems.
 Rust edition 2024, async with tokio, latest MCP protocol via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
-All CI jobs run on `ubuntu-24.04-arm` (ARM64).
+All CI jobs run on `ubuntu-26.04-arm` (ARM64).
 
 ## Commands
 
