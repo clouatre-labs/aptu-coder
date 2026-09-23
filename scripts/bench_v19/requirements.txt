@@ -1,0 +1,6 @@
+# Pinned bench_v19 oracle dependencies (tree-sitter double extraction).
+# Pin exact versions: grammar/AST output must be reproducible for oracle
+# ground truth. All support Python 3.9+.
+py-tree-sitter==0.23.2
+tree-sitter-python==0.23.6
+tree-sitter-rust==0.23.2

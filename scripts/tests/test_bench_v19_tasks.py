@@ -7,6 +7,7 @@ from bench_v19.generate_tasks import (
     apply_discriminative_filter,
     filter_pilot_tasks,
     generate_tasks,
+    generate_track_c_tasks,
 )
 
 ORACLE = [
@@ -85,3 +86,38 @@ def test_filter_pilot_tasks_returns_matching_survivors():
     assert survivors == sorted(survivors, key=lambda t: t["id"])
     # The 1-entity Track C cell survives only via divergence; it was not.
     assert all(t["track"] == "A" for t in survivors)
+
+
+def test_track_c_generation_from_definition_index():
+    index = {"sym": ["lib.py"], "other": ["pkg/mod.rs"], "ghost": []}
+    tasks = generate_track_c_tasks(index)
+    assert [t["id"] for t in tasks] == ["task-c-lookup-other", "task-c-lookup-sym"]
+    by_id = {t["id"]: t for t in tasks}
+    assert by_id["task-c-lookup-sym"]["expected_files"] == ["lib.py"]
+    assert by_id["task-c-lookup-sym"]["track"] == "C"
+    assert by_id["task-c-lookup-sym"]["hop_depth"] is None
+    # Empty definition lists emit no task (nothing to look up).
+    assert "task-c-lookup-ghost" not in by_id
+
+
+def test_track_c_exempt_from_f1_gap_rule():
+    task = generate_track_c_tasks({"sym": ["lib.py"]})[0]
+    # Single answer by construction: divergence only, never the F1 gap.
+    assert apply_discriminative_filter(task, 0.9, 0.1, divergent=True)
+    assert not apply_discriminative_filter(task, 0.9, 0.1, divergent=False)
+
+
+def test_track_a_hop_stratification_derives_from_call_edge_bfs(tmp_path):
+    # a.py defines sym; b.py calls sym; c.py calls b.middle (defined in b.py).
+    from bench_v19 import oracle
+
+    (tmp_path / "a.py").write_text("def sym():\n    return 1\n")
+    (tmp_path / "b.py").write_text("def middle():\n    return sym()\n")
+    (tmp_path / "c.py").write_text("from b import middle\n\nmiddle()\n")
+    entries = oracle.build_callers_oracle(tmp_path, "sym")
+    assert all(e["crosscheck_agrees"] for e in entries)
+    tasks = generate_tasks(entries)
+    hop = {t["hop_depth"]: t["expected_files"] for t in tasks}
+    assert hop[1] == ["b.py"]
+    assert hop[2] == ["b.py", "c.py"]
+    assert hop[3] == ["b.py", "c.py"]
