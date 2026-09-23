@@ -45,27 +45,27 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Verifying signature for tag: $TAG"
-          
+
           # Get tag ref to find the tag object SHA
           TAG_SHA=$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq '.object.sha')
           TAG_TYPE=$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq '.object.type')
-          
+
           if [ "$TAG_TYPE" != "tag" ]; then
             echo "ERROR: $TAG is a lightweight tag (type: $TAG_TYPE), not an annotated/signed tag"
             exit 1
           fi
-          
+
           # Verify the tag signature via GitHub API
           VERIFIED=$(gh api "repos/${{ github.repository }}/git/tags/$TAG_SHA" --jq '.verification.verified')
           REASON=$(gh api "repos/${{ github.repository }}/git/tags/$TAG_SHA" --jq '.verification.reason')
-          
+
           echo "Tag verification: verified=$VERIFIED, reason=$REASON"
-          
+
           if [ "$VERIFIED" != "true" ]; then
             echo "ERROR: Tag $TAG signature is not valid (reason: $REASON)"
             exit 1
           fi
-          
+
           echo "Tag $TAG is signed and verified by GitHub"
 
   create-release:
@@ -77,6 +77,7 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
+      release_id: ${{ steps.create_release.outputs.release_id }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -103,19 +104,31 @@ jobs:
             exit 1
           fi
 
-      - name: Create GitHub release
+      - name: Create GitHub draft release
+        # Immutable releases (owner-enforced) lock assets and the tag at publish
+        # time, so the release is created as a draft first; assets are uploaded
+        # to the draft by build-and-attest and generate-mcpb, and publish-release
+        # flips draft=false only after every asset is uploaded.
         if: ${{ env.DRY_RUN != 'true' }}
+        id: create_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.extract_version.outputs.version }}
         run: |
-          # Idempotent: skip creation if release already exists; if creation fails with 422
-          # (concurrent race), the final view confirms existence and exits 0.
-          gh release view "v${VERSION}" &>/dev/null \
-            || gh release create "v${VERSION}" \
-              --title "v${VERSION}" \
-              --generate-notes \
-            || gh release view "v${VERSION}" &>/dev/null
+          # Idempotent: reuse an existing draft for this tag (workflow re-runs);
+          # otherwise create a new draft release targeting the signed tag.
+          RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq ".[] | select(.draft and .tag_name == \"v${VERSION}\") | .id" | head -n1 || true)
+          if [ -z "${RELEASE_ID}" ]; then
+            RELEASE_ID=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -F tag_name="v${VERSION}" \
+              -F draft=true \
+              -F name="v${VERSION}" \
+              -F generate_release_notes=true \
+              --jq '.id')
+          fi
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+          echo "Draft release id: ${RELEASE_ID}"
 
       - name: Dry run - skip release creation
         if: ${{ env.DRY_RUN == 'true' }}
@@ -149,11 +162,119 @@ jobs:
       os: ${{ matrix.os }}
       cross: ${{ matrix.cross }}
       version: ${{ needs.create-release.outputs.version }}
+      release_id: ${{ needs.create-release.outputs.release_id }}
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
+
+  generate-mcpb:
+    name: Generate MCPB Bundles
+    needs: [create-release, build-and-attest]
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
+    runs-on: ubuntu-26.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Generate and upload MCPB bundles
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.create-release.outputs.version }}"
+
+          declare -a targets=("aarch64-apple-darwin" "aarch64-unknown-linux-musl" "x86_64-unknown-linux-musl")
+
+          for target in "${targets[@]}"; do
+            echo "Processing target: $target"
+
+            ARTIFACT_NAME="aptu-coder-${VERSION}-${target}.tar.gz"
+
+            # Download tarball from the draft release via the assets API (draft
+            # releases are not resolvable by tag).
+            ASSET_URL=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --jq ".[] | select(.name == \"${ARTIFACT_NAME}\") | .url")
+            if [ -z "${ASSET_URL}" ]; then
+              echo "Error: asset ${ARTIFACT_NAME} not found on draft release" >&2
+              exit 1
+            fi
+            gh api -H "Accept: application/octet-stream" "${ASSET_URL}" > "/tmp/${ARTIFACT_NAME}"
+
+            # Validate the downloaded tarball before extracting
+            if ! tar -tzf "/tmp/${ARTIFACT_NAME}" >/dev/null 2>&1; then
+              echo "Error: Downloaded file /tmp/${ARTIFACT_NAME} is not a valid tar.gz archive" >&2
+              exit 1
+            fi
+
+            # Extract the binary
+            mkdir -p "/tmp/mcpb-${target}"
+            tar -xzf "/tmp/${ARTIFACT_NAME}" -C "/tmp/mcpb-${target}"
+
+            # Create manifest.json
+            printf '%s\n' \
+              '{' \
+              '  "name": "aptu-coder",' \
+              "  \"version\": \"${VERSION}\"," \
+              '  "description": "MCP server for code structure analysis using tree-sitter",' \
+              '  "args": []' \
+              '}' > "/tmp/mcpb-${target}/manifest.json"
+
+            # Create the .mcpb zip file
+            MCPB_NAME="aptu-coder-${VERSION}-${target}.mcpb"
+            cd "/tmp/mcpb-${target}"
+            zip -r "/tmp/${MCPB_NAME}" aptu-coder manifest.json
+            cd -
+
+            # Upload to the draft release via the assets API (immutable releases
+            # lock assets at publish; publish-release runs after this job).
+            ASSET_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --jq ".[] | select(.name == \"${MCPB_NAME}\") | .id")
+            if [ -n "${ASSET_ID}" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}"
+            fi
+            UPLOAD_URL=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.upload_url' | sed 's/{.*}//')
+            gh api --method POST "${UPLOAD_URL}?name=${MCPB_NAME}" \
+              --input "/tmp/${MCPB_NAME}" \
+              -H "Content-Type: application/zip" > /dev/null
+          done
+
+  publish-release:
+    name: Publish Release
+    needs: [create-release, build-and-attest, generate-mcpb]
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
+    runs-on: ubuntu-26.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        # Publishing makes the release immutable (owner-enforced): assets and
+        # the tag are locked from this point on. Only runs after every asset is
+        # on the draft.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          IS_DRAFT=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')
+          if [ "${IS_DRAFT}" != "true" ]; then
+            echo "Release already published"
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            if gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -F draft=false --jq '.html_url'; then
+              exit 0
+            fi
+            echo "Publish attempt ${i} failed; retrying in 15s..."
+            sleep 15
+          done
+          echo "Error: failed to publish release after 5 attempts" >&2
+          exit 1
 
   update-homebrew:
     name: Update Homebrew Formula
-    needs: [create-release, build-and-attest]
+    needs: [create-release, publish-release]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
     runs-on: ubuntu-26.04-arm
     steps:
@@ -235,11 +356,13 @@ jobs:
           PYEOF
 
       - name: Create feature branch and commit formula update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           cd homebrew-tap
           RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
           BRANCH_NAME="update-aptu-coder-${RELEASE_TAG}"
-          
+
           git config user.email "hugues@linux.com"
           git config user.name "Hugues Clouatre"
           git fetch origin
@@ -260,80 +383,19 @@ jobs:
           cd homebrew-tap
           RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
           BRANCH_NAME="update-aptu-coder-${RELEASE_TAG}"
-          
+
           gh pr create \
             --title "Update aptu-coder formula for ${RELEASE_TAG}" \
             --body "Automated formula update with SHA256 checksums for release ${RELEASE_TAG}" \
             --head "$BRANCH_NAME" \
             --base main
-          
+
           # Auto-merge after Audit check passes (ruleset requires status checks)
           gh pr merge "$BRANCH_NAME" --auto --squash --delete-branch
 
-  generate-mcpb:
-    name: Generate MCPB Bundles
-    needs: [create-release, build-and-attest]
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
-    runs-on: ubuntu-26.04-arm
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Generate and upload MCPB bundles
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          
-          RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
-          VERSION="${{ needs.create-release.outputs.version }}"
-          
-          declare -a targets=("aarch64-apple-darwin" "aarch64-unknown-linux-musl" "x86_64-unknown-linux-musl")
-          
-          for target in "${targets[@]}"; do
-            echo "Processing target: $target"
-            
-            ARTIFACT_NAME="aptu-coder-${VERSION}-${target}.tar.gz"
-
-            gh release download "${RELEASE_TAG}" \
-              --repo clouatre-labs/aptu-coder \
-              --pattern "${ARTIFACT_NAME}" \
-              --dir /tmp
-
-            # Validate the downloaded tarball before extracting
-            if ! tar -tzf "/tmp/${ARTIFACT_NAME}" >/dev/null 2>&1; then
-              echo "Error: Downloaded file /tmp/${ARTIFACT_NAME} is not a valid tar.gz archive" >&2
-              exit 1
-            fi
-
-            # Extract the binary
-            mkdir -p "/tmp/mcpb-${target}"
-            tar -xzf "/tmp/${ARTIFACT_NAME}" -C "/tmp/mcpb-${target}"
-            
-            # Create manifest.json
-            printf '%s\n' \
-              '{' \
-              '  "name": "aptu-coder",' \
-              "  \"version\": \"${VERSION}\"," \
-              '  "description": "MCP server for code structure analysis using tree-sitter",' \
-              '  "args": []' \
-              '}' > "/tmp/mcpb-${target}/manifest.json"
-            
-            # Create the .mcpb zip file
-            MCPB_NAME="aptu-coder-${VERSION}-${target}.mcpb"
-            cd "/tmp/mcpb-${target}"
-            zip -r "/tmp/${MCPB_NAME}" aptu-coder manifest.json
-            cd -
-            
-            # Upload to GitHub release
-            gh release upload "${RELEASE_TAG}" "/tmp/${MCPB_NAME}" --clobber
-          done
-
   publish-registry:
     name: Publish to MCP Registry
-    needs: [create-release, generate-mcpb]
+    needs: [create-release, publish-release]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
     runs-on: ubuntu-26.04-arm
     permissions:
@@ -348,23 +410,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          
+
           RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
           VERSION="${{ needs.create-release.outputs.version }}"
-          
+
           declare -a targets=("aarch64-apple-darwin" "aarch64-unknown-linux-musl" "x86_64-unknown-linux-musl")
           declare -A shas
-          
+
           for target in "${targets[@]}"; do
             MCPB_NAME="aptu-coder-${VERSION}-${target}.mcpb"
             DOWNLOAD_URL="https://github.com/clouatre-labs/aptu-coder/releases/download/${RELEASE_TAG}/${MCPB_NAME}"
-            
+
             curl -fsSL "$DOWNLOAD_URL" -o "/tmp/${MCPB_NAME}"
-            
+
             sha=$(sha256sum "/tmp/${MCPB_NAME}" | cut -d' ' -f1)
             shas["${target}"]="$sha"
           done
-          
+
           # Write to environment for next step
           echo "SHA_AARCH64_APPLE_DARWIN=${shas[aarch64-apple-darwin]}" >> "$GITHUB_ENV"
           echo "SHA_AARCH64_LINUX_MUSL=${shas[aarch64-unknown-linux-musl]}" >> "$GITHUB_ENV"
