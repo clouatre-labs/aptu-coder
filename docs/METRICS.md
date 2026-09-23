@@ -69,18 +69,20 @@ Each line in the JSONL file is one JSON object:
 | `l1_eviction_count` | `u64 \| null` | Number of L1 in-memory LRU evictions that have occurred in the cache since process start, at the time of metric emission. Process-lifetime counter; resets on restart. Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls that use the call-graph cache. |
 | `l2_entry_count` | `u64 \| null` | Approximate number of entries currently tracked in the L2 disk cache, at the time of metric emission. Incremented on successful `put()`; approximate (does not account for manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
 | `l2_size_bytes` | `u64 \| null` | Approximate total compressed size in bytes of L2 disk cache entries, at the time of metric emission. Incremented on successful `put()` by the compressed entry size; approximate (does not account for evictions or manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
-| `est_output_tokens` | `u64 \| null` | Rough token estimate for the response payload: `output_chars / 4`. This is a coarse heuristic (~4 chars per token), not a tokenizer-accurate count; treat it as an order-of-magnitude signal only. Populated centrally on per-call events (all tools except `schema_surface`); omitted from JSONL when `null`. |
-| `schema_chars` | `object \| null` | Per-tool serialized JSON-schema size in characters, captured once at server start on the `schema_surface` event. Keys are tool names; values are `serde_json::to_string(&tool.input_schema).len()`. The event's `output_chars` field holds the sum of all values. `null` on all other events. |
+| `est_output_tokens` | `u64 \| null` | Rough token estimate for the response payload: `output_chars / 4`. This is a coarse heuristic (~4 chars per token), not a tokenizer-accurate count; treat it as an order-of-magnitude signal only. Populated centrally on per-call completion events only (receipt `"received"` events and the `schema_surface` startup event are excluded); omitted from JSONL when `null`. |
+| `schema_chars` | `object \| null` | Per-tool serialized JSON-schema size in serialized UTF-8 bytes, captured once at server start on the `schema_surface` event. Keys are tool names; values are `serde_json::to_string(&tool.input_schema).len()` — that is, byte length, not character count (consistent with the byte-based unit used by `stdout_bytes_raw`/`stderr_bytes_raw`). The event's `output_chars` field holds the sum of all values. `null` on all other events. |
 
 ### schema_surface event
 
-Exactly one `schema_surface` event (with `tool="schema_surface"`, `result="ok"`, `duration_ms=0`) is emitted at server start when the tool router is constructed. It records the per-tool serialized schema surface in `schema_chars` and the total in `output_chars`, enabling amortization of per-tool prompt-cache setup cost against call volume. Emission failures are swallowed: a tool whose schema fails to serialize is skipped, and startup never blocks on metrics.
+Exactly one `schema_surface` event (with `tool="schema_surface"`, `result="ok"`, `duration_ms=0`) is emitted at server start when the tool router is constructed. It records the per-tool serialized schema surface in `schema_chars` and the total in `output_chars`, enabling amortization of per-tool prompt-cache setup cost against call volume. The event is written to JSONL for completeness but is excluded from token estimation, OpenTelemetry metrics, and call-oriented aggregation: it is not a tool call, so it must not inflate call counts or add zero-duration observations. Emission failures are swallowed: a tool whose schema fails to serialize is skipped, and startup never blocks on metrics.
 
 Amortize schema surface against per-session call volume:
 
 ```bash
-cd ~/.local/share/aptu-coder && jq -s '[.[] | select(.tool=="schema_surface")][0].schema_chars as $s | [.[] | select(.tool!="schema_surface") | .tool] | group_by(.) | map({tool: .[0], calls: length, schema_chars: $s[.[0]]}) | sort_by(-.calls)' metrics-*.jsonl
+cd ~/.local/share/aptu-coder && jq -s '[.[] | select(.tool=="schema_surface")][0].schema_chars as $s | [.[] | select(.tool!="schema_surface" and .result!="received") | .tool] | group_by(.) | map({tool: .[0], calls: length, schema_chars: $s[.[0]]}) | sort_by(-.calls)' metrics-*.jsonl
 ```
+
+Filter out `result=="received"` receipt events when counting calls: each invocation first emits a receipt event with no payload, and counting both receipt and completion events doubles call volume.
 
 Because the estimate uses a fixed chars/4 ratio, prefer `output_chars` for any quantitative analysis; `est_output_tokens` is intended for quick human-readable sizing only.
 
@@ -185,7 +187,7 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `l2_entry_count` | `null` (omitted when null; approximate L2 entry count; only for `analyze_symbol`) |
 | `l2_size_bytes` | `null` (omitted when null; approximate L2 compressed size in bytes; only for `analyze_symbol`) |
 | `est_output_tokens` | `null` (omitted when null; populated centrally on per-call events as `output_chars / 4`; coarse heuristic, not tokenizer-accurate) |
-| `schema_chars` | `null` (omitted when null; populated only on the one-time `schema_surface` event at server start) |
+| `schema_chars` | `null` (omitted when null; populated only on the one-time `schema_surface` event at server start; values are serialized UTF-8 byte lengths) |
 
 To query truncation events with overflow sizes across all retained JSONL files:
 

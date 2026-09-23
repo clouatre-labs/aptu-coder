@@ -508,6 +508,14 @@ pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
     (otel_method_name(event.tool), event.tool)
 }
 
+/// Whether an event should be recorded to OpenTelemetry metrics. Receipt
+/// ("received") events and the synthetic `schema_surface` startup event are
+/// excluded: neither represents an actual tool call, and recording them would
+/// pollute latency histograms and increment `mcp.server.tool.calls`.
+fn should_record_otel(event: &MetricEvent) -> bool {
+    event.result != "received" && event.tool != "schema_surface"
+}
+
 /// Record a metric event to OTel metrics if the global meter provider is available.
 ///
 /// Records:
@@ -518,8 +526,9 @@ pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
 ///
 /// Instruments are initialized once via OnceLock to avoid rebuilding them on every call.
 pub(crate) fn record_otel_metrics(event: &MetricEvent) {
-    // Skip OTEL recording for "received" events (duration_ms=0 would pollute latency histograms)
-    if event.result == "received" {
+    // Skip OTEL recording for "received" events (duration_ms=0 would pollute latency
+    // histograms) and the synthetic schema_surface startup event (it is not a tool call)
+    if !should_record_otel(event) {
         return;
     }
 
@@ -601,6 +610,18 @@ mod tests {
             .build();
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""est_output_tokens":100"#));
+    }
+
+    #[test]
+    fn test_should_record_otel_filters_receipt_and_schema_surface() {
+        let completion = MetricEventBuilder::new("analyze_file", "ok", 10).build();
+        assert!(should_record_otel(&completion));
+
+        let receipt = MetricEventBuilder::new("analyze_file", "received", 0).build();
+        assert!(!should_record_otel(&receipt));
+
+        let schema_surface = MetricEventBuilder::new("schema_surface", "ok", 0).build();
+        assert!(!should_record_otel(&schema_surface));
     }
 
     #[test]
