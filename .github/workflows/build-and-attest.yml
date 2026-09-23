@@ -24,9 +24,10 @@ on:
         type: string
         description: "Release version tag"
       release_id:
-        required: true
+        required: false
+        default: ''
         type: string
-        description: "GitHub Release (draft) ID to upload assets to"
+        description: "GitHub Release (draft) ID to upload assets to; resolved by tag at runtime when empty"
       dry_run:
         required: false
         type: boolean
@@ -106,13 +107,33 @@ jobs:
         # Immutable releases (owner-enforced) lock assets at publish time, so
         # assets are uploaded to the draft release via the assets API; the
         # publish-release job flips draft=false only after all uploads complete.
+        # RELEASE_ID may be empty (release-repair callers); it is then resolved
+        # by tag, preferring a draft and falling back to the published release.
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ inputs.release_id }}
+          RELEASE_INPUT_ID: ${{ inputs.release_id }}
+          VERSION: ${{ inputs.version }}
           ARCHIVE: ${{ env.ARCHIVE }}
         run: |
           set -euo pipefail
+          RELEASE_ID="${RELEASE_INPUT_ID}"
+          if [ -z "${RELEASE_ID}" ]; then
+            RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+              --jq ".[] | select(.tag_name == \"v${VERSION}\") | select(.draft) | .id" | head -n1 || true)
+            if [ -z "${RELEASE_ID}" ]; then
+              RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}" --jq '.id' 2>/dev/null || true)
+            fi
+          fi
+          if [ -z "${RELEASE_ID}" ]; then
+            echo "Error: no draft or published release found for v${VERSION}" >&2
+            exit 1
+          fi
+          IS_DRAFT=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')
+          if [ "${IS_DRAFT}" != "true" ]; then
+            echo "Release v${VERSION} is already published and immutable; skipping asset mutation"
+            exit 0
+          fi
           UPLOAD_URL=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.upload_url' | sed 's/{.*}//')
           for file in "${ARCHIVE}" "${ARCHIVE}.sha256" "${ARCHIVE}.bundle"; do
             name=$(basename "${file}")

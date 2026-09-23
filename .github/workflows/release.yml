@@ -115,10 +115,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.extract_version.outputs.version }}
         run: |
-          # Idempotent: reuse an existing draft for this tag (workflow re-runs);
-          # otherwise create a new draft release targeting the signed tag.
+          # Idempotent: reuse an existing draft or published release for this tag
+          # (workflow re-runs); otherwise create a new draft release targeting
+          # the signed tag. A published release is immutable (owner-enforced),
+          # so downstream mutating steps no-op on it.
           RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
-            --jq ".[] | select(.draft and .tag_name == \"v${VERSION}\") | .id" | head -n1 || true)
+            --jq ".[] | select(.tag_name == \"v${VERSION}\") | select(.draft) | .id" | head -n1 || true)
+          if [ -z "${RELEASE_ID}" ]; then
+            RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+              --jq ".[] | select(.tag_name == \"v${VERSION}\") | .id" | head -n1 || true)
+          fi
           if [ -z "${RELEASE_ID}" ]; then
             RELEASE_ID=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
               -F tag_name="v${VERSION}" \
@@ -186,6 +192,15 @@ jobs:
           VERSION="${{ needs.create-release.outputs.version }}"
 
           declare -a targets=("aarch64-apple-darwin" "aarch64-unknown-linux-musl" "x86_64-unknown-linux-musl")
+
+          # Re-run guard: a published release is immutable (owner-enforced); its
+          # assets are already locked and must not be mutated. The MCPB bundles
+          # needed by publish-registry are already on the release.
+          IS_DRAFT=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')
+          if [ "${IS_DRAFT}" != "true" ]; then
+            echo "Release already published and immutable; skipping MCPB generation"
+            exit 0
+          fi
 
           for target in "${targets[@]}"; do
             echo "Processing target: $target"
