@@ -30,7 +30,7 @@ env:
 jobs:
   verify-tag-signature:
     name: Verify Tag Signature
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     if: github.event_name != 'workflow_dispatch'
     steps:
       - name: Checkout repository
@@ -72,7 +72,7 @@ jobs:
     name: Create Release
     needs: [verify-tag-signature]
     if: always() && (needs.verify-tag-signature.result == 'success' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: write
     outputs:
@@ -135,10 +135,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-24.04
+            os: ubuntu-26.04
             cross: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04
+            os: ubuntu-26.04
             cross: true
           - target: aarch64-apple-darwin
             os: macos-15
@@ -155,7 +155,7 @@ jobs:
     name: Update Homebrew Formula
     needs: [create-release, build-and-attest]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
       - name: Checkout homebrew-tap repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -274,7 +274,7 @@ jobs:
     name: Generate MCPB Bundles
     needs: [create-release, build-and-attest]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: write
     steps:
@@ -335,7 +335,7 @@ jobs:
     name: Publish to MCP Registry
     needs: [create-release, generate-mcpb]
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
       id-token: write
@@ -432,7 +432,7 @@ jobs:
     name: Publish to crates.io
     needs: create-release
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run == true) }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
       id-token: write
