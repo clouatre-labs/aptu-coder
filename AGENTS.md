@@ -61,7 +61,8 @@ Follow an existing handler in `crates/aptu-coder-core/src/languages/`. The exten
 
 ## Releases & CI
 
-- Tag releases with a GPG-signed annotated tag and push it to trigger the release workflow; never `gh release create`
+- Cut releases via a version-bump PR merged to `main`, then a GPG-signed annotated tag (`git tag -s vX.Y.Z`) pushed to trigger the release workflow; never `gh release create`
+- The release pipeline is draft-first (required by owner-enforced immutable releases): create draft → upload all assets to the draft → publish last. Assets and the tag lock permanently at publish; never delete and re-create a release tag — cut `X.Y.Z+1` instead. See CONTRIBUTING.md "Releasing" for the full validated methodology
 - Never revert `release.yml` `update-homebrew` to full formula regeneration; it must update URLs and SHA256s in-place so that structural changes in `clouatre-labs/homebrew-tap/Formula/aptu-coder.rb` survive releases
 - `README.md` links must be absolute (`https://github.com/clouatre-labs/aptu-coder/blob/main/...`), never relative, so they resolve on crates.io, docs.rs, and other mirrors
 

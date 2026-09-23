@@ -148,32 +148,30 @@ Commits and tags must be GPG-signed. Follow the [GitHub docs on signing commits]
 
 ### Release Steps
 
-1. Update version in `Cargo.toml`
-2. Commit: `git commit -S --signoff -m "chore: bump version to X.Y.Z"`
-3. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`
-4. Push: `git push origin main --tags`
-5. Edit the release to add highlights (see below)
+1. Update version in `Cargo.toml` (and `Cargo.lock` via `cargo update -w --offline`)
+2. Open a PR (`chore(release): bump workspace version to X.Y.Z`), wait for checks, squash-merge
+3. On the merged `main`: `git tag -s vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`
+4. Watch the run: `gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId -q '.[0].databaseId')`
+5. Edit the release to add curated notes (see below)
 
-The workflow verifies the tag signature, builds binaries (macOS ARM64, Linux ARM64/x86_64 musl), generates GitHub artifact attestations, creates a GitHub release with auto-generated notes, publishes to crates.io, and opens a PR against the Homebrew tap.
+The workflow verifies the tag signature, then follows a **draft-first flow** (required because this repository has owner-enforced immutable releases — assets and the tag are locked at publish time):
+
+1. **create-release** creates a *draft* release and outputs its release ID
+2. **build-and-attest** builds per-target, archives (`aptu-coder-X.Y.Z-<target>.tar.gz`), generates a SHA256 checksum, signs with a cosign bundle, attests build provenance, and uploads all three assets to the draft
+3. **generate-mcpb** builds `.mcpb` bundles from the draft tarballs and uploads them to the draft
+4. **publish-release** flips `draft=false` — this makes the release immutable: assets and the tag are locked from this point on
+5. **update-homebrew** and **publish-registry** download by tag and update the Homebrew tap / MCP Registry
+6. **publish** publishes the workspace to crates.io
+
+Because the tag is permanently reserved once an immutable release publishes on it, **never delete and re-create a release tag** — if a release is broken, cut `X.Y.Z+1` instead. A tag name used by an immutable release cannot be reused even after the release is deleted. Use `release-repair.yml` to rebuild assets for an existing tag (it no-ops asset mutation if the release is already published and immutable; Homebrew/server.json updates still run).
 
 ### Release Notes
 
-GitHub auto-generates a changelog from conventional commits. After the workflow completes, edit the release on GitHub to prepend a curated highlights section:
+The workflow generates initial notes on the draft. After the release publishes, edit it on GitHub (title and body remain editable on immutable releases) with a curated section following the house style — see [v0.35.3](https://github.com/clouatre-labs/aptu-coder/releases/tag/v0.35.3) for the reference format:
 
-```markdown
-## [Theme or Summary]
-
-Brief description of what this release delivers.
-
-### Highlights
-
-- **Feature Name** - One-line description
-- **Another Feature** - One-line description
-
----
-
-[Auto-generated changelog follows]
-```
+- Opening paragraph summarizing the release theme
+- `### Features` / `### Fixes` / `### Documentation` / `### Maintenance` sections, each entry formatted as **`type(scope): title`** (#PR): one-line description
+- `## Full Changelog` with a `compare/v<prev>...v<current>` link
 
 ### Dry Run
 
