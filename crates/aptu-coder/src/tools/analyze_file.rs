@@ -137,6 +137,37 @@ pub(crate) async fn handle_file_details_mode(
     }
 }
 
+/// Emit a terminal `result="error"` metric on an `invalid_params` early return
+/// so the invocation does not disappear from the shutdown summary call_count.
+/// `error_type` reflects the failure class: `invalid_params` for validation
+/// failures, `internal_error` for read/pagination failures.
+#[allow(clippy::too_many_arguments)]
+fn emit_validation_error(
+    ctx: &AnalyzeFileContext,
+    params: &AnalyzeFileParams,
+    seq: u32,
+    sid: &Option<String>,
+    t_start: std::time::Instant,
+    param_path: &str,
+    cursor: Option<&str>,
+    error_type: &str,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    ctx.metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("analyze_file", "error", dur)
+            .param_path_depth(crate::metrics::path_component_count(param_path))
+            .error_type(Some(error_type.to_string()))
+            .session_id(sid.clone())
+            .seq(Some(seq))
+            .file_ext(crate::metrics::path_file_ext(param_path))
+            .language(crate::metrics::path_language(param_path))
+            .fields_projected(params.fields.is_some())
+            .summary_mode(params.output_control.summary.unwrap_or(false))
+            .is_paginated(cursor.is_some())
+            .build(),
+    );
+}
+
 /// Handler body for the `analyze_file` MCP tool.
 ///
 /// Called by the thin shim in `lib.rs` after parameter extraction and metric
@@ -156,6 +187,16 @@ pub(crate) async fn analyze_file_handler(
     if std::path::Path::new(&params.path).is_dir() {
         span.record("error", true);
         span.record("error.type", "invalid_params");
+        emit_validation_error(
+            ctx,
+            &params,
+            seq,
+            &sid,
+            t_start,
+            &param_path,
+            cursor,
+            "invalid_params",
+        );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "path is a directory; use analyze_directory instead",
@@ -172,6 +213,16 @@ pub(crate) async fn analyze_file_handler(
     if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
+        emit_validation_error(
+            ctx,
+            &params,
+            seq,
+            &sid,
+            t_start,
+            &param_path,
+            cursor,
+            "invalid_params",
+        );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -236,6 +287,16 @@ pub(crate) async fn analyze_file_handler(
             formatted.len(),
             estimated_tokens
         );
+        emit_validation_error(
+            ctx,
+            &params,
+            seq,
+            &sid,
+            t_start,
+            &param_path,
+            cursor,
+            "invalid_params",
+        );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             message,
@@ -260,6 +321,16 @@ pub(crate) async fn analyze_file_handler(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                emit_validation_error(
+                    ctx,
+                    &params,
+                    seq,
+                    &sid,
+                    t_start,
+                    &param_path,
+                    cursor,
+                    "invalid_params",
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -290,6 +361,18 @@ pub(crate) async fn analyze_file_handler(
     ) {
         Ok(v) => v,
         Err(e) => {
+            span.record("error", true);
+            span.record("error.type", "internal_error");
+            emit_validation_error(
+                ctx,
+                &params,
+                seq,
+                &sid,
+                t_start,
+                &param_path,
+                cursor,
+                "internal_error",
+            );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
                 e.to_string(),
@@ -369,4 +452,58 @@ pub(crate) async fn analyze_file_handler(
             .build(),
     );
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aptu_coder_core::cache::AnalysisCache;
+
+    /// Builds a minimal `AnalyzeFileContext` backed by an unbounded metrics
+    /// channel, returning the context and the receiving end so tests can inspect
+    /// emitted events.
+    fn test_context() -> (
+        AnalyzeFileContext,
+        tokio::sync::mpsc::UnboundedReceiver<crate::metrics::MetricEvent>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let ctx = AnalyzeFileContext {
+            cache: AnalysisCache::new(1),
+            disk_cache: Arc::new(aptu_coder_core::cache::DiskCache::new(
+                std::path::PathBuf::new(),
+                true,
+            )),
+            metrics_tx: crate::metrics::MetricsSender(tx),
+            sid: None,
+        };
+        (ctx, rx)
+    }
+
+    #[tokio::test]
+    async fn emit_validation_error_internal_error_sends_terminal_event() {
+        // Arrange: covers the paginate_slice / internal failure classification
+        // where the handler returns without an "ok" completion event.
+        let (ctx, mut rx) = test_context();
+        let params: AnalyzeFileParams = serde_json::from_value(serde_json::json!({
+            "path": "src/lib.rs",
+        }))
+        .expect("valid AnalyzeFileParams JSON");
+
+        // Act
+        emit_validation_error(
+            &ctx,
+            &params,
+            0,
+            &None,
+            std::time::Instant::now(),
+            "src/lib.rs",
+            None,
+            "internal_error",
+        );
+
+        // Assert
+        let event = rx.try_recv().expect("expected a terminal error metric");
+        assert_eq!(event.result, "error");
+        assert_eq!(event.error_type.as_deref(), Some("internal_error"));
+    }
 }

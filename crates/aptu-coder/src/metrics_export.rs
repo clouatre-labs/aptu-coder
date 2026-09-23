@@ -37,14 +37,26 @@ impl MetricsWriter {
     }
 
     /// Accumulate per-tool event counts for session summary export on shutdown.
-    /// Synthetic `schema_surface` startup events are excluded: they are not tool
-    /// calls and must not inflate call counts, durations, or output totals.
+    /// Three kinds of events are excluded via the shared `is_tool_call_event`
+    /// predicate or explicit checks:
+    ///
+    /// - Synthetic `schema_surface` startup events: they are not tool calls and
+    ///   must not inflate call counts, durations, or output totals.
+    /// - `result == "received"` receipt events: they are acknowledgment
+    ///   duplicates of completed tool calls; counting them would double-report
+    ///   every tool invocation in the shutdown summary.
+    /// - Events with `cache_write_failure == Some(true)`: they are synthetic
+    ///   signal events emitted after the real completion event when the L2
+    ///   disk cache write fails; counting them would double-report the
+    ///   invocation. They are excluded only here (not in the shared
+    ///   predicate) because they also drive the
+    ///   `mcp.server.tool.cache_write_failures_total` OTel counter.
     fn accumulate_event(
         tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
         event: &MetricEvent,
     ) {
-        if event.tool == "schema_surface" {
+        if !crate::metrics::is_tool_call_event(event) || event.cache_write_failure == Some(true) {
             return;
         }
         let entry = tool_counts.entry(event.tool).or_default();
@@ -151,8 +163,7 @@ impl MetricsWriter {
         // schema_surface events carry schema size data and receipt ("received")
         // events carry no payload, so both are excluded.
         const ESTIMATE: fn(&mut MetricEvent) = |e: &mut MetricEvent| {
-            if e.tool != "schema_surface" && e.result != "received" && e.est_output_tokens.is_none()
-            {
+            if crate::metrics::is_tool_call_event(e) && e.est_output_tokens.is_none() {
                 e.est_output_tokens = Some((e.output_chars / 4) as u64);
             }
         };
@@ -508,6 +519,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accumulate_event_excludes_cache_write_failure_events_from_call_counts() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &MetricEvent {
+                tool: "analyze_file",
+                result: "ok",
+                duration_ms: 50,
+                output_chars: 400,
+                ..Default::default()
+            },
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 0)
+                .cache_write_failure(Some(true))
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m| m.count),
+            Some(1),
+            "synthetic cache-failure event must not inflate call_count"
+        );
+    }
+
+    #[tokio::test]
     async fn accumulate_event_excludes_schema_surface_from_call_counts() {
         let mut counts = std::collections::HashMap::new();
         let mut sid = None;
@@ -532,6 +572,63 @@ mod tests {
         assert_eq!(
             counts.get("analyze_file").map(|m: &ToolMetrics| m.count),
             Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn accumulate_event_excludes_received_receipts_from_call_counts() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "received", 0)
+                .output_chars(1234)
+                .build(),
+        );
+        assert!(
+            counts.is_empty(),
+            "receipt event must not count as a tool call in shutdown summary"
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "ok", 5)
+                .output_chars(10)
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m: &ToolMetrics| m.count),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn accumulate_event_counts_receipt_with_error_pair_as_single_call() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        // Receipt ("received") emitted by begin_tool_call, paired with a terminal
+        // "error" event emitted on the validation-failure early-return path.
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "received", 0).build(),
+        );
+        assert!(
+            counts.is_empty(),
+            "receipt alone must not count as a tool call"
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "error", 3)
+                .error_type(Some("invalid_params".to_string()))
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m: &ToolMetrics| m.count),
+            Some(1),
+            "a rejected invocation (receipt + error pair) must count exactly once"
         );
     }
 
