@@ -249,6 +249,31 @@ impl CodeAnalyzer {
         .await
     }
 
+    /// Emit a terminal `result="error"` metric after a failed path validation.
+    ///
+    /// `begin_tool_call` already emitted a `"received"` receipt; because
+    /// `is_tool_call_event` excludes receipts from the shutdown summary
+    /// call_count, every receipt needs a paired terminal event or the
+    /// invocation would vanish from the summary.
+    fn emit_validation_error_metric(
+        &self,
+        tool: &'static str,
+        seq: u32,
+        sid: Option<String>,
+        t_start: std::time::Instant,
+        path: &str,
+    ) {
+        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+        self.metrics_tx.send(
+            crate::metrics::MetricEventBuilder::new(tool, "error", dur)
+                .error_type(Some("invalid_params".to_string()))
+                .param_path_depth(crate::metrics::path_component_count(path))
+                .session_id(sid)
+                .seq(Some(seq))
+                .build(),
+        );
+    }
+
     /// Shared telemetry preamble for tool handlers: emits the "received"
     /// metric, clones the session/client metadata (in order: session_id,
     /// client_name, client_version), and extracts the W3C Trace Context from
@@ -342,6 +367,13 @@ impl CodeAnalyzer {
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                self.emit_validation_error_metric(
+                    "analyze_directory",
+                    seq,
+                    sid.clone(),
+                    t_start,
+                    &params.path,
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -402,6 +434,13 @@ impl CodeAnalyzer {
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                self.emit_validation_error_metric(
+                    "analyze_file",
+                    seq,
+                    sid.clone(),
+                    t_start,
+                    &params.path,
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -450,6 +489,13 @@ impl CodeAnalyzer {
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                self.emit_validation_error_metric(
+                    "analyze_symbol",
+                    seq,
+                    sid.clone(),
+                    t_start,
+                    &params.path,
+                );
                 return Ok(err_to_tool_result(e));
             }
         };
@@ -506,6 +552,13 @@ impl CodeAnalyzer {
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                self.emit_validation_error_metric(
+                    "analyze_module",
+                    seq,
+                    sid.clone(),
+                    t_start,
+                    &params.path,
+                );
                 return Ok(err_to_tool_result(e));
             }
         };

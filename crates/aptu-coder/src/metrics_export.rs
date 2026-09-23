@@ -568,6 +568,35 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn accumulate_event_counts_receipt_with_error_pair_as_single_call() {
+        let mut counts = std::collections::HashMap::new();
+        let mut sid = None;
+        // Receipt ("received") emitted by begin_tool_call, paired with a terminal
+        // "error" event emitted on the validation-failure early-return path.
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "received", 0).build(),
+        );
+        assert!(
+            counts.is_empty(),
+            "receipt alone must not count as a tool call"
+        );
+        MetricsWriter::accumulate_event(
+            &mut counts,
+            &mut sid,
+            &crate::metrics::MetricEventBuilder::new("analyze_file", "error", 3)
+                .error_type(Some("invalid_params".to_string()))
+                .build(),
+        );
+        assert_eq!(
+            counts.get("analyze_file").map(|m: &ToolMetrics| m.count),
+            Some(1),
+            "a rejected invocation (receipt + error pair) must count exactly once"
+        );
+    }
+
     /// Serializes tests that mutate `APTU_CODER_METRICS_EXPORT_FILE` to prevent parallel
     /// pollution.
     async fn metrics_export_lock() -> tokio::sync::MutexGuard<'static, ()> {

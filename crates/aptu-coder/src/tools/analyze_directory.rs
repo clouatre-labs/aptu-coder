@@ -218,6 +218,31 @@ pub(crate) async fn handle_overview_mode(
     }
 }
 
+/// Emit a terminal `result="error"` metric on an `invalid_params` early return
+/// so every `"received"` receipt is paired with a completion event; otherwise
+/// the invocation disappears from the shutdown summary call_count.
+fn emit_validation_error(
+    ctx: &AnalyzeDirectoryContext,
+    params: &AnalyzeDirectoryParams,
+    seq: u32,
+    sid: &Option<String>,
+    t_start: std::time::Instant,
+    param_path: &str,
+    cursor: Option<&str>,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    ctx.metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("analyze_directory", "error", dur)
+            .param_path_depth(crate::metrics::path_component_count(param_path))
+            .error_type(Some("invalid_params".to_string()))
+            .session_id(sid.clone())
+            .seq(Some(seq))
+            .summary_mode(params.output_control.summary.unwrap_or(false))
+            .is_paginated(cursor.is_some())
+            .build(),
+    );
+}
+
 /// Handler body for the `analyze_directory` MCP tool.
 ///
 /// Called by the thin shim in `lib.rs` after parameter extraction and metric
@@ -255,6 +280,7 @@ pub(crate) async fn analyze_directory_handler(
     if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
+        emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -299,6 +325,7 @@ pub(crate) async fn analyze_directory_handler(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
                 return Ok(err_to_tool_result(e));
             }
         };

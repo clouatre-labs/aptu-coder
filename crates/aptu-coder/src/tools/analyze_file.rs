@@ -137,6 +137,34 @@ pub(crate) async fn handle_file_details_mode(
     }
 }
 
+/// Emit a terminal `result="error"` metric on an `invalid_params` early return
+/// so every `"received"` receipt is paired with a completion event; otherwise
+/// the invocation disappears from the shutdown summary call_count.
+fn emit_validation_error(
+    ctx: &AnalyzeFileContext,
+    params: &AnalyzeFileParams,
+    seq: u32,
+    sid: &Option<String>,
+    t_start: std::time::Instant,
+    param_path: &str,
+    cursor: Option<&str>,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    ctx.metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("analyze_file", "error", dur)
+            .param_path_depth(crate::metrics::path_component_count(param_path))
+            .error_type(Some("invalid_params".to_string()))
+            .session_id(sid.clone())
+            .seq(Some(seq))
+            .file_ext(crate::metrics::path_file_ext(param_path))
+            .language(crate::metrics::path_language(param_path))
+            .fields_projected(params.fields.is_some())
+            .summary_mode(params.output_control.summary.unwrap_or(false))
+            .is_paginated(cursor.is_some())
+            .build(),
+    );
+}
+
 /// Handler body for the `analyze_file` MCP tool.
 ///
 /// Called by the thin shim in `lib.rs` after parameter extraction and metric
@@ -156,6 +184,7 @@ pub(crate) async fn analyze_file_handler(
     if std::path::Path::new(&params.path).is_dir() {
         span.record("error", true);
         span.record("error.type", "invalid_params");
+        emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "path is a directory; use analyze_directory instead",
@@ -172,6 +201,7 @@ pub(crate) async fn analyze_file_handler(
     if summary_cursor_conflict(params.output_control.summary, cursor) {
         span.record("error", true);
         span.record("error.type", "invalid_params");
+        emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             "summary=true is incompatible with a pagination cursor; use one or the other"
@@ -236,6 +266,7 @@ pub(crate) async fn analyze_file_handler(
             formatted.len(),
             estimated_tokens
         );
+        emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
             message,
@@ -260,6 +291,7 @@ pub(crate) async fn analyze_file_handler(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
+                emit_validation_error(ctx, &params, seq, &sid, t_start, &param_path, cursor);
                 return Ok(err_to_tool_result(e));
             }
         };
