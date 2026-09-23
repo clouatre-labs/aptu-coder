@@ -52,6 +52,31 @@ in pi is provided by that package, so `--no-extensions` is not used (it
 would disable the adapter; ambient isolation comes from the shadow dir
 itself). Shadow dirs are freshly created per run; all paths are absolute.
 
+Gateway arm (`mcp-gateway`) runs with
+`PI_CODING_AGENT_DIR=<abs>/agent-mcp-gateway` whose `mcp.json` registers
+exactly one stdio server (aptu-coder, `directTools: false`) alongside a
+`settings.json` with `{"packages": ["npm:pi-mcp-adapter"]}` — every tool
+call routes through the adapter's mcp search/call gateway tool. Search
+middle-path arm (`mcp-search`) runs with
+`PI_CODING_AGENT_DIR=<abs>/agent-mcp-search` whose `mcp.json` registers
+exactly one stdio server (aptu-coder, `directTools: "search"` — the JSON
+string, not an array) alongside a `settings.json` with
+`{"packages": ["npm:pi-mcp-adapter"]}` — only the search tool is surfaced
+directly; calls still route through the gateway. Both arms reuse the same
+read-only `--exclude-tools` denylist as the MCP arm so all MCP-mode arms
+present identical tool availability and the only manipulated variable
+across them is `directTools`. `directTools: false` on a
+direct-tools MCP server populates a metadata cache on first use in a
+fresh `PI_CODING_AGENT_DIR`; warmup before measurement is currently
+infeasible in this single-session-per-invocation runner, so wiring-smoke
+sessions for these arms are treated as the discarded warmup and first-turn
+token measurements for `mcp-gateway`/`mcp-search` are documented as
+potentially contaminated by cold-start cache population. First-attempt
+success for `mcp-search` is defined as an in-attempt `mcp({search})`
+activation count greater than zero within the session's own tool calls.
+No tool description trimming is applied in any arm (R7 constraint:
+structural changes only).
+
 ## Budget enforcement
 
 Per-session kill at USD 0.25, stage caps of USD 0.10 / 0.10 / 0.60 / 2.00

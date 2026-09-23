@@ -53,8 +53,12 @@ NATIVE_TOOLS = ["--tools", "read,bash"]
 # tools arrive prefixed (aptu-coder_edit_overwrite etc.), so an unprefixed
 # denylist silently fails to exclude them (found live in wiring smoke).
 MCP_EXCLUDE = ["--exclude-tools",
-               "aptu-coder_edit_overwrite,aptu-coder_edit_replace,"
-               "aptu-coder_exec_command"]
+               ("aptu-coder_edit_overwrite,aptu-coder_edit_replace,"
+                "aptu-coder_exec_command")]
+# Gateway and search middle-path arms reuse MCP_EXCLUDE so all MCP-mode
+# arms present identical read-only tool availability; the only manipulated
+# variable across these arms is directTools.
+ARMS = ("native", "mcp", "mcp-gateway", "mcp-search")
 
 
 def new_run_id() -> str:
@@ -66,7 +70,7 @@ def build_invocation(
     arm: str, run_root: Path, session_dir: Path, prompt: str
 ) -> tuple[list[str], dict[str, str]]:
     """Build the (command, env) for one arm's pi invocation."""
-    if arm not in ("native", "mcp"):
+    if arm not in ARMS:
         raise ValueError(f"unknown arm: {arm}")
     agent_dir = run_root / f"agent-{arm}"
     agent_dir.mkdir(parents=True, exist_ok=True)
@@ -77,13 +81,18 @@ def build_invocation(
     else:
         # directTools: true surfaces the four analysis tools directly by
         # name (aptu-coder_analyze_directory etc.) instead of behind the
-        # adapter's mcp search/call gateway tool; verified live.
+        # adapter's mcp search/call gateway tool; verified live. The
+        # mcp-gateway and mcp-search arms probe the other points of that
+        # axis: false (full gateway round-trip) and "search" (search tool
+        # surfaced, calls still gated).
+        direct_tools = {"mcp": True, "mcp-gateway": False,
+                        "mcp-search": "search"}[arm]
         (agent_dir / "mcp.json").write_text(json.dumps({
             "mcpServers": {
                 "aptu-coder": {
                     "type": "stdio",
                     "command": "aptu-coder",
-                    "directTools": True,
+                    "directTools": direct_tools,
                 },
             },
         }) + "\n")
@@ -284,7 +293,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--stage", choices=STAGES, required=True)
-    ap.add_argument("--arm", choices=("native", "mcp"), required=True)
+    ap.add_argument("--arm", choices=ARMS, required=True)
     ap.add_argument("--task", required=True)
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--run-root", type=Path, required=True)

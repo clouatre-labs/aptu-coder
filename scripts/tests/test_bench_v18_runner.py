@@ -155,7 +155,7 @@ def test_safe_env_preserves_provider_key_and_strips_other_secrets(monkeypatch):
 
 
 def test_invocation_pins_preregistered_model(tmp_path):
-    cmd, env = runner.build_invocation(
+    cmd, _env = runner.build_invocation(
         "mcp", tmp_path, tmp_path / "sessions" / "x" / "t" / "mcp", "prompt",
     )
     assert "--provider" in cmd and "zai" in cmd
@@ -181,6 +181,50 @@ def test_shadow_dirs_carry_isolation_config(tmp_path):
             assert server["type"] == "stdio"
             assert server["directTools"] is True
             assert settings == {"packages": ["npm:pi-mcp-adapter"]}
+
+
+def test_gateway_and_search_arm_wiring(tmp_path):
+    for arm, direct_tools in (("mcp-gateway", False),
+                              ("mcp-search", "search")):
+        cmd, _ = runner.build_invocation(
+            arm, tmp_path,
+            tmp_path / "sessions" / "x" / "t" / arm, "prompt",
+        )
+        agent_dir = tmp_path / f"agent-{arm}"
+        mcp = json.loads((agent_dir / "mcp.json").read_text())
+        settings = json.loads((agent_dir / "settings.json").read_text())
+        server = mcp["mcpServers"]["aptu-coder"]
+        assert server["type"] == "stdio"
+        assert server["command"] == "aptu-coder"
+        assert server["directTools"] == direct_tools
+        assert settings == {"packages": ["npm:pi-mcp-adapter"]}
+        # All MCP-mode arms must present identical read-only tool
+        # availability so only directTools varies across arms.
+        assert "--exclude-tools" in cmd
+        assert "aptu-coder_edit_overwrite,aptu-coder_edit_replace," \
+               "aptu-coder_exec_command" in cmd
+
+
+def test_unknown_arm_raises_value_error():
+    try:
+        runner.build_invocation(
+            "mcp-lite", Path("/tmp"), Path("/tmp/s/x/t/mcp-lite"), "p",
+        )
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "unknown arm" in str(exc)
+
+
+def test_new_arms_write_to_disjoint_shadow_dirs(tmp_path):
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    for arm in ("mcp-gateway", "mcp-search"):
+        session_dir = run_root / "sessions" / "rid" / "t" / arm
+        _, env = runner.build_invocation(arm, run_root, session_dir, "p")
+        assert env["PI_CODING_AGENT_DIR"] == \
+            str((run_root / f"agent-{arm}").resolve())
+    assert (run_root / "agent-mcp-gateway").is_dir()
+    assert (run_root / "agent-mcp-search").is_dir()
 
 
 def test_common_flags_do_not_disable_extensions():
