@@ -53,14 +53,11 @@ NATIVE_TOOLS = ["--tools", "read,bash"]
 # tools arrive prefixed (aptu-coder_edit_overwrite etc.), so an unprefixed
 # denylist silently fails to exclude them (found live in wiring smoke).
 MCP_EXCLUDE = ["--exclude-tools",
-               "aptu-coder_edit_overwrite,aptu-coder_edit_replace,"
-               "aptu-coder_exec_command"]
-# Gateway arm: directTools: false routes every tool call through the
-# adapter's mcp search/call gateway tool; common flags only, no denylist.
-GATEWAY_FLAGS: list[str] = []
-# Search middle-path arm: directTools: "search" exposes only the search
-# tool directly; call still routes through the gateway. Common flags only.
-SEARCH_FLAGS: list[str] = []
+               ("aptu-coder_edit_overwrite,aptu-coder_edit_replace,"
+                "aptu-coder_exec_command")]
+# Gateway and search middle-path arms reuse MCP_EXCLUDE so all MCP-mode
+# arms present identical read-only tool availability; the only manipulated
+# variable across these arms is directTools.
 ARMS = ("native", "mcp", "mcp-gateway", "mcp-search")
 
 
@@ -101,8 +98,7 @@ def build_invocation(
         }) + "\n")
         (agent_dir / "settings.json").write_text(
             '{"packages": ["npm:pi-mcp-adapter"]}\n')
-        arm_flags = {"mcp": MCP_EXCLUDE, "mcp-gateway": GATEWAY_FLAGS,
-                     "mcp-search": SEARCH_FLAGS}[arm]
+        arm_flags = MCP_EXCLUDE
     cmd = ["pi", "-p", "--mode", "json", "--provider", PROVIDER,
            "--model", MODEL, *COMMON_FLAGS, *arm_flags,
            "--session-dir", str(session_dir.resolve()), prompt]

@@ -155,7 +155,7 @@ def test_safe_env_preserves_provider_key_and_strips_other_secrets(monkeypatch):
 
 
 def test_invocation_pins_preregistered_model(tmp_path):
-    cmd, env = runner.build_invocation(
+    cmd, _env = runner.build_invocation(
         "mcp", tmp_path, tmp_path / "sessions" / "x" / "t" / "mcp", "prompt",
     )
     assert "--provider" in cmd and "zai" in cmd
@@ -198,7 +198,11 @@ def test_gateway_and_search_arm_wiring(tmp_path):
         assert server["command"] == "aptu-coder"
         assert server["directTools"] == direct_tools
         assert settings == {"packages": ["npm:pi-mcp-adapter"]}
-        assert "--exclude-tools" not in cmd
+        # All MCP-mode arms must present identical read-only tool
+        # availability so only directTools varies across arms.
+        assert "--exclude-tools" in cmd
+        assert "aptu-coder_edit_overwrite,aptu-coder_edit_replace," \
+               "aptu-coder_exec_command" in cmd
 
 
 def test_unknown_arm_raises_value_error():
