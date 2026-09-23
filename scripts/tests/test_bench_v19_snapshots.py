@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import urllib.request
 
 import pytest
 from bench_v19 import snapshots
@@ -78,13 +77,37 @@ def test_fetch_snapshot_streams_chunks_with_timeout(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_urlopen(url, timeout=None):
-        seen.update(url=url, timeout=timeout)
-        snapshots.validate_tarball_url(url)
-        return FakeResponse()
+    class FakeOpener:
+        def open(self, url, timeout=None):
+            seen.update(url=url, timeout=timeout)
+            snapshots.validate_tarball_url(url)
+            return FakeResponse()
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(snapshots, "_opener", lambda: FakeOpener())
     dest = snapshots.fetch_snapshot("django", tmp_path / "out")
     assert dest.read_bytes() == b"aaabbb"
     assert seen["url"] == snapshots.tarball_url(snapshots.SNAPSHOT_MANIFEST["django"])
     assert seen["timeout"] == snapshots.FETCH_TIMEOUT_S
+
+
+def test_fetch_snapshot_blocks_redirects_without_second_request(tmp_path, monkeypatch):
+    import urllib.error
+
+    attempts = []
+
+    class RedirectingOpener:
+        def open(self, url, timeout=None):
+            attempts.append(url)
+            raise urllib.error.HTTPError(
+                url,
+                302,
+                "redirect",
+                {"Location": "http://169.254.169.254/latest/meta-data"},
+                None,
+            )
+
+    monkeypatch.setattr(snapshots, "_opener", lambda: RedirectingOpener())
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        snapshots.fetch_snapshot("django", tmp_path / "out")
+    assert excinfo.value.code == 302
+    assert len(attempts) == 1

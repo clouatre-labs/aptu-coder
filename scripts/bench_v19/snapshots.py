@@ -5,12 +5,18 @@ fetch (network) and verify (pure-local, fail-closed) are separable. The
 manifest below is frozen from day one: pinned commits and expected tarball
 SHA256 digests are never re-pinned, and verify_snapshot trusts only this
 checked-in manifest -- never caller-supplied JSON.
+
+SSRF hardening: fetching uses an OpenerDirector whose redirect handler
+rejects every redirect. An allowlisted URL could otherwise 302 to an
+internal or cloud-metadata endpoint, bypassing host/path allowlist
+validation; blocking redirects closes that hole.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -56,15 +62,28 @@ def validate_tarball_url(url: str) -> None:
         raise RuntimeError(f"refusing non-allowlisted tarball URL: {url}")
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject every redirect: SSRF hardening (no post-allowlist hops)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, "redirects blocked (SSRF hardening)", headers, fp
+        )
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(_NoRedirectHandler())
+
+
 def fetch_snapshot(name: str, dest_dir: Path) -> Path:
-    """Download one snapshot tarball (allowlisted URL, streamed, timeout)."""
+    """Download one snapshot tarball (allowlisted URL, no redirects, timeout)."""
     entry = SNAPSHOT_MANIFEST[name]
     url = tarball_url(entry)
     validate_tarball_url(url)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{name}-{entry['commit']}.tar.gz"
     with (
-        urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as resp,
+        _opener().open(url, timeout=FETCH_TIMEOUT_S) as resp,
         dest.open("wb") as out,
     ):
         while chunk := resp.read(CHUNK_SIZE):

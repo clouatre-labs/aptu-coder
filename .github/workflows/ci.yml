@@ -334,7 +334,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pytest
-        run: python3 -m pip install pytest==8.3.4
+        run: |
+          python3 -m pip install pytest==8.3.4
+          python3 -m pip install -r scripts/bench_v19/requirements.txt
       - name: Run bench_v18 unit tests
         run: python3 -m pytest scripts/tests/ -q
 
