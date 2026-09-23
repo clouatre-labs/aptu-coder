@@ -37,8 +37,14 @@ impl MetricsWriter {
     }
 
     /// Accumulate per-tool event counts for session summary export on shutdown.
-    /// Synthetic `schema_surface` startup events are excluded: they are not tool
-    /// calls and must not inflate call counts, durations, or output totals.
+    /// Two kinds of events are excluded via the shared `is_tool_call_event`
+    /// predicate:
+    ///
+    /// - Synthetic `schema_surface` startup events: they are not tool calls and
+    ///   must not inflate call counts, durations, or output totals.
+    /// - `result == "received"` receipt events: they are acknowledgment
+    ///   duplicates of completed tool calls; counting them would double-report
+    ///   every tool invocation in the shutdown summary.
     fn accumulate_event(
         tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
