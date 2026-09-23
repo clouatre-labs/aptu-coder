@@ -16,7 +16,8 @@ Pilot-first scaffold for the v19 crossover benchmark per
   construction, exempt from the F1-gap rule and from the rg agreement
   cross-check). The hop-depth sweep is restricted to the callers
   template.
-- The oracle (`oracle.py`) is AST-based via py-tree-sitter with pinned
+- The oracle (`oracle.py`) is AST-based via tree-sitter (py-tree-sitter
+  bindings) with pinned
   Python and Rust grammars (see `requirements.txt`). Ground truth is
   the set of files containing call nodes whose callee resolves exactly
   to the target symbol against the definition index; hop depth expands
