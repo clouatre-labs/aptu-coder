@@ -250,11 +250,6 @@ impl CodeAnalyzer {
     }
 
     /// Emit a terminal `result="error"` metric after a failed path validation.
-    ///
-    /// `begin_tool_call` already emitted a `"received"` receipt; because
-    /// `is_tool_call_event` excludes receipts from the shutdown summary
-    /// call_count, every receipt needs a paired terminal event or the
-    /// invocation would vanish from the summary.
     fn emit_validation_error_metric(
         &self,
         tool: &'static str,
@@ -263,14 +258,13 @@ impl CodeAnalyzer {
         t_start: std::time::Instant,
         path: &str,
     ) {
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new(tool, "error", dur)
-                .error_type(Some("invalid_params".to_string()))
-                .param_path_depth(crate::metrics::path_component_count(path))
-                .session_id(sid)
-                .seq(Some(seq))
-                .build(),
+        crate::tools::server::emit_terminal_error_metric(
+            &self.metrics_tx,
+            tool,
+            seq,
+            sid,
+            t_start,
+            path,
         );
     }
 

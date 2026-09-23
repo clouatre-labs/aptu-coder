@@ -212,6 +212,31 @@ pub(crate) async fn emit_received_metric(
     (seq, sid)
 }
 
+/// Emit a terminal `result="error"` metric after a failed path validation.
+///
+/// `begin_tool_call` already emitted a `"received"` receipt; because
+/// `is_tool_call_event` excludes receipts from the shutdown summary
+/// call_count, every receipt needs a paired terminal event or the
+/// invocation would vanish from the summary.
+pub(crate) fn emit_terminal_error_metric(
+    metrics_tx: &crate::metrics::MetricsSender,
+    tool: &'static str,
+    seq: u32,
+    sid: Option<String>,
+    t_start: std::time::Instant,
+    path: &str,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new(tool, "error", dur)
+            .error_type(Some("invalid_params".to_string()))
+            .param_path_depth(crate::metrics::path_component_count(path))
+            .session_id(sid)
+            .seq(Some(seq))
+            .build(),
+    );
+}
+
 /// Delegates to [`crate::tools::analyze_directory::handle_overview_mode`].
 #[cfg(test)]
 pub(crate) async fn handle_overview_mode(
