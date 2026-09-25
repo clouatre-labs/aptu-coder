@@ -11,7 +11,7 @@ This document maps every repo-level artifact to its purpose and the rationale be
 | `.github/ISSUE_TEMPLATE/refactor.md` | Tracks refactors as first-class work, not hidden in feature PRs |
 | `.github/PULL_REQUEST_TEMPLATE.md` | Verification checklist: tests, clippy, fmt, no-unwrap, API verification, GPG+DCO |
 | `.github/copilot-instructions.md` | Repo context for Copilot agents |
-| `.github/workflows/ci.yml` | Lint, test, audit; path-filtered; aggregate `CI Result` job; pass `--profile ci` explicitly on `cargo clippy` (not `cargo test`: profile.ci inherits `panic=abort` which aborts the test harness) |
+| `.github/workflows/ci.yml` | test, coverage, audit; path-filtered; aggregate `CI Result` job; pass `--profile ci` explicitly on `cargo clippy` (safe on `cargo test` too: profile.ci overrides `lto=false`, `codegen-units=16`, `panic=unwind`, `strip=false`, so it does not abort the test harness) |
 | `.github/workflows/build-and-attest.yml` | Reusable multi-platform build with cosign signing and provenance attestation |
 | `.github/workflows/release.yml` | GPG tag verification, Homebrew + cargo-binstall + crates.io distribution |
 | `.github/scripts/check-package-age.sh` | Validates new Cargo.lock dependencies are >=7 days old; bypass with `SKIP_PACKAGE_AGE_CHECK=true` |
@@ -22,7 +22,7 @@ This document maps every repo-level artifact to its purpose and the rationale be
 | `CONTRIBUTING.md` | Dev setup, commit format, PR process |
 | `SECURITY.md` | Vulnerability disclosure policy |
 | `Cargo.toml` `[profile.release]` | `opt-level=z`, `lto=true`, `codegen-units=1`, `panic=abort`, `strip=true` for minimal distribution binaries |
-| `Cargo.toml` `[profile.ci]` | Inherits release; `lto=false`, `codegen-units=16` for faster CI builds without sacrificing correctness |
+| `Cargo.toml` `[profile.ci]` | Inherits release; overrides `lto=false`, `codegen-units=16`, `panic=unwind`, `strip=false` for faster CI builds (and test compatibility) |
 | `Cargo.toml` `[workspace.lints.clippy]` | Hard-denies `undocumented_unsafe_blocks`, `unwrap_used`, `expect_used`; warn-tier `must_use_candidate`, `redundant_clone`, `needless_pass_by_value`, `large_enum_variant` staged for eventual promotion to `deny` once all violations are cleared (tracked in issue #1225) |
 | `.github/workflows/ci.yml` permissions block | Top-level `permissions:` block on every workflow. Use `contents: read` + `pull-requests: read` for CI workflows; set the minimum required permissions per job, noting that jobs using `actions/checkout` need at least `contents: read`. Required even after the org default was flipped to `read` on 2026-03-25, as defence in depth. |
 | Runner pin (`ubuntu-26.04-arm`) | Pin every job to `ubuntu-26.04-arm` rather than `ubuntu-latest`. `ubuntu-latest` resolves to the newest image mid-cycle and can silently change toolchain versions between runs. |
@@ -41,7 +41,7 @@ ci-result:
   name: CI Result
   runs-on: ubuntu-26.04-arm
   if: always()
-  needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks]
+  needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks, pytest-bench]
   steps:
     - name: Verify all jobs passed or were skipped
       run: |
@@ -54,7 +54,7 @@ ci-result:
 
 There is no standalone `format` job (`cargo fmt --check` is a step inside `lint`) and no `test` job (`coverage` replaces it, running `cargo-llvm-cov`/nextest with coverage gates on `aptu-coder-core`); `ci.yml` has no `renovate-check` job. `zizmor` is not a `ci.yml` job at all -- it runs inside `security.yml`'s single `security-result` job (`Security Result`), alongside a TruffleHog secret scan, gated to run only when workflow files change (`dorny/paths-filter`). See Control 7 for the secret-scanning detail and Control 2 for the zizmor step itself.
 
-**Path-based change detection.** Lint and coverage jobs in `ci.yml` run only when `src/**`, `Cargo.*`, `tests/**`, or workflow files change. Documentation-only pushes skip expensive jobs and give faster feedback. `security.yml`'s zizmor step is similarly gated to run only when `.github/workflows/**` changes; the TruffleHog secret scan itself always runs.
+**Path-based change detection.** Lint and coverage jobs in `ci.yml` run only when `crates/**`, `Cargo.toml`, `Cargo.lock`, `clippy.toml`, `tests/**`, or workflow files change. Documentation-only pushes skip expensive jobs and give faster feedback. `security.yml`'s zizmor step is similarly gated to run only when `.github/workflows/**` changes; the TruffleHog secret scan itself always runs.
 
 **Provenance attestation.** `build-and-attest.yml` generates a signed attestation via `actions/attest-build-provenance`. Consumers can verify with `gh attestation verify` before installing. `Cargo.lock` is committed and `cargo deny` enforces license and advisory checks in CI. Build provenance is covered by cosign signing and `actions/attest-build-provenance` (SLSA Build L3).
 
@@ -80,7 +80,7 @@ Do not raise the global threshold to accommodate a single outlier. The `reason` 
 
 1. **GitHub metadata:** Set topics, copy the 11-label taxonomy (names, colors, descriptions), create the two rulesets.
 2. **Templates:** Copy all three issue templates and the PR template; adapt wording to the target domain.
-3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (not `cargo test`). Set `CI Result` as the sole required status check in the branch ruleset. Copy `.commitlintrc.yml`.
+3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (safe on `cargo test` too: `profile.ci` explicitly sets `panic = "unwind"`, so it does not abort the test harness; the profile exists for faster CI builds). Set `CI Result` and `Security Result` as the required status checks in the branch ruleset. Copy `.commitlintrc.yml`.
 4. **Release:** Copy `build-and-attest.yml` and `release.yml`; update distribution channel config.
 5. **Cargo profiles:** Copy the `[profile.release]` and `[profile.ci]` blocks verbatim.
 6. **Docs:** Add `ARCHITECTURE.md` for the target repo; link this document and the orchestration guide from README.
@@ -212,7 +212,7 @@ parameters:
 
 In February-March 2026, an attacker force-pushed 75 tags in the aquasec/trivy repository; any workflow using `uses: action@tag` silently resolved to the malicious commit and executed attacker-controlled code on org runners. Pinning to a commit SHA makes tag force-push attacks impossible because the SHA reference is immutable.
 
-Enforce SHA pinning via zizmor as a required CI status check. Renovate or Dependabot opens PRs to keep pinned SHAs current when upstream releases new versions. The `sha_pinning_required` org setting (Control 1) enforces pinning at queue time; zizmor provides per-PR feedback during code review.
+Enforce SHA pinning via zizmor as a required CI status check. Renovate opens PRs to keep pinned SHAs current when upstream releases new versions. The `sha_pinning_required` org setting (Control 1) enforces pinning at queue time; zizmor provides per-PR feedback during code review.
 
 ```mermaid
 graph TD
@@ -232,7 +232,7 @@ graph TD
 # zizmor step in security.yml; pin zizmor itself to a SHA; path-gated to workflow-file changes only
 - name: Audit GitHub Actions workflows
   if: always() && steps.filter.outputs.workflows == 'true'
-  uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99  # v0.6.3
+  uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482  # v0.6.4
   with:
     min-severity: medium
     advanced-security: true
@@ -244,19 +244,33 @@ graph TD
 Set `advanced-security: true` only when the repo has GitHub Advanced Security (GHAS) enabled -- otherwise zizmor emits false positives for features that are unavailable. This repo runs with `advanced-security: true`; the `security-events: write` permission granted to the job (needed for SARIF upload) implies GHAS is enabled. `.github/zizmor.yml` suppresses one specific finding: `ci.yml` gates Renovate-only jobs on `github.actor`, which zizmor's `bot-conditions` rule otherwise flags even though the condition is not attacker-controllable in this context.
 
 ```yaml
-# .github/dependabot.yml: keep action SHAs current via weekly PRs
-version: 2
-updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns:
-          - "*"
+# renovate.json: keep action SHAs current via weekly PRs
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "labels": ["dependencies"],
+  "minimumReleaseAge": "3 days",
+  "platformAutomerge": true,
+  "dependencyDashboard": false,
+  "ignorePaths": ["fuzz/**"],
+  "schedule": ["before 6am on monday"],
+  "timezone": "UTC",
+  "packageRules": [
+    {
+      "groupName": "non-major",
+      "matchUpdateTypes": ["patch", "minor", "digest", "pin", "lockFileMaintenance"],
+      "automerge": true
+    },
+    {
+      "groupName": "github-actions",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major", "minor", "patch", "digest", "pin", "lockFileMaintenance"],
+      "automerge": true
+    }
+  ]
+}
 ```
-*Code Snippet 6: Dependabot configuration for the `github-actions` ecosystem.*
+*Code Snippet 6: Renovate configuration (`renovate.json`) keeping pinned SHAs current, with weekly schedule and automerge.*
 
 **3. OIDC Trusted Publishers: No Stored Registry Tokens**
 
@@ -278,7 +292,7 @@ jobs:
       id-token: write  # required to request an OIDC token
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
         # no password= field; OIDC token is requested automatically via id-token: write
@@ -355,12 +369,12 @@ tar -xzf tool.tar.gz
 
 Secret scanning runs on every PR and push as part of the required `Security Result` check (`.github/workflows/security.yml`). This prevents long-lived tokens committed to any repository from persisting in history or appearing in CI log artifacts. `--only-verified` restricts findings to secrets TruffleHog has confirmed are live against the origin service, cutting noise from historical or fixture-only matches.
 
-TruffleHog is used instead of `gitleaks/gitleaks-action` because `gitleaks-action` requires a `GITLEAKS_LICENSE` org secret for GitHub Organisation repos; TruffleHog has no per-org licensing gate, so it needs no license secret to run as a required check.
+TruffleHog is used instead of `gitleaks/gitleaks-action` because `gitleaks-action` requires a `GITLEAKS_LICENSE` org secret for GitHub Organisation repos; TruffleHog has no per-org licensing gate, so it needs no license secret to run as a required check. gitleaks has since been succeeded by [Betterleaks](https://github.com/betterleaks/betterleaks) (created by gitleaks' original author, announced March 2026), but no official Betterleaks GitHub Action exists yet, so TruffleHog remains the practical CI default.
 
 ```yaml
 # TruffleHog step in security.yml; no license secret required
 - name: Scan for committed secrets
-  uses: trufflesecurity/trufflehog@363923b901c911a9164f50b6c423f47c15372b1c  # v3.97.4
+  uses: trufflesecurity/trufflehog@f714bf454f350590f4a24c3ddb1aef02c35bf5b6  # v3.97.5
   with:
     extra_args: --only-verified
 ```
@@ -458,7 +472,7 @@ gh api "/orgs/{org}/audit-log?phrase=action:tag.create+action:repo.create&per_pa
 | # | Control | Attack or Risk Blocked | Enforcement Path |
 |---|---|---|---|
 | 1 | Actions permissions | Overprivileged GITHUB_TOKEN; unreviewed third-party actions | `PUT /orgs/{org}/actions/permissions` |
-| 2 | SHA pinning | Tag poisoning (Trivy breach, Feb-Mar 2026) | zizmor required check; Renovate or Dependabot |
+| 2 | SHA pinning | Tag poisoning (Trivy breach, Feb-Mar 2026) | zizmor required check; Renovate |
 | 3 | OIDC Trusted Publishers | Stored registry token exfiltration (LiteLLM breach) | Workflow hardening; no `password=` field |
 | 4 | `pull_request_target` ban | Fork PR PAT theft (Trivy breach, Feb 28 2026) | zizmor required check; workflow audit |
 | 5 | Environment protection | Secrets reachable from fork PRs or unapproved refs | `PUT /repos/{org}/{repo}/environments/{name}` |
