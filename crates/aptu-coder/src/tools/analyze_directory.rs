@@ -42,6 +42,23 @@ fn relativize_file_paths(output: &mut analyze::AnalysisOutput, base: &Path) {
     }
 }
 
+/// Applies a safe text-level transformation to `output.formatted` so the text
+/// payload matches the relativized `files[].path` values.
+///
+/// Formatters must consume absolute paths (their per-directory grouping joins
+/// on `starts_with` against absolute `WalkEntry` paths), so `formatted` is
+/// rendered from absolute paths and then transformed here: every occurrence of
+/// a base prefix (canonical base and the raw `params.path`) followed by a
+/// separator is stripped, mirroring `strip_prefix` in `relativize_file_paths`.
+fn relativize_formatted_text(formatted: &mut String, bases: &[&Path]) {
+    for base in bases {
+        let trimmed = base.to_string_lossy();
+        let trimmed = trimmed.trim_end_matches('/');
+        let prefix = format!("{trimmed}/");
+        *formatted = formatted.replace(&prefix, "");
+    }
+}
+
 /// Applies an optional `git_ref` filter to the directory walk entries.
 ///
 /// If `git_ref` is `None` or empty, `entries` is returned unchanged.
@@ -438,6 +455,11 @@ pub(crate) async fn analyze_directory_handler(
     let base = std::fs::canonicalize(&params.path)
         .unwrap_or_else(|_| std::path::PathBuf::from(&params.path));
     relativize_file_paths(&mut output, &base);
+    // Keep the text payload in sync with the relativized structured paths.
+    relativize_formatted_text(
+        &mut output.formatted,
+        &[&base, Path::new(params.path.trim_end_matches('/'))],
+    );
 
     let mut final_text = output.formatted.clone();
     if use_paginated && let Some(cursor) = paginated.next_cursor {
@@ -663,6 +685,10 @@ mod tests {
         );
         let text = text_of(&result);
         let hash_miss = content_hash_of(&result);
+        assert!(
+            !text.contains(&format!("{path}/")),
+            "text payload must contain no absolute path of the analyzed dir: {text}"
+        );
         assert_eq!(
             hash_miss,
             format!("{}", blake3::hash(text.as_bytes())),
@@ -682,6 +708,11 @@ mod tests {
         let structured_l1 = result_l1.structured_content.clone().expect("structured");
         assert_eq!(structured, structured_l1, "L1 hit output must match miss");
         assert_eq!(hash_miss, content_hash_of(&result_l1));
+        let text_l1 = text_of(&result_l1);
+        assert!(
+            !text_l1.contains(&format!("{path}/")),
+            "L1 hit text payload must contain no absolute path: {text_l1}"
+        );
 
         // Act + Assert (L2 disk hit: fresh L1, shared disk cache)
         let ctx2 = test_context_with_disk(cache_dir.path().to_path_buf());
@@ -696,6 +727,16 @@ mod tests {
         let structured_l2 = result_l2.structured_content.clone().expect("structured");
         assert_eq!(structured, structured_l2, "L2 hit output must match miss");
         assert_eq!(hash_miss, content_hash_of(&result_l2));
+        let text_l2 = text_of(&result_l2);
+        assert!(
+            !text_l2.contains(&format!("{path}/")),
+            "L2 hit text payload must contain no absolute path: {text_l2}"
+        );
+        assert_eq!(
+            text_l2,
+            text_of(&result),
+            "L2 hit text must match miss text"
+        );
     }
 
     /// Extracts the text payload from a successful result's content blocks.
@@ -749,15 +790,23 @@ mod tests {
         .expect("valid params");
 
         // Act
-        let result =
-            analyze_directory_handler(&ctx, params, test_call(path), &tracing::Span::none())
-                .await
-                .expect("handler ok");
+        let result = analyze_directory_handler(
+            &ctx,
+            params,
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
         let structured = result.structured_content.clone().expect("structured");
 
         // Assert: the sub/ section must report 1 file (not zero), and emitted
         // FileInfo paths must be relative.
         let text = text_of(&result);
+        assert!(
+            !text.contains(&format!("{path}/")),
+            "summary text payload must contain no absolute path: {text}"
+        );
         assert!(
             text.contains("sub/ [1 files"),
             "per-directory count must survive; got: {text}"
@@ -802,12 +851,18 @@ mod tests {
                 .expect("handler ok");
         let structured = result.structured_content.clone().expect("structured");
 
-        // Assert: no absolute paths leak into files[].path.
+        // Assert: no absolute paths leak into files[].path or the text block.
         let files = structured["files"].as_array().expect("files array");
         assert!(!files.is_empty(), "expected at least one file");
         for f in files {
             let p = f["path"].as_str().expect("path str");
             assert!(!p.starts_with('/'), "path must be relative, got {p}");
         }
+        let text = text_of(&result);
+        let cwd_abs = format!("{}/", cwd.display());
+        assert!(
+            !text.contains(&cwd_abs),
+            "text payload must contain no absolute path of the analyzed dir: {text}"
+        );
     }
 }
