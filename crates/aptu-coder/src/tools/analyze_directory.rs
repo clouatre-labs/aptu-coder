@@ -630,18 +630,30 @@ mod tests {
         panic!("disk cache entry never appeared");
     }
 
-    #[tokio::test]
-    async fn files_paths_relative_and_identical_across_cache_tiers() {
+    /// Creates a temp source dir under the CWD containing `top.rs` and
+    /// `sub/inner.rs`; optionally also creates a temp disk-cache dir.
+    /// Returns (source dir, optional cache dir, source path as a string).
+    fn setup_source_fixture(
+        with_cache_dir: bool,
+    ) -> (tempfile::TempDir, Option<tempfile::TempDir>, String) {
         // Arrange: temp source dir inside CWD (symlinked roots on macOS are
         // resolved by the canonicalized base).
         let cwd = std::env::current_dir().expect("cwd");
         let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
-        let cache_dir = tempfile::TempDir::new_in(&cwd).expect("cache tempdir");
+        let cache_dir =
+            with_cache_dir.then(|| tempfile::TempDir::new_in(&cwd).expect("cache tempdir"));
         std::fs::create_dir(dir.path().join("sub")).expect("mkdir sub");
         std::fs::write(dir.path().join("sub").join("inner.rs"), "fn inner() {}")
             .expect("write inner.rs");
         std::fs::write(dir.path().join("top.rs"), "fn top() {}").expect("write top.rs");
         let path = dir.path().to_str().expect("utf8 path").to_string();
+        (dir, cache_dir, path)
+    }
+
+    #[tokio::test]
+    async fn files_paths_relative_and_identical_across_cache_tiers() {
+        let (_dir, cache_dir, path) = setup_source_fixture(true);
+        let cache_dir = cache_dir.expect("cache tempdir");
 
         let make_params = || {
             let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
@@ -772,16 +784,10 @@ mod tests {
 
     #[tokio::test]
     async fn summary_mode_per_directory_counts_survive_relativization() {
-        // Arrange: ordering regression guard. format_summary must consume the
-        // absolute FileInfo paths BEFORE relativization, otherwise the
-        // starts_with join in summary.rs zeroes per-directory stats.
-        let cwd = std::env::current_dir().expect("cwd");
-        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
-        std::fs::create_dir(dir.path().join("sub")).expect("mkdir sub");
-        std::fs::write(dir.path().join("sub").join("inner.rs"), "fn inner() {}")
-            .expect("write inner.rs");
-        std::fs::write(dir.path().join("top.rs"), "fn top() {}").expect("write top.rs");
-        let path = dir.path().to_str().expect("utf8 path").to_string();
+        // Ordering guard: format_summary must consume the absolute FileInfo
+        // paths BEFORE relativization, otherwise the starts_with join in
+        // summary.rs zeroes per-directory stats.
+        let (_dir, _cache_dir, path) = setup_source_fixture(false);
         let (ctx, _rx) = test_context();
         let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
             "path": path,
