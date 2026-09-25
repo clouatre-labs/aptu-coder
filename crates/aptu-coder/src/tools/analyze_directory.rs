@@ -65,6 +65,15 @@ fn relativize_formatted_text(formatted: &mut String, bases: &[&Path]) {
     for base in bases {
         let trimmed = base.to_string_lossy();
         let trimmed = trimmed.trim_end_matches(['/', '\\']);
+        // A base that trims to empty (e.g. "/") or reduces to a bare
+        // filesystem root (e.g. "/" or "C:\") would yield a prefix that is
+        // just the root or separator, stripping every separator from the
+        // output and corrupting tree formatting. Such bases contribute
+        // nothing to the prefix set.
+        let is_bare_root = base.has_root() && base.parent().is_none();
+        if trimmed.is_empty() || trimmed.len() <= 1 || is_bare_root {
+            continue;
+        }
         let mut prefix = String::with_capacity(trimmed.len() + 1);
         prefix.push_str(trimmed);
         prefix.push(sep);
@@ -594,6 +603,21 @@ mod tests {
 
         // Assert
         assert_eq!(text, "README.md");
+    }
+
+    #[test]
+    fn relativize_formatted_text_skips_filesystem_root_bases() {
+        // Arrange: a base at the filesystem root (and a trailing-separator
+        // variant) must not produce a prefix that strips every separator.
+        let base = std::path::Path::new("/");
+        let base_trailing = std::path::Path::new("//");
+        let mut text = String::from("src/lib.rs\nsrc/main.rs");
+
+        // Act
+        relativize_formatted_text(&mut text, &[base, base_trailing]);
+
+        // Assert: byte-identical output
+        assert_eq!(text, "src/lib.rs\nsrc/main.rs");
     }
 
     /// Builds a minimal `AnalyzeDirectoryContext` backed by an unbounded metrics
