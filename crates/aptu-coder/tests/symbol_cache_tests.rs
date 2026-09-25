@@ -134,7 +134,7 @@ async fn test_analyze_symbol_call_graph_cache_hit() {
         "structuredContent must be absent"
     );
 
-    // Assert: second call returns L1Memory tier (same analyzer instance, unchanged directory).
+    // Assert: second call succeeds and carries no structuredContent payload.
     assert!(
         structured_content(&resp2).is_none(),
         "structuredContent must be absent"
