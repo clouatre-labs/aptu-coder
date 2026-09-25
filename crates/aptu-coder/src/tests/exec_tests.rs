@@ -560,3 +560,32 @@ fn shell_output_metadata_key_set_matches_shell_output_subset() {
         "ShellOutputMetadata key set drifted from the ShellOutput metadata subset"
     );
 }
+
+/// Field-level check: every ShellOutputMetadata field must carry the exact
+/// value from the source ShellOutput through `From<&ShellOutput>`.
+#[test]
+fn shell_output_metadata_from_copies_every_field() {
+    use crate::{ShellOutput, ShellOutputMetadata};
+
+    let mut output = ShellOutput::new("out".into(), "err".into(), Some(7), true);
+    output.timed_out = true;
+    output.output_collection_error = Some("drain timed out".into());
+    output.filter_applied = Some("redact-secrets".into());
+    output.filter_effect = Some("stdout capped".into());
+    output.stdout_path = Some("/tmp/slot-stdout".into());
+    output.stderr_path = Some("/tmp/slot-stderr".into());
+
+    let meta = ShellOutputMetadata::from(&output);
+
+    assert_eq!(meta.exit_code, Some(7));
+    assert!(meta.timed_out);
+    assert!(meta.output_truncated);
+    assert_eq!(
+        meta.output_collection_error.as_deref(),
+        Some("drain timed out")
+    );
+    assert_eq!(meta.filter_applied.as_deref(), Some("redact-secrets"));
+    assert_eq!(meta.filter_effect.as_deref(), Some("stdout capped"));
+    assert_eq!(meta.stdout_path.as_deref(), Some("/tmp/slot-stdout"));
+    assert_eq!(meta.stderr_path.as_deref(), Some("/tmp/slot-stderr"));
+}

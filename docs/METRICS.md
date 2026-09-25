@@ -58,10 +58,6 @@ Each line in the JSONL file is one JSON object:
 | `fields_projected` | `bool` | `true` when the `fields` projection parameter was supplied on `analyze_file`. Omitted from JSONL when `false`. |
 | `match_mode` | `string \| null` | The `match_mode` value passed to `analyze_symbol` (e.g. `"exact"`, `"contains"`); `null` when not set (defaults to `exact` in the handler). Omitted from JSONL when `null`. |
 | `follow_depth` | `u32 \| null` | Effective call-graph traversal depth for `analyze_symbol` (field name kept for schema continuity; the value is derived from the `max_depth` parameter — the former `follow_depth` parameter was removed). `null` when `max_depth` was not explicitly supplied. Omitted from JSONL when `null`. |
-
-### Raw bytes and ANSI stripping
-
-`stdout_bytes_raw`/`stderr_bytes_raw` count child-emitted bytes pre-strip, so they measure what the process actually wrote. Overflow slot files (`aptu-overflow://slot-*`) contain raw pre-strip content as the recovery record. Delivered output (text blocks and the interleaved preview) are ANSI-stripped via `aptu_coder_core::ansi::strip_ansi` before filter rules are applied, so filter rules match clean text and delivered output never contains escape sequences. exec_command's structuredContent is metadata-only (`ShellOutputMetadata`: exit code, truncation/drain flags, filter rule, and overflow slot-file paths); stdout/stderr content is delivered solely via the text block.
 | `mode` | `string \| null` | The `mode` value passed to `analyze_symbol` (`"call_graph"`, `"import_lookup"`, or `"def_use"`); `null` when not set (defaults to `call_graph` in the handler). Omitted from JSONL when `null`. |
 | `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
 | `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
@@ -71,6 +67,10 @@ Each line in the JSONL file is one JSON object:
 | `l2_size_bytes` | `u64 \| null` | Approximate total compressed size in bytes of L2 disk cache entries, at the time of metric emission. Incremented on successful `put()` by the compressed entry size; approximate (does not account for evictions or manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
 | `est_output_tokens` | `u64 \| null` | Rough token estimate for the response payload: `output_chars / 4`. This is a coarse heuristic (~4 chars per token), not a tokenizer-accurate count; treat it as an order-of-magnitude signal only. Populated centrally on per-call completion events only (receipt `"received"` events and the `schema_surface` startup event are excluded); omitted from JSONL when `null`. |
 | `schema_chars` | `object \| null` | Per-tool serialized JSON-schema size in serialized UTF-8 bytes, captured once at server start on the `schema_surface` event. Keys are tool names; values are `serde_json::to_string(&tool.input_schema).len()` — that is, byte length, not character count (consistent with the byte-based unit used by `stdout_bytes_raw`/`stderr_bytes_raw`). The event's `output_chars` field holds the sum of all values. `null` on all other events. |
+
+### Raw bytes and ANSI stripping
+
+`stdout_bytes_raw`/`stderr_bytes_raw` count child-emitted bytes pre-strip, so they measure what the process actually wrote. Overflow slot files (`aptu-overflow://slot-*`) contain raw pre-strip content as the recovery record. Delivered output (text blocks and the interleaved preview) are ANSI-stripped via `aptu_coder_core::ansi::strip_ansi` before filter rules are applied, so filter rules match clean text and delivered output never contains escape sequences. exec_command's structuredContent is metadata-only (`ShellOutputMetadata`: exit code, truncation/drain flags, filter rule, and overflow slot-file paths); stdout/stderr content is delivered solely via the text block.
 
 ### schema_surface event
 
