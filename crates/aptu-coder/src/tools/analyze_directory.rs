@@ -28,6 +28,20 @@ use crate::tools::common::{
 };
 use crate::tools::{AnalyzeDirectoryContext, DirectoryHandlerCall};
 
+/// Relativizes each `FileInfo.path` in `output` against `base`.
+///
+/// `base` must already be canonicalized (see the traversal.rs canonicalize
+/// pattern) so `strip_prefix` matches on symlink-resolved roots such as the
+/// macOS /tmp -> /private/tmp alias. Paths outside `base` are left absolute;
+/// a failed strip is silently ignored and never an error.
+fn relativize_file_paths(output: &mut analyze::AnalysisOutput, base: &Path) {
+    for file in &mut output.files {
+        if let Ok(rel) = Path::new(&file.path).strip_prefix(base) {
+            file.path = rel.to_string_lossy().into_owned();
+        }
+    }
+}
+
 /// Applies an optional `git_ref` filter to the directory walk entries.
 ///
 /// If `git_ref` is `None` or empty, `entries` is returned unchanged.
@@ -413,6 +427,18 @@ pub(crate) async fn analyze_directory_handler(
         output.next_cursor = None;
     }
 
+    // Relativize emitted FileInfo.path values against the canonicalized target
+    // directory. This must run AFTER format_summary and
+    // format_structure_paginated have consumed the absolute paths (their
+    // per-directory grouping joins on starts_with) and immediately BEFORE
+    // final_text/content_hash/structured_content serialization. Because the
+    // transform is emit-time, cached absolute-path output is relativized
+    // identically on L1/L2/miss, so content_hash = blake3(final relativized
+    // text) stays self-consistent with no cache version bump.
+    let base = std::fs::canonicalize(&params.path)
+        .unwrap_or_else(|_| std::path::PathBuf::from(&params.path));
+    relativize_file_paths(&mut output, &base);
+
     let mut final_text = output.formatted.clone();
     if use_paginated && let Some(cursor) = paginated.next_cursor {
         final_text.push('\n');
@@ -545,5 +571,243 @@ mod tests {
         let event = rx.try_recv().expect("expected a terminal error metric");
         assert_eq!(event.result, "error");
         assert_eq!(event.error_type.as_deref(), Some("internal_error"));
+    }
+
+    /// Builds a context with an enabled disk cache rooted at `disk_base`.
+    fn test_context_with_disk(disk_base: std::path::PathBuf) -> AnalyzeDirectoryContext {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        AnalyzeDirectoryContext {
+            cache: AnalysisCache::new(1),
+            disk_cache: Arc::new(aptu_coder_core::cache::DiskCache::new(disk_base, false)),
+            metrics_tx: crate::metrics::MetricsSender(tx),
+            sid: None,
+        }
+    }
+
+    /// Extracts the blake3 content_hash from a successful result's meta.
+    fn content_hash_of(result: &rmcp::model::CallToolResult) -> String {
+        result
+            .meta
+            .as_ref()
+            .expect("meta present")
+            .0
+            .get("content_hash")
+            .and_then(|v| v.as_str())
+            .expect("content_hash string")
+            .to_string()
+    }
+
+    /// Waits until the disk cache has at least one entry (async L2 write).
+    async fn wait_for_disk_entry(ctx: &AnalyzeDirectoryContext) {
+        for _ in 0..500 {
+            if ctx.disk_cache.cache_stats().0 > 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("disk cache entry never appeared");
+    }
+
+    #[tokio::test]
+    async fn files_paths_relative_and_identical_across_cache_tiers() {
+        // Arrange: temp source dir inside CWD (symlinked roots on macOS are
+        // resolved by the canonicalized base).
+        let cwd = std::env::current_dir().expect("cwd");
+        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+        let cache_dir = tempfile::TempDir::new_in(&cwd).expect("cache tempdir");
+        std::fs::create_dir(dir.path().join("sub")).expect("mkdir sub");
+        std::fs::write(dir.path().join("sub").join("inner.rs"), "fn inner() {}")
+            .expect("write inner.rs");
+        std::fs::write(dir.path().join("top.rs"), "fn top() {}").expect("write top.rs");
+        let path = dir.path().to_str().expect("utf8 path").to_string();
+
+        let make_params = || {
+            let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+                "path": path,
+            }))
+            .expect("valid params");
+            params
+        };
+
+        // Act + Assert (cache miss)
+        let ctx1 = test_context_with_disk(cache_dir.path().to_path_buf());
+        let result = analyze_directory_handler(
+            &ctx1,
+            make_params(),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let structured = result
+            .structured_content
+            .clone()
+            .expect("structured content");
+        let paths: Vec<&str> = structured["files"]
+            .as_array()
+            .expect("files array")
+            .iter()
+            .map(|f| f["path"].as_str().expect("path str"))
+            .collect();
+        assert_eq!(paths.len(), 2);
+        assert!(
+            paths
+                .iter()
+                .all(|p| !p.starts_with('/') && !p.contains("..")),
+            "paths must be relative: {paths:?}"
+        );
+        assert!(paths.contains(&"top.rs"), "expected top.rs, got {paths:?}");
+        assert!(
+            paths.contains(&"sub/inner.rs"),
+            "expected sub/inner.rs, got {paths:?}"
+        );
+        let text = text_of(&result);
+        let hash_miss = content_hash_of(&result);
+        assert_eq!(
+            hash_miss,
+            format!("{}", blake3::hash(text.as_bytes())),
+            "content_hash must hash the emitted relativized text"
+        );
+        wait_for_disk_entry(&ctx1).await;
+
+        // Act + Assert (L1 hit: same ctx, same result)
+        let result_l1 = analyze_directory_handler(
+            &ctx1,
+            make_params(),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let structured_l1 = result_l1.structured_content.clone().expect("structured");
+        assert_eq!(structured, structured_l1, "L1 hit output must match miss");
+        assert_eq!(hash_miss, content_hash_of(&result_l1));
+
+        // Act + Assert (L2 disk hit: fresh L1, shared disk cache)
+        let ctx2 = test_context_with_disk(cache_dir.path().to_path_buf());
+        let result_l2 = analyze_directory_handler(
+            &ctx2,
+            make_params(),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let structured_l2 = result_l2.structured_content.clone().expect("structured");
+        assert_eq!(structured, structured_l2, "L2 hit output must match miss");
+        assert_eq!(hash_miss, content_hash_of(&result_l2));
+    }
+
+    /// Extracts the text payload from a successful result's content blocks.
+    fn text_of(result: &rmcp::model::CallToolResult) -> String {
+        match result.content.first().expect("content") {
+            rmcp::model::ContentBlock::Text(t) => t.text.clone(),
+            other => panic!("expected text content, got {other:?}"),
+        }
+    }
+
+    /// Builds an `AnalysisOutput` from JSON (struct is non-exhaustive).
+    fn output_from_json(files: serde_json::Value) -> analyze::AnalysisOutput {
+        serde_json::from_value(serde_json::json!({ "formatted": "", "files": files }))
+            .expect("valid AnalysisOutput JSON")
+    }
+
+    #[tokio::test]
+    async fn relativize_keeps_absolute_paths_outside_base() {
+        // Arrange: file paths that are not under the base must stay unchanged
+        // (both absolute-outside and already-relative inputs).
+        let mut output = output_from_json(serde_json::json!([
+            { "path": "/elsewhere/other.rs", "language": "rust", "line_count": 1, "function_count": 1, "class_count": 0, "is_test": false },
+            { "path": "already/relative.rs", "language": "rust", "line_count": 1, "function_count": 1, "class_count": 0, "is_test": false }
+        ]));
+
+        // Act
+        relativize_file_paths(&mut output, Path::new("/base"));
+
+        // Assert: strip_prefix failures keep the original paths, no error.
+        assert_eq!(output.files[0].path, "/elsewhere/other.rs");
+        assert_eq!(output.files[1].path, "already/relative.rs");
+    }
+
+    #[tokio::test]
+    async fn summary_mode_per_directory_counts_survive_relativization() {
+        // Arrange: ordering regression guard. format_summary must consume the
+        // absolute FileInfo paths BEFORE relativization, otherwise the
+        // starts_with join in summary.rs zeroes per-directory stats.
+        let cwd = std::env::current_dir().expect("cwd");
+        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+        std::fs::create_dir(dir.path().join("sub")).expect("mkdir sub");
+        std::fs::write(dir.path().join("sub").join("inner.rs"), "fn inner() {}")
+            .expect("write inner.rs");
+        std::fs::write(dir.path().join("top.rs"), "fn top() {}").expect("write top.rs");
+        let path = dir.path().to_str().expect("utf8 path").to_string();
+        let (ctx, _rx) = test_context();
+        let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "summary": true,
+        }))
+        .expect("valid params");
+
+        // Act
+        let result =
+            analyze_directory_handler(&ctx, params, test_call(path), &tracing::Span::none())
+                .await
+                .expect("handler ok");
+        let structured = result.structured_content.clone().expect("structured");
+
+        // Assert: the sub/ section must report 1 file (not zero), and emitted
+        // FileInfo paths must be relative.
+        let text = text_of(&result);
+        assert!(
+            text.contains("sub/ [1 files"),
+            "per-directory count must survive; got: {text}"
+        );
+        assert!(
+            !text.contains("showing 0"),
+            "relativization must not zero per-directory stats; got: {text}"
+        );
+        let files = structured["files"].as_array().expect("files array");
+        assert!(
+            files
+                .iter()
+                .all(|f| !f["path"].as_str().unwrap().starts_with('/')),
+            "paths must be relative after formatting: {structured}"
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_params_path_yields_relative_paths_on_symlinked_roots() {
+        // Arrange: a relative params.path resolved through a symlinked CWD
+        // (e.g. macOS /var -> /private/var) must still emit relative paths.
+        let cwd = std::env::current_dir().expect("cwd");
+        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").expect("write lib.rs");
+        let relative = dir
+            .path()
+            .strip_prefix(&cwd)
+            .expect("relative to cwd")
+            .to_str()
+            .expect("utf8")
+            .to_string();
+        let (ctx, _rx) = test_context();
+        let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+            "path": relative,
+        }))
+        .expect("valid params");
+
+        // Act
+        let result =
+            analyze_directory_handler(&ctx, params, test_call(relative), &tracing::Span::none())
+                .await
+                .expect("handler ok");
+        let structured = result.structured_content.clone().expect("structured");
+
+        // Assert: no absolute paths leak into files[].path.
+        let files = structured["files"].as_array().expect("files array");
+        assert!(!files.is_empty(), "expected at least one file");
+        for f in files {
+            let p = f["path"].as_str().expect("path str");
+            assert!(!p.starts_with('/'), "path must be relative, got {p}");
+        }
     }
 }

@@ -277,6 +277,13 @@ pub struct AnalyzeSymbolParams {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct FileInfo {
+    /// Path relative to the analyzed directory (absolute when outside base).
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(
+            description = "Path relative to the analyzed directory (absolute when outside base)."
+        )
+    )]
     pub path: String,
     pub language: String,
     #[cfg_attr(
