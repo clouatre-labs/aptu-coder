@@ -93,15 +93,12 @@ async fn call_tool_twice_sequential(
     (resp1, resp2)
 }
 
-/// Return the `cache_tier` string from a structuredContent if present.
+/// Access `structuredContent` if present.
 ///
-/// The field was removed from all analyze-tool responses (alpha policy); the
-/// cache tier now surfaces only via metrics. Assertions below lock in absence.
-fn extract_cache_tier(resp: &serde_json::Value) -> Option<String> {
-    resp["result"]["structuredContent"]
-        .get("cache_tier")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
+/// analyze_symbol responses must not carry a structuredContent payload
+/// (alpha policy); assertions below lock in its absence.
+fn structured_content(resp: &serde_json::Value) -> Option<&serde_json::Value> {
+    resp["result"].get("structuredContent")
 }
 
 fn is_success(resp: &serde_json::Value) -> bool {
@@ -133,14 +130,14 @@ async fn test_analyze_symbol_call_graph_cache_hit() {
     assert!(is_success(&resp2), "second call must succeed; got: {resp2}");
 
     assert!(
-        extract_cache_tier(&resp1).is_none(),
-        "cache_tier must be absent"
+        structured_content(&resp1).is_none(),
+        "structuredContent must be absent"
     );
 
     // Assert: second call returns L1Memory tier (same analyzer instance, unchanged directory).
     assert!(
-        extract_cache_tier(&resp2).is_none(),
-        "cache_tier must be absent"
+        structured_content(&resp2).is_none(),
+        "structuredContent must be absent"
     );
 }
 
@@ -164,12 +161,12 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     assert!(is_success(&resp1), "pair1 call1 must succeed");
     assert!(is_success(&resp2), "pair1 call2 must succeed");
     assert!(
-        extract_cache_tier(&resp1).is_none(),
-        "cache_tier must be absent"
+        structured_content(&resp1).is_none(),
+        "structuredContent must be absent"
     );
     assert!(
-        extract_cache_tier(&resp2).is_none(),
-        "cache_tier must be absent"
+        structured_content(&resp2).is_none(),
+        "structuredContent must be absent"
     );
 
     // Advance mtime: sleep >= 1 s so the filesystem registers a new mtime.
@@ -185,11 +182,11 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     assert!(is_success(&resp4), "pair2 call2 must succeed");
 
     assert!(
-        extract_cache_tier(&resp3).is_none(),
-        "cache_tier must be absent"
+        structured_content(&resp3).is_none(),
+        "structuredContent must be absent"
     );
     assert!(
-        extract_cache_tier(&resp4).is_none(),
-        "cache_tier must be absent"
+        structured_content(&resp4).is_none(),
+        "structuredContent must be absent"
     );
 }
