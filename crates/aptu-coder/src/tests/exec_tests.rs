@@ -529,14 +529,21 @@ fn shell_output_metadata_key_set_matches_shell_output_subset() {
 
     let mut full = ShellOutput::new("out".into(), "err".into(), Some(0), false);
     full.timed_out = true;
+    full.output_collection_error = Some("drain timed out".into());
+    full.filter_applied = Some("redact-secrets".into());
+    full.filter_effect = Some("stdout capped".into());
+    full.stdout_path = Some("/tmp/slot-stdout".into());
+    full.stderr_path = Some("/tmp/slot-stderr".into());
     let full = serde_json::to_value(full).expect("ShellOutput serializes");
-    let meta = serde_json::to_value(ShellOutputMetadata::from(&ShellOutput::new(
-        "out".into(),
-        "err".into(),
-        Some(0),
-        true,
-    )))
-    .expect("ShellOutputMetadata serializes");
+    let mut source = ShellOutput::new("out".into(), "err".into(), Some(0), true);
+    source.timed_out = true;
+    source.output_collection_error = Some("drain timed out".into());
+    source.filter_applied = Some("redact-secrets".into());
+    source.filter_effect = Some("stdout capped".into());
+    source.stdout_path = Some("/tmp/slot-stdout".into());
+    source.stderr_path = Some("/tmp/slot-stderr".into());
+    let meta = serde_json::to_value(ShellOutputMetadata::from(&source))
+        .expect("ShellOutputMetadata serializes");
 
     let mut expected: Vec<&str> = full
         .as_object()
