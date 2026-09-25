@@ -5,8 +5,10 @@ review:
   enabled: true
   instructions-file: .github/instructions/pr-review.md
   paths:
+    - "**/*.md"
     - "crates/**"
-    - "!**/*.md"
+    - "scripts/**"
+    - "fuzz/**"
   skip-labeled: true
 scan:
   enabled: true
