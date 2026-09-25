@@ -55,14 +55,43 @@ fn relativize_file_paths(output: &mut analyze::AnalysisOutput, base: &Path) {
 /// cost is O(N * P) where P is the prefix count, with no repeated full-string
 /// reallocation the way a `replace` loop would incur.
 fn relativize_formatted_text(formatted: &mut String, bases: &[&Path]) {
-    let prefixes: Vec<String> = bases
-        .iter()
-        .map(|base| {
-            let trimmed = base.to_string_lossy();
-            trimmed.trim_end_matches('/').to_owned()
-        })
-        .map(|trimmed| format!("{trimmed}/"))
-        .collect();
+    // Platform-aware prefix construction: the trailing separator uses
+    // MAIN_SEPARATOR, and each base also yields a variant with separators
+    // swapped so params.path values containing either '/' or MAIN_SEPARATOR
+    // produce a matching prefix.
+    let sep = std::path::MAIN_SEPARATOR;
+    let alt = if sep == '/' { '\\' } else { '/' };
+    let mut prefixes: Vec<String> = Vec::with_capacity(bases.len() * 2);
+    for base in bases {
+        let trimmed = base.to_string_lossy();
+        let trimmed = trimmed.trim_end_matches(['/', '\\']);
+        let mut prefix = String::with_capacity(trimmed.len() + 1);
+        prefix.push_str(trimmed);
+        prefix.push(sep);
+        if !prefixes.contains(&prefix) {
+            prefixes.push(prefix);
+        }
+        if alt != sep {
+            let swapped: String = trimmed
+                .chars()
+                .map(|c| {
+                    if c == sep {
+                        alt
+                    } else if c == alt {
+                        sep
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            let mut prefix = String::with_capacity(swapped.len() + 1);
+            prefix.push_str(&swapped);
+            prefix.push(alt);
+            if !prefixes.contains(&prefix) {
+                prefixes.push(prefix);
+            }
+        }
+    }
 
     let mut result = String::with_capacity(formatted.len());
     let mut rest = formatted.as_str();
@@ -530,6 +559,42 @@ pub(crate) async fn analyze_directory_handler(
 mod tests {
     use super::*;
     use aptu_coder_core::cache::AnalysisCache;
+
+    #[test]
+    fn relativize_formatted_text_prefix_construction_and_stripping() {
+        // Arrange: base uses MAIN_SEPARATOR; text contains both a
+        // MAIN_SEPARATOR-joined occurrence and a swapped-separator variant
+        // (as a params.path containing the other separator would produce).
+        let sep = std::path::MAIN_SEPARATOR;
+        let alt = if sep == '/' { '\\' } else { '/' };
+        let base = std::path::PathBuf::from(format!("tmp{sep}proj"));
+        let mut text = format!(
+            "first: tmp{sep}proj{sep}src{sep}lib.rs\nsecond: tmp{alt}proj{alt}src{alt}main.rs\nkeep: other{sep}file.txt"
+        );
+
+        // Act
+        relativize_formatted_text(&mut text, &[&base]);
+
+        // Assert: both separator variants are stripped; unrelated paths stay.
+        assert_eq!(
+            text,
+            format!("first: src{sep}lib.rs\nsecond: src{alt}main.rs\nkeep: other{sep}file.txt")
+        );
+    }
+
+    #[test]
+    fn relativize_formatted_text_trims_trailing_separators_and_avoids_double_prefix() {
+        // Arrange: base with a trailing separator should not yield '//'.
+        let sep = std::path::MAIN_SEPARATOR;
+        let base = std::path::PathBuf::from(format!("tmp{sep}proj{sep}"));
+        let mut text = format!("tmp{sep}proj{sep}README.md");
+
+        // Act
+        relativize_formatted_text(&mut text, &[&base]);
+
+        // Assert
+        assert_eq!(text, "README.md");
+    }
 
     /// Builds a minimal `AnalyzeDirectoryContext` backed by an unbounded metrics
     /// channel, returning the context and the receiving end so tests can inspect
