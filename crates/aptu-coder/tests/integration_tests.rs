@@ -1201,9 +1201,16 @@ async fn test_analyze_directory_cursor_continuation_fixed_page_size() {
         !resp1["result"]["isError"].as_bool().unwrap_or(false),
         "page 1 expected success, got: {resp1}"
     );
-    let cursor = resp1["result"]["structuredContent"]["next_cursor"]
-        .as_str()
-        .expect("page 1 of 60 files must emit next_cursor at fixed page size 50");
+    let text1 = resp1["result"]["content"][0]["text"].as_str().unwrap_or("");
+    let cursor = text1
+        .lines()
+        .find_map(|l| l.strip_prefix("NEXT_CURSOR: "))
+        .map(str::to_string)
+        .expect("page 1 of 60 files must emit a NEXT_CURSOR line at fixed page size 50");
+    assert!(
+        !cursor.is_empty(),
+        "NEXT_CURSOR line must carry a non-empty cursor: {text1}"
+    );
 
     // Act: continue with only the cursor.
     let resp2 = call_tool_raw(
@@ -1217,14 +1224,14 @@ async fn test_analyze_directory_cursor_continuation_fixed_page_size() {
         !resp2["result"]["isError"].as_bool().unwrap_or(false),
         "page 2 expected success, got: {resp2}"
     );
+    let text2 = resp2["result"]["content"][0]["text"].as_str().unwrap_or("");
     assert!(
-        resp2["result"]["structuredContent"]["next_cursor"].is_null(),
+        !text2.contains("NEXT_CURSOR: "),
         "second page must terminate without next_cursor: {resp2}"
     );
-    let text = resp2["result"]["content"][0]["text"].as_str().unwrap_or("");
     assert!(
-        text.contains("file_59.rs"),
-        "second page must contain remaining files: {text}"
+        text2.contains("file_59.rs"),
+        "second page must contain remaining files: {text2}"
     );
 }
 
