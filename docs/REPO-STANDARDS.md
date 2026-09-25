@@ -80,7 +80,7 @@ Do not raise the global threshold to accommodate a single outlier. The `reason` 
 
 1. **GitHub metadata:** Set topics, copy the 11-label taxonomy (names, colors, descriptions), create the two rulesets.
 2. **Templates:** Copy all three issue templates and the PR template; adapt wording to the target domain.
-3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (not `cargo test`). Set `CI Result` as the sole required status check in the branch ruleset. Copy `.commitlintrc.yml`.
+3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (safe on `cargo test` too: `profile.ci` explicitly sets `panic = "unwind"`, so it does not abort the test harness; the profile exists for faster CI builds). Set `CI Result` as the sole required status check in the branch ruleset. Copy `.commitlintrc.yml`.
 4. **Release:** Copy `build-and-attest.yml` and `release.yml`; update distribution channel config.
 5. **Cargo profiles:** Copy the `[profile.release]` and `[profile.ci]` blocks verbatim.
 6. **Docs:** Add `ARCHITECTURE.md` for the target repo; link this document and the orchestration guide from README.
@@ -369,7 +369,7 @@ tar -xzf tool.tar.gz
 
 Secret scanning runs on every PR and push as part of the required `Security Result` check (`.github/workflows/security.yml`). This prevents long-lived tokens committed to any repository from persisting in history or appearing in CI log artifacts. `--only-verified` restricts findings to secrets TruffleHog has confirmed are live against the origin service, cutting noise from historical or fixture-only matches.
 
-TruffleHog is used instead of `gitleaks/gitleaks-action` because `gitleaks-action` requires a `GITLEAKS_LICENSE` org secret for GitHub Organisation repos; TruffleHog has no per-org licensing gate, so it needs no license secret to run as a required check. gitleaks has since been succeeded by Betterleaks (by the original gitleaks author), but no official Betterleaks GitHub Action exists yet, so TruffleHog remains the practical CI default.
+TruffleHog is used instead of `gitleaks/gitleaks-action` because `gitleaks-action` requires a `GITLEAKS_LICENSE` org secret for GitHub Organisation repos; TruffleHog has no per-org licensing gate, so it needs no license secret to run as a required check. gitleaks has since been succeeded by [Betterleaks](https://github.com/betterleaks/betterleaks) (created by gitleaks' original author, announced March 2026), but no official Betterleaks GitHub Action exists yet, so TruffleHog remains the practical CI default.
 
 ```yaml
 # TruffleHog step in security.yml; no license secret required
