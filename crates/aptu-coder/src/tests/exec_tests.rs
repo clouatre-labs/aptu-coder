@@ -518,3 +518,45 @@ async fn test_run_exec_impl_timed_out_leaves_filter_capped_false() {
     assert!(!output.filter_capped);
     assert!(output.filter_effect.is_none());
 }
+
+/// Drift guard: the serde key set of serialized ShellOutputMetadata must equal
+/// the metadata field subset of serialized ShellOutput. If a metadata field is
+/// added to ShellOutput but not ShellOutputMetadata (or vice versa), this test
+/// fails so the wire contract and the schema stay in lockstep.
+#[test]
+fn shell_output_metadata_key_set_matches_shell_output_subset() {
+    use crate::{ShellOutput, ShellOutputMetadata};
+
+    let mut full = ShellOutput::new("out".into(), "err".into(), Some(0), false);
+    full.timed_out = true;
+    let full = serde_json::to_value(full).expect("ShellOutput serializes");
+    let meta = serde_json::to_value(ShellOutputMetadata::from(&ShellOutput::new(
+        "out".into(),
+        "err".into(),
+        Some(0),
+        true,
+    )))
+    .expect("ShellOutputMetadata serializes");
+
+    let mut expected: Vec<&str> = full
+        .as_object()
+        .expect("ShellOutput is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    expected.retain(|k| !matches!(*k, "stdout" | "stderr" | "filter_capped"));
+    expected.sort_unstable();
+
+    let mut actual: Vec<&str> = meta
+        .as_object()
+        .expect("ShellOutputMetadata is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    actual.sort_unstable();
+
+    assert_eq!(
+        expected, actual,
+        "ShellOutputMetadata key set drifted from the ShellOutput metadata subset"
+    );
+}

@@ -137,6 +137,49 @@ impl ShellOutput {
     }
 }
 
+/// Metadata-only view of [`ShellOutput`] serialized as exec_command's
+/// structuredContent. stdout/stderr themselves are excluded: the text block is
+/// the single model-visible output channel; overflow slot-file paths survive
+/// here so full captures remain recoverable.
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ShellOutputMetadata {
+    /// Exit code; mirrors `ShellOutput::exit_code`.
+    pub exit_code: Option<i32>,
+    /// True when the command was killed on timeout or cancellation.
+    pub timed_out: bool,
+    /// True when output was truncated or overflowed to slot files.
+    pub output_truncated: bool,
+    /// Set when the post-exit drain timed out.
+    pub output_collection_error: Option<String>,
+    /// Description of the filter applied to stdout (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_applied: Option<String>,
+    /// Human-readable description of the filter effect (cap or substitution).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_effect: Option<String>,
+    /// Path to the slot file containing full stdout (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout_path: Option<String>,
+    /// Path to the slot file containing full stderr (if output was persisted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_path: Option<String>,
+}
+
+impl From<&ShellOutput> for ShellOutputMetadata {
+    fn from(output: &ShellOutput) -> Self {
+        Self {
+            exit_code: output.exit_code,
+            timed_out: output.timed_out,
+            output_truncated: output.output_truncated,
+            output_collection_error: output.output_collection_error.clone(),
+            filter_applied: output.filter_applied.clone(),
+            filter_effect: output.filter_effect.clone(),
+            stdout_path: output.stdout_path.clone(),
+            stderr_path: output.stderr_path.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 use aptu_coder_core::cache::CacheTier;
 use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
@@ -650,8 +693,8 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set); returns stdout, stderr, and exit code. Output capped (30k chars stdout / 10k stderr / 2000 lines); when capped, full captures are exposed as aptu-overflow:// resource links. Set working_dir to the target directory; use relative paths. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. A 300 s server-side timeout kills runaway children; send notifications/cancelled to cancel early. Built-in filters may strip, cap, or substitute output of known CLI tools (git, cargo); structuredContent names the applied rule and links the full pre-filter output.",
-        output_schema = schema_for_type::<ShellOutput>(),
+        description = "Execute shell command via sh -c (or $SHELL if set); returns output and exit code as a text block. Output capped (30k chars stdout / 10k stderr / 2000 lines); when capped, full captures are exposed as aptu-overflow:// resource links (paths in structuredContent). Set working_dir to the target directory; use relative paths. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. A 300 s server-side timeout kills runaway children; send notifications/cancelled to cancel early. Built-in filters may strip, cap, or substitute output of known CLI tools (git, cargo); structuredContent names the applied rule and links the full pre-filter output.",
+        output_schema = schema_for_type::<ShellOutputMetadata>(),
         annotations(
             title = "Exec Command",
             read_only_hint = false,

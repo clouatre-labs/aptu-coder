@@ -20,7 +20,7 @@ use crate::otel::{ClientMetadata, extract_and_set_trace_context};
 use crate::shell_write;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 use crate::tools::exec_runtime::run_exec_impl;
-use crate::{ExecCommandParams, STDIN_MAX_BYTES, ShellOutput, validate_path};
+use crate::{ExecCommandParams, STDIN_MAX_BYTES, ShellOutput, ShellOutputMetadata, validate_path};
 
 /// Machine-readable cause for an `exec_command` `invalid_params` error, used to
 /// populate `MetricEvent::error_subtype` for per-cause metrics dashboards.
@@ -618,7 +618,7 @@ pub(crate) async fn exec_command_impl(
     }
     .with_meta(Some(no_cache_meta()));
 
-    let structured = match serde_json::to_value(&output).map_err(|e| {
+    let structured = match serde_json::to_value(ShellOutputMetadata::from(&output)).map_err(|e| {
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("serialization failed: {e}"),

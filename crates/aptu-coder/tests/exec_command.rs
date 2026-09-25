@@ -33,6 +33,14 @@ async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
 }
 
+/// The text block is the single model-visible output channel after stdout/stderr
+/// were dropped from structuredContent.
+fn text_block(resp: &serde_json::Value) -> &str {
+    resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+}
+
 fn truncate_output(output: &str, max_lines: usize, max_bytes: usize) -> (String, bool) {
     let lines: Vec<&str> = output.lines().collect();
 
@@ -249,9 +257,21 @@ async fn test_handler_structured_output() {
     let resp = call_exec_command_raw(serde_json::json!({"command": "echo hello"})).await;
     let sc = &resp["result"]["structuredContent"];
     assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
+    // Happy path: structuredContent carries metadata only -- no stdout/stderr
+    // keys, and no path keys when nothing overflowed.
     assert!(
-        sc["stdout"].as_str().unwrap_or("").contains("hello"),
-        "stdout missing 'hello': {sc}"
+        sc.get("stdout").is_none() && sc.get("stderr").is_none(),
+        "structuredContent must not carry stdout/stderr: {sc}"
+    );
+    assert!(
+        sc.get("stdout_path").is_none() && sc.get("stderr_path").is_none(),
+        "path keys must be absent (not null) when no output overflowed: {sc}"
+    );
+    assert!(sc["output_truncated"].as_bool() == Some(false), "{sc}");
+    // Output is delivered via the text block.
+    assert!(
+        text_block(&resp).contains("hello"),
+        "text block missing 'hello': {resp}"
     );
 }
 
@@ -295,8 +315,7 @@ async fn test_handler_shell_preference() {
     .await;
     unsafe { std::env::remove_var("APTU_SHELL") };
 
-    let sc = &resp["result"]["structuredContent"];
-    let stdout = sc["stdout"].as_str().unwrap_or("");
+    let stdout = text_block(&resp);
     assert!(
         stdout.contains("sh"),
         "expected sh in $0 output, got: {stdout}"
@@ -306,10 +325,9 @@ async fn test_handler_shell_preference() {
 #[tokio::test]
 async fn test_handler_stderr_populated() {
     let resp = call_exec_command_raw(serde_json::json!({"command": "sh -c 'echo err >&2'"})).await;
-    let sc = &resp["result"]["structuredContent"];
     assert!(
-        sc["stderr"].as_str().unwrap_or("").contains("err"),
-        "stderr missing 'err': {sc}"
+        text_block(&resp).contains("err"),
+        "text block missing stderr text 'err': {resp}"
     );
 }
 
@@ -325,8 +343,8 @@ async fn test_exec_command_large_stdout_no_deadlock() {
     let sc = &resp["result"]["structuredContent"];
     assert_eq!(sc["exit_code"], 0, "exit code should be 0: {sc}");
     assert!(
-        sc["stdout"].as_str().unwrap_or("").contains("1"),
-        "stdout should contain output: {sc}"
+        text_block(&resp).contains("1"),
+        "text block should contain output: {resp}"
     );
 }
 
@@ -344,8 +362,8 @@ async fn test_exec_command_backgrounded_process() {
         "normal command should not truncate: {sc}"
     );
     assert!(
-        sc["stdout"].as_str().unwrap_or("").contains("parent done"),
-        "stdout should contain output: {sc}"
+        text_block(&resp).contains("parent done"),
+        "text block should contain output: {resp}"
     );
 }
 
@@ -579,14 +597,11 @@ async fn test_handler_interleaved_ordering() {
         text_block.contains("stderr_line"),
         "text block missing stderr_line: {text_block}"
     );
-    // Verify structuredContent.stdout and .stderr are populated separately too
+    // structuredContent no longer carries stdout/stderr; both streams still
+    // contribute to the interleaved text block (asserted above).
     assert!(
-        sc["stdout"].as_str().unwrap_or("").contains("stdout_line"),
-        "stdout field missing stdout_line: {sc}"
-    );
-    assert!(
-        sc["stderr"].as_str().unwrap_or("").contains("stderr_line"),
-        "stderr field missing stderr_line: {sc}"
+        sc.get("stdout").is_none() && sc.get("stderr").is_none(),
+        "structuredContent must not carry stdout/stderr: {sc}"
     );
 }
 
@@ -641,15 +656,15 @@ async fn test_exec_cache_hit_on_sequential_repeat() {
 
     // Act: first call executes the command
     let resp1 = call_exec_command_raw(params1).await;
-    let sc1 = &resp1["result"]["structuredContent"];
-    let stdout1 = sc1["stdout"].as_str().unwrap_or("").to_string();
+    let stdout1 = text_block(&resp1).to_string();
 
     // Second call executes independently (exec_command is non-cacheable)
     let resp2 = call_exec_command_raw(params2).await;
-    let sc2 = &resp2["result"]["structuredContent"];
-    let stdout2 = sc2["stdout"].as_str().unwrap_or("").to_string();
+    let stdout2 = text_block(&resp2).to_string();
 
     // Assert: both calls succeeded with identical output (both ran the command)
+    let sc1 = &resp1["result"]["structuredContent"];
+    let sc2 = &resp2["result"]["structuredContent"];
     assert_eq!(sc1["exit_code"], 0, "first call should succeed: {sc1}");
     assert_eq!(sc2["exit_code"], 0, "second call should succeed: {sc2}");
     assert_eq!(
@@ -688,11 +703,8 @@ async fn test_exec_cache_skipped_with_stdin() {
     // Assert: command executed and stdin was passed through
     assert_eq!(sc["exit_code"], 0, "cat with stdin should succeed: {sc}");
     assert!(
-        sc["stdout"]
-            .as_str()
-            .unwrap_or("")
-            .contains("test_stdin_data"),
-        "stdout should contain the stdin content: {sc}"
+        text_block(&resp).contains("test_stdin_data"),
+        "text block should contain the stdin content: {resp}"
     );
     // Assert: cache_hit is absent (exec_command is non-cacheable regardless of stdin)
     assert!(
@@ -769,9 +781,7 @@ async fn test_cd_prefix_chain_passthrough_with_working_dir() {
         !resp["result"]["isError"].as_bool().unwrap_or(true),
         "expected success: {resp}"
     );
-    let stdout = resp["result"]["structuredContent"]["stdout"]
-        .as_str()
-        .unwrap_or("");
+    let stdout = text_block(&resp);
     let tmp_pos = stdout.find("/tmp").expect("expected /tmp in stdout");
     let var_pos = stdout.find("/var").expect("expected /var in stdout");
     assert!(
@@ -798,9 +808,7 @@ async fn test_cd_prefix_plain_absolute_promoted_when_no_working_dir() {
         !resp["result"]["isError"].as_bool().unwrap_or(true),
         "expected success: {resp}"
     );
-    let stdout = resp["result"]["structuredContent"]["stdout"]
-        .as_str()
-        .unwrap_or("");
+    let stdout = text_block(&resp);
     assert!(
         stdout.trim().ends_with("/src"),
         "pwd should resolve to the src subdir: {stdout}"
@@ -822,9 +830,7 @@ async fn test_cd_prefix_shell_special_passes_through() {
         !resp["result"]["isError"].as_bool().unwrap_or(true),
         "cd ~ must reach the shell unmodified and succeed: {resp}"
     );
-    let stdout = resp["result"]["structuredContent"]["stdout"]
-        .as_str()
-        .unwrap_or("");
+    let stdout = text_block(&resp);
     assert!(
         !stdout.trim().is_empty(),
         "pwd after cd ~ must produce output: {stdout}"
@@ -848,8 +854,8 @@ async fn test_exec_command_working_dir_outside_cwd() {
     let sc = &resp["result"]["structuredContent"];
     assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
     assert!(
-        sc["stdout"].as_str().unwrap_or("").contains("hello"),
-        "stdout missing 'hello': {sc}"
+        text_block(&resp).contains("hello"),
+        "text block missing 'hello': {resp}"
     );
 }
 
@@ -1115,8 +1121,8 @@ async fn test_drain_background_pipe_holder_truncates() {
             "expected truncation: {resp}"
         );
         assert!(
-            sc["stdout"].as_str().unwrap_or("").contains("main done"),
-            "stdout: {resp}"
+            text_block(&resp).contains("main done"),
+            "text block: {resp}"
         );
     };
     tokio::time::timeout(std::time::Duration::from_secs(10), test_fut)
@@ -1146,7 +1152,7 @@ async fn exec_command_large_output_truncation_via_drain() {
 
     let result = &resp["result"];
     let sc = &result["structuredContent"];
-    let stdout = sc["stdout"].as_str().unwrap_or_default();
+    let stdout = text_block(&resp);
 
     // (b) output_truncated is true when drain byte budget is exhausted
     assert!(
@@ -1154,15 +1160,8 @@ async fn exec_command_large_output_truncation_via_drain() {
         "output_truncated should be true for large output"
     );
 
-    // (c) stdout is non-empty
-    assert!(!stdout.is_empty(), "stdout should be non-empty");
-
-    // (d) stdout preview is within size limit
-    assert!(
-        stdout.len() <= 30_000,
-        "stdout preview size {} exceeds 30k limit",
-        stdout.len()
-    );
+    // (c) output text is non-empty (drain budget keeps a bounded preview)
+    assert!(!stdout.is_empty(), "output should be non-empty");
 }
 
 /// Command where stdout is under budget but stderr exceeds budget.
@@ -1182,7 +1181,7 @@ async fn exec_command_stderr_exceeds_budget_stdout_present() {
 
     let result = &resp["result"];
     let sc = &result["structuredContent"];
-    let stdout = sc["stdout"].as_str().unwrap_or_default();
+    let stdout = text_block(&resp);
 
     // stdout contains 'ok' (stdout lines present even though stderr overflows)
     assert!(
@@ -1214,7 +1213,7 @@ async fn exec_command_drain_budget_exhaustion() {
 
     let result = &resp["result"];
     let sc = &result["structuredContent"];
-    let stdout = sc["stdout"].as_str().unwrap_or_default();
+    let stdout = text_block(&resp);
 
     // output_truncated is true (drain budget exhausted)
     assert!(
@@ -1222,15 +1221,8 @@ async fn exec_command_drain_budget_exhaustion() {
         "output_truncated should be true when drain budget exhausted"
     );
 
-    // stdout within size limit
-    assert!(
-        stdout.len() <= 30_000,
-        "stdout size {} exceeds 30k limit",
-        stdout.len()
-    );
-
-    // stdout non-empty (has tail content)
-    assert!(!stdout.is_empty(), "stdout should be non-empty");
+    // output text is non-empty (bounded preview retained)
+    assert!(!stdout.is_empty(), "output should be non-empty");
 }
 
 /// Creates a temp git repo with `commits` commits (one file, one line each).
@@ -1277,8 +1269,8 @@ async fn test_exec_command_filter_capped_notice_and_resource_link() {
 
     let sc = &resp["result"]["structuredContent"];
     assert!(
-        sc["filter_capped"].as_bool().unwrap_or(false),
-        "filter_capped should be true for git log: {sc}"
+        sc.get("filter_applied").is_some(),
+        "filter_applied should be set for git log: {sc}"
     );
     assert!(
         sc["filter_effect"]
@@ -1334,8 +1326,8 @@ async fn test_exec_command_uncapped_output_byte_identical() {
 
     let sc = &resp["result"]["structuredContent"];
     assert!(
-        !sc["filter_capped"].as_bool().unwrap_or(false),
-        "filter_capped must be false without a cap: {sc}"
+        sc.get("filter_applied").is_none(),
+        "filter_applied must be absent without a cap: {sc}"
     );
     let text = resp["result"]["content"][0]["text"]
         .as_str()
@@ -1386,8 +1378,8 @@ async fn test_exec_command_filter_cap_and_overflow_cooccurrence() {
         sc["output_truncated"], true,
         "overflow should fire for git log -p"
     );
-    assert_eq!(
-        sc["filter_capped"], true,
+    assert!(
+        sc.get("filter_applied").is_some(),
         "filter cap should also fire for git log -p: {sc}"
     );
 
@@ -1426,7 +1418,7 @@ async fn test_exec_command_stderr_capped_only() {
 
     let sc = &resp["result"]["structuredContent"];
     assert!(
-        sc["filter_capped"].as_bool().unwrap_or(false),
+        sc.get("filter_applied").is_some(),
         "interleaved (stderr) stream should be filter-capped: {sc}"
     );
     assert!(

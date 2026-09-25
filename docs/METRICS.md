@@ -61,7 +61,7 @@ Each line in the JSONL file is one JSON object:
 
 ### Raw bytes and ANSI stripping
 
-`stdout_bytes_raw`/`stderr_bytes_raw` count child-emitted bytes pre-strip, so they measure what the process actually wrote. Overflow slot files (`aptu-overflow://slot-*`) contain raw pre-strip content as the recovery record. Delivered stdout/stderr (text blocks, structured content, and the interleaved preview) are ANSI-stripped via `aptu_coder_core::ansi::strip_ansi` before filter rules are applied, so filter rules match clean text and delivered output never contains escape sequences.
+`stdout_bytes_raw`/`stderr_bytes_raw` count child-emitted bytes pre-strip, so they measure what the process actually wrote. Overflow slot files (`aptu-overflow://slot-*`) contain raw pre-strip content as the recovery record. Delivered output (text blocks and the interleaved preview) are ANSI-stripped via `aptu_coder_core::ansi::strip_ansi` before filter rules are applied, so filter rules match clean text and delivered output never contains escape sequences. exec_command's structuredContent is metadata-only (`ShellOutputMetadata`: exit code, truncation/drain flags, filter rule, and overflow slot-file paths); stdout/stderr content is delivered solely via the text block.
 | `mode` | `string \| null` | The `mode` value passed to `analyze_symbol` (`"call_graph"`, `"import_lookup"`, or `"def_use"`); `null` when not set (defaults to `call_graph` in the handler). Omitted from JSONL when `null`. |
 | `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
 | `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
