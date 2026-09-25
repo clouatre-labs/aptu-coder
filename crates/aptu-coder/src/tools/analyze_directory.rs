@@ -17,7 +17,6 @@ use aptu_coder_core::traversal::{
 };
 use aptu_coder_core::types::{AnalysisMode, AnalyzeDirectoryParams};
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
-use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::instrument;
@@ -474,7 +473,7 @@ pub(crate) async fn analyze_directory_handler(
     // directory. This must run AFTER format_summary and
     // format_structure_paginated have consumed the absolute paths (their
     // per-directory grouping joins on starts_with) and immediately BEFORE
-    // final_text/content_hash/structured_content serialization. Because the
+    // final_text/content_hash serialization. Because the
     // transform is emit-time, cached absolute-path output is relativized
     // identically on L1/L2/miss, so content_hash = blake3(final relativized
     // text) stays self-consistent with no cache version bump.
@@ -504,13 +503,11 @@ pub(crate) async fn analyze_directory_handler(
     );
     let meta = rmcp::model::MetaObject(meta);
 
-    let mut result = CallToolResult::success(vec![ContentBlock::Text(
+    let result = CallToolResult::success(vec![ContentBlock::Text(
         TextContent::new(final_text.clone())
             .with_annotations(Annotations::default().with_priority(0.9_f32)),
     )])
     .with_meta(Some(meta));
-    let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-    result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_directory", "ok", dur)
@@ -684,6 +681,7 @@ mod tests {
         let make_params = || {
             let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
                 "path": path,
+                "summary": false,
             }))
             .expect("valid params");
             params
@@ -699,30 +697,16 @@ mod tests {
         )
         .await
         .expect("handler ok");
-        let structured = result
-            .structured_content
-            .clone()
-            .expect("structured content");
-        let paths: Vec<&str> = structured["files"]
-            .as_array()
-            .expect("files array")
-            .iter()
-            .map(|f| f["path"].as_str().expect("path str"))
-            .collect();
-        assert_eq!(paths.len(), 2);
         assert!(
-            paths
-                .iter()
-                .all(|p| !p.starts_with('/') && !p.contains("..")),
-            "paths must be relative: {paths:?}"
-        );
-        assert!(paths.contains(&"top.rs"), "expected top.rs, got {paths:?}");
-        assert!(
-            paths.contains(&"sub/inner.rs"),
-            "expected sub/inner.rs, got {paths:?}"
+            result.structured_content.is_none(),
+            "text-only emission: no structuredContent may be present"
         );
         let text = text_of(&result);
         let hash_miss = content_hash_of(&result);
+        assert!(
+            text.contains("top.rs") && text.contains("sub/inner.rs"),
+            "text payload must list relativized file paths: {text}"
+        );
         assert!(
             !text.contains(&format!("{path}/")),
             "text payload must contain no absolute path of the analyzed dir: {text}"
@@ -743,8 +727,6 @@ mod tests {
         )
         .await
         .expect("handler ok");
-        let structured_l1 = result_l1.structured_content.clone().expect("structured");
-        assert_eq!(structured, structured_l1, "L1 hit output must match miss");
         assert_eq!(hash_miss, content_hash_of(&result_l1));
         let text_l1 = text_of(&result_l1);
         assert!(
@@ -762,8 +744,6 @@ mod tests {
         )
         .await
         .expect("handler ok");
-        let structured_l2 = result_l2.structured_content.clone().expect("structured");
-        assert_eq!(structured, structured_l2, "L2 hit output must match miss");
         assert_eq!(hash_miss, content_hash_of(&result_l2));
         let text_l2 = text_of(&result_l2);
         assert!(
@@ -830,10 +810,8 @@ mod tests {
         )
         .await
         .expect("handler ok");
-        let structured = result.structured_content.clone().expect("structured");
 
-        // Assert: the sub/ section must report 1 file (not zero), and emitted
-        // FileInfo paths must be relative.
+        // Assert: the sub/ section must report 1 file (not zero).
         let text = text_of(&result);
         assert!(
             !text.contains(&format!("{path}/")),
@@ -846,13 +824,6 @@ mod tests {
         assert!(
             !text.contains("showing 0"),
             "relativization must not zero per-directory stats; got: {text}"
-        );
-        let files = structured["files"].as_array().expect("files array");
-        assert!(
-            files
-                .iter()
-                .all(|f| !f["path"].as_str().unwrap().starts_with('/')),
-            "paths must be relative after formatting: {structured}"
         );
     }
 
@@ -881,20 +852,107 @@ mod tests {
             analyze_directory_handler(&ctx, params, test_call(relative), &tracing::Span::none())
                 .await
                 .expect("handler ok");
-        let structured = result.structured_content.clone().expect("structured");
 
-        // Assert: no absolute paths leak into files[].path or the text block.
-        let files = structured["files"].as_array().expect("files array");
-        assert!(!files.is_empty(), "expected at least one file");
-        for f in files {
-            let p = f["path"].as_str().expect("path str");
-            assert!(!p.starts_with('/'), "path must be relative, got {p}");
-        }
+        // Assert: no absolute paths leak into the text block.
         let text = text_of(&result);
         let cwd_abs = format!("{}/", cwd.display());
         assert!(
             !text.contains(&cwd_abs),
             "text payload must contain no absolute path of the analyzed dir: {text}"
+        );
+        assert!(
+            result.structured_content.is_none(),
+            "text-only emission: no structuredContent may be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn success_result_has_no_structured_content() {
+        // Arrange + Act
+        let (_dir, _cache_dir, path) = setup_source_fixture(false);
+        let (ctx, _rx) = test_context();
+        let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+        }))
+        .expect("valid params");
+        let result = analyze_directory_handler(
+            &ctx,
+            params,
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+
+        // Assert: regression guard against dual emission (MCP 2026-07-28
+        // forbids structuredContent without a registered outputSchema).
+        assert!(
+            result.structured_content.is_none(),
+            "analyze_directory must be text-only"
+        );
+    }
+
+    #[tokio::test]
+    async fn pagination_emits_next_cursor_line_on_page_1_only() {
+        // Arrange: 60 files exceed the fixed page size of 50.
+        let cwd = std::env::current_dir().expect("cwd");
+        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+        for i in 0..60 {
+            let name = dir.path().join(format!("file_{i:02}.rs"));
+            std::fs::write(&name, "fn f() {}").expect("write file");
+        }
+        let path = dir.path().to_str().expect("utf8").to_string();
+        let (ctx, _rx) = test_context();
+        let make_params = |extra: serde_json::Value| {
+            let mut v = serde_json::json!({ "path": path, "summary": false, "max_depth": 0 });
+            if let (Some(obj), Some(extra)) = (v.as_object_mut(), extra.as_object()) {
+                obj.extend(extra.clone());
+            }
+            let params: AnalyzeDirectoryParams = serde_json::from_value(v).expect("valid params");
+            params
+        };
+
+        // Act: page 1.
+        let result1 = analyze_directory_handler(
+            &ctx,
+            make_params(serde_json::json!({})),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let text1 = text_of(&result1);
+
+        // Assert: NEXT_CURSOR line is present on page 1 and carries the cursor.
+        let cursor_line = text1
+            .lines()
+            .find(|l| l.starts_with("NEXT_CURSOR: "))
+            .expect("page 1 must emit a NEXT_CURSOR line");
+        let cursor = cursor_line
+            .strip_prefix("NEXT_CURSOR: ")
+            .expect("cursor after prefix")
+            .to_string();
+        assert!(!cursor.is_empty());
+
+        // Act: page 2 via cursor only.
+        let result2 = analyze_directory_handler(
+            &ctx,
+            make_params(serde_json::json!({ "cursor": cursor })),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let text2 = text_of(&result2);
+
+        // Assert: page 2 terminates without a cursor and contains the tail.
+        assert!(
+            !text2.contains("NEXT_CURSOR: "),
+            "page 2 must terminate: {text2}"
+        );
+        assert!(
+            text2.contains("file_59.rs"),
+            "page 2 must contain remaining files"
         );
     }
 }

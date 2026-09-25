@@ -32,9 +32,15 @@ async fn test_analyze_directory_cache_hit_metrics() {
     use aptu_coder_core::types::AnalyzeDirectoryParams;
     use tempfile::TempDir;
 
-    // Arrange: a temp dir with one file
+    // Arrange: a temp dir with one uniquely named file (the disk-cache key
+    // hashes relative paths + mtimes, so a unique name avoids cross-test
+    // key collisions within the same mtime second).
     let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
+    std::fs::write(
+        dir.path().join("metrics_cache_hit_fixture.rs"),
+        "fn foo() {}",
+    )
+    .unwrap();
     let analyzer = make_analyzer();
     let params: AnalyzeDirectoryParams = serde_json::from_value(serde_json::json!({
         "path": dir.path().to_str().unwrap(),

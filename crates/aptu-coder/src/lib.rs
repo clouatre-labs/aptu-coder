@@ -331,7 +331,6 @@ impl CodeAnalyzer {
         name = "analyze_directory",
         title = "Analyze Directory",
         description = "Tree-view of a directory with LOC, function/class counts, and test markers. Respects .gitignore. Paginates with an opaque cursor; page size is server-owned (50). Large dirs (1000+ files) auto-compact to summary; pass summary=false for the per-file list. git_ref restricts to files changed since a branch/tag/commit.",
-        output_schema = schema_for_type::<analyze::AnalysisOutput>(),
         annotations(
             title = "Analyze Directory",
             read_only_hint = true,
