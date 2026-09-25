@@ -50,13 +50,39 @@ fn relativize_file_paths(output: &mut analyze::AnalysisOutput, base: &Path) {
 /// rendered from absolute paths and then transformed here: every occurrence of
 /// a base prefix (canonical base and the raw `params.path`) followed by a
 /// separator is stripped, mirroring `strip_prefix` in `relativize_file_paths`.
+///
+/// Runs in a single pass over the text: at each byte position the remaining
+/// slice is tested against the (small, at most two-element) prefix set, so the
+/// cost is O(N * P) where P is the prefix count, with no repeated full-string
+/// reallocation the way a `replace` loop would incur.
 fn relativize_formatted_text(formatted: &mut String, bases: &[&Path]) {
-    for base in bases {
-        let trimmed = base.to_string_lossy();
-        let trimmed = trimmed.trim_end_matches('/');
-        let prefix = format!("{trimmed}/");
-        *formatted = formatted.replace(&prefix, "");
+    let prefixes: Vec<String> = bases
+        .iter()
+        .map(|base| {
+            let trimmed = base.to_string_lossy();
+            trimmed.trim_end_matches('/').to_owned()
+        })
+        .map(|trimmed| format!("{trimmed}/"))
+        .collect();
+
+    let mut result = String::with_capacity(formatted.len());
+    let mut rest = formatted.as_str();
+    'scan: while !rest.is_empty() {
+        for prefix in &prefixes {
+            if let Some(stripped) = rest.strip_prefix(prefix) {
+                rest = stripped;
+                continue 'scan;
+            }
+        }
+        match rest.chars().next() {
+            Some(c) => {
+                result.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
+            None => break,
+        }
     }
+    *formatted = result;
 }
 
 /// Applies an optional `git_ref` filter to the directory walk entries.
