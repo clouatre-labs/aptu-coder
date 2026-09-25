@@ -80,7 +80,7 @@ Do not raise the global threshold to accommodate a single outlier. The `reason` 
 
 1. **GitHub metadata:** Set topics, copy the 11-label taxonomy (names, colors, descriptions), create the two rulesets.
 2. **Templates:** Copy all three issue templates and the PR template; adapt wording to the target domain.
-3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (safe on `cargo test` too: `profile.ci` explicitly sets `panic = "unwind"`, so it does not abort the test harness; the profile exists for faster CI builds). Set `CI Result` as the sole required status check in the branch ruleset. Copy `.commitlintrc.yml`.
+3. **CI:** Copy `ci.yml`; update path filters; pin runner to `ubuntu-26.04-arm` on every job; add a top-level `permissions` block with `contents: read` and `pull-requests: read`; pass `--profile ci` on `cargo clippy` (safe on `cargo test` too: `profile.ci` explicitly sets `panic = "unwind"`, so it does not abort the test harness; the profile exists for faster CI builds). Set `CI Result` and `Security Result` as the required status checks in the branch ruleset. Copy `.commitlintrc.yml`.
 4. **Release:** Copy `build-and-attest.yml` and `release.yml`; update distribution channel config.
 5. **Cargo profiles:** Copy the `[profile.release]` and `[profile.ci]` blocks verbatim.
 6. **Docs:** Add `ARCHITECTURE.md` for the target repo; link this document and the orchestration guide from README.
