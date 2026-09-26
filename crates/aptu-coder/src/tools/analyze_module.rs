@@ -154,19 +154,9 @@ pub(crate) async fn analyze_module_handler(
                             "content_hash".to_string(),
                             serde_json::Value::String(content_hash),
                         );
-                        let mut result = CallToolResult::success(vec![ContentBlock::text(text)])
+                        let result = CallToolResult::success(vec![ContentBlock::text(text)])
                             .with_meta(Some(MetaObject(meta)));
-                        match serde_json::to_value(&mi) {
-                            Ok(v) => {
-                                result.structured_content = Some(v);
-                                Ok(result)
-                            }
-                            Err(se) => Ok(err_to_tool_result(ErrorData::new(
-                                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                                format!("serialization failed: {se}"),
-                                Some(error_meta("internal", false, "report this as a bug")),
-                            ))),
-                        }
+                        Ok(result)
                     };
                 }
                 let (error_type, error_data) = (
@@ -235,19 +225,8 @@ pub(crate) async fn analyze_module_handler(
         serde_json::Value::String(content_hash),
     );
 
-    let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
+    let result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
         .with_meta(Some(MetaObject(meta)));
-    let structured = match serde_json::to_value(&module_info).map_err(|e| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            format!("serialization failed: {e}"),
-            Some(error_meta("internal", false, "report this as a bug")),
-        )
-    }) {
-        Ok(v) => v,
-        Err(e) => return Ok(err_to_tool_result(e)),
-    };
-    result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_module", "ok", dur)

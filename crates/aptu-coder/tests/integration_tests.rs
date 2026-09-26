@@ -521,28 +521,16 @@ async fn test_analyze_module_unsupported_fallback() {
         "analyze_module on unsupported extension must succeed; got: {resp}"
     );
 
-    let sc = &resp["result"]["structuredContent"];
-
-    // Correct line count
-    let line_count = sc["line_count"]
-        .as_u64()
-        .expect("line_count must be present");
-    assert_eq!(line_count, 1, "line_count must be 1; got: {resp}");
-
-    // Function and import lists empty
+    let result = &resp["result"];
     assert!(
-        sc["functions"]
-            .as_array()
-            .expect("functions must be array")
-            .is_empty(),
-        "functions must be empty for unsupported extension"
+        result.get("structuredContent").is_none(),
+        "structuredContent must be absent; got: {resp}"
     );
+
+    let text = result["content"][0]["text"].as_str().unwrap_or("");
     assert!(
-        sc["imports"]
-            .as_array()
-            .expect("imports must be array")
-            .is_empty(),
-        "imports must be empty for unsupported extension"
+        text.contains("(1L, 0F, 0I)"),
+        "line_count must be 1 with empty functions/imports; got: {text}"
     );
 }
 
