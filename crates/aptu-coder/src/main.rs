@@ -123,35 +123,50 @@ fn parse_port(s: &str) -> Result<u16, String> {
     }
 }
 
-/// Parse CLI arguments and resolve the optional HTTP port.
-///
-/// Returns `Ok(None)` when the server should run in stdio mode (no `--port`),
-/// `Ok(Some(port))` when an HTTP port was specified, or `Err(msg)` on invalid
-/// input.  Prints the package version and returns `Ok(None)` when `--version`
-/// is passed; the caller is responsible for exiting after printing.
-fn parse_cli_args() -> Result<Option<u16>, String> {
+/// Terminal action requested via CLI flags.
+#[derive(Debug, PartialEq, Eq)]
+enum CliAction {
+    /// Serve over stdio (default).
+    Stdio,
+    /// Serve over streamable HTTP on the given port.
+    Http(u16),
+    /// Print the package version and exit.
+    PrintVersion,
+    /// Print usage help and exit.
+    PrintHelp,
+}
+
+/// Parse a CLI argument iterator into a [`CliAction`], using `env_port` as the
+/// fallback port source (mirrors the `APTU_CODER_PORT` environment variable).
+fn parse_cli_args_with_env<I: IntoIterator<Item = String>>(
+    args: I,
+    env_port: Option<String>,
+) -> Result<CliAction, String> {
     let mut port: Option<u16> = None;
-    let mut args = std::env::args();
-    while let Some(arg) = args.next() {
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--version" => {
-                println!("{}", env!("CARGO_PKG_VERSION"));
-                return Ok(None);
+            "--version" => return Ok(CliAction::PrintVersion),
+            "--help" => {
+                println!(
+                    "Usage: aptu-coder [OPTIONS]\n\nFlags:\n  --port <PORT>  Serve over streamable HTTP on 127.0.0.1:<PORT> (non-zero u16)\n  --version      Print the package version and exit\n  --help         Print this help and exit\n\nTransports:\n  stdio (default when --port is omitted) or streamable HTTP when --port is set.\nThe APTU_CODER_PORT environment variable is used when --port is not passed."
+                );
+                return Ok(CliAction::PrintHelp);
             }
-            "--port" => match args.next() {
+            "--port" => match iter.next() {
                 Some(val) => match parse_port(&val) {
                     Ok(p) => port = Some(p),
                     Err(msg) => return Err(format!("--port {msg}")),
                 },
                 None => return Err("--port requires a value".to_string()),
             },
-            _ => {}
+            other => return Err(format!("unknown flag: {other}")),
         }
     }
 
-    // Fall back to APTU_CODER_PORT env var when --port was not passed.
+    // Fall back to the provided env port when --port was not passed.
     if port.is_none()
-        && let Ok(val) = std::env::var("APTU_CODER_PORT")
+        && let Some(val) = env_port
     {
         match parse_port(&val) {
             Ok(p) => port = Some(p),
@@ -159,7 +174,15 @@ fn parse_cli_args() -> Result<Option<u16>, String> {
         }
     }
 
-    Ok(port)
+    Ok(port.map_or(CliAction::Stdio, CliAction::Http))
+}
+
+/// Parse CLI arguments and resolve the requested action.
+fn parse_cli_args() -> Result<CliAction, String> {
+    parse_cli_args_with_env(
+        std::env::args().skip(1),
+        std::env::var("APTU_CODER_PORT").ok(),
+    )
 }
 
 /// Install the global tracing subscriber with optional OpenTelemetry layers.
@@ -197,8 +220,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // SAFETY: CryptoProvider installation is required for TLS; main() cannot proceed without it.
         .expect("failed to install rustls CryptoProvider: TLS is required for server startup and cannot be recovered");
 
-    let port = match parse_cli_args() {
-        Ok(p) => p,
+    let action = match parse_cli_args() {
+        Ok(CliAction::PrintVersion) | Ok(CliAction::PrintHelp) => return Ok(()),
+        Ok(action) => action,
         Err(msg) => {
             eprintln!("error: {msg}");
             std::process::exit(1);
@@ -222,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let analyzer = CodeAnalyzer::new(peer, MetricsSender(metrics_tx));
 
-    if let Some(p) = port {
+    if let CliAction::Http(p) = action {
         run_http(analyzer, p).await?;
     } else {
         let (stdin, stdout) = stdio();
@@ -267,6 +291,52 @@ mod tests {
                 blake3::hash(token.as_bytes()),
                 auth_middleware,
             ))
+    }
+
+    #[test]
+    fn test_parse_cli_args_version() {
+        assert_eq!(
+            parse_cli_args_with_env(["--version".to_string()], None),
+            Ok(CliAction::PrintVersion)
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_args_help() {
+        assert_eq!(
+            parse_cli_args_with_env(["--help".to_string()], None),
+            Ok(CliAction::PrintHelp)
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_args_unknown_flag() {
+        let err = parse_cli_args_with_env(["--bogus".to_string()], None).unwrap_err();
+        assert!(err.contains("--bogus"), "error must name the flag: {err}");
+    }
+
+    #[test]
+    fn test_parse_cli_args_port() {
+        assert_eq!(
+            parse_cli_args_with_env(["--port".to_string(), "8080".to_string()], None),
+            Ok(CliAction::Http(8080))
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_args_no_args() {
+        assert_eq!(
+            parse_cli_args_with_env(Vec::new(), None),
+            Ok(CliAction::Stdio)
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_args_env_port_fallback() {
+        assert_eq!(
+            parse_cli_args_with_env(Vec::new(), Some("9000".to_string())),
+            Ok(CliAction::Http(9000))
+        );
     }
 
     #[tokio::test]
