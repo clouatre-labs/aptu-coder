@@ -145,7 +145,7 @@ Exported from `aptu_coder_core` as a public API for library consumers that hold 
 
 **Git ref filtering:** When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the set of changed files, and `filter_entries_by_git_ref()` restricts the analysis to those files before the graph is built.
 
-**Def-use mode:** When `mode=def_use`, the tool computes definition and use sites alongside the call graph. However, `def_use_sites` is cleared (`Vec::new()`) in `structuredContent` on the initial response. Once the callers and callees pages are exhausted, the handler automatically emits a `{mode: defuse, offset: 0}` cursor. Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
+**Def-use mode:** When `mode=def_use`, the tool computes definition and use sites alongside the call graph, but the initial response is text-only: `analyze_symbol` no longer sets `structuredContent`, so the bootstrap cursor is delivered as a `NEXT_CURSOR:` line in the text output (with a usage hint). Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
 
 ## Observability Architecture
 

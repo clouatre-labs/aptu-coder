@@ -6,7 +6,7 @@
 Initial release. Four tools (`analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`), seven languages (Rust, Go, Java, Python, TypeScript, TSX, Fortran), tree-sitter AST extraction, rayon parallelism, .gitignore-aware walk via `ignore` crate. (language support has since grown to 18; see [Supported Languages](../README.md))
 
 ### [Complete] Wave 2: MCP Protocol (milestone 7)
-Summary-first output, `outputSchema` per tool, cursor pagination.
+Summary-first output, `outputSchema` per tool (historical: the mirrored per-tool output schemas were later removed for analysis and edit tools, see #1635 and successors), cursor pagination.
 
 ### [Complete] Wave 3: Analysis Quality (milestone 8)
 Multi-strategy call graphs, inheritance tracking, cross-client compatibility.
@@ -240,4 +240,4 @@ Unimplemented and pertinent:
 - KG pull-only ablation benchmark (see [docs/audit/2026-08-29-kg-pull-ablation-benchmark-design.md](audit/2026-08-29-kg-pull-ablation-benchmark-design.md)): the design doc names telemetry (#1491) as its execution prerequisite; that prerequisite has now shipped, so the benchmark is unblocked and next in line.
 
 
-- Small-codebase fit trims from the 2026-09-25 audit (see [docs/audit/2026-09-25-small-codebase-fit.md](audit/2026-09-25-small-codebase-fit.md)): #1633 (exec response dedup), #1634 (analyze_directory single representation + relative paths), #1636 (instructions trim), #1637 (gateway-arm smokes + pi directTools default) are independent of and can proceed in parallel with #1620 (v19); #1635 (outputSchema slimming, ablation-gated) is sequenced after v19, which anchors the crossover-threshold claim that motivates it.
+- Small-codebase fit trims from the 2026-09-25 audit (see [docs/audit/2026-09-25-small-codebase-fit.md](audit/2026-09-25-small-codebase-fit.md)): all five are now merged -- #1633 (exec response dedup), #1634 (analyze_directory single representation + relative paths), #1635 (outputSchema slimming), #1636 (instructions trim), and #1637 (gateway-arm smokes + pi directTools default) have shipped.

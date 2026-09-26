@@ -86,7 +86,7 @@ Returns a tree with LOC, function count, and class count."
 
 **Principle:** Server instructions should provide an ordered workflow, not open-ended guidance. Small models execute numbered steps sequentially; they do not synthesize a strategy from a list of capabilities.
 
-*Example: The server instructions for this server use a 4-step recommended workflow: (1) `analyze_directory` at max_depth=2 to orient; (2) re-run on the source package; (3) `analyze_file` on key files; (4) `analyze_symbol` for call graphs. This workflow was introduced in Wave 6 (#342).*
+*Example: The server instructions for this server were originally a 4-step numbered workflow (introduced in Wave 6, #342); they have since been trimmed (#1636) to a single short paragraph: start with `analyze_directory` for a package/module map, then `analyze_module`/`analyze_file` for per-file detail and `analyze_symbol` for call graphs. The lesson stands -- guidance should be ordered and concrete, not a list of capabilities.*
 
 ### Structured Output Belongs at the Runner Layer
 
