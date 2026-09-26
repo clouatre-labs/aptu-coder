@@ -221,7 +221,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("failed to install rustls CryptoProvider: TLS is required for server startup and cannot be recovered");
 
     let action = match parse_cli_args() {
-        Ok(CliAction::PrintVersion) | Ok(CliAction::PrintHelp) => return Ok(()),
+        Ok(CliAction::PrintVersion) => {
+            println!("aptu-coder {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Ok(CliAction::PrintHelp) => return Ok(()),
         Ok(action) => action,
         Err(msg) => {
             eprintln!("error: {msg}");
