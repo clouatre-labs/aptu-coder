@@ -43,6 +43,7 @@ pub use otel::{
     ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,
 };
 
+#[cfg(test)]
 use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion};
 use validation::validate_path;
@@ -476,8 +477,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories and analyze_module for a lightweight function/import index (~75% smaller). Paginates with an opaque cursor; page size is server-owned (50). git_ref not supported. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
-        output_schema = schema_for_type::<analyze::FileAnalysisOutput>(),
+        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories and analyze_module for a lightweight function/import index (~75% smaller). Output is returned as a text block only; no structured content or output schema. Paginates with an opaque cursor; page size is server-owned (50). git_ref not supported. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
         annotations(
             title = "Analyze File",
             read_only_hint = true,
