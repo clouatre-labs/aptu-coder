@@ -453,19 +453,10 @@ fn focused_prologue<'a>(
     Ok((output, prod_chains, test_chains, outgoing))
 }
 
-/// Format mode selector for the two focused-output variants.
-#[derive(Clone, Copy)]
-enum FocusedMode {
-    /// Full-format output (callers/callees with chain trees).
-    Full,
-    /// Compact summary output (top-10 callers/callees).
-    Summary,
-}
-
-/// Shared prologue and dispatch for the `format_focused` variants.
+/// Full-format focused symbol output (callers/callees with chain trees).
 #[instrument(skip_all)]
-#[allow(clippy::too_many_arguments)] // preserves the unchanged public entry-point signature plus mode
-fn format_focused_impl(
+#[allow(clippy::too_many_arguments)] // preserves the unchanged public entry-point signature
+pub(crate) fn format_focused_internal(
     graph: &CallGraph,
     symbol: &str,
     follow_depth: u32,
@@ -473,7 +464,6 @@ fn format_focused_impl(
     incoming_chains: Option<&[InternalCallChain]>,
     outgoing_chains: Option<&[InternalCallChain]>,
     def_use_sites: &[DefUseSite],
-    mode: FocusedMode,
 ) -> Result<String, FormatterError> {
     let (output, prod_chains, test_chains, outgoing_ref) = focused_prologue(
         graph,
@@ -485,48 +475,15 @@ fn format_focused_impl(
     )?;
     let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
 
-    match mode {
-        FocusedMode::Full => render_focused_full(
-            output,
-            prod_chains,
-            test_chains,
-            outgoing_chains_ref,
-            base_path,
-            def_use_sites,
-            symbol,
-            graph,
-        ),
-        FocusedMode::Summary => render_focused_summary(
-            output,
-            prod_chains,
-            test_chains,
-            outgoing_chains_ref,
-            base_path,
-            def_use_sites,
-            symbol,
-        ),
-    }
-}
-
-/// Full-format focused symbol output (callers/callees with chain trees).
-pub(crate) fn format_focused_internal(
-    graph: &CallGraph,
-    symbol: &str,
-    follow_depth: u32,
-    base_path: Option<&Path>,
-    incoming_chains: Option<&[InternalCallChain]>,
-    outgoing_chains: Option<&[InternalCallChain]>,
-    def_use_sites: &[DefUseSite],
-) -> Result<String, FormatterError> {
-    format_focused_impl(
-        graph,
-        symbol,
-        follow_depth,
+    render_focused_full(
+        output,
+        prod_chains,
+        test_chains,
+        outgoing_chains_ref,
         base_path,
-        incoming_chains,
-        outgoing_chains,
         def_use_sites,
-        FocusedMode::Full,
+        symbol,
+        graph,
     )
 }
 
@@ -700,6 +657,7 @@ fn render_focused_full(
 /// Format a compact summary of focused symbol analysis.
 /// Used when output would exceed the size threshold or when explicitly requested.
 /// Internal helper that accepts pre-computed chains.
+#[instrument(skip_all)]
 pub(crate) fn format_focused_summary_internal(
     graph: &CallGraph,
     symbol: &str,
@@ -709,15 +667,24 @@ pub(crate) fn format_focused_summary_internal(
     outgoing_chains: Option<&[InternalCallChain]>,
     def_use_sites: &[DefUseSite],
 ) -> Result<String, FormatterError> {
-    format_focused_impl(
+    let (output, prod_chains, test_chains, outgoing_ref) = focused_prologue(
         graph,
         symbol,
         follow_depth,
         base_path,
         incoming_chains,
         outgoing_chains,
+    )?;
+    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
+
+    render_focused_summary(
+        output,
+        prod_chains,
+        test_chains,
+        outgoing_chains_ref,
+        base_path,
         def_use_sites,
-        FocusedMode::Summary,
+        symbol,
     )
 }
 
