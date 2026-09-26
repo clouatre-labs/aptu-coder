@@ -1,0 +1,137 @@
+[
+  {
+    "expected_files": [
+      "django/test/utils.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-captured_stderr",
+    "prompt": "Locate the definition of captured_stderr and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/test/utils.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-captured_stdout",
+    "prompt": "Locate the definition of captured_stdout and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/crypto.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-constant_time_compare",
+    "prompt": "Locate the definition of constant_time_compare and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/contrib/gis/geos/libgeos.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-geos_version_tuple",
+    "prompt": "Locate the definition of geos_version_tuple and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/inspect.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-get_func_args",
+    "prompt": "Locate the definition of get_func_args and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/contrib/auth/__init__.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-get_permission_codename",
+    "prompt": "Locate the definition of get_permission_codename and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/version.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-get_version_tuple",
+    "prompt": "Locate the definition of get_version_tuple and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/log.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-log_response",
+    "prompt": "Locate the definition of log_response and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "tests/mail/__init__.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-override_deprecated_email_settings",
+    "prompt": "Locate the definition of override_deprecated_email_settings and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/cache.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-patch_vary_headers",
+    "prompt": "Locate the definition of patch_vary_headers and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/contrib/auth/views.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-redirect_to_login",
+    "prompt": "Locate the definition of redirect_to_login and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/core/management/utils.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-run_formatters",
+    "prompt": "Locate the definition of run_formatters and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/_os.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-safe_join",
+    "prompt": "Locate the definition of safe_join and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/db/backends/utils.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-split_tzname_delta",
+    "prompt": "Locate the definition of split_tzname_delta and report its file path.",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/deprecation.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-c-lookup-warn_about_external_use",
+    "prompt": "Locate the definition of warn_about_external_use and report its file path.",
+    "track": "C"
+  }
+]
