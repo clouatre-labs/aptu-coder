@@ -29,7 +29,7 @@ use tree_sitter::{Language, Node};
 ///
 /// Returns `None` if the node's byte range falls outside `source`.
 #[must_use]
-pub fn get_node_text(node: &Node, source: &str) -> Option<String> {
+pub(crate) fn get_node_text(node: &Node, source: &str) -> Option<String> {
     let end = node.end_byte();
     if end <= source.len() {
         Some(source[node.start_byte()..end].to_string())

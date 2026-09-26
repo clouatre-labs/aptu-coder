@@ -54,25 +54,13 @@ pub const STDIN_MAX_BYTES: usize = 1_048_576;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct ExecCommandParams {
+pub(crate) struct ExecCommandParams {
     /// Shell command to execute via sh -c (or $SHELL if set).
     pub command: String,
     /// Working directory for the command. Set this instead of prepending cd to the command string. Validated against path traversal; does not sandbox the process.
     pub working_dir: Option<String>,
     /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). None closes stdin.
     pub stdin: Option<String>,
-}
-
-impl ExecCommandParams {
-    /// Creates a new ExecCommandParams with the given command.
-    #[must_use]
-    pub fn new(command: String, working_dir: Option<String>) -> Self {
-        Self {
-            command,
-            working_dir,
-            ..Default::default()
-        }
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -143,7 +131,7 @@ impl ShellOutput {
 /// the single model-visible output channel; overflow slot-file paths survive
 /// here so full captures remain recoverable.
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
-pub struct ShellOutputMetadata {
+pub(crate) struct ShellOutputMetadata {
     /// Exit code; mirrors `ShellOutput::exit_code`.
     pub exit_code: Option<i32>,
     /// True when the command was killed on timeout or cancellation.
