@@ -767,16 +767,10 @@ impl ServerHandler for CodeAnalyzer {
     }
 
     fn get_info(&self) -> InitializeResult {
-        let excluded = aptu_coder_core::EXCLUDED_DIRS.join(", ");
-        let instructions = format!(
-            "Recommended workflow:\n\
-            1. Start with analyze_directory(path=<repo_root>, max_depth=2, summary=true) to identify source package (largest by file count; exclude {excluded}).\n\
-            2. Re-run analyze_directory(path=<source_package>, max_depth=2, summary=true) for module map. Include test directories (tests/, *_test.go, test_*.py, test_*.rs, *.spec.ts, *.spec.js).\n\
-            3. For key files, prefer analyze_module for function/import index; use analyze_file for signatures and types.\n\
-            4. Use analyze_symbol to trace call graphs.\n\
-            Prefer summary=true on 1000+ files. Set max_depth=2; increase if packages too large. Paginate with the opaque cursor; page sizes are server-owned (analyze_directory 50, analyze_file 50, analyze_symbol 20).\n\
-            JSONL metrics at $HOME/.local/share/aptu-coder/ (or $XDG_DATA_HOME/aptu-coder/). Always cd there before jq glob queries."
-        );
+        let instructions = "MCP server for code structure analysis (tree-sitter). Start \
+            with analyze_directory for a package/module map, then \
+            analyze_module/analyze_file for per-file detail and analyze_symbol for call \
+            graphs. JSONL metrics and jq recipes: docs/METRICS.md.";
         let capabilities = ServerCapabilities::builder()
             .enable_tools()
             .enable_tool_list_changed()
@@ -788,7 +782,7 @@ impl ServerHandler for CodeAnalyzer {
             .with_description("MCP server for code structure analysis using tree-sitter");
         InitializeResult::new(capabilities)
             .with_server_info(server_info)
-            .with_instructions(&instructions)
+            .with_instructions(instructions)
     }
 
     async fn list_tools(
