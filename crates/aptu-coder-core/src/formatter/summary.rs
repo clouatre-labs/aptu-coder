@@ -372,12 +372,14 @@ pub fn format_summary(
 
 /// Shared prologue for the `format_focused` variants: chain resolution, caller partitioning,
 /// counts, and the FOCUS/DEPTH/DEFINED sections.
-struct FocusedPrologue<'a> {
-    output: String,
-    prod_chains: Vec<InternalCallChain>,
-    test_chains: Vec<InternalCallChain>,
-    outgoing_chains: std::borrow::Cow<'a, [InternalCallChain]>,
-}
+/// Prologue outputs for the `format_focused` variants: rendered sections, production and
+/// test chains, and resolved outgoing chains.
+type FocusedPrologue<'a> = (
+    String,
+    Vec<InternalCallChain>,
+    Vec<InternalCallChain>,
+    std::borrow::Cow<'a, [InternalCallChain]>,
+);
 
 fn focused_prologue<'a>(
     graph: &CallGraph,
@@ -448,12 +450,62 @@ fn focused_prologue<'a>(
         output.push_str("DEFINED: (not found)\n");
     }
 
-    Ok(FocusedPrologue {
-        output,
-        prod_chains,
-        test_chains,
-        outgoing_chains: outgoing,
-    })
+    Ok((output, prod_chains, test_chains, outgoing))
+}
+
+/// Format mode selector for the two focused-output variants.
+#[derive(Clone, Copy)]
+enum FocusedMode {
+    /// Full-format output (callers/callees with chain trees).
+    Full,
+    /// Compact summary output (top-10 callers/callees).
+    Summary,
+}
+
+/// Shared prologue and dispatch for the `format_focused` variants.
+#[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)] // preserves the unchanged public entry-point signature plus mode
+fn format_focused_impl(
+    graph: &CallGraph,
+    symbol: &str,
+    follow_depth: u32,
+    base_path: Option<&Path>,
+    incoming_chains: Option<&[InternalCallChain]>,
+    outgoing_chains: Option<&[InternalCallChain]>,
+    def_use_sites: &[DefUseSite],
+    mode: FocusedMode,
+) -> Result<String, FormatterError> {
+    let (output, prod_chains, test_chains, outgoing_ref) = focused_prologue(
+        graph,
+        symbol,
+        follow_depth,
+        base_path,
+        incoming_chains,
+        outgoing_chains,
+    )?;
+    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
+
+    match mode {
+        FocusedMode::Full => render_focused_full(
+            output,
+            prod_chains,
+            test_chains,
+            outgoing_chains_ref,
+            base_path,
+            def_use_sites,
+            symbol,
+            graph,
+        ),
+        FocusedMode::Summary => render_focused_summary(
+            output,
+            prod_chains,
+            test_chains,
+            outgoing_chains_ref,
+            base_path,
+            def_use_sites,
+            symbol,
+        ),
+    }
 }
 
 /// Full-format focused symbol output (callers/callees with chain trees).
@@ -466,22 +518,31 @@ pub(crate) fn format_focused_internal(
     outgoing_chains: Option<&[InternalCallChain]>,
     def_use_sites: &[DefUseSite],
 ) -> Result<String, FormatterError> {
-    let prologue = focused_prologue(
+    format_focused_impl(
         graph,
         symbol,
         follow_depth,
         base_path,
         incoming_chains,
         outgoing_chains,
-    )?;
-    let FocusedPrologue {
-        mut output,
-        prod_chains,
-        test_chains,
-        outgoing_chains: outgoing_ref,
-    } = prologue;
-    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
+        def_use_sites,
+        FocusedMode::Full,
+    )
+}
 
+/// Render the full-format tail: CALLERS/CALLEES sections with chain trees.
+#[allow(clippy::too_many_lines)] // exhaustive chain-tree rendering; splitting harms readability
+#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_summary
+fn render_focused_full(
+    mut output: String,
+    prod_chains: Vec<InternalCallChain>,
+    test_chains: Vec<InternalCallChain>,
+    outgoing_chains_ref: &[InternalCallChain],
+    base_path: Option<&Path>,
+    def_use_sites: &[DefUseSite],
+    symbol: &str,
+    graph: &CallGraph,
+) -> Result<String, FormatterError> {
     // CALLERS section - who calls this symbol
     output.push_str("CALLERS:\n");
 
@@ -639,9 +700,6 @@ pub(crate) fn format_focused_internal(
 /// Format a compact summary of focused symbol analysis.
 /// Used when output would exceed the size threshold or when explicitly requested.
 /// Internal helper that accepts pre-computed chains.
-#[instrument(skip_all)]
-#[allow(clippy::too_many_lines)] // exhaustive symbol summary formatting; splitting harms readability
-#[allow(clippy::similar_names)] // domain pairs: callers_count/callees_count are intentionally similar
 pub(crate) fn format_focused_summary_internal(
     graph: &CallGraph,
     symbol: &str,
@@ -651,22 +709,31 @@ pub(crate) fn format_focused_summary_internal(
     outgoing_chains: Option<&[InternalCallChain]>,
     def_use_sites: &[DefUseSite],
 ) -> Result<String, FormatterError> {
-    let prologue = focused_prologue(
+    format_focused_impl(
         graph,
         symbol,
         follow_depth,
         base_path,
         incoming_chains,
         outgoing_chains,
-    )?;
-    let FocusedPrologue {
-        mut output,
-        prod_chains,
-        test_chains,
-        outgoing_chains: outgoing_ref,
-    } = prologue;
-    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
+        def_use_sites,
+        FocusedMode::Summary,
+    )
+}
 
+/// Render the compact-summary tail: top-10 CALLERS/CALLEES sections.
+#[allow(clippy::too_many_lines)] // exhaustive symbol summary formatting; splitting harms readability
+#[allow(clippy::similar_names)] // domain pairs: callers_count/callees_count are intentionally similar
+#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_full
+fn render_focused_summary(
+    mut output: String,
+    prod_chains: Vec<InternalCallChain>,
+    test_chains: Vec<InternalCallChain>,
+    outgoing_chains_ref: &[InternalCallChain],
+    base_path: Option<&Path>,
+    def_use_sites: &[DefUseSite],
+    _symbol: &str,
+) -> Result<String, FormatterError> {
     // CALLERS (production, top 10 by frequency)
     output.push_str("CALLERS (top 10):\n");
     if prod_chains.is_empty() {

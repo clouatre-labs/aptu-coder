@@ -232,6 +232,22 @@ fn parse_with_deadline(
         return Err(ParserError::Timeout(tc.micros));
     }
 
+    let (tree, lang_info) = resolve_and_parse(source, language)?;
+
+    // Check deadline after parsing
+    if tc.is_exceeded() {
+        return Err(ParserError::Timeout(tc.micros));
+    }
+
+    Ok((tree, lang_info))
+}
+
+/// Resolve `language` to its tree-sitter grammar and parse `source` with the
+/// shared thread-local parser. Returns the parse tree plus resolved language info.
+fn resolve_and_parse(
+    source: &str,
+    language: &str,
+) -> Result<(Tree, crate::languages::LanguageInfo), ParserError> {
     let lang_info = get_language_info(language)
         .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
 
@@ -244,11 +260,6 @@ fn parse_with_deadline(
             .parse(source, None)
             .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
     })?;
-
-    // Check deadline after parsing
-    if tc.is_exceeded() {
-        return Err(ParserError::Timeout(tc.micros));
-    }
 
     Ok((tree, lang_info))
 }
@@ -266,18 +277,7 @@ impl ElementExtractor {
     /// Returns `ParserError::QueryError` if the tree-sitter query fails.
     #[instrument(skip_all, fields(language))]
     pub fn extract_with_depth(source: &str, language: &str) -> Result<(usize, usize), ParserError> {
-        let lang_info = get_language_info(language)
-            .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
-
-        let tree = PARSER.with(|p| {
-            let mut parser = p.borrow_mut();
-            parser
-                .set_language(&lang_info.language)
-                .map_err(|e| ParserError::ParseError(format!("Failed to set language: {e}")))?;
-            parser
-                .parse(source, None)
-                .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
-        })?;
+        let (tree, _) = resolve_and_parse(source, language)?;
 
         let compiled = get_compiled_queries(language)?;
 

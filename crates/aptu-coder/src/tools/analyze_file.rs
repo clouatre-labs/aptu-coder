@@ -24,29 +24,6 @@ use crate::tools::common::{
     err_to_tool_result, error_meta, no_cache_meta, normalize_cursor, summary_cursor_conflict,
 };
 
-/// Classify a terminal failure for the shared emit_internal_error helper: record span
-/// fields, emit the validation metric, and wrap the `ErrorData` exactly once.
-#[allow(clippy::too_many_arguments)]
-fn emit_internal_error(
-    span: &tracing::Span,
-    ctx: &AnalyzeFileContext,
-    params: &AnalyzeFileParams,
-    seq: u32,
-    sid: &Option<String>,
-    t_start: std::time::Instant,
-    param_path: &str,
-    cursor: Option<&str>,
-    error_type: &str,
-    e: ErrorData,
-) -> Result<CallToolResult, ErrorData> {
-    span.record("error", true);
-    span.record("error.type", error_type);
-    emit_validation_error(
-        ctx, params, seq, sid, t_start, param_path, cursor, error_type,
-    );
-    Ok(err_to_tool_result(e))
-}
-
 /// Core analysis logic for the `analyze_file` tool (file details mode).
 ///
 /// Checks L1/L2 caches, runs file analysis on a cache miss, and stores results.
@@ -334,18 +311,18 @@ pub(crate) async fn analyze_file_handler(
     let offset = match super::common::decode_offset(cursor) {
         Ok(o) => o,
         Err(e) => {
-            return emit_internal_error(
-                span,
-                ctx,
-                &params,
-                seq,
-                &sid,
-                t_start,
-                &param_path,
-                cursor,
-                "invalid_params",
-                e,
-            );
+            return super::common::emit_internal_error(span, "invalid_params", e, |error_type| {
+                emit_validation_error(
+                    ctx,
+                    &params,
+                    seq,
+                    &sid,
+                    t_start,
+                    &param_path,
+                    cursor,
+                    error_type,
+                );
+            });
         }
     };
 
@@ -367,17 +344,22 @@ pub(crate) async fn analyze_file_handler(
         match super::common::paginate_or_internal_error(&top_level_fns, offset, page_size) {
             Ok(v) => v,
             Err(e) => {
-                return emit_internal_error(
+                return super::common::emit_internal_error(
                     span,
-                    ctx,
-                    &params,
-                    seq,
-                    &sid,
-                    t_start,
-                    &param_path,
-                    cursor,
                     "internal_error",
                     e,
+                    |error_type| {
+                        emit_validation_error(
+                            ctx,
+                            &params,
+                            seq,
+                            &sid,
+                            t_start,
+                            &param_path,
+                            cursor,
+                            error_type,
+                        );
+                    },
                 );
             }
         };

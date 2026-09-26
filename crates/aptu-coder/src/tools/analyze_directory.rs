@@ -339,29 +339,6 @@ fn emit_validation_error(
     );
 }
 
-/// Classify a terminal failure for the shared emit_internal_error helper: record span
-/// fields, emit the validation metric, and wrap the `ErrorData` exactly once.
-#[allow(clippy::too_many_arguments)]
-fn emit_internal_error(
-    span: &tracing::Span,
-    ctx: &AnalyzeDirectoryContext,
-    params: &AnalyzeDirectoryParams,
-    seq: u32,
-    sid: &Option<String>,
-    t_start: std::time::Instant,
-    param_path: &str,
-    cursor: Option<&str>,
-    error_type: &str,
-    e: ErrorData,
-) -> Result<CallToolResult, ErrorData> {
-    span.record("error", true);
-    span.record("error.type", error_type);
-    emit_validation_error(
-        ctx, params, seq, sid, t_start, param_path, cursor, error_type,
-    );
-    Ok(err_to_tool_result(e))
-}
-
 /// Handler body for the `analyze_directory` MCP tool.
 ///
 /// Called by the thin shim in `lib.rs` after parameter extraction and metric
@@ -458,27 +435,8 @@ pub(crate) async fn analyze_directory_handler(
     let offset = match super::common::decode_offset(cursor) {
         Ok(o) => o,
         Err(e) => {
-            return emit_internal_error(
-                span,
-                ctx,
-                &params,
-                seq,
-                &sid,
-                t_start,
-                &param_path,
-                cursor,
-                "invalid_params",
-                e,
-            );
-        }
-    };
-
-    let paginated =
-        match super::common::paginate_or_internal_error(&output.files, offset, page_size) {
-            Ok(v) => v,
-            Err(e) => {
-                return emit_internal_error(
-                    span,
+            return super::common::emit_internal_error(span, "invalid_params", e, |error_type| {
+                emit_validation_error(
                     ctx,
                     &params,
                     seq,
@@ -486,8 +444,32 @@ pub(crate) async fn analyze_directory_handler(
                     t_start,
                     &param_path,
                     cursor,
+                    error_type,
+                );
+            });
+        }
+    };
+
+    let paginated =
+        match super::common::paginate_or_internal_error(&output.files, offset, page_size) {
+            Ok(v) => v,
+            Err(e) => {
+                return super::common::emit_internal_error(
+                    span,
                     "internal_error",
                     e,
+                    |error_type| {
+                        emit_validation_error(
+                            ctx,
+                            &params,
+                            seq,
+                            &sid,
+                            t_start,
+                            &param_path,
+                            cursor,
+                            error_type,
+                        );
+                    },
                 );
             }
         };

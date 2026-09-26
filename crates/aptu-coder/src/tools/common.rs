@@ -111,6 +111,24 @@ pub(crate) fn error_meta(
     .unwrap_or_default()
 }
 
+/// Shared terminal-failure helper for tool handlers: records span error fields,
+/// delegates metric emission to the tool-specific `emit_validation` closure, and
+/// wraps the `ErrorData` exactly once into a `CallToolResult`.
+pub(crate) fn emit_internal_error<F>(
+    span: &tracing::Span,
+    error_type: &str,
+    e: ErrorData,
+    emit_validation: F,
+) -> Result<CallToolResult, ErrorData>
+where
+    F: FnOnce(&str),
+{
+    span.record("error", true);
+    span.record("error.type", error_type);
+    emit_validation(error_type);
+    Ok(err_to_tool_result(e))
+}
+
 #[must_use]
 pub(crate) fn err_to_tool_result(e: ErrorData) -> CallToolResult {
     let mut result =
