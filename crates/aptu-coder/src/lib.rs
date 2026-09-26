@@ -59,7 +59,7 @@ pub struct ExecCommandParams {
     pub command: String,
     /// Working directory for the command. Set this instead of prepending cd to the command string. Validated against path traversal; does not sandbox the process.
     pub working_dir: Option<String>,
-    /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). When None, stdin is closed (null).
+    /// UTF-8 content to pipe into the process stdin (max `STDIN_MAX_BYTES` = 1 MB). None closes stdin.
     pub stdin: Option<String>,
 }
 
@@ -444,7 +444,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_directory",
         title = "Analyze Directory",
-        description = "Tree-view of a directory with LOC, function/class counts, and test markers. Respects .gitignore. Paginates with an opaque cursor; page size is server-owned (50). Large dirs (1000+ files) auto-compact to summary; pass summary=false for the per-file list. git_ref restricts to files changed since a branch/tag/commit.",
+        description = "Directory tree with LOC, function/class counts, and test markers. Respects .gitignore. Paginates with an opaque cursor; page size is server-owned (50). Dirs of 1000+ files auto-compact to summary; pass summary=false for the per-file list. git_ref restricts to files changed since a ref.",
         annotations(
             title = "Analyze Directory",
             read_only_hint = true,
@@ -513,7 +513,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories and analyze_module for a lightweight function/import index (~75% smaller). Output is returned as a text block only; no structured content or output schema. Paginates with an opaque cursor; page size is server-owned (50). git_ref not supported. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories, analyze_module for a lightweight index (~75% smaller). Text block output only; no structured content or output schema. Paginates with an opaque cursor (50); git_ref not supported.",
         annotations(
             title = "Analyze File",
             read_only_hint = true,
@@ -567,7 +567,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is \"who calls X\" or \"what does X call\" rather than \"what is in this file\". Modes: call_graph (default), import_lookup (files importing a module path), def_use (write/read sites). Paginates with an opaque cursor; page size is server-owned (20). Fails if file path supplied or if impl_only=true on a non-Rust directory. git_ref restricts to changed files.",
+        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is who calls X or what does X call. Modes: call_graph (default), import_lookup, def_use. Paginates with an opaque cursor (20). Fails if file path supplied or if impl_only=true on a non-Rust directory. git_ref restricts to changed files.",
         annotations(
             title = "Analyze Symbol",
             read_only_hint = true,
@@ -629,7 +629,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Lightweight function and import index for a single source file with minimal token cost: file name, line count, language, function names with line numbers, and the import list (~75% smaller than analyze_file). Fails if directory path supplied; use analyze_file for signatures, types, or class details. Pagination and git_ref not supported; responses are always a single complete response with no next_cursor field and no follow-up page call. Supported: Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.",
+        description = "Lightweight function and import index for a single source file (~75% smaller than analyze_file): file name, line count, language, function names with line numbers, and the import list. Fails if directory path supplied; use analyze_file for signatures, types, or class details. Pagination and git_ref not supported; responses are always a single response.",
         annotations(
             title = "Analyze Module",
             read_only_hint = true,
@@ -720,7 +720,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Batch form: pass edits[] (array of {old_text, new_text, replace_all}) instead of old_text/new_text — mutually exclusive — to apply multiple replacements to one file atomically; all edits validate against one content snapshot, any invalid edit aborts the batch with per-index errors and no write, and a successful batch returns a post-edit content_hash. structuredContent carries only metadata (path, byte counts, occurrences_replaced, content_hash), not per-edit results. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file.",
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence (sed s/old/new/g). Empty new_text deletes. CRLF in old_text normalized to LF. Batch form: edits[] applies multiple replacements to one file atomically; any invalid edit aborts the batch. structuredContent carries metadata only. On invalid_params, re-read with analyze_file and retry. Use edit_overwrite to replace the whole file.",
         output_schema = slim_output_schema::<EditReplaceOutputMetadata>(),
         annotations(
             title = "Edit Replace",
@@ -760,7 +760,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute shell command via sh -c (or $SHELL if set); returns output and exit code as a text block. Output capped (30k chars stdout / 10k stderr / 2000 lines); when capped, full captures are exposed as aptu-overflow:// resource links (paths in structuredContent). Set working_dir to the target directory; use relative paths. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. A 300 s server-side timeout kills runaway children; send notifications/cancelled to cancel early. Built-in filters may strip, cap, or substitute output of known CLI tools (git, cargo); structuredContent names the applied rule and links the full pre-filter output.",
+        description = "Execute a shell command; returns output and exit code as a text block. Output capped (30k stdout / 10k stderr / 2000 lines); full captures exposed as aptu-overflow:// links when capped. Set working_dir to the target directory. stdin pipes UTF-8 content (max 1 MB); heredoc syntax rejected. For file writes use edit_overwrite or edit_replace. Prefer --json flags to reduce tokens. 300 s server-side timeout; cancel via notifications/cancelled. Built-in filters may strip, cap, or substitute output; structuredContent identifies the filter and links the full pre-filter output.",
         output_schema = slim_output_schema::<ShellOutputMetadata>(),
         annotations(
             title = "Exec Command",
