@@ -177,13 +177,13 @@ Page size is server-owned; there is no client `page_size` parameter (passing one
 
 | Tool | Purpose | Languages |
 |------|---------|-----------|
-| `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore` | all |
+| `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore`; file paths in the output are relative to the working directory | all |
 | `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions | all |
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
 | `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block or all non-overlapping occurrences (replace_all=true); errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching; optional expected_content_hash (blake3 hex of raw bytes) rejects stale edits; concurrent edits to the same file are serialized per-path; returns occurrences_replaced count. Batch form: pass `edits[]` (array of `{old_text, new_text, replace_all}`) instead of `old_text`/`new_text` to apply multiple replacements to one file atomically (any invalid edit aborts with per-index errors, no write) | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; the command is killed when the request is cancelled; server-owned post-exit drain window (500 ms default); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter) | any |
+| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; the command is killed when the request is cancelled; server-owned post-exit drain window (500 ms default); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter); structuredContent carries metadata only (exit code, truncation, collection-error flags), command output lives in the text stream | any |
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
@@ -263,7 +263,7 @@ Project-local rules can be added in `.aptu/filters.toml`. Parse errors and unrec
 
 In single-pass subagent sessions, prompt caches are written but never reused. Benchmarks showed MCP responses writing ~2x more to cache than native-only workflows, adding cost with no quality gain. Set `DISABLE_PROMPT_CACHING=1` (or `DISABLE_PROMPT_CACHING_HAIKU=1` for Haiku-specific pipelines) to avoid this overhead.
 
-The server's own instructions expose a 4-step recommended workflow for unknown repositories: survey the repo root with `analyze_directory` at `max_depth=2`, drill into the source package, run `analyze_module` on key files for a function/import index (or `analyze_file` when signatures and types are needed), then use `analyze_symbol` to trace call graphs. MCP clients that surface server instructions will present this workflow automatically to the agent.
+The server's own instructions are deliberately minimal, a single short paragraph: start with `analyze_directory` for a package/module map, then use `analyze_module`/`analyze_file` for per-file detail and `analyze_symbol` for call graphs, with a pointer to `docs/METRICS.md` for JSONL metrics and jq recipes. MCP clients that surface server instructions will present this guidance automatically to the agent.
 
 ## Environment Variables
 

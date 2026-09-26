@@ -86,11 +86,11 @@ Returns a tree with LOC, function count, and class count."
 
 **Principle:** Server instructions should provide an ordered workflow, not open-ended guidance. Small models execute numbered steps sequentially; they do not synthesize a strategy from a list of capabilities.
 
-*Example: The server instructions for this server use a 4-step recommended workflow: (1) `analyze_directory` at max_depth=2 to orient; (2) re-run on the source package; (3) `analyze_file` on key files; (4) `analyze_symbol` for call graphs. This workflow was introduced in Wave 6 (#342).*
+*Example: The server instructions for this server were originally a 4-step numbered workflow (introduced in Wave 6, #342); they have since been trimmed (#1636) to a single short paragraph: start with `analyze_directory` for a package/module map, then `analyze_module`/`analyze_file` for per-file detail and `analyze_symbol` for call graphs. The lesson stands -- guidance should be ordered and concrete, not a list of capabilities.*
 
 ### Structured Output Belongs at the Runner Layer
 
-**Principle:** Tools should always return structured data. Enforcing output schema (e.g., JSON-only) belongs at the client or runner layer, not inside the tool.
+**Principle:** When a tool returns structured data, enforcing its schema (e.g., JSON-only) belongs at the client or runner layer, not inside the tool. Note: this project has since moved its analysis tools to text-only MCP output, removing the mirrored structuredContent and output schemas (#1660 series); the runner-layer lesson below still applies wherever structured output is used.
 
 *Example: In v12 benchmark Condition D, the runner initially omitted `--json-schema`, causing Haiku to wrap structured output in prose. Re-running with `--json-schema` restored 100% JSON validity. The tool itself was unchanged.*
 
@@ -276,7 +276,7 @@ The following anti-patterns were identified across benchmark waves and wave post
 | One auto-detecting tool for all modes | Ambiguous routing; model guesses; reliability failure | Separate tools with non-overlapping, explicitly described interfaces |
 | Vague or suggestive tool descriptions | Small models choose the wrong tool or call multiple tools in sequence | Prescriptive descriptions with explicit when-to-use and when-not-to-use |
 | Generic error messages without next steps | Agent loops re-calling the errored tool or abandons task | Actionable errors with alternative tool name and absolute path suggestion |
-| Structured output enforcement inside the tool | Tool becomes runner-dependent; non-portable | Enforce at client/runner layer; tool always returns structured data |
+| Structured output enforcement inside the tool | Tool becomes runner-dependent; non-portable | Enforce at client/runner layer; the tool's MCP response stays text-only, and any structured data it exposes (e.g., a public library API) carries no in-tool schema enforcement |
 | Synchronous metrics/logging on the hot path | Observability adds latency to every tool call | Channel pattern: fire-and-forget into unbounded channel; writer task runs independently |
 | Optimizing only for large models | Small-model users experience regressions | Small-model-first constraint: validate against Haiku before Sonnet |
 | Missing `///` doc comments on parameter fields | Parameter appears in `inputSchema.properties` with an empty `description`; model must infer meaning from name alone | Add `///` doc comment to every parameter field; enforced by `test_all_tool_parameters_have_descriptions` in `annotations.rs` |

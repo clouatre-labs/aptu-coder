@@ -134,18 +134,13 @@ Exported from `aptu_coder_core` as a public API for library consumers that hold 
 4. Symbols called >3x marked with `•N`
 5. Format as FOCUS/DEPTH/DEFINED/CALLERS/CALLEES sections
 
-**Structured output:** In addition to formatted text, `analyze_symbol` populates three fields on `FocusedAnalysisOutput` for programmatic consumption:
-- `callers: Option<Vec<CallChainEntry>>` -- depth-1 production callers
-- `test_callers: Option<Vec<CallChainEntry>>` -- depth-1 callers from test files
-- `callees: Option<Vec<CallChainEntry>>` -- depth-1 callees
-
-`CallChainEntry` is a stable public type (exported from `aptu_coder_core`) with fields `symbol: String`, `file: String`, `line: usize`. Conversion from the internal `InternalCallChain` (which is non-serializable and stays internal) happens at the output boundary via the private `chains_to_entries` helper. The `follow_depth` parameter does not affect these arrays; they always represent depth-1 relationships.
+**Output contract:** The MCP tool returns formatted text only; the mirrored `structuredContent`/output schema was removed (#1660 series). The depth-1 callers/callees appear in the CALLERS/CALLEES text sections. The `FocusedAnalysisOutput` fields `callers`, `test_callers`, and `callees` (`Option<Vec<CallChainEntry>>`) remain available on the public core API in `aptu_coder_core` for library consumers. `CallChainEntry` is a stable public type with fields `symbol: String`, `file: String`, `line: usize`; conversion from the internal `InternalCallChain` (which is non-serializable and stays internal) happens via the private `chains_to_entries` helper. The `follow_depth` parameter does not affect these arrays; they always represent depth-1 relationships.
 
 **Import lookup mode:** When `mode=import_lookup`, instead of building a call graph, the tool scans all files in the directory for imports of the module path specified in `symbol`. Returns a list of files that import that module. This mode rejects `match_mode`, `follow_depth`, and `impl_only` (`mode_param_conflict`).
 
 **Git ref filtering:** When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the set of changed files, and `filter_entries_by_git_ref()` restricts the analysis to those files before the graph is built.
 
-**Def-use mode:** When `mode=def_use`, the tool computes definition and use sites alongside the call graph. However, `def_use_sites` is cleared (`Vec::new()`) in `structuredContent` on the initial response. Once the callers and callees pages are exhausted, the handler automatically emits a `{mode: defuse, offset: 0}` cursor. Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
+**Def-use mode:** When `mode=def_use`, the tool computes definition and use sites alongside the call graph, but in the initial response the handler does not set `structuredContent`: the bootstrap cursor is delivered as a `NEXT_CURSOR:` line in the text output (with a usage hint). Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
 
 ## Observability Architecture
 
