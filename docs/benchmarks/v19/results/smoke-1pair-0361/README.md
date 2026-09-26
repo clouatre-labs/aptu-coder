@@ -118,3 +118,21 @@ correct on its control cell. Blinding leak check PASS; cumulative spend
 $0.008301 / $0.10 cap. **Do not proceed to stage 3** until the runner
 records wait-timeout kills as defects and the turn-limit trip is
 adjudicated per the ladder runbook.
+
+## Post-halt decisions (2026-09-26, Jev-consulted)
+
+The three stage-3 gating questions were put to the TypeSafe System One
+decision model (Jev, `jev-1.13.0`, via decisions-judge-mcp `judge`; the
+full run state above was the `state` payload; verdict recorded verbatim,
+no fallback envelope):
+
+| Question | Jev answer | Confidence |
+|---|---|---|
+| Land the wait-timeout ledger patch before pilot spend? | yes (noul 0.83) | - |
+| Fix for the Track A prompt/scorer mismatch | `add_anchors_to_prompt` (0.95 vs 0.05) | 0.90 |
+| Stage-3 wait/turn threshold | `raise_and_turn_cap` (0.70; `raise_300s` 0.18, `keep_120s` 0.08) | 0.61 |
+
+Ledger patch: PR #1685. Threshold re-cut (wait 120s to 300s + explicit
+per-session turn cap) and the callers-template anchor wording are
+manifest-recorded amendments to apply at stage 3, pending maintainer
+ratification on #1681 - nothing re-cut silently.
