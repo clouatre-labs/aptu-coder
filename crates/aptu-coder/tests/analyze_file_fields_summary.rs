@@ -54,35 +54,43 @@ async fn analyze_file_fields_with_summary_true_silently_ignores_fields() {
     );
 }
 
-/// analyze_file default response (no fields): structuredContent semantic data
-/// must not carry references or calls keys; only functions/classes/imports.
+/// analyze_file default response (no fields): the text block must include the
+/// classes and functions sections; the response carries no structuredContent.
 #[tokio::test]
-async fn analyze_file_default_response_omits_references_and_calls() {
+async fn analyze_file_default_response_includes_semantic_sections() {
     // Arrange: a real source file in the repo; no fields projection requested.
     let path = "src/lib.rs";
 
     // Act: call analyze_file with only the path.
     let resp = call_tool_raw("analyze_file", serde_json::json!({ "path": path })).await;
 
-    // Assert: success, and no references/calls keys in structuredContent.
+    // Assert: success, sections present in the text block, structuredContent
+    // absent.
     assert!(
         !resp["result"]["isError"].as_bool().unwrap_or(false),
         "expected success but got error: {resp}"
     );
-    let structured = &resp["result"]["structuredContent"]["semantic"];
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
     assert!(
-        structured.get("references").is_none(),
-        "references must be absent by default: {structured}"
+        text.contains("\nC:\n"),
+        "classes section must be present by default: {text}"
     );
     assert!(
-        structured.get("calls").is_none(),
-        "calls must be absent by default: {structured}"
+        text.contains("\nF:\n"),
+        "functions section must be present by default: {text}"
+    );
+    assert!(
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
     );
 }
 
-/// analyze_file with fields=[references, calls]: the requested sections appear.
+/// analyze_file with fields=[references, calls]: the requested fields are
+/// accepted and the response carries a text block only (no structuredContent).
 #[tokio::test]
-async fn analyze_file_fields_references_and_calls_are_projected() {
+async fn analyze_file_fields_references_and_calls_project_to_text() {
     // Arrange: a real source file and an explicit references+calls projection.
     let path = "src/lib.rs";
 
@@ -93,18 +101,20 @@ async fn analyze_file_fields_references_and_calls_are_projected() {
     )
     .await;
 
-    // Assert: success, and both requested keys are present in structuredContent.
+    // Assert: success, and the response carries a text block only.
     assert!(
         !resp["result"]["isError"].as_bool().unwrap_or(false),
         "expected success but got error: {resp}"
     );
-    let structured = &resp["result"]["structuredContent"]["semantic"];
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
     assert!(
-        structured.get("references").is_some(),
-        "references must be present when requested: {structured}"
+        text.starts_with("FILE: "),
+        "expected details-mode output header, got: {text}"
     );
     assert!(
-        structured.get("calls").is_some(),
-        "calls must be present when requested: {structured}"
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
     );
 }

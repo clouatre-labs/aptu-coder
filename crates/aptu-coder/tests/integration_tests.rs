@@ -245,29 +245,26 @@ async fn test_fields_functions_only_structured() {
         "expected success; got: {resp}"
     );
 
-    // Inspect structuredContent.semantic
-    let sc = &resp["result"]["structuredContent"];
-    let functions = sc["semantic"]["functions"]
-        .as_array()
-        .expect("functions must be array");
-    let classes = sc["semantic"]["classes"]
-        .as_array()
-        .expect("classes must be array");
-    let imports = sc["semantic"]["imports"]
-        .as_array()
-        .expect("imports must be array");
+    // Inspect the text block (no structuredContent in responses).
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
+    assert!(
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
+    );
 
     assert!(
-        !functions.is_empty(),
-        "functions must be non-empty for fields=[functions]; got: {sc}"
+        text.contains("\nF:\n"),
+        "functions section must be present for fields=[functions]; got: {text}"
     );
     assert!(
-        classes.is_empty(),
-        "classes must be empty for fields=[functions]; got: {sc}"
+        !text.contains("\nC:\n"),
+        "classes section must be absent for fields=[functions]; got: {text}"
     );
     assert!(
-        imports.is_empty(),
-        "imports must be empty for fields=[functions]; got: {sc}"
+        !text.contains("\nI:\n"),
+        "imports section must be absent for fields=[functions]; got: {text}"
     );
 }
 
@@ -301,29 +298,26 @@ async fn test_fields_classes_only_structured() {
         "expected success; got: {resp}"
     );
 
-    // Inspect structuredContent.semantic
-    let sc = &resp["result"]["structuredContent"];
-    let functions = sc["semantic"]["functions"]
-        .as_array()
-        .expect("functions must be array");
-    let classes = sc["semantic"]["classes"]
-        .as_array()
-        .expect("classes must be array");
-    let imports = sc["semantic"]["imports"]
-        .as_array()
-        .expect("imports must be array");
+    // Inspect the text block (no structuredContent in responses).
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
+    assert!(
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
+    );
 
     assert!(
-        functions.is_empty(),
-        "functions must be empty for fields=[classes]; got: {sc}"
+        !text.contains("\nF:\n"),
+        "functions section must be absent for fields=[classes]; got: {text}"
     );
     assert!(
-        !classes.is_empty(),
-        "classes must be non-empty for fields=[classes]; got: {sc}"
+        text.contains("\nC:\n"),
+        "classes section must be present for fields=[classes]; got: {text}"
     );
     assert!(
-        imports.is_empty(),
-        "imports must be empty for fields=[classes]; got: {sc}"
+        !text.contains("\nI:\n"),
+        "imports section must be absent for fields=[classes]; got: {text}"
     );
 }
 
@@ -357,29 +351,26 @@ async fn test_fields_imports_only_structured() {
         "expected success; got: {resp}"
     );
 
-    // Inspect structuredContent.semantic
-    let sc = &resp["result"]["structuredContent"];
-    let functions = sc["semantic"]["functions"]
-        .as_array()
-        .expect("functions must be array");
-    let classes = sc["semantic"]["classes"]
-        .as_array()
-        .expect("classes must be array");
-    let imports = sc["semantic"]["imports"]
-        .as_array()
-        .expect("imports must be array");
+    // Inspect the text block (no structuredContent in responses).
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
+    assert!(
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
+    );
 
     assert!(
-        functions.is_empty(),
-        "functions must be empty for fields=[imports]; got: {sc}"
+        !text.contains("\nF:\n"),
+        "functions section must be absent for fields=[imports]; got: {text}"
     );
     assert!(
-        classes.is_empty(),
-        "classes must be empty for fields=[imports]; got: {sc}"
+        !text.contains("\nC:\n"),
+        "classes section must be absent for fields=[imports]; got: {text}"
     );
     assert!(
-        !imports.is_empty(),
-        "imports must be non-empty for fields=[imports]; got: {sc}"
+        text.contains("\nI:\n"),
+        "imports section must be present for fields=[imports]; got: {text}"
     );
 }
 
@@ -412,29 +403,26 @@ async fn test_fields_none_structured_full() {
         "expected success; got: {resp}"
     );
 
-    // Inspect structuredContent.semantic -- all sections must be present (regression)
-    let sc = &resp["result"]["structuredContent"];
-    let functions = sc["semantic"]["functions"]
-        .as_array()
-        .expect("functions must be array");
-    let classes = sc["semantic"]["classes"]
-        .as_array()
-        .expect("classes must be array");
-    let imports = sc["semantic"]["imports"]
-        .as_array()
-        .expect("imports must be array");
+    // Inspect the text block -- all sections must be present (regression)
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
+    assert!(
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
+    );
 
     assert!(
-        !functions.is_empty(),
-        "functions must be non-empty when fields=None; got: {sc}"
+        text.contains("\nF:\n"),
+        "functions section must be present when fields=None; got: {text}"
     );
     assert!(
-        !classes.is_empty(),
-        "classes must be non-empty when fields=None; got: {sc}"
+        text.contains("\nC:\n"),
+        "classes section must be present when fields=None; got: {text}"
     );
     assert!(
-        !imports.is_empty(),
-        "imports must be non-empty when fields=None; got: {sc}"
+        !text.contains("\nI:\n"),
+        "imports section is only shown for explicit fields projection: {text}"
     );
 }
 
@@ -461,38 +449,28 @@ async fn test_analyze_file_unsupported_extension() {
         "analyze_file on unsupported extension must succeed; got: {resp}"
     );
 
-    // Correct line count
-    let sc = &resp["result"]["structuredContent"];
-    let line_count = sc["line_count"]
-        .as_u64()
-        .expect("line_count must be present");
-    assert_eq!(line_count, 2, "line_count must be 2; got: {resp}");
-
-    // Semantic fields empty
+    // No structuredContent; unsupported-extension note present
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("result should carry text content");
     assert!(
-        sc["semantic"]["functions"]
-            .as_array()
-            .expect("functions must be array")
-            .is_empty(),
-        "functions must be empty for unsupported extension"
+        resp["result"].get("structuredContent").is_none(),
+        "structuredContent must be absent: {resp}"
     );
     assert!(
-        sc["semantic"]["classes"]
-            .as_array()
-            .expect("classes must be array")
-            .is_empty(),
-        "classes must be empty for unsupported extension"
+        !text.contains("\nF:\n"),
+        "functions section must be absent for unsupported extension; got: {text}"
     );
     assert!(
-        sc["semantic"]["imports"]
-            .as_array()
-            .expect("imports must be array")
-            .is_empty(),
-        "imports must be empty for unsupported extension"
+        !text.contains("\nC:\n"),
+        "classes section must be absent for unsupported extension; got: {text}"
+    );
+    assert!(
+        !text.contains("\nI:\n"),
+        "imports section must be absent for unsupported extension; got: {text}"
     );
 
     // Formatted text includes unsupported-extension note
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
     assert!(
         text.to_lowercase().contains("unsupported"),
         "formatted output must include unsupported-extension note; got: {text}"

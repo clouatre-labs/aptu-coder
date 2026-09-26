@@ -14,7 +14,6 @@ const ANALYZE_FILE_PAGE_SIZE: usize = 50;
 use aptu_coder_core::parser::ParserError;
 use aptu_coder_core::types::{AnalysisMode, AnalyzeFileParams, FunctionInfo};
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, TextContent};
-use serde_json::Value;
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -394,14 +393,6 @@ pub(crate) async fn analyze_file_handler(
         final_text.push_str("\nPagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.");
     }
 
-    let response_output = analyze::FileAnalysisOutput::new(
-        params.path.clone(),
-        formatted,
-        arc_output.semantic.project(params.fields.as_deref()),
-        line_count,
-        next_cursor,
-    );
-
     tracing::Span::current().record("cache_tier", file_cache_hit.as_str());
 
     let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
@@ -412,13 +403,11 @@ pub(crate) async fn analyze_file_handler(
     );
     let meta = rmcp::model::MetaObject(meta);
 
-    let mut result = CallToolResult::success(vec![ContentBlock::Text(
+    let result = CallToolResult::success(vec![ContentBlock::Text(
         TextContent::new(final_text.clone())
             .with_annotations(Annotations::default().with_priority(0.9_f32)),
     )])
     .with_meta(Some(meta));
-    let structured = serde_json::to_value(&response_output).unwrap_or(Value::Null);
-    result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_file", "ok", dur)
