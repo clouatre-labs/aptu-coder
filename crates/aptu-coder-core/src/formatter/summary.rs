@@ -370,40 +370,40 @@ pub fn format_summary(
     output
 }
 
-/// Format a compact summary of file details for large `FileDetails` output.
-///
-/// Returns `FILE` header with path/LOC/counts, top 10 functions by line span descending,
-/// classes inline if <=10, import count, and suggestion block.
-#[instrument(skip_all)]
+/// Shared prologue for the `format_focused` variants: chain resolution, caller partitioning,
+/// counts, and the FOCUS/DEPTH/DEFINED sections.
+struct FocusedPrologue<'a> {
+    output: String,
+    prod_chains: Vec<InternalCallChain>,
+    test_chains: Vec<InternalCallChain>,
+    outgoing_chains: std::borrow::Cow<'a, [InternalCallChain]>,
+}
 
-/// Full-format focused symbol output (callers/callees with chain trees).
-pub(crate) fn format_focused_internal(
+fn focused_prologue<'a>(
     graph: &CallGraph,
     symbol: &str,
     follow_depth: u32,
     base_path: Option<&Path>,
-    incoming_chains: Option<&[InternalCallChain]>,
-    outgoing_chains: Option<&[InternalCallChain]>,
-    def_use_sites: &[DefUseSite],
-) -> Result<String, FormatterError> {
+    incoming_chains: Option<&'a [InternalCallChain]>,
+    outgoing_chains: Option<&'a [InternalCallChain]>,
+) -> Result<FocusedPrologue<'a>, FormatterError> {
     let mut output = String::new();
 
     // Compute all counts BEFORE output begins
     let def_count = graph.definitions.get(symbol).map_or(0, Vec::len);
 
     // Use pre-computed chains if provided, otherwise compute them
-    let (incoming_chains_vec, outgoing_chains_vec);
-    let (incoming_chains_ref, outgoing_chains_ref) =
-        if let (Some(inc), Some(out)) = (incoming_chains, outgoing_chains) {
-            (inc, out)
-        } else {
-            incoming_chains_vec = graph.find_incoming_chains(symbol, follow_depth)?;
-            outgoing_chains_vec = graph.find_outgoing_chains(symbol, follow_depth)?;
-            (
-                incoming_chains_vec.as_slice(),
-                outgoing_chains_vec.as_slice(),
-            )
-        };
+    let incoming_chains_vec;
+    let incoming_chains_ref = if let Some(inc) = incoming_chains {
+        inc
+    } else {
+        incoming_chains_vec = graph.find_incoming_chains(symbol, follow_depth)?;
+        incoming_chains_vec.as_slice()
+    };
+    let outgoing = match outgoing_chains {
+        Some(out) => std::borrow::Cow::Borrowed(out),
+        None => std::borrow::Cow::Owned(graph.find_outgoing_chains(symbol, follow_depth)?),
+    };
 
     // Partition incoming_chains into production and test callers
     let (prod_chains, test_chains): (Vec<_>, Vec<_>) =
@@ -422,7 +422,7 @@ pub(crate) fn format_focused_internal(
         .len();
 
     // Count unique callees
-    let callees_count = outgoing_chains_ref
+    let callees_count = outgoing
         .iter()
         .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p))
         .collect::<std::collections::HashSet<_>>()
@@ -447,6 +447,40 @@ pub(crate) fn format_focused_internal(
     } else {
         output.push_str("DEFINED: (not found)\n");
     }
+
+    Ok(FocusedPrologue {
+        output,
+        prod_chains,
+        test_chains,
+        outgoing_chains: outgoing,
+    })
+}
+
+/// Full-format focused symbol output (callers/callees with chain trees).
+pub(crate) fn format_focused_internal(
+    graph: &CallGraph,
+    symbol: &str,
+    follow_depth: u32,
+    base_path: Option<&Path>,
+    incoming_chains: Option<&[InternalCallChain]>,
+    outgoing_chains: Option<&[InternalCallChain]>,
+    def_use_sites: &[DefUseSite],
+) -> Result<String, FormatterError> {
+    let prologue = focused_prologue(
+        graph,
+        symbol,
+        follow_depth,
+        base_path,
+        incoming_chains,
+        outgoing_chains,
+    )?;
+    let FocusedPrologue {
+        mut output,
+        prod_chains,
+        test_chains,
+        outgoing_chains: outgoing_ref,
+    } = prologue;
+    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
 
     // CALLERS section - who calls this symbol
     output.push_str("CALLERS:\n");
@@ -617,67 +651,21 @@ pub(crate) fn format_focused_summary_internal(
     outgoing_chains: Option<&[InternalCallChain]>,
     def_use_sites: &[DefUseSite],
 ) -> Result<String, FormatterError> {
-    let mut output = String::new();
-
-    // Compute all counts BEFORE output begins
-    let def_count = graph.definitions.get(symbol).map_or(0, Vec::len);
-
-    // Use pre-computed chains if provided, otherwise compute them
-    let (incoming_chains_vec, outgoing_chains_vec);
-    let (incoming_chains_ref, outgoing_chains_ref) =
-        if let (Some(inc), Some(out)) = (incoming_chains, outgoing_chains) {
-            (inc, out)
-        } else {
-            incoming_chains_vec = graph.find_incoming_chains(symbol, follow_depth)?;
-            outgoing_chains_vec = graph.find_outgoing_chains(symbol, follow_depth)?;
-            (
-                incoming_chains_vec.as_slice(),
-                outgoing_chains_vec.as_slice(),
-            )
-        };
-
-    // Partition incoming_chains into production and test callers
-    let (prod_chains, test_chains): (Vec<_>, Vec<_>) =
-        incoming_chains_ref.iter().cloned().partition(|chain| {
-            chain
-                .chain
-                .first()
-                .is_none_or(|(name, path, _)| !is_test_file(path) && !name.starts_with("test_"))
-        });
-
-    // Count unique production callers
-    let callers_count = prod_chains
-        .iter()
-        .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p))
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-
-    // Count unique callees
-    let callees_count = outgoing_chains_ref
-        .iter()
-        .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p))
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-
-    // FOCUS header
-    let _ = writeln!(
-        output,
-        "FOCUS: {symbol} ({def_count} defs, {callers_count} callers, {callees_count} callees)"
-    );
-
-    // DEPTH line
-    let _ = writeln!(output, "DEPTH: {follow_depth}");
-
-    // DEFINED section
-    if let Some(definitions) = graph.definitions.get(symbol) {
-        output.push_str("DEFINED:\n");
-        for (path, line) in definitions {
-            let display = emit::strip_base_path(path, base_path);
-            let _ = writeln!(output, "  {display}:{line}");
-        }
-    } else {
-        output.push_str("DEFINED: (not found)\n");
-    }
+    let prologue = focused_prologue(
+        graph,
+        symbol,
+        follow_depth,
+        base_path,
+        incoming_chains,
+        outgoing_chains,
+    )?;
+    let FocusedPrologue {
+        mut output,
+        prod_chains,
+        test_chains,
+        outgoing_chains: outgoing_ref,
+    } = prologue;
+    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
 
     // CALLERS (production, top 10 by frequency)
     output.push_str("CALLERS (top 10):\n");

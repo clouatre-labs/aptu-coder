@@ -5,6 +5,7 @@
 //! All items here are `pub(crate)`. OTel-specific types (`ClientMetadata`,
 //! `extract_and_set_trace_context`) live in `crate::otel` where they are `pub`.
 
+use aptu_coder_core::pagination::decode_cursor;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData, MetaObject};
 
 /// Returns `true` when `summary=true` and a `cursor` are both provided, which is an invalid
@@ -20,6 +21,43 @@ pub(crate) fn summary_cursor_conflict(summary: Option<bool>, cursor: Option<&str
 #[must_use]
 pub(crate) fn normalize_cursor(cursor: Option<&str>) -> Option<&str> {
     cursor.filter(|c| !c.is_empty())
+}
+
+/// Decodes a pagination cursor into its byte offset, returning offset 0 when the cursor is
+/// absent. Malformed cursors yield an `INVALID_PARAMS` error with a validation meta payload.
+pub(crate) fn decode_offset(cursor: Option<&str>) -> Result<usize, ErrorData> {
+    match cursor {
+        Some(cursor_str) => decode_cursor(cursor_str).map(|c| c.offset).map_err(|e| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                e.to_string(),
+                Some(error_meta("validation", false, "invalid cursor format")),
+            )
+        }),
+        None => Ok(0),
+    }
+}
+
+/// Paginates a slice with the default pagination mode, mapping pagination failures to an
+/// `INTERNAL_ERROR` with a transient, retryable meta payload.
+pub(crate) fn paginate_or_internal_error<T: Clone>(
+    items: &[T],
+    offset: usize,
+    page_size: usize,
+) -> Result<aptu_coder_core::pagination::PaginationResult<T>, ErrorData> {
+    aptu_coder_core::pagination::paginate_slice(
+        items,
+        offset,
+        page_size,
+        aptu_coder_core::pagination::PaginationMode::Default,
+    )
+    .map_err(|e| {
+        ErrorData::new(
+            rmcp::model::ErrorCode::INTERNAL_ERROR,
+            e.to_string(),
+            Some(error_meta("transient", true, "retry the request")),
+        )
+    })
 }
 
 #[cfg(test)]

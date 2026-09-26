@@ -8,7 +8,6 @@
 use aptu_coder_core::analyze;
 use aptu_coder_core::cache::{CacheKey, CacheTier};
 use aptu_coder_core::formatter::{format_file_details_paginated, format_file_details_summary};
-use aptu_coder_core::pagination::{PaginationMode, decode_cursor};
 
 /// Fixed server-side page size for analyze_file. Clients cannot override it.
 const ANALYZE_FILE_PAGE_SIZE: usize = 50;
@@ -24,6 +23,29 @@ use crate::tools::AnalyzeFileContext;
 use crate::tools::common::{
     err_to_tool_result, error_meta, no_cache_meta, normalize_cursor, summary_cursor_conflict,
 };
+
+/// Classify a terminal failure for the shared emit_internal_error helper: record span
+/// fields, emit the validation metric, and wrap the `ErrorData` exactly once.
+#[allow(clippy::too_many_arguments)]
+fn emit_internal_error(
+    span: &tracing::Span,
+    ctx: &AnalyzeFileContext,
+    params: &AnalyzeFileParams,
+    seq: u32,
+    sid: &Option<String>,
+    t_start: std::time::Instant,
+    param_path: &str,
+    cursor: Option<&str>,
+    error_type: &str,
+    e: ErrorData,
+) -> Result<CallToolResult, ErrorData> {
+    span.record("error", true);
+    span.record("error.type", error_type);
+    emit_validation_error(
+        ctx, params, seq, sid, t_start, param_path, cursor, error_type,
+    );
+    Ok(err_to_tool_result(e))
+}
 
 /// Core analysis logic for the `analyze_file` tool (file details mode).
 ///
@@ -309,34 +331,22 @@ pub(crate) async fn analyze_file_handler(
     }
 
     let page_size = ANALYZE_FILE_PAGE_SIZE;
-    let offset = if let Some(cursor_str) = cursor {
-        let cursor_data = match decode_cursor(cursor_str).map_err(|e| {
-            ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                e.to_string(),
-                Some(error_meta("validation", false, "invalid cursor format")),
-            )
-        }) {
-            Ok(v) => v,
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                emit_validation_error(
-                    ctx,
-                    &params,
-                    seq,
-                    &sid,
-                    t_start,
-                    &param_path,
-                    cursor,
-                    "invalid_params",
-                );
-                return Ok(err_to_tool_result(e));
-            }
-        };
-        cursor_data.offset
-    } else {
-        0
+    let offset = match super::common::decode_offset(cursor) {
+        Ok(o) => o,
+        Err(e) => {
+            return emit_internal_error(
+                span,
+                ctx,
+                &params,
+                seq,
+                &sid,
+                t_start,
+                &param_path,
+                cursor,
+                "invalid_params",
+                e,
+            );
+        }
     };
 
     let top_level_fns: Vec<FunctionInfo> = arc_output
@@ -353,33 +363,24 @@ pub(crate) async fn analyze_file_handler(
         .cloned()
         .collect();
 
-    let paginated = match aptu_coder_core::pagination::paginate_slice(
-        &top_level_fns,
-        offset,
-        page_size,
-        PaginationMode::Default,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            span.record("error", true);
-            span.record("error.type", "internal_error");
-            emit_validation_error(
-                ctx,
-                &params,
-                seq,
-                &sid,
-                t_start,
-                &param_path,
-                cursor,
-                "internal_error",
-            );
-            return Ok(err_to_tool_result(ErrorData::new(
-                rmcp::model::ErrorCode::INTERNAL_ERROR,
-                e.to_string(),
-                Some(error_meta("transient", true, "retry the request")),
-            )));
-        }
-    };
+    let paginated =
+        match super::common::paginate_or_internal_error(&top_level_fns, offset, page_size) {
+            Ok(v) => v,
+            Err(e) => {
+                return emit_internal_error(
+                    span,
+                    ctx,
+                    &params,
+                    seq,
+                    &sid,
+                    t_start,
+                    &param_path,
+                    cursor,
+                    "internal_error",
+                    e,
+                );
+            }
+        };
 
     let is_unsupported_fallback = arc_output
         .formatted

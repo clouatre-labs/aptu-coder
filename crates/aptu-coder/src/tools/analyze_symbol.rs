@@ -340,19 +340,7 @@ async fn handle_import_lookup(
     // Record cache tier in span
     tracing::Span::current().record("cache_tier", "Miss");
 
-    // Add content_hash to _meta
-    let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-    let mut meta = no_cache_meta().0;
-    meta.insert(
-        "content_hash".to_string(),
-        serde_json::Value::String(content_hash),
-    );
-
-    let mut result = CallToolResult::success(vec![ContentBlock::Text(
-        TextContent::new(final_text.clone())
-            .with_annotations(Annotations::default().with_priority(0.9_f32)),
-    )])
-    .with_meta(Some(MetaObject(meta)));
+    let mut result = ok_result_with_hash(&final_text);
     let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
     result.structured_content = Some(structured);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
@@ -387,6 +375,23 @@ async fn handle_import_lookup(
     Ok(result)
 }
 
+/// Build a successful `CallToolResult` carrying the content hash in `_meta`.
+/// Shared by the call-graph and detail result paths so the hash/meta prologue
+/// is not duplicated.
+fn ok_result_with_hash(final_text: &str) -> CallToolResult {
+    let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+    let mut meta = no_cache_meta().0;
+    meta.insert(
+        "content_hash".to_string(),
+        serde_json::Value::String(content_hash),
+    );
+    CallToolResult::success(vec![ContentBlock::Text(
+        TextContent::new(final_text.to_string())
+            .with_annotations(Annotations::default().with_priority(0.9_f32)),
+    )])
+    .with_meta(Some(MetaObject(meta)))
+}
+
 /// Decode the pagination cursor from `params` and return `(offset, cursor_mode)`.
 ///
 /// Returns `Err(CallToolResult)` on a malformed cursor so the caller can
@@ -405,22 +410,12 @@ fn decode_call_graph_cursor(
         })
         .unwrap_or(PaginationMode::Callers);
 
-    let offset = if let Some(cursor_str) = cursor {
-        decode_cursor(cursor_str)
-            .map_err(|e| {
-                (
-                    err_to_tool_result(ErrorData::new(
-                        rmcp::model::ErrorCode::INVALID_PARAMS,
-                        e.to_string(),
-                        Some(error_meta("validation", false, "invalid cursor format")),
-                    )),
-                    AnalyzeSymbolErrorSubtype::InvalidCursor,
-                )
-            })?
-            .offset
-    } else {
-        0
-    };
+    let offset = super::common::decode_offset(cursor).map_err(|e| {
+        (
+            err_to_tool_result(e),
+            AnalyzeSymbolErrorSubtype::InvalidCursor,
+        )
+    })?;
 
     Ok((offset, cursor_mode))
 }
@@ -579,19 +574,7 @@ async fn handle_call_graph(
     // Record cache tier in span
     tracing::Span::current().record("cache_tier", graph_cache_tier.as_str());
 
-    // Add content_hash to _meta
-    let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
-    let mut meta = no_cache_meta().0;
-    meta.insert(
-        "content_hash".to_string(),
-        serde_json::Value::String(content_hash),
-    );
-
-    let mut result = CallToolResult::success(vec![ContentBlock::Text(
-        TextContent::new(final_text.clone())
-            .with_annotations(Annotations::default().with_priority(0.9_f32)),
-    )])
-    .with_meta(Some(MetaObject(meta)));
+    let mut result = ok_result_with_hash(&final_text);
     // Only include def_use_sites in structuredContent when in DefUse mode.
     // In Callers/Callees modes, clearing the vec prevents large def-use
     // payloads from leaking into paginated non-def-use responses.

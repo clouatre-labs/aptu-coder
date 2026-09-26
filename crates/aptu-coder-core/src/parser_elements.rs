@@ -10,8 +10,8 @@ use crate::types::{
     CallInfo, ClassInfo, FunctionInfo, ImplTraitInfo, ImportInfo, ReferenceInfo, ReferenceType,
 };
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use tree_sitter::{Node, StreamingIterator};
+use std::path::Path;
+use tree_sitter::{Node, Query, StreamingIterator};
 
 use crate::parser::{CompiledQueries, ParserError, QUERY_CURSOR, TimeoutConfig};
 
@@ -752,30 +752,29 @@ pub(crate) fn extract_references(
 
 /// Extract impl-trait blocks from an already-parsed tree.
 ///
-/// Called during `extract()` for Rust files to avoid a second parse.
-/// Returns an empty vec if the query is not available.
-pub(crate) fn extract_impl_traits_from_tree(
+/// Collect `impl Trait for Type` matches from a compiled query into `results`.
+///
+/// Shared capture loop for `extract_impl_traits` (parser.rs) and
+/// `extract_impl_traits_from_tree`; `tc` enables mid-loop deadline checks.
+/// Returns `true` if the loop stopped early due to timeout.
+pub(crate) fn collect_impl_trait_matches(
     source: &str,
-    compiled: &CompiledQueries,
+    query: &Query,
     root: Node<'_>,
-    tc: TimeoutConfig,
-) -> Result<Vec<ImplTraitInfo>, ParserError> {
-    let Some(query) = &compiled.impl_trait else {
-        return Ok(vec![]);
-    };
-
-    let mut results = Vec::new();
+    path: &Path,
+    tc: Option<TimeoutConfig>,
+    results: &mut Vec<ImplTraitInfo>,
+) -> bool {
     let mut timed_out = false;
 
     QUERY_CURSOR.with(|c| {
         let mut cursor = c.borrow_mut();
         cursor.set_max_start_depth(None);
-
         let mut matches = cursor.matches(query, root, source.as_bytes());
 
         while let Some(mat) = matches.next() {
             // Check if we've hit the deadline
-            if tc.is_exceeded() {
+            if tc.is_some_and(|tc| tc.is_exceeded()) {
                 timed_out = true;
                 break;
             }
@@ -804,12 +803,31 @@ pub(crate) fn extract_impl_traits_from_tree(
                 results.push(ImplTraitInfo {
                     trait_name,
                     impl_type,
-                    path: PathBuf::new(), // Path will be set by caller
+                    path: path.to_path_buf(),
                     line,
                 });
             }
         }
     });
+
+    timed_out
+}
+
+/// Called during `extract()` for Rust files to avoid a second parse.
+/// Returns an empty vec if the query is not available.
+pub(crate) fn extract_impl_traits_from_tree(
+    source: &str,
+    compiled: &CompiledQueries,
+    root: Node<'_>,
+    tc: TimeoutConfig,
+) -> Result<Vec<ImplTraitInfo>, ParserError> {
+    let Some(query) = &compiled.impl_trait else {
+        return Ok(vec![]);
+    };
+
+    let mut results = Vec::new();
+    let timed_out =
+        collect_impl_trait_matches(source, query, root, Path::new(""), Some(tc), &mut results);
 
     if timed_out {
         return Err(ParserError::Timeout(tc.micros));
