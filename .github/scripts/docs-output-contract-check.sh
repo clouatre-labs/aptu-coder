@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 aptu-coder contributors
+# SPDX-License-Identifier: Apache-2.0
 # Denylist check for stale MCP tool-surface claims in docs.
 # Advisory in CI (see docs-output-contract job in ci.yml): the denylist
 # is maintained via the PR template's tool-surface checklist item.
