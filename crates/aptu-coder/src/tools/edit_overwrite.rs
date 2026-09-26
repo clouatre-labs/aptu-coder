@@ -187,19 +187,8 @@ pub(crate) async fn edit_overwrite(
     };
 
     let text = format!("Wrote {} bytes to {}", output.bytes_written, output.path);
-    let mut result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
+    let result = CallToolResult::success(vec![ContentBlock::text(text.clone())])
         .with_meta(Some(no_cache_meta()));
-    let structured = match serde_json::to_value(&output).map_err(|e| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            format!("serialization failed: {e}"),
-            Some(error_meta("internal", false, "report this as a bug")),
-        )
-    }) {
-        Ok(v) => v,
-        Err(e) => return Ok(err_to_tool_result(e)),
-    };
-    result.structured_content = Some(structured);
     ctx.cache
         .invalidate_file(&std::path::PathBuf::from(&param_path));
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
