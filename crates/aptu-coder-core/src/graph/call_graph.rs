@@ -48,7 +48,8 @@ pub enum GraphError {
 /// - `Ok(name)` when exactly one symbol matches.
 /// - `Err(GraphError::SymbolNotFound)` when no symbol matches.
 /// - `Err(GraphError::MultipleCandidates)` when more than one symbol matches.
-pub fn resolve_symbol<'a>(
+#[cfg(test)]
+fn resolve_symbol<'a>(
     known_symbols: impl Iterator<Item = &'a String>,
     query: &str,
     mode: &SymbolMatchMode,
