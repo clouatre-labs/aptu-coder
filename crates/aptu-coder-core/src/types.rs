@@ -121,8 +121,9 @@ pub struct AnalyzeDirectoryParams {
     )]
     pub max_depth: Option<u32>,
 
-    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering. Example: "main" or "HEAD~1".
+    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
     #[serde(default)]
+    #[cfg_attr(feature = "schemars", schemars(extend("examples" = [["main"]])))]
     pub git_ref: Option<String>,
 
     #[serde(flatten)]
@@ -247,8 +248,9 @@ pub struct AnalyzeSymbolParams {
     #[serde(default)]
     pub mode: Option<SymbolAnalysisMode>,
 
-    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering. Example: "main" or "HEAD~1".
+    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
     #[serde(default)]
+    #[cfg_attr(feature = "schemars", schemars(extend("examples" = [["main"]])))]
     pub git_ref: Option<String>,
 }
 
