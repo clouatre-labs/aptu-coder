@@ -276,7 +276,7 @@ The following anti-patterns were identified across benchmark waves and wave post
 | One auto-detecting tool for all modes | Ambiguous routing; model guesses; reliability failure | Separate tools with non-overlapping, explicitly described interfaces |
 | Vague or suggestive tool descriptions | Small models choose the wrong tool or call multiple tools in sequence | Prescriptive descriptions with explicit when-to-use and when-not-to-use |
 | Generic error messages without next steps | Agent loops re-calling the errored tool or abandons task | Actionable errors with alternative tool name and absolute path suggestion |
-| Structured output enforcement inside the tool | Tool becomes runner-dependent; non-portable | Enforce at client/runner layer; tool always returns structured data |
+| Structured output enforcement inside the tool | Tool becomes runner-dependent; non-portable | Enforce at client/runner layer; the tool's MCP response stays text-only, and any structured data it exposes (e.g., a public library API) carries no in-tool schema enforcement |
 | Synchronous metrics/logging on the hot path | Observability adds latency to every tool call | Channel pattern: fire-and-forget into unbounded channel; writer task runs independently |
 | Optimizing only for large models | Small-model users experience regressions | Small-model-first constraint: validate against Haiku before Sonnet |
 | Missing `///` doc comments on parameter fields | Parameter appears in `inputSchema.properties` with an empty `description`; model must infer meaning from name alone | Add `///` doc comment to every parameter field; enforced by `test_all_tool_parameters_have_descriptions` in `annotations.rs` |
