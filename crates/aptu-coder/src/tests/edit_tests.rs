@@ -286,3 +286,75 @@ fn test_validate_path_in_dir_nonexistent_with_existing_parent() {
         "File name component must be preserved"
     );
 }
+
+/// Drift guard: the serde key set of serialized EditReplaceOutputMetadata must
+/// equal the metadata field subset of serialized EditReplaceOutput (everything
+/// except per-edit `edits`). If a metadata field is added to EditReplaceOutput
+/// but not EditReplaceOutputMetadata (or vice versa), this test fails so the
+/// wire contract and the schema stay in lockstep.
+#[test]
+fn edit_replace_output_metadata_key_set_matches_output_subset() {
+    use crate::EditReplaceOutputMetadata;
+
+    let full = serde_json::json!({
+        "path": "a.txt",
+        "bytes_before": 10,
+        "bytes_after": 8,
+        "occurrences_replaced": 1,
+        "content_hash": "abc",
+        "edits": [{"index": 0, "occurrences_replaced": 1}]
+    });
+    let source: aptu_coder_core::EditReplaceOutput =
+        serde_json::from_value(full.clone()).expect("EditReplaceOutput deserializes");
+    let meta = serde_json::to_value(EditReplaceOutputMetadata::from(&source))
+        .expect("EditReplaceOutputMetadata serializes");
+
+    let mut expected: Vec<String> = full
+        .as_object()
+        .expect("EditReplaceOutput is an object")
+        .keys()
+        .cloned()
+        .collect();
+    expected.retain(|k| k != "edits");
+    expected.sort();
+
+    let mut actual: Vec<String> = meta
+        .as_object()
+        .expect("EditReplaceOutputMetadata is an object")
+        .keys()
+        .cloned()
+        .collect();
+    actual.sort();
+
+    assert_eq!(
+        expected, actual,
+        "EditReplaceOutputMetadata key set drifted from the EditReplaceOutput metadata subset"
+    );
+}
+
+/// Field-level check: every EditReplaceOutputMetadata field must carry the
+/// exact value from the source EditReplaceOutput through `From<&EditReplaceOutput>`.
+#[test]
+fn edit_replace_output_metadata_from_copies_every_field() {
+    use crate::EditReplaceOutputMetadata;
+
+    let source: aptu_coder_core::EditReplaceOutput = serde_json::from_value(serde_json::json!({
+        "path": "b.txt",
+        "bytes_before": 24,
+        "bytes_after": 20,
+        "occurrences_replaced": 2,
+        "content_hash": "cafe",
+        "edits": [
+            {"index": 0, "occurrences_replaced": 1},
+            {"index": 1, "occurrences_replaced": 1}
+        ]
+    }))
+    .expect("EditReplaceOutput deserializes");
+    let meta = EditReplaceOutputMetadata::from(&source);
+
+    assert_eq!(meta.path, "b.txt");
+    assert_eq!(meta.bytes_before, 24);
+    assert_eq!(meta.bytes_after, 20);
+    assert_eq!(meta.occurrences_replaced, 2);
+    assert_eq!(meta.content_hash.as_deref(), Some("cafe"));
+}

@@ -986,7 +986,8 @@ async fn test_edit_replace_batch_with_matching_content_hash() {
 
 /// Batch structuredContent must satisfy the tool's declared output schema:
 /// every required field present. Guards against the batch response shape
-/// drifting from EditReplaceOutput (regression for missing occurrences_replaced).
+/// drifting from EditReplaceOutputMetadata (regression for missing
+/// occurrences_replaced).
 #[tokio::test]
 async fn test_edit_replace_batch_structured_content_matches_output_schema() {
     let (_temp_dir, file_name, working_dir) = batch_setup("one two\n");
@@ -1005,7 +1006,7 @@ async fn test_edit_replace_batch_structured_content_matches_output_schema() {
     let structured = resp["result"]["structuredContent"]
         .as_object()
         .expect("batch success should carry structuredContent");
-    let schema = serde_json::to_value(schemars::schema_for!(aptu_coder_core::EditReplaceOutput))
+    let schema = serde_json::to_value(schemars::schema_for!(aptu_coder::EditReplaceOutputMetadata))
         .expect("output schema should serialize");
     for required in schema["required"].as_array().expect("schema required list") {
         let field = required.as_str().expect("required field name");
@@ -1014,11 +1015,49 @@ async fn test_edit_replace_batch_structured_content_matches_output_schema() {
             "batch structuredContent missing required output-schema field '{field}': {structured:?}"
         );
     }
-    let edits = structured["edits"].as_array().expect("batch edits array");
-    assert_eq!(edits.len(), 2, "per-edit results for both edits: {edits:?}");
     assert_eq!(
         structured["occurrences_replaced"].as_u64(),
         Some(2),
         "batch total occurrences_replaced"
+    );
+    assert!(
+        structured.get("edits").is_none(),
+        "structuredContent must not carry per-edit batch results"
+    );
+}
+
+/// Metadata-only view: structuredContent for a batch response must not include
+/// per-edit results; only the metadata fields survive.
+#[tokio::test]
+async fn test_edit_replace_batch_structured_content_is_metadata_only() {
+    let (_temp_dir, file_name, working_dir) = batch_setup("one two\n");
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "edits": [
+                {"old_text": "one", "new_text": "1"},
+                {"old_text": "two", "new_text": "2"}
+            ],
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+    let structured = resp["result"]["structuredContent"]
+        .as_object()
+        .expect("batch success should carry structuredContent");
+    let keys: Vec<&str> = structured.keys().map(String::as_str).collect();
+    for key in keys {
+        assert!(
+            matches!(
+                key,
+                "path" | "bytes_before" | "bytes_after" | "occurrences_replaced" | "content_hash"
+            ),
+            "unexpected key '{key}' in metadata view"
+        );
+    }
+    assert!(
+        structured["content_hash"].as_str().is_some(),
+        "content_hash survives in the metadata view"
     );
 }

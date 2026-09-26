@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::instrument;
 
+use crate::EditReplaceOutputMetadata;
 use crate::tools::EditHandlerContext;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 use crate::validation::{canonical_cwd, validate_path_relative_to};
@@ -682,13 +683,14 @@ pub(crate) async fn edit_replace(
             output.path, output.bytes_before, output.bytes_after
         )
     };
-    let structured_value = match serde_json::to_value(&output).map_err(|e| {
-        ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            format!("serialization failed: {e}"),
-            Some(error_meta("internal", false, "report this as a bug")),
-        )
-    }) {
+    let structured_value = match serde_json::to_value(EditReplaceOutputMetadata::from(&output))
+        .map_err(|e| {
+            ErrorData::new(
+                rmcp::model::ErrorCode::INTERNAL_ERROR,
+                format!("serialization failed: {e}"),
+                Some(error_meta("internal", false, "report this as a bug")),
+            )
+        }) {
         Ok(v) => v,
         Err(e) => return Ok(err_to_tool_result(e)),
     };
