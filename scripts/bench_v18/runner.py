@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PER_SESSION_KILL_USD = 0.25
+SESSION_WAIT_TIMEOUT_S = 120
 TOTAL_CEILING_USD = 5.0
 STAGE_BUDGET_CAPS_USD = {
     "wiring_smoke": 0.10,
@@ -209,13 +210,23 @@ def meter_and_close(
     session_jsonl: Path,
     proc: subprocess.Popen | None,
 ) -> SessionResult:
-    """Meter one finished session; kill/record defect on failure (fail-closed)."""
+    """Meter one finished session; kill/record defect on failure (fail-closed).
+
+    A wait-timeout kill (session still mid-turn at SESSION_WAIT_TIMEOUT_S)
+    is recorded in the defect ledger and returned as a killed result: the
+    spend is real and the session produced no final answer. Cost parsing
+    and the caps still apply on top (found live in the v19 stage-2 smoke:
+    the pre-patch behavior recorded killed:false, defect:null for a
+    wait-timeout kill, hiding it from the ledger).
+    """
+    timed_out = False
     if proc is not None:
         try:
-            proc.wait(timeout=120)
+            proc.wait(timeout=SESSION_WAIT_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+            timed_out = True
     cost = parse_session_cost(session_jsonl)
     if cost is None:
         state.defects.append({
@@ -230,6 +241,12 @@ def meter_and_close(
         state.halt_reason = "total-ceiling-exceeded"
     if cost > PER_SESSION_KILL_USD:
         reason = f"per-session-cap-exceeded:{cost:.4f}"
+        state.defects.append({
+            "stage": stage, "task": task, "arm": arm, "reason": reason,
+        })
+        return SessionResult(stage, task, arm, run_id, True, reason, cost)
+    if timed_out:
+        reason = f"session-wait-timeout:{SESSION_WAIT_TIMEOUT_S}s"
         state.defects.append({
             "stage": stage, "task": task, "arm": arm, "reason": reason,
         })

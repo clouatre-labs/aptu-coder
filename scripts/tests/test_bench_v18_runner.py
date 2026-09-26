@@ -4,6 +4,7 @@ These are synthetic unit tests; no live pi session is ever launched.
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,6 +54,64 @@ def test_nested_message_usage_and_cost_dict_are_parsed(tmp_path):
     )
     assert not result.killed
     assert result.cost_usd == 0.15
+
+
+def test_wait_timeout_kill_is_ledger_visible(tmp_path, monkeypatch):
+    # A session killed at the wait deadline mid-turn must be recorded in
+    # the defect ledger and returned killed, with its real spend (found
+    # live in the v19 stage-2 smoke). Use a hanging fake proc and shrink
+    # the deadline for test speed.
+    class _HangingProc:
+        def wait(self, timeout=None):
+            if timeout is None:
+                return  # post-kill reap: process already terminated
+            import time
+
+            time.sleep(timeout)
+            raise subprocess.TimeoutExpired("pi", timeout)
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(runner, "SESSION_WAIT_TIMEOUT_S", 0.05)
+    sess = _session_dir_with_jsonl(tmp_path / "sess", [
+        {"usage": {"cost": {"total": 0.005}}},
+    ])
+    state = runner.LadderState()
+    result = runner.meter_and_close(
+        state, "pilot", "t1", "native", "abc", sess, _HangingProc()
+    )
+    assert result.killed
+    assert result.defect == f"session-wait-timeout:{runner.SESSION_WAIT_TIMEOUT_S}s"
+    assert result.cost_usd == 0.005
+    assert len(state.defects) == 1
+    assert state.defects[0]["reason"].startswith("session-wait-timeout")
+
+
+def test_wait_timeout_with_over_budget_cost_prefers_cap_reason(tmp_path, monkeypatch):
+    class _HangingProc:
+        def wait(self, timeout=None):
+            if timeout is None:
+                return  # post-kill reap: process already terminated
+            import time
+
+            time.sleep(timeout)
+            raise subprocess.TimeoutExpired("pi", timeout)
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(runner, "SESSION_WAIT_TIMEOUT_S", 0.05)
+    sess = _session_dir_with_jsonl(tmp_path / "sess", [
+        {"usage": {"cost": {"total": 0.30}}},
+    ])
+    state = runner.LadderState()
+    result = runner.meter_and_close(
+        state, "pilot", "t1", "mcp", "abc", sess, _HangingProc()
+    )
+    assert result.killed
+    assert result.defect == "per-session-cap-exceeded:0.3000"
+    assert result.cost_usd == 0.30
 
 
 def test_missing_usage_cost_fails_closed(tmp_path):
