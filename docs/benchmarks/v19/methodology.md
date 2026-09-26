@@ -134,7 +134,12 @@ file:line against the vendored snapshot).
 
 #### Anchor adjudication layer (post-pilot amendment #1686)
 
-**Status: calibration-gated, not yet active.** The v19 pilot's stage-2
+**Status: DROPPED (amendment A2, 2025-09-26) — calibration failed its
+freeze gate (0.733 < 0.90); see `AMENDMENTS.md` and
+`results/calibration/` for the retained negative result. The AST oracle
+remains the sole ground truth.**
+
+Historical specification: the v19 pilot's stage-2
 smoke (WATCH-TRIP gate, #1681) exposed a textual-resolution failure
 mode: a semantic-role judgment (call site vs definition vs mention) was
 miscounted as a `fabricated-anchor`. To fix this, an anchor-adjudication
