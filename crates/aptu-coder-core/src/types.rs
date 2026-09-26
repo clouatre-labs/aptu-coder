@@ -114,7 +114,7 @@ pub struct AnalyzeDirectoryParams {
     /// Directory path to analyze
     pub path: String,
 
-    /// Maximum directory traversal depth for overview mode only. Default: 3. Pass 0 for unlimited depth. Use 1-3 for large monorepos to manage output size. Ignored in other modes.
+    /// Maximum directory traversal depth for overview mode only. Pass 0 for unlimited depth; use 1-3 for large monorepos to manage output size. Ignored in other modes.
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::option_integer_schema")
@@ -169,10 +169,7 @@ pub struct AnalyzeFileParams {
     )]
     pub path: String,
 
-    /// Limit output to specific sections. Valid values: "functions", "classes", "imports", "references", "calls", "all".
-    /// The FILE header (path, line count, section counts) is always emitted regardless.
-    /// Omitting this field returns all sections (current behavior).
-    /// Ignored when summary=true (summary takes precedence).
+    /// Limit output to specific sections. Valid values: "functions", "classes", "imports", "references", "calls", "all". The FILE header (path, line count, section counts) is always emitted regardless. Omit for all sections. Ignored when summary=true.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schemars", schemars(extend("examples" = [["functions", "classes"], ["functions"], ["imports"]])))]
     pub fields: Option<Vec<AnalyzeFileField>>,
@@ -235,7 +232,7 @@ pub struct AnalyzeSymbolParams {
     /// Symbol matching mode (default: exact). exact: case-sensitive exact match. insensitive: case-insensitive exact match. prefix: case-insensitive prefix match. contains: case-insensitive substring match.
     pub match_mode: Option<SymbolMatchMode>,
 
-    /// Maximum traversal depth. For call graph mode this is the graph traversal depth (default 1); level 1 = direct callers and callees, level 2 = one more hop, etc. It also caps directory walking. Unset means graph depth 1 and unlimited directory walk. Warn user on levels above 2. Hard cap of 3.
+    /// Maximum traversal depth. For call graph mode, level 1 = direct callers and callees, level 2 = one more hop, etc.; also caps directory walking. Unset means graph depth 1 and unlimited directory walk. Warn user on levels above 2. Hard cap of 3.
     #[cfg_attr(
         feature = "schemars",
         schemars(schema_with = "crate::schema_helpers::max_depth_schema")
@@ -994,16 +991,10 @@ pub struct EditReplaceParams {
     pub new_text: Option<String>,
     /// When `true`, replaces every non-overlapping occurrence of `old_text` in a single pass
     /// (sed `s/old/new/g` semantics). Returns `INVALID_PARAMS` if `old_text` is empty.
-    /// When `false` (default), `old_text` must appear exactly once; fails with `ambiguous` if
-    /// multiple matches are found. Check `occurrences_replaced` in the output to confirm how
-    /// many substitutions were made.
+    /// When `false`, `old_text` must appear exactly once; fails with `ambiguous` if multiple matches.
     #[serde(default)]
     pub replace_all: Option<bool>,
-    /// Blake3 hex hash of the raw file bytes the caller last saw. If provided and the file
-    /// has changed since the caller last read it, the edit is rejected with `INVALID_PARAMS`
-    /// directing the caller to re-read the file. The hash is computed over the raw file bytes
-    /// as read by `read_to_string` (i.e. the exact bytes on disk, before any normalization).
-    /// Omit to skip the staleness check (backward compatible).
+    /// Blake3 hex hash of the raw file bytes the caller last saw. If the file has changed since the caller last read it, the edit is rejected with `INVALID_PARAMS` directing the caller to re-read. Omit to skip the staleness check (backward compatible).
     #[serde(default)]
     pub expected_content_hash: Option<String>,
     /// Batch edits applied atomically to one file; mutually exclusive with `old_text`/`new_text`.
