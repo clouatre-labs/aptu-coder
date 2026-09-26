@@ -61,6 +61,7 @@ jobs:
               - 'crates/**/*.rs'
             docs:
               - 'docs/**'
+              - 'crates/**'
               - '.markdownlint*'
               - '.github/scripts/docs-output-contract-check.sh'
 
