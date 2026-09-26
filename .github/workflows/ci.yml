@@ -62,6 +62,7 @@ jobs:
             docs:
               - 'docs/**'
               - '.markdownlint*'
+              - '.github/scripts/docs-output-contract-check.sh'
 
   commitlint:
     name: Lint Commits
@@ -259,6 +260,25 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Lint markdown
         run: bunx markdownlint-cli2@0.23.1 '**/*.md' '#.worktrees' '#.handoff'
+
+  docs-output-contract:
+    name: Docs Tool-Surface Sync
+    runs-on: ubuntu-26.04-arm
+    needs: changes
+    if: (needs.changes.outputs.docs == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check docs for stale tool-surface claims
+        # Review signal, not a hard gate (following the jscpd advisory
+        # precedent, #1656): the denylist may drift as docs evolve, and
+        # historical/changelog mentions are legitimate. Findings surface
+        # here for reviewers; this job is deliberately NOT in the
+        # ci-result needs list so it cannot block merges.
+        run: bash .github/scripts/docs-output-contract-check.sh
 
   msrv:
     name: MSRV Check

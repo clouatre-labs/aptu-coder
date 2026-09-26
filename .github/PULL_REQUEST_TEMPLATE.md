@@ -37,5 +37,6 @@ Example: "Add Python language support to the analyzer. Implements Overview and F
 - [ ] DCO signed-off: `git commit --signoff`
 - [ ] No scope creep (changes match assigned issue)
 - [ ] No secrets, API keys, or credentials in diff
+- [ ] If the MCP tool surface changed (params, `structuredContent`, output schema, server instructions), `README.md` and `docs/` are updated to match, and the denylist in `.github/scripts/docs-output-contract-check.sh` was reviewed
 - [ ] New span attributes comply with the never-record policy in [OBSERVABILITY.md](../OBSERVABILITY.md) (no command strings, file content, or free-form user input)
 - [ ] I have reviewed every line in this PR and can explain it
