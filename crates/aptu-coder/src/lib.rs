@@ -225,6 +225,42 @@ use aptu_coder_core::types::{
 use filters::CompiledRule;
 
 use rmcp::handler::server::tool::{ToolRouter, schema_for_type};
+use rmcp::model::JsonObject;
+use schemars::JsonSchema;
+
+/// Recursively removes all `description` keys from a JSON schema value.
+fn strip_descriptions(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("description");
+            for v in map.values_mut() {
+                strip_descriptions(v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for v in items {
+                strip_descriptions(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Builds a slimmed output schema for `T`: generates the schema, then removes
+/// all `description` keys (including those nested in `properties`, `items`, and
+/// `definitions`) so output schemas stay compact on the wire.
+///
+/// rmcp's `schema_for_type` caches the generated `Arc<JsonObject>` per `TypeId`
+/// in a thread-local map, so the inner object is cloned before stripping; the
+/// shared cache entry is never mutated.
+pub(crate) fn slim_output_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
+    let mut schema = serde_json::Value::Object((*schema_for_type::<T>()).clone());
+    strip_descriptions(&mut schema);
+    Arc::new(match schema {
+        serde_json::Value::Object(map) => map,
+        _ => JsonObject::new(),
+    })
+}
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CacheScope, CallToolResponse, CallToolResult, CancelledNotificationParam,
@@ -685,7 +721,7 @@ impl CodeAnalyzer {
         name = "edit_replace",
         title = "Edit Replace",
         description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Batch form: pass edits[] (array of {old_text, new_text, replace_all}) instead of old_text/new_text — mutually exclusive — to apply multiple replacements to one file atomically; all edits validate against one content snapshot, any invalid edit aborts the batch with per-index errors and no write, and a successful batch returns a post-edit content_hash. structuredContent carries only metadata (path, byte counts, occurrences_replaced, content_hash), not per-edit results. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file.",
-        output_schema = schema_for_type::<EditReplaceOutputMetadata>(),
+        output_schema = slim_output_schema::<EditReplaceOutputMetadata>(),
         annotations(
             title = "Edit Replace",
             read_only_hint = false,
@@ -725,7 +761,7 @@ impl CodeAnalyzer {
         name = "exec_command",
         title = "Exec Command",
         description = "Execute shell command via sh -c (or $SHELL if set); returns output and exit code as a text block. Output capped (30k chars stdout / 10k stderr / 2000 lines); when capped, full captures are exposed as aptu-overflow:// resource links (paths in structuredContent). Set working_dir to the target directory; use relative paths. Pass stdin to pipe UTF-8 content (max 1 MB); heredoc syntax is rejected. For file writes use edit_overwrite or edit_replace. Prefer machine-readable output flags (e.g. --json) to reduce tokens. A 300 s server-side timeout kills runaway children; send notifications/cancelled to cancel early. Built-in filters may strip, cap, or substitute output of known CLI tools (git, cargo); structuredContent names the applied rule and links the full pre-filter output.",
-        output_schema = schema_for_type::<ShellOutputMetadata>(),
+        output_schema = slim_output_schema::<ShellOutputMetadata>(),
         annotations(
             title = "Exec Command",
             read_only_hint = false,
