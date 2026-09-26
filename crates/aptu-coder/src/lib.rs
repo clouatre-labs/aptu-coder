@@ -180,6 +180,40 @@ impl From<&ShellOutput> for ShellOutputMetadata {
     }
 }
 
+/// Metadata-only view of [`EditReplaceOutput`] serialized as edit_replace's
+/// structuredContent. Per-edit batch results (`edits`) are excluded: the text
+/// block already reports the batch edit count; the metadata fields survive here.
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct EditReplaceOutputMetadata {
+    /// Path of the file that was edited; mirrors `EditReplaceOutput::path`.
+    pub path: String,
+    /// File size in bytes before the edit; mirrors `EditReplaceOutput::bytes_before`.
+    #[schemars(schema_with = "aptu_coder_core::schema_helpers::integer_schema")]
+    pub bytes_before: usize,
+    /// File size in bytes after the edit; mirrors `EditReplaceOutput::bytes_after`.
+    #[schemars(schema_with = "aptu_coder_core::schema_helpers::integer_schema")]
+    pub bytes_after: usize,
+    /// Number of occurrences replaced; mirrors `EditReplaceOutput::occurrences_replaced`.
+    #[schemars(schema_with = "aptu_coder_core::schema_helpers::integer_schema")]
+    pub occurrences_replaced: usize,
+    /// Blake3 hex hash of the file bytes after the edit (batch form only); mirrors
+    /// `EditReplaceOutput::content_hash`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+}
+
+impl From<&EditReplaceOutput> for EditReplaceOutputMetadata {
+    fn from(output: &EditReplaceOutput) -> Self {
+        Self {
+            path: output.path.clone(),
+            bytes_before: output.bytes_before,
+            bytes_after: output.bytes_after,
+            occurrences_replaced: output.occurrences_replaced,
+            content_hash: output.content_hash.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 use aptu_coder_core::cache::CacheTier;
 use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
@@ -650,8 +684,8 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Batch form: pass edits[] (array of {old_text, new_text, replace_all}) instead of old_text/new_text — mutually exclusive — to apply multiple replacements to one file atomically; all edits validate against one content snapshot, any invalid edit aborts the batch with per-index errors and no write, and a successful batch returns per-edit results plus a post-edit content_hash. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file.",
-        output_schema = schema_for_type::<EditReplaceOutput>(),
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence in one pass. Pass empty new_text to delete. CRLF in old_text normalized to LF; all other whitespace matched exactly. Batch form: pass edits[] (array of {old_text, new_text, replace_all}) instead of old_text/new_text — mutually exclusive — to apply multiple replacements to one file atomically; all edits validate against one content snapshot, any invalid edit aborts the batch with per-index errors and no write, and a successful batch returns a post-edit content_hash. structuredContent carries only metadata (path, byte counts, occurrences_replaced, content_hash), not per-edit results. On invalid_params, re-read with analyze_file or analyze_module and retry. Use edit_overwrite to replace the whole file.",
+        output_schema = schema_for_type::<EditReplaceOutputMetadata>(),
         annotations(
             title = "Edit Replace",
             read_only_hint = false,
