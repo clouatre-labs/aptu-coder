@@ -121,14 +121,9 @@ pub struct AnalyzeDirectoryParams {
     )]
     pub max_depth: Option<u32>,
 
-    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering. Example: "main" or "HEAD~1".
+    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
     #[serde(default)]
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(
-            description = "Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering."
-        )
-    )]
+    #[cfg_attr(feature = "schemars", schemars(extend("examples" = ["main"])))]
     pub git_ref: Option<String>,
 
     #[serde(flatten)]
@@ -251,22 +246,11 @@ pub struct AnalyzeSymbolParams {
 
     /// Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/max_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty.
     #[serde(default)]
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(
-            description = "Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/max_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty."
-        )
-    )]
     pub mode: Option<SymbolAnalysisMode>,
 
-    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering. Example: "main" or "HEAD~1".
+    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
     #[serde(default)]
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(
-            description = "Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering."
-        )
-    )]
+    #[cfg_attr(feature = "schemars", schemars(extend("examples" = ["main"])))]
     pub git_ref: Option<String>,
 }
 
@@ -275,12 +259,6 @@ pub struct AnalyzeSymbolParams {
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct FileInfo {
     /// Path relative to the analyzed directory (absolute when outside base).
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(
-            description = "Path relative to the analyzed directory (absolute when outside base)."
-        )
-    )]
     pub path: String,
     pub language: String,
     #[cfg_attr(
