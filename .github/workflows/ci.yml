@@ -13,6 +13,8 @@ on:
       - 'tests/**'
       - 'docs/**'
       - '.markdownlint*'
+      - 'README.md'
+      - '.github/scripts/docs-output-contract-check.sh'
   pull_request:
 
 concurrency:
