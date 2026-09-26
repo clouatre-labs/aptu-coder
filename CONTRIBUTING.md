@@ -113,6 +113,7 @@ This project follows a Rust adaptation of the [NASA/JPL Power of 10](https://en.
 - **No unchecked indexing on untrusted data:** Use `.get()` with explicit error propagation instead of `[]`
 - **Loops over untrusted or externally-driven data must have an explicit bound or checked max-iteration guard**
 - **Minimize #[cfg] feature combinations:** Each supported combination must be covered by CI
+- **Duplication is a review signal, not a CI gate:** The `Detect Duplicated Code` job runs `jscpd` against an `origin/main` baseline and publishes the clone report in its log, but does not fail CI on new clones — fingerprint-based baselines re-flag legitimate edits inside pre-existing cloned regions. Reviewers check the report and block PRs that add large-scale duplication.
 
 ## Automated Review Tooling
 
