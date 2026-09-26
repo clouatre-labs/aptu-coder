@@ -238,7 +238,11 @@ jobs:
         with:
           bun-version: "1"
       - name: Detect Duplicated Code
-        run: bunx jscpd crates --baseline-from-ref origin/main --fail-on-new-clones --fail-on-empty
+        # Review signal, not a hard gate (#1656): fingerprint-based baseline
+        # matching re-flags legitimate edits inside pre-existing cloned regions
+        # as "new" clones. The full report stays visible in this job's log;
+        # reviewers treat new clones as a checklist item, not a CI failure.
+        run: bunx jscpd crates --baseline-from-ref origin/main
 
   lint-docs:
     name: Lint Docs
