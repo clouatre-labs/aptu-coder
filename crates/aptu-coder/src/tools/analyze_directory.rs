@@ -512,6 +512,7 @@ pub(crate) async fn analyze_directory_handler(
         final_text.push('\n');
         final_text.push_str("NEXT_CURSOR: ");
         final_text.push_str(&cursor);
+        final_text.push_str("\nPagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.");
     }
 
     tracing::Span::current().record("cache_tier", dir_cache_hit.as_str());
@@ -1005,6 +1006,10 @@ mod tests {
             .expect("cursor after prefix")
             .to_string();
         assert!(!cursor.is_empty());
+        assert!(
+            text1.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "page 1 footer must carry pagination guidance: {text1}"
+        );
 
         // Act: page 2 via cursor only.
         let result2 = analyze_directory_handler(

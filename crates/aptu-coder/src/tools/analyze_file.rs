@@ -391,6 +391,7 @@ pub(crate) async fn analyze_file_handler(
         final_text.push('\n');
         final_text.push_str("NEXT_CURSOR: ");
         final_text.push_str(cursor);
+        final_text.push_str("\nPagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.");
     }
 
     let response_output = analyze::FileAnalysisOutput::new(
