@@ -123,7 +123,7 @@ pub struct AnalyzeDirectoryParams {
 
     /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
     #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(extend("examples" = [["main"]])))]
+    #[cfg_attr(feature = "schemars", schemars(extend("examples" = ["main"])))]
     pub git_ref: Option<String>,
 
     #[serde(flatten)]
@@ -250,7 +250,7 @@ pub struct AnalyzeSymbolParams {
 
     /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
     #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(extend("examples" = [["main"]])))]
+    #[cfg_attr(feature = "schemars", schemars(extend("examples" = ["main"])))]
     pub git_ref: Option<String>,
 }
 
