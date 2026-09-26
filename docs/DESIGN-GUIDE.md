@@ -90,7 +90,7 @@ Returns a tree with LOC, function count, and class count."
 
 ### Structured Output Belongs at the Runner Layer
 
-**Principle:** Tools should always return structured data. Enforcing output schema (e.g., JSON-only) belongs at the client or runner layer, not inside the tool.
+**Principle:** When a tool returns structured data, enforcing its schema (e.g., JSON-only) belongs at the client or runner layer, not inside the tool. Note: this project has since moved its analysis tools to text-only MCP output, removing the mirrored structuredContent and output schemas (#1660 series); the runner-layer lesson below still applies wherever structured output is used.
 
 *Example: In v12 benchmark Condition D, the runner initially omitted `--json-schema`, causing Haiku to wrap structured output in prose. Re-running with `--json-schema` restored 100% JSON validity. The tool itself was unchanged.*
 
