@@ -7,9 +7,11 @@ SHA256 digests are never re-pinned, and verify_snapshot trusts only this
 checked-in manifest -- never caller-supplied JSON.
 
 SSRF hardening: fetching uses an OpenerDirector whose redirect handler
-rejects every redirect. An allowlisted URL could otherwise 302 to an
-internal or cloud-metadata endpoint, bypassing host/path allowlist
-validation; blocking redirects closes that hole.
+rejects every redirect EXCEPT a single hop to a pinned archive host
+(`codeload.github.com`, the only target GitHub's own tarball endpoint
+302s to). A fully-open redirect chain could otherwise land on an
+internal or cloud-metadata endpoint; the pinned single-hop allowlist
+closes that hole while keeping the frozen GitHub tarball URLs valid.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ SNAPSHOT_MANIFEST = {
     },
 }
 
+ARCHIVE_HOST = "codeload.github.com"
 ALLOWED_HOST = "github.com"
 ALLOWED_REPO_PREFIXES = tuple(
     f"https://{ALLOWED_HOST}/{entry['repo']}/archive/"
@@ -62,17 +65,27 @@ def validate_tarball_url(url: str) -> None:
         raise RuntimeError(f"refusing non-allowlisted tarball URL: {url}")
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Reject every redirect: SSRF hardening (no post-allowlist hops)."""
+class _PinnedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Allow only one hop, from the allowlisted host to the pinned
+    archive host; anything else is SSRF (no arbitrary post-allowlist
+    hops)."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if req.host == ALLOWED_HOST and newurl.startswith(
+            f"https://{ARCHIVE_HOST}/"
+        ):
+            return urllib.request.Request(
+                newurl, headers={k: v for k, v in req.headers.items() if k.lower() != "host"},
+                origin_req_host=req.origin_req_host,
+                unverifiable=True,
+            )
         raise urllib.error.HTTPError(
-            req.full_url, code, "redirects blocked (SSRF hardening)", headers, fp
+            req.full_url, code, "redirect blocked (not the pinned archive hop)", headers, fp
         )
 
 
 def _opener() -> urllib.request.OpenerDirector:
-    return urllib.request.build_opener(_NoRedirectHandler())
+    return urllib.request.build_opener(_PinnedRedirectHandler())
 
 
 def fetch_snapshot(name: str, dest_dir: Path) -> Path:
