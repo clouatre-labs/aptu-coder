@@ -17,7 +17,6 @@ use aptu_coder_core::traversal::{
 };
 use aptu_coder_core::types::{AnalyzeSymbolParams, SymbolAnalysisMode, SymbolMatchMode};
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, ErrorData, MetaObject, TextContent};
-use serde_json::Value;
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -340,9 +339,7 @@ async fn handle_import_lookup(
     // Record cache tier in span
     tracing::Span::current().record("cache_tier", "Miss");
 
-    let mut result = ok_result_with_hash(&final_text);
-    let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-    result.structured_content = Some(structured);
+    let result = ok_result_with_hash(&final_text);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_symbol", "ok", dur)
@@ -574,15 +571,7 @@ async fn handle_call_graph(
     // Record cache tier in span
     tracing::Span::current().record("cache_tier", graph_cache_tier.as_str());
 
-    let mut result = ok_result_with_hash(&final_text);
-    // Only include def_use_sites in structuredContent when in DefUse mode.
-    // In Callers/Callees modes, clearing the vec prevents large def-use
-    // payloads from leaking into paginated non-def-use responses.
-    if cursor_mode != PaginationMode::DefUse {
-        output.def_use_sites = Vec::new();
-    }
-    let structured = serde_json::to_value(&output).unwrap_or(Value::Null);
-    result.structured_content = Some(structured);
+    let result = ok_result_with_hash(&final_text);
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
 
     // Collect cache stats for metrics
