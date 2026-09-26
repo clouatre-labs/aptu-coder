@@ -61,9 +61,13 @@ jobs:
               - 'crates/**/*.rs'
             docs:
               - 'docs/**'
+              # Intentionally broad: the advisory docs-output-contract check should run on
+              # any tool-surface code change even when docs are untouched (cost accepted;
+              # job is advisory and cheap).
               - 'crates/**'
               - '.markdownlint*'
               - '.github/scripts/docs-output-contract-check.sh'
+              - 'README.md'
 
   commitlint:
     name: Lint Commits
