@@ -720,7 +720,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "edit_replace",
         title = "Edit Replace",
-        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence (sed s/old/new/g). Empty new_text deletes. CRLF in old_text normalized to LF. Batch form: edits[] applies multiple replacements to one file atomically; any invalid edit aborts the batch. structuredContent carries metadata only. On invalid_params, re-read with analyze_file and retry. Use edit_overwrite to replace the whole file.",
+        description = "Replaces an exact text block; old_text must appear exactly once. Fails if zero or multiple matches (extend old_text to disambiguate). replace_all=true replaces every occurrence (sed s/old/new/g). Empty new_text deletes. CRLF in old_text normalized to LF. structuredContent carries metadata only. On invalid_params, re-read with analyze_file and retry. Use edit_overwrite to replace the whole file.",
         output_schema = slim_output_schema::<EditReplaceOutputMetadata>(),
         annotations(
             title = "Edit Replace",
@@ -760,7 +760,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute a shell command; returns output and exit code as a text block. Output capped (30k stdout / 10k stderr / 2000 lines); full captures exposed as aptu-overflow:// links when capped. Set working_dir to the target directory. stdin pipes UTF-8 content (max 1 MB); heredoc syntax rejected. For file writes use edit_overwrite or edit_replace. Prefer --json flags to reduce tokens. 300 s server-side timeout; cancel via notifications/cancelled. Built-in filters may strip, cap, or substitute output; structuredContent identifies the filter and links the full pre-filter output.",
+        description = "Execute a shell command; returns output and exit code as a text block. Output capped (30k stdout / 10k stderr / 2000 lines); full captures exposed as aptu-overflow:// links when capped. For file writes use edit_overwrite or edit_replace. Prefer --json flags. 300 s server-side timeout; cancel via notifications/cancelled. Built-in filters may strip, cap, or substitute output; structuredContent identifies the filter and links the full pre-filter output.",
         output_schema = slim_output_schema::<ShellOutputMetadata>(),
         annotations(
             title = "Exec Command",
