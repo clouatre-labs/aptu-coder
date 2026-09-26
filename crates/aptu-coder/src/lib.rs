@@ -185,7 +185,7 @@ use aptu_coder_core::cache::CacheTier;
 use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
 use aptu_coder_core::types::{
     AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, AnalyzeSymbolParams,
-    EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
+    EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
 };
 use filters::CompiledRule;
 
@@ -611,7 +611,6 @@ impl CodeAnalyzer {
         name = "edit_overwrite",
         title = "Edit Overwrite",
         description = "Creates or overwrites a file with UTF-8 content; creates parent directories if needed. Works on any file type. Use edit_replace for targeted single-block edits.",
-        output_schema = schema_for_type::<EditOverwriteOutput>(),
         annotations(
             title = "Edit Overwrite",
             read_only_hint = false,
