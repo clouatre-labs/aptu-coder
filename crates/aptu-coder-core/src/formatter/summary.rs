@@ -370,40 +370,42 @@ pub fn format_summary(
     output
 }
 
-/// Format a compact summary of file details for large `FileDetails` output.
-///
-/// Returns `FILE` header with path/LOC/counts, top 10 functions by line span descending,
-/// classes inline if <=10, import count, and suggestion block.
-#[instrument(skip_all)]
+/// Shared prologue for the `format_focused` variants: chain resolution, caller partitioning,
+/// counts, and the FOCUS/DEPTH/DEFINED sections.
+/// Prologue outputs for the `format_focused` variants: rendered sections, production and
+/// test chains, and resolved outgoing chains.
+type FocusedPrologue<'a> = (
+    String,
+    Vec<InternalCallChain>,
+    Vec<InternalCallChain>,
+    std::borrow::Cow<'a, [InternalCallChain]>,
+);
 
-/// Full-format focused symbol output (callers/callees with chain trees).
-pub(crate) fn format_focused_internal(
+fn focused_prologue<'a>(
     graph: &CallGraph,
     symbol: &str,
     follow_depth: u32,
     base_path: Option<&Path>,
-    incoming_chains: Option<&[InternalCallChain]>,
-    outgoing_chains: Option<&[InternalCallChain]>,
-    def_use_sites: &[DefUseSite],
-) -> Result<String, FormatterError> {
+    incoming_chains: Option<&'a [InternalCallChain]>,
+    outgoing_chains: Option<&'a [InternalCallChain]>,
+) -> Result<FocusedPrologue<'a>, FormatterError> {
     let mut output = String::new();
 
     // Compute all counts BEFORE output begins
     let def_count = graph.definitions.get(symbol).map_or(0, Vec::len);
 
     // Use pre-computed chains if provided, otherwise compute them
-    let (incoming_chains_vec, outgoing_chains_vec);
-    let (incoming_chains_ref, outgoing_chains_ref) =
-        if let (Some(inc), Some(out)) = (incoming_chains, outgoing_chains) {
-            (inc, out)
-        } else {
-            incoming_chains_vec = graph.find_incoming_chains(symbol, follow_depth)?;
-            outgoing_chains_vec = graph.find_outgoing_chains(symbol, follow_depth)?;
-            (
-                incoming_chains_vec.as_slice(),
-                outgoing_chains_vec.as_slice(),
-            )
-        };
+    let incoming_chains_vec;
+    let incoming_chains_ref = if let Some(inc) = incoming_chains {
+        inc
+    } else {
+        incoming_chains_vec = graph.find_incoming_chains(symbol, follow_depth)?;
+        incoming_chains_vec.as_slice()
+    };
+    let outgoing = match outgoing_chains {
+        Some(out) => std::borrow::Cow::Borrowed(out),
+        None => std::borrow::Cow::Owned(graph.find_outgoing_chains(symbol, follow_depth)?),
+    };
 
     // Partition incoming_chains into production and test callers
     let (prod_chains, test_chains): (Vec<_>, Vec<_>) =
@@ -422,7 +424,7 @@ pub(crate) fn format_focused_internal(
         .len();
 
     // Count unique callees
-    let callees_count = outgoing_chains_ref
+    let callees_count = outgoing
         .iter()
         .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p))
         .collect::<std::collections::HashSet<_>>()
@@ -448,6 +450,99 @@ pub(crate) fn format_focused_internal(
         output.push_str("DEFINED: (not found)\n");
     }
 
+    Ok((output, prod_chains, test_chains, outgoing))
+}
+
+/// Format mode selector for the two focused-output variants.
+#[derive(Clone, Copy)]
+enum FocusedMode {
+    /// Full-format output (callers/callees with chain trees).
+    Full,
+    /// Compact summary output (top-10 callers/callees).
+    Summary,
+}
+
+/// Shared prologue and dispatch for the `format_focused` variants.
+#[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)] // preserves the unchanged public entry-point signature plus mode
+fn format_focused_impl(
+    graph: &CallGraph,
+    symbol: &str,
+    follow_depth: u32,
+    base_path: Option<&Path>,
+    incoming_chains: Option<&[InternalCallChain]>,
+    outgoing_chains: Option<&[InternalCallChain]>,
+    def_use_sites: &[DefUseSite],
+    mode: FocusedMode,
+) -> Result<String, FormatterError> {
+    let (output, prod_chains, test_chains, outgoing_ref) = focused_prologue(
+        graph,
+        symbol,
+        follow_depth,
+        base_path,
+        incoming_chains,
+        outgoing_chains,
+    )?;
+    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
+
+    match mode {
+        FocusedMode::Full => render_focused_full(
+            output,
+            prod_chains,
+            test_chains,
+            outgoing_chains_ref,
+            base_path,
+            def_use_sites,
+            symbol,
+            graph,
+        ),
+        FocusedMode::Summary => render_focused_summary(
+            output,
+            prod_chains,
+            test_chains,
+            outgoing_chains_ref,
+            base_path,
+            def_use_sites,
+            symbol,
+        ),
+    }
+}
+
+/// Full-format focused symbol output (callers/callees with chain trees).
+pub(crate) fn format_focused_internal(
+    graph: &CallGraph,
+    symbol: &str,
+    follow_depth: u32,
+    base_path: Option<&Path>,
+    incoming_chains: Option<&[InternalCallChain]>,
+    outgoing_chains: Option<&[InternalCallChain]>,
+    def_use_sites: &[DefUseSite],
+) -> Result<String, FormatterError> {
+    format_focused_impl(
+        graph,
+        symbol,
+        follow_depth,
+        base_path,
+        incoming_chains,
+        outgoing_chains,
+        def_use_sites,
+        FocusedMode::Full,
+    )
+}
+
+/// Render the full-format tail: CALLERS/CALLEES sections with chain trees.
+#[allow(clippy::too_many_lines)] // exhaustive chain-tree rendering; splitting harms readability
+#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_summary
+fn render_focused_full(
+    mut output: String,
+    prod_chains: Vec<InternalCallChain>,
+    test_chains: Vec<InternalCallChain>,
+    outgoing_chains_ref: &[InternalCallChain],
+    base_path: Option<&Path>,
+    def_use_sites: &[DefUseSite],
+    symbol: &str,
+    graph: &CallGraph,
+) -> Result<String, FormatterError> {
     // CALLERS section - who calls this symbol
     output.push_str("CALLERS:\n");
 
@@ -605,9 +700,6 @@ pub(crate) fn format_focused_internal(
 /// Format a compact summary of focused symbol analysis.
 /// Used when output would exceed the size threshold or when explicitly requested.
 /// Internal helper that accepts pre-computed chains.
-#[instrument(skip_all)]
-#[allow(clippy::too_many_lines)] // exhaustive symbol summary formatting; splitting harms readability
-#[allow(clippy::similar_names)] // domain pairs: callers_count/callees_count are intentionally similar
 pub(crate) fn format_focused_summary_internal(
     graph: &CallGraph,
     symbol: &str,
@@ -617,68 +709,31 @@ pub(crate) fn format_focused_summary_internal(
     outgoing_chains: Option<&[InternalCallChain]>,
     def_use_sites: &[DefUseSite],
 ) -> Result<String, FormatterError> {
-    let mut output = String::new();
+    format_focused_impl(
+        graph,
+        symbol,
+        follow_depth,
+        base_path,
+        incoming_chains,
+        outgoing_chains,
+        def_use_sites,
+        FocusedMode::Summary,
+    )
+}
 
-    // Compute all counts BEFORE output begins
-    let def_count = graph.definitions.get(symbol).map_or(0, Vec::len);
-
-    // Use pre-computed chains if provided, otherwise compute them
-    let (incoming_chains_vec, outgoing_chains_vec);
-    let (incoming_chains_ref, outgoing_chains_ref) =
-        if let (Some(inc), Some(out)) = (incoming_chains, outgoing_chains) {
-            (inc, out)
-        } else {
-            incoming_chains_vec = graph.find_incoming_chains(symbol, follow_depth)?;
-            outgoing_chains_vec = graph.find_outgoing_chains(symbol, follow_depth)?;
-            (
-                incoming_chains_vec.as_slice(),
-                outgoing_chains_vec.as_slice(),
-            )
-        };
-
-    // Partition incoming_chains into production and test callers
-    let (prod_chains, test_chains): (Vec<_>, Vec<_>) =
-        incoming_chains_ref.iter().cloned().partition(|chain| {
-            chain
-                .chain
-                .first()
-                .is_none_or(|(name, path, _)| !is_test_file(path) && !name.starts_with("test_"))
-        });
-
-    // Count unique production callers
-    let callers_count = prod_chains
-        .iter()
-        .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p))
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-
-    // Count unique callees
-    let callees_count = outgoing_chains_ref
-        .iter()
-        .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p))
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-
-    // FOCUS header
-    let _ = writeln!(
-        output,
-        "FOCUS: {symbol} ({def_count} defs, {callers_count} callers, {callees_count} callees)"
-    );
-
-    // DEPTH line
-    let _ = writeln!(output, "DEPTH: {follow_depth}");
-
-    // DEFINED section
-    if let Some(definitions) = graph.definitions.get(symbol) {
-        output.push_str("DEFINED:\n");
-        for (path, line) in definitions {
-            let display = emit::strip_base_path(path, base_path);
-            let _ = writeln!(output, "  {display}:{line}");
-        }
-    } else {
-        output.push_str("DEFINED: (not found)\n");
-    }
-
+/// Render the compact-summary tail: top-10 CALLERS/CALLEES sections.
+#[allow(clippy::too_many_lines)] // exhaustive symbol summary formatting; splitting harms readability
+#[allow(clippy::similar_names)] // domain pairs: callers_count/callees_count are intentionally similar
+#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_full
+fn render_focused_summary(
+    mut output: String,
+    prod_chains: Vec<InternalCallChain>,
+    test_chains: Vec<InternalCallChain>,
+    outgoing_chains_ref: &[InternalCallChain],
+    base_path: Option<&Path>,
+    def_use_sites: &[DefUseSite],
+    _symbol: &str,
+) -> Result<String, FormatterError> {
     // CALLERS (production, top 10 by frequency)
     output.push_str("CALLERS (top 10):\n");
     if prod_chains.is_empty() {

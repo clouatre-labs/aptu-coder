@@ -17,6 +17,58 @@ use tracing::instrument;
 
 pub const MAX_WALK_ENTRIES: usize = 50_000;
 
+/// Build a `WalkEntry` from a directory entry, capturing symlink target and mtime.
+fn walk_entry_from(entry: &ignore::DirEntry) -> WalkEntry {
+    let path = entry.path().to_path_buf();
+    let is_symlink = entry.path_is_symlink();
+
+    let symlink_target = if is_symlink {
+        std::fs::read_link(&path).ok()
+    } else {
+        None
+    };
+
+    let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
+
+    WalkEntry {
+        canonical_path: path.clone(),
+        depth: entry.depth(),
+        is_dir: entry.file_type().is_some_and(|ft| ft.is_dir()),
+        is_symlink,
+        symlink_target,
+        mtime,
+        path,
+    }
+}
+
+/// Truncate, log, and sort walk results. `message` distinguishes parallel vs sync walks.
+fn finish_walk(mut entries: Vec<WalkEntry>, start: Instant, message: &str) -> Vec<WalkEntry> {
+    entries.truncate(MAX_WALK_ENTRIES);
+    if entries.len() >= MAX_WALK_ENTRIES {
+        tracing::warn!(
+            "walk truncated at {} entries (MAX_WALK_ENTRIES={}); results are partial",
+            MAX_WALK_ENTRIES,
+            MAX_WALK_ENTRIES
+        );
+    }
+
+    let dir_count = entries.iter().filter(|e| e.is_dir).count();
+    let file_count = entries.iter().filter(|e| !e.is_dir).count();
+
+    tracing::debug!(
+        entries = entries.len(),
+        dirs = dir_count,
+        files = file_count,
+        duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "{}",
+        message
+    );
+
+    // Restore sort contract: walk_parallel does not guarantee order.
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries
+}
+
 #[derive(Debug, Clone)]
 pub struct WalkEntry {
     pub path: PathBuf,
@@ -76,28 +128,9 @@ pub fn walk_directory(
         let entry_count = entry_count.clone();
         Box::new(move |result| match result {
             Ok(entry) => {
-                let path = entry.path().to_path_buf();
-                let depth = entry.depth();
-                let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-                let is_symlink = entry.path_is_symlink();
-
-                let symlink_target = if is_symlink {
-                    std::fs::read_link(&path).ok()
-                } else {
-                    None
-                };
-
-                let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
-
-                let walk_entry = WalkEntry {
-                    path: path.clone(),
-                    depth,
-                    is_dir,
-                    is_symlink,
-                    symlink_target,
-                    mtime,
-                    canonical_path: path.clone(),
-                };
+                let walk_entry = walk_entry_from(&entry);
+                let depth = walk_entry.depth;
+                let is_dir = walk_entry.is_dir;
                 sender.send(walk_entry).ok();
                 let count = entry_count.fetch_add(1, Ordering::Relaxed);
                 if count >= MAX_WALK_ENTRIES {
@@ -119,29 +152,7 @@ pub fn walk_directory(
         })
     });
 
-    let mut entries: Vec<WalkEntry> = receiver.try_iter().collect();
-    entries.truncate(MAX_WALK_ENTRIES);
-    if entries.len() >= MAX_WALK_ENTRIES {
-        tracing::warn!(
-            "walk truncated at {} entries (MAX_WALK_ENTRIES={}); results are partial",
-            MAX_WALK_ENTRIES,
-            MAX_WALK_ENTRIES
-        );
-    }
-
-    let dir_count = entries.iter().filter(|e| e.is_dir).count();
-    let file_count = entries.iter().filter(|e| !e.is_dir).count();
-
-    tracing::debug!(
-        entries = entries.len(),
-        dirs = dir_count,
-        files = file_count,
-        duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
-        "walk complete"
-    );
-
-    // Restore sort contract: walk_parallel does not guarantee order.
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    let entries = finish_walk(receiver.try_iter().collect(), start, "walk complete");
     Ok(entries)
 }
 
@@ -157,29 +168,7 @@ fn walk_directory_sync(root: &Path, start: Instant) -> Result<Vec<WalkEntry>, Tr
     for result in builder.build() {
         match result {
             Ok(entry) => {
-                let path = entry.path().to_path_buf();
-                let depth = entry.depth();
-                let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-                let is_symlink = entry.path_is_symlink();
-
-                let symlink_target = if is_symlink {
-                    std::fs::read_link(&path).ok()
-                } else {
-                    None
-                };
-
-                let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
-
-                let walk_entry = WalkEntry {
-                    path: path.clone(),
-                    depth,
-                    is_dir,
-                    is_symlink,
-                    symlink_target,
-                    mtime,
-                    canonical_path: path.clone(),
-                };
-                entries.push(walk_entry);
+                entries.push(walk_entry_from(&entry));
                 let count = entry_count.fetch_add(1, Ordering::Relaxed);
                 if count >= MAX_WALK_ENTRIES {
                     break;
@@ -191,28 +180,7 @@ fn walk_directory_sync(root: &Path, start: Instant) -> Result<Vec<WalkEntry>, Tr
         }
     }
 
-    entries.truncate(MAX_WALK_ENTRIES);
-    if entries.len() >= MAX_WALK_ENTRIES {
-        tracing::warn!(
-            "walk truncated at {} entries (MAX_WALK_ENTRIES={}); results are partial",
-            MAX_WALK_ENTRIES,
-            MAX_WALK_ENTRIES
-        );
-    }
-
-    let dir_count = entries.iter().filter(|e| e.is_dir).count();
-    let file_count = entries.iter().filter(|e| !e.is_dir).count();
-
-    tracing::debug!(
-        entries = entries.len(),
-        dirs = dir_count,
-        files = file_count,
-        duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
-        "walk complete (sync)"
-    );
-
-    // Sort entries lexicographically.
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    let entries = finish_walk(entries, start, "walk complete (sync)");
     Ok(entries)
 }
 

@@ -353,6 +353,19 @@ pub fn determine_mode(path: &str, focus: Option<&str>) -> AnalysisMode {
     }
 }
 
+/// Check the file size limit and read the source, mapping errors to `AnalyzeError`.
+pub(crate) fn read_source_checked(path: &str) -> Result<String, AnalyzeError> {
+    if Path::new(path).metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
+        tracing::debug!("skipping large file: {}", path);
+        return Err(AnalyzeError::Parser(
+            crate::parser::ParserError::ParseError("file too large".to_string()),
+        ));
+    }
+
+    std::fs::read_to_string(path)
+        .map_err(|e| AnalyzeError::Parser(crate::parser::ParserError::ParseError(e.to_string())))
+}
+
 /// Analyze a single file and return semantic analysis with formatted output.
 #[instrument(skip_all, fields(path))]
 pub fn analyze_file(
@@ -361,16 +374,7 @@ pub fn analyze_file(
 ) -> Result<FileAnalysisOutput, AnalyzeError> {
     let start = Instant::now();
 
-    // Check file size before reading
-    if Path::new(path).metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
-        tracing::debug!("skipping large file: {}", path);
-        return Err(AnalyzeError::Parser(
-            crate::parser::ParserError::ParseError("file too large".to_string()),
-        ));
-    }
-
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| AnalyzeError::Parser(crate::parser::ParserError::ParseError(e.to_string())))?;
+    let source = read_source_checked(path)?;
 
     let line_count = source.lines().count();
 

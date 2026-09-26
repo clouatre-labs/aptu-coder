@@ -15,16 +15,7 @@ use tracing::instrument;
 /// functions, imports) for lightweight code understanding.
 #[instrument(skip_all, fields(path))]
 pub fn analyze_module_file(path: &str) -> Result<crate::types::ModuleInfo, AnalyzeError> {
-    // Check file size before reading
-    if Path::new(path).metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
-        tracing::debug!("skipping large file: {}", path);
-        return Err(AnalyzeError::Parser(
-            crate::parser::ParserError::ParseError("file too large".to_string()),
-        ));
-    }
-
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| AnalyzeError::Parser(crate::parser::ParserError::ParseError(e.to_string())))?;
+    let source = crate::analyze::read_source_checked(path)?;
 
     let file_path = Path::new(path);
     let name = file_path

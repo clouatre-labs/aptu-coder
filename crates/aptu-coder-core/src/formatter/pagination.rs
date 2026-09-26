@@ -57,6 +57,32 @@ pub(crate) fn format_chains_as_tree(
     output
 }
 
+/// Render the current page of chains as a tree, parametrized by arrow direction.
+fn render_paginated_page(
+    paginated_chains: &[InternalCallChain],
+    arrow: &str,
+    symbol: &str,
+) -> String {
+    let page_refs: Vec<_> = paginated_chains
+        .iter()
+        .filter_map(|chain| {
+            if chain.chain.len() >= 2 {
+                Some((chain.chain[0].0.as_str(), chain.chain[1].0.as_str()))
+            } else if chain.chain.len() == 1 {
+                Some((chain.chain[0].0.as_str(), ""))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if page_refs.is_empty() {
+        "  (none)\n".to_string()
+    } else {
+        format_chains_as_tree(&page_refs, arrow, symbol)
+    }
+}
+
 /// Format a paginated list of files for directory analysis results.
 #[instrument(skip_all)]
 pub fn format_structure_paginated(
@@ -216,24 +242,7 @@ pub fn format_focused_paginated(
         PaginationMode::Callers => {
             let _ = writeln!(output, "CALLERS ({start}-{end} of {total}):");
 
-            let page_refs: Vec<_> = paginated_chains
-                .iter()
-                .filter_map(|chain| {
-                    if chain.chain.len() >= 2 {
-                        Some((chain.chain[0].0.as_str(), chain.chain[1].0.as_str()))
-                    } else if chain.chain.len() == 1 {
-                        Some((chain.chain[0].0.as_str(), ""))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if page_refs.is_empty() {
-                output.push_str("  (none)\n");
-            } else {
-                output.push_str(&format_chains_as_tree(&page_refs, "<-", symbol));
-            }
+            output.push_str(&render_paginated_page(paginated_chains, "<-", symbol));
 
             if !test_chains.is_empty() {
                 let mut test_files: Vec<_> = test_chains
@@ -289,24 +298,7 @@ pub fn format_focused_paginated(
 
             let _ = writeln!(output, "CALLEES ({start}-{end} of {total}):");
 
-            let page_refs: Vec<_> = paginated_chains
-                .iter()
-                .filter_map(|chain| {
-                    if chain.chain.len() >= 2 {
-                        Some((chain.chain[0].0.as_str(), chain.chain[1].0.as_str()))
-                    } else if chain.chain.len() == 1 {
-                        Some((chain.chain[0].0.as_str(), ""))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if page_refs.is_empty() {
-                output.push_str("  (none)\n");
-            } else {
-                output.push_str(&format_chains_as_tree(&page_refs, "->", symbol));
-            }
+            output.push_str(&render_paginated_page(paginated_chains, "->", symbol));
         }
         PaginationMode::Default => {
             unreachable!("format_focused_paginated called with PaginationMode::Default")

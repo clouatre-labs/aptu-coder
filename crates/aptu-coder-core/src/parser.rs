@@ -17,12 +17,12 @@ use std::path::Path;
 use std::sync::LazyLock;
 use thiserror::Error;
 use tracing::instrument;
-use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 // Import extracted element handlers from parser_elements module
 use crate::parser_elements::{
-    extract_calls, extract_def_use, extract_elements, extract_impl_methods,
-    extract_impl_traits_from_tree, extract_imports, extract_references,
+    collect_impl_trait_matches, extract_calls, extract_def_use, extract_elements,
+    extract_impl_methods, extract_impl_traits_from_tree, extract_imports, extract_references,
 };
 
 #[derive(Debug, Error)]
@@ -221,6 +221,49 @@ thread_local! {
     pub(crate) static QUERY_CURSOR: RefCell<QueryCursor> = RefCell::new(QueryCursor::new());
 }
 
+/// Shared language-resolution and parse prologue with pre/post deadline checks.
+fn parse_with_deadline(
+    source: &str,
+    language: &str,
+    tc: TimeoutConfig,
+) -> Result<(Tree, crate::languages::LanguageInfo), ParserError> {
+    // Check deadline at the start before any parsing work.
+    if tc.is_exceeded() {
+        return Err(ParserError::Timeout(tc.micros));
+    }
+
+    let (tree, lang_info) = resolve_and_parse(source, language)?;
+
+    // Check deadline after parsing
+    if tc.is_exceeded() {
+        return Err(ParserError::Timeout(tc.micros));
+    }
+
+    Ok((tree, lang_info))
+}
+
+/// Resolve `language` to its tree-sitter grammar and parse `source` with the
+/// shared thread-local parser. Returns the parse tree plus resolved language info.
+fn resolve_and_parse(
+    source: &str,
+    language: &str,
+) -> Result<(Tree, crate::languages::LanguageInfo), ParserError> {
+    let lang_info = get_language_info(language)
+        .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
+
+    let tree = PARSER.with(|p| {
+        let mut parser = p.borrow_mut();
+        parser
+            .set_language(&lang_info.language)
+            .map_err(|e| ParserError::ParseError(format!("Failed to set language: {e}")))?;
+        parser
+            .parse(source, None)
+            .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
+    })?;
+
+    Ok((tree, lang_info))
+}
+
 /// Canonical API for extracting element counts from source code.
 pub struct ElementExtractor;
 
@@ -234,18 +277,7 @@ impl ElementExtractor {
     /// Returns `ParserError::QueryError` if the tree-sitter query fails.
     #[instrument(skip_all, fields(language))]
     pub fn extract_with_depth(source: &str, language: &str) -> Result<(usize, usize), ParserError> {
-        let lang_info = get_language_info(language)
-            .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
-
-        let tree = PARSER.with(|p| {
-            let mut parser = p.borrow_mut();
-            parser
-                .set_language(&lang_info.language)
-                .map_err(|e| ParserError::ParseError(format!("Failed to set language: {e}")))?;
-            parser
-                .parse(source, None)
-                .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
-        })?;
+        let (tree, _) = resolve_and_parse(source, language)?;
 
         let compiled = get_compiled_queries(language)?;
 
@@ -314,29 +346,7 @@ impl SemanticExtractor {
         timeout_micros: Option<u64>,
     ) -> Result<SemanticAnalysis, ParserError> {
         let tc = TimeoutConfig::new(timeout_micros);
-
-        // Check deadline at the start before any parsing work.
-        if tc.is_exceeded() {
-            return Err(ParserError::Timeout(tc.micros));
-        }
-
-        let lang_info = get_language_info(language)
-            .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
-
-        let tree = PARSER.with(|p| {
-            let mut parser = p.borrow_mut();
-            parser
-                .set_language(&lang_info.language)
-                .map_err(|e| ParserError::ParseError(format!("Failed to set language: {e}")))?;
-            parser
-                .parse(source, None)
-                .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
-        })?;
-
-        // Check deadline after parsing
-        if tc.is_exceeded() {
-            return Err(ParserError::Timeout(tc.micros));
-        }
+        let (tree, lang_info) = parse_with_deadline(source, language, tc)?;
 
         let compiled = get_compiled_queries(language)?;
         let root = tree.root_node();
@@ -433,29 +443,7 @@ impl SemanticExtractor {
         timeout_micros: Option<u64>,
     ) -> Result<crate::types::ModuleInfo, ParserError> {
         let tc = TimeoutConfig::new(timeout_micros);
-
-        // Check deadline at the start before any parsing work.
-        if tc.is_exceeded() {
-            return Err(ParserError::Timeout(tc.micros));
-        }
-
-        let lang_info = get_language_info(language)
-            .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
-
-        let tree = PARSER.with(|p| {
-            let mut parser = p.borrow_mut();
-            parser
-                .set_language(&lang_info.language)
-                .map_err(|e| ParserError::ParseError(format!("Failed to set language: {e}")))?;
-            parser
-                .parse(source, None)
-                .ok_or_else(|| ParserError::ParseError("Failed to parse".to_string()))
-        })?;
-
-        // Check deadline after parsing
-        if tc.is_exceeded() {
-            return Err(ParserError::Timeout(tc.micros));
-        }
+        let (tree, lang_info) = parse_with_deadline(source, language, tc)?;
 
         let compiled = get_compiled_queries(language)?;
         let root = tree.root_node();
@@ -587,43 +575,7 @@ pub fn extract_impl_traits(source: &str, path: &Path) -> Vec<ImplTraitInfo> {
 
     let root = tree.root_node();
     let mut results = Vec::new();
-
-    QUERY_CURSOR.with(|c| {
-        let mut cursor = c.borrow_mut();
-        cursor.set_max_start_depth(None);
-        let mut matches = cursor.matches(query, root, source.as_bytes());
-
-        while let Some(mat) = matches.next() {
-            let mut trait_name = String::new();
-            let mut impl_type = String::new();
-            let mut line = 0usize;
-
-            for capture in mat.captures() {
-                let capture_name = query.capture_names()[capture.index as usize];
-                let node = capture.node;
-                let text = source[node.start_byte()..node.end_byte()].to_string();
-                match capture_name {
-                    "trait_name" => {
-                        trait_name = text;
-                        line = node.start_position().row + 1;
-                    }
-                    "impl_type" => {
-                        impl_type = text;
-                    }
-                    _ => {}
-                }
-            }
-
-            if !trait_name.is_empty() && !impl_type.is_empty() {
-                results.push(ImplTraitInfo {
-                    trait_name,
-                    impl_type,
-                    path: path.to_path_buf(),
-                    line,
-                });
-            }
-        }
-    });
+    collect_impl_trait_matches(source, query, root, path, None, &mut results);
 
     results
 }

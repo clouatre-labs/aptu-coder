@@ -395,6 +395,37 @@ fn filter_capture_hint(path: &str) -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+/// Send the terminal `invalid_params` error metric shared by the working-dir and
+/// pre-spawn validation phases. Preserves error_type/error_subtype semantics with
+/// exactly one metric event per failure.
+fn send_invalid_params_metric(
+    metrics_tx: &MetricsSender,
+    subtype: &ExecCommandErrorSubtype,
+    param_path: &Option<String>,
+    stdin_provided: bool,
+    working_dir_used: bool,
+    sid: Option<String>,
+    seq: u32,
+    t_start: std::time::Instant,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+            .param_path_depth(crate::metrics::path_component_count(
+                param_path.as_deref().unwrap_or(""),
+            ))
+            .error_type(Some("invalid_params".to_string()))
+            .error_subtype(Some(subtype.to_string()))
+            .session_id(sid)
+            .seq(Some(seq))
+            .output_truncated(Some(false))
+            .stdin_provided(stdin_provided)
+            .working_dir_used(working_dir_used)
+            .build(),
+    );
+}
+
 /// Free-function implementation of the `exec_command` tool handler.
 ///
 /// The `#[tool(...)]`-decorated shim in `lib.rs` extracts state from `&self` into
@@ -460,20 +491,15 @@ pub(crate) async fn exec_command_impl(
             (cmd, wd)
         }
         Err((result, subtype)) => {
-            let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-            metrics_tx.send(
-                crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                    .param_path_depth(crate::metrics::path_component_count(
-                        param_path.as_deref().unwrap_or(""),
-                    ))
-                    .error_type(Some("invalid_params".to_string()))
-                    .error_subtype(Some(subtype.to_string()))
-                    .session_id(sid)
-                    .seq(Some(seq))
-                    .output_truncated(Some(false))
-                    .stdin_provided(stdin_provided)
-                    .working_dir_used(working_dir_used)
-                    .build(),
+            send_invalid_params_metric(
+                &metrics_tx,
+                &subtype,
+                &param_path,
+                stdin_provided,
+                working_dir_used,
+                sid,
+                seq,
+                t_start,
             );
             return Ok(result);
         }
@@ -481,20 +507,15 @@ pub(crate) async fn exec_command_impl(
 
     // Phase 2: Validate pre-spawn requirements
     if let Err((result, subtype)) = validate_pre_spawn_phase(&params, &command, &span) {
-        let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                .param_path_depth(crate::metrics::path_component_count(
-                    param_path.as_deref().unwrap_or(""),
-                ))
-                .error_type(Some("invalid_params".to_string()))
-                .error_subtype(Some(subtype.to_string()))
-                .session_id(sid)
-                .seq(Some(seq))
-                .output_truncated(Some(false))
-                .stdin_provided(stdin_provided)
-                .working_dir_used(working_dir_used)
-                .build(),
+        send_invalid_params_metric(
+            &metrics_tx,
+            &subtype,
+            &param_path,
+            stdin_provided,
+            working_dir_used,
+            sid,
+            seq,
+            t_start,
         );
         return Ok(result);
     }
