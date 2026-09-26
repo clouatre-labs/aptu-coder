@@ -132,6 +132,34 @@ tasks. v19 adds a **set-recall scoring layer** for Track A:
 Anchor resolution reuses the v18 scorer logic (resolve cited
 file:line against the vendored snapshot).
 
+#### Anchor adjudication layer (post-pilot amendment #1686)
+
+**Status: calibration-gated, not yet active.** The v19 pilot's stage-2
+smoke (WATCH-TRIP gate, #1681) exposed a textual-resolution failure
+mode: a semantic-role judgment (call site vs definition vs mention) was
+miscounted as a `fabricated-anchor`. To fix this, an anchor-adjudication
+layer was specified in #1686 using Jev as a *verification* oracle, not a
+decision-maker:
+
+- A frozen question protocol asks exactly one `choice` question per
+  cited anchor over five anchor-role criteria (`call_of_target`,
+  `definition_of_target`, `textual_mention_only`,
+  `other_symbol_same_name`, `unrelated`), with no arm or human labels in
+  the state. The protocol, the model pin (`jev-1.13.0`), and the
+  code-side decision rule are manifest-recorded in
+  `scripts/bench_v19/adjudicate.py`.
+- The code owns the decision rule: `call_of_target` with the anchor in
+  the oracle set scores as a true positive; `call_of_target` outside the
+  oracle set flags an adjudication disagreement for human review (never
+  silently scored); every other role takes a precision penalty per the
+  existing F1 layer. The AST oracle remains the sole ground truth for
+  the oracle *set*; Jev only classifies the *role of cited evidence*.
+- The layer activates only if calibration freezes: measured Jev-vs-label
+  agreement must be ≥ 0.9 overall with no role below 0.75 (gate
+  constants in `scripts/bench_v19/calibrate.py`). Calibration runs with
+  zero benchmark spend, before any stage-3 pilot; a gate failure means
+  the protocol is amended or dropped and textual resolution stays.
+
 ### Token-savings measurement (the primary endpoint)
 
 Per session, from the pi JSONL `message.usage` shape handled by the
