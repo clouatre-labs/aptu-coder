@@ -195,6 +195,7 @@ fn test_metric_chars_threshold_breach_fires() {
         edit_count: None,
         est_output_tokens: None,
         schema_chars: None,
+        output_schema_chars: None,
     };
     assert!(
         event.chars_threshold_breach,
@@ -248,6 +249,7 @@ fn test_metric_chars_threshold_breach_no_fire() {
         edit_count: None,
         est_output_tokens: None,
         schema_chars: None,
+        output_schema_chars: None,
     };
     assert!(
         !event.chars_threshold_breach,

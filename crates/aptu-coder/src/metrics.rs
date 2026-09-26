@@ -147,6 +147,12 @@ pub struct MetricEvent {
     /// `serde_json::to_string(&tool.input_schema).len()`. `None` on all other events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_chars: Option<std::collections::BTreeMap<String, usize>>,
+    /// Per-tool serialized output-schema size in characters, captured once at server
+    /// start on the `schema_surface` event. Keys are tool names; values are
+    /// `serde_json::to_string(&tool.output_schema).len()` when the tool declares an
+    /// output schema, and `0` when it does not. `None` on all other events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema_chars: Option<std::collections::BTreeMap<String, usize>>,
 }
 
 /// Fluent builder for MetricEvent. Reduces repetitive struct literal boilerplate.
@@ -192,6 +198,7 @@ pub(crate) struct MetricEventBuilder {
     edit_count: Option<usize>,
     est_output_tokens: Option<u64>,
     schema_chars: Option<std::collections::BTreeMap<String, usize>>,
+    output_schema_chars: Option<std::collections::BTreeMap<String, usize>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -393,6 +400,14 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    pub(crate) fn output_schema_chars(
+        mut self,
+        v: std::collections::BTreeMap<String, usize>,
+    ) -> Self {
+        self.output_schema_chars = Some(v);
+        self
+    }
+    #[must_use]
     pub(crate) fn build(self) -> MetricEvent {
         MetricEvent {
             ts: self.ts,
@@ -435,29 +450,40 @@ impl MetricEventBuilder {
             edit_count: self.edit_count,
             est_output_tokens: self.est_output_tokens,
             schema_chars: self.schema_chars,
+            output_schema_chars: self.output_schema_chars,
         }
     }
 }
 
 /// Emit the one-time `schema_surface` metric event at server start.
 ///
-/// Serializes each tool's `input_schema` to JSON and records its character length in a
-/// `BTreeMap` keyed by tool name. Serialization failures skip the individual tool so a
-/// metrics problem can never block startup. Sent fire-and-forget through the existing
-/// unbounded channel; the map total equals the event's `output_chars` slot.
+/// Serializes each tool's `input_schema` and `output_schema` to JSON and records their
+/// character lengths in `BTreeMap`s keyed by tool name (`schema_chars` and
+/// `output_schema_chars` respectively; tools without an output schema record `0`).
+/// Serialization failures skip the individual tool so a metrics problem can never block
+/// startup. Sent fire-and-forget through the existing unbounded channel; the
+/// `schema_chars` total equals the event's `output_chars` slot.
 pub(crate) fn emit_schema_surface(sender: &MetricsSender, tools: &[rmcp::model::Tool]) {
     let mut schema_chars = std::collections::BTreeMap::new();
+    let mut output_schema_chars = std::collections::BTreeMap::new();
     for tool in tools {
         let Ok(json) = serde_json::to_string(&tool.input_schema) else {
             continue;
         };
         schema_chars.insert(tool.name.to_string(), json.len());
+        let out_len = tool
+            .output_schema
+            .as_ref()
+            .and_then(|s| serde_json::to_string(s).ok())
+            .map_or(0, |s| s.len());
+        output_schema_chars.insert(tool.name.to_string(), out_len);
     }
     let total: usize = schema_chars.values().sum();
     sender.send(
         MetricEventBuilder::new("schema_surface", "ok", 0)
             .output_chars(total)
             .schema_chars(schema_chars)
+            .output_schema_chars(output_schema_chars)
             .build(),
     );
 }
@@ -658,6 +684,16 @@ mod tests {
         let total: usize = map.values().sum();
         assert_eq!(event.output_chars, total);
         assert!(total > 0);
+        let out_map = event
+            .output_schema_chars
+            .expect("output_schema_chars populated");
+        assert_eq!(out_map.len(), tools.len());
+        let out_total: usize = out_map.values().sum();
+        assert!(out_total > 0, "output schemas serialize to non-zero bytes");
+        assert!(
+            out_map.values().any(|v| *v > 0),
+            "at least one tool declares a non-empty output schema"
+        );
     }
 
     #[test]
@@ -667,7 +703,24 @@ mod tests {
         let event = rx.try_recv().unwrap();
         let map = event.schema_chars.expect("schema_chars populated");
         assert!(map.is_empty());
+        let out_map = event
+            .output_schema_chars
+            .expect("output_schema_chars populated");
+        assert!(out_map.is_empty());
         assert_eq!(event.output_chars, 0);
+    }
+
+    #[test]
+    fn test_emit_schema_surface_tools_without_output_schema_record_zero() {
+        let mut tool = crate::CodeAnalyzer::list_tools()[0].clone();
+        tool.output_schema = None;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        emit_schema_surface(&MetricsSender(tx), std::slice::from_ref(&tool));
+        let event = rx.try_recv().unwrap();
+        let out_map = event
+            .output_schema_chars
+            .expect("output_schema_chars populated");
+        assert_eq!(out_map.get(tool.name.as_ref()), Some(&0));
     }
 
     #[test]
@@ -828,6 +881,7 @@ mod tests {
             edit_count: None,
             est_output_tokens: None,
             schema_chars: None,
+            output_schema_chars: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;
