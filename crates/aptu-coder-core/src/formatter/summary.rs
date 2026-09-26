@@ -657,6 +657,7 @@ fn render_focused_full(
 /// Format a compact summary of focused symbol analysis.
 /// Used when output would exceed the size threshold or when explicitly requested.
 /// Internal helper that accepts pre-computed chains.
+#[instrument(skip_all)]
 pub(crate) fn format_focused_summary_internal(
     graph: &CallGraph,
     symbol: &str,
