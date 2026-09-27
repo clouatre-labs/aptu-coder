@@ -1,0 +1,82 @@
+[
+  {
+    "expected_files": [
+      "django/utils/dateformat.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-F",
+    "prompt": "Locate the definition of F and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/regex_helper.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-_lazy_re_compile",
+    "prompt": "Locate the definition of _lazy_re_compile and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/datastructures.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-dict",
+    "prompt": "Locate the definition of dict and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/utils/safestring.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-mark_safe",
+    "prompt": "Locate the definition of mark_safe and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/test/testcases.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-modify_settings",
+    "prompt": "Locate the definition of modify_settings and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/test/testcases.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-skipUnlessDBFeature",
+    "prompt": "Locate the definition of skipUnlessDBFeature and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/template/loader_tags.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-super",
+    "prompt": "Locate the definition of super and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  },
+  {
+    "expected_files": [
+      "django/contrib/gis/gdal/field.py"
+    ],
+    "hop_depth": 1,
+    "id": "task-fanin-c-lookup-type",
+    "prompt": "Locate the definition of type and report its file path.",
+    "tier": "fanin",
+    "track": "C"
+  }
+]
