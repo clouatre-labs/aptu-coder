@@ -61,7 +61,12 @@ def extract_paths(text: str, root: Path) -> set[str]:
         cand = cand.split(":")[0]
         p = root / cand
         if p.is_file():
-            out.add(p.resolve().relative_to(root).as_posix())
+            try:
+                out.add(p.resolve().relative_to(root).as_posix())
+            except ValueError:
+                # Mentions of paths outside the snapshot are not
+                # repository anchors; skip them instead of crashing.
+                continue
     return out
 
 
