@@ -47,7 +47,9 @@ def generate_tasks(oracle_entries: list[dict]) -> list[dict]:
                     "prompt": (
                         f"List every file in this repository that calls "
                         f"{entry['symbol']} within {entry['hop_depth']} "
-                        f"hop(s) of indirection. Report file paths only."
+                        f"hop(s) of indirection. Report file paths only. "
+                        f"Report each calling file as a file:line anchor "
+                        f"(path:line)."
                     ),
                     "hop_depth": entry["hop_depth"],
                     "expected_files": entry["expected_files"],
