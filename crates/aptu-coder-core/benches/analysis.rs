@@ -3,7 +3,7 @@
 
 use aptu_coder_core::cache::{CallGraphCache, CallGraphCacheKey};
 use aptu_coder_core::graph::StructuralGraph;
-use aptu_coder_core::types::SymbolMatchMode;
+use aptu_coder_core::types::{SymbolAnalysisMode, SymbolMatchMode};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::path::Path;
 use std::sync::Arc;
@@ -333,6 +333,12 @@ fn call_graph_cache_benchmark(c: &mut Criterion) {
         &params.match_mode,
         params.impl_only.unwrap_or(false),
         params.ast_recursion_limit,
+        &params.focus,
+        if params.def_use {
+            &SymbolAnalysisMode::DefUse
+        } else {
+            &SymbolAnalysisMode::CallGraph
+        },
     );
     let cache = CallGraphCache::new(32);
     cache.put(key.clone(), Arc::new(output));

@@ -8,7 +8,7 @@
 use crate::analyze::{AnalysisOutput, FileAnalysisOutput, FocusedAnalysisOutput};
 use crate::graph::structural::StructuralGraph;
 use crate::traversal::WalkEntry;
-use crate::types::{AnalysisMode, SymbolMatchMode};
+use crate::types::{AnalysisMode, SymbolAnalysisMode, SymbolMatchMode};
 use lru::LruCache;
 use rayon::prelude::*;
 use std::num::NonZeroUsize;
@@ -141,6 +141,10 @@ where
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CallGraphCacheKey {
     root_path: PathBuf,
+    /// Queried symbol name; two queries differing only in symbol must not collide.
+    symbol: String,
+    /// Analysis mode (call_graph vs def_use); the two produce distinct outputs.
+    mode: SymbolAnalysisMode,
     git_ref: Option<String>,
     follow_depth: u32,
     match_mode: SymbolMatchMode,
@@ -154,6 +158,10 @@ impl CallGraphCacheKey {
     /// Build a `CallGraphCacheKey` from walk entries and analysis parameters.
     /// Files are sorted by path for deterministic hashing.
     /// Directories are filtered out; only file entries contribute to the key.
+    // The key intentionally enumerates every analysis parameter that affects the
+    // cached output; grouping them into a struct would only move the list, not
+    // shorten it.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn from_entries(
         root: &std::path::Path,
@@ -163,6 +171,8 @@ impl CallGraphCacheKey {
         match_mode: &SymbolMatchMode,
         impl_only: bool,
         ast_recursion_limit: Option<usize>,
+        symbol: &str,
+        mode: &SymbolAnalysisMode,
     ) -> Self {
         let mut file_mtimes: Vec<(PathBuf, u64)> = entries
             .par_iter()
@@ -180,6 +190,8 @@ impl CallGraphCacheKey {
         file_mtimes.sort_by(|a, b| a.0.cmp(&b.0));
         Self {
             root_path: root.to_path_buf(),
+            symbol: symbol.to_owned(),
+            mode: mode.clone(),
             git_ref: git_ref.map(ToOwned::to_owned),
             follow_depth,
             match_mode: match_mode.clone(),
@@ -483,7 +495,7 @@ pub use crate::cache_disk::DiskCache;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SemanticAnalysis;
+    use crate::types::{SemanticAnalysis, SymbolAnalysisMode};
 
     #[test]
     fn test_from_entries_skips_dirs() {
@@ -520,6 +532,68 @@ mod tests {
         // The directory entry should be filtered out
         assert_eq!(key.files.len(), 1);
         assert_eq!(key.files[0].0, file_path);
+    }
+
+    fn file_entry(path: &std::path::Path) -> WalkEntry {
+        WalkEntry {
+            path: path.to_path_buf(),
+            depth: 0,
+            is_dir: false,
+            is_symlink: false,
+            symlink_target: None,
+            mtime: None,
+            canonical_path: PathBuf::new(),
+        }
+    }
+
+    #[test]
+    fn test_call_graph_key_distinguishes_symbol_and_mode() {
+        // Regression: the cache key previously omitted the queried symbol and the
+        // analysis mode, so two different symbols (or call_graph vs def_use) on the
+        // same path collided and served the first query's cached result.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = tempfile::NamedTempFile::new_in(dir.path()).expect("tempfile");
+        let entries = vec![file_entry(file.path())];
+
+        let key_a = CallGraphCacheKey::from_entries(
+            dir.path(),
+            &entries,
+            None,
+            1,
+            &SymbolMatchMode::Exact,
+            false,
+            None,
+            "chain",
+            &SymbolAnalysisMode::CallGraph,
+        );
+        let key_b = CallGraphCacheKey::from_entries(
+            dir.path(),
+            &entries,
+            None,
+            1,
+            &SymbolMatchMode::Exact,
+            false,
+            None,
+            "timezone",
+            &SymbolAnalysisMode::CallGraph,
+        );
+        let key_def_use = CallGraphCacheKey::from_entries(
+            dir.path(),
+            &entries,
+            None,
+            1,
+            &SymbolMatchMode::Exact,
+            false,
+            None,
+            "chain",
+            &SymbolAnalysisMode::DefUse,
+        );
+
+        assert_ne!(key_a, key_b, "different symbols must not collide");
+        assert_ne!(
+            key_a, key_def_use,
+            "call_graph and def_use must not collide"
+        );
     }
 
     #[test]

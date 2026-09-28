@@ -297,6 +297,11 @@ pub(crate) async fn handle_focused_mode(
         &params.match_mode.clone().unwrap_or_default(),
         params.impl_only.unwrap_or(false),
         None,
+        &params.symbol,
+        params
+            .mode
+            .as_ref()
+            .unwrap_or(&SymbolAnalysisMode::default()),
     );
 
     // Check L1 cache first.
@@ -305,10 +310,30 @@ pub(crate) async fn handle_focused_mode(
     }
 
     // Compute L2 disk cache key by streaming CallGraphCacheKey fields through blake3.
-    // Same pattern as analyze_directory: root_path + git_ref + max_depth + match_mode
-    // + impl_only + per-file mtimes.
+    // Same pattern as analyze_directory: symbol + mode + root_path + git_ref + max_depth
+    // + match_mode + impl_only + per-file mtimes.
     let disk_key = {
         let mut hasher = blake3::Hasher::new();
+        hasher.update(params.symbol.as_bytes());
+        let mode_str = match serde_json::to_string(
+            params
+                .mode
+                .as_ref()
+                .unwrap_or(&SymbolAnalysisMode::default()),
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                // Serialization of a unit-like enum should never fail; if it does,
+                // an empty string would produce a non-unique cache key, so warn loudly.
+                tracing::warn!(
+                    error = %e,
+                    "analyze_symbol: failed to serialize mode for disk cache key; \
+                     falling back to empty string (cache key may collide)"
+                );
+                String::new()
+            }
+        };
+        hasher.update(mode_str.as_bytes());
         hasher.update(path.as_os_str().to_string_lossy().as_bytes());
         if let Some(ref git_ref) = params.git_ref {
             hasher.update(git_ref.as_bytes());
