@@ -15,6 +15,16 @@ async fn call_tool_twice_sequential(
     tool_name: &str,
     params: serde_json::Value,
 ) -> (serde_json::Value, serde_json::Value) {
+    call_tool_pair_sequential(tool_name, params.clone(), params).await
+}
+
+/// Send two sequential `tools/call` requests with distinct arguments on the same
+/// MCP connection (same CodeAnalyzer, hence shared caches).
+async fn call_tool_pair_sequential(
+    tool_name: &str,
+    params1: serde_json::Value,
+    params2: serde_json::Value,
+) -> (serde_json::Value, serde_json::Value) {
     let analyzer = make_test_analyzer();
     let (client, server) = tokio::io::duplex(65536);
 
@@ -70,7 +80,7 @@ async fn call_tool_twice_sequential(
     // First call (id=2) -- send and wait for response.
     let msg1 = serde_json::json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": tool_name, "arguments": &params}
+        "params": {"name": tool_name, "arguments": &params1}
     })
     .to_string()
         + "\n";
@@ -78,10 +88,10 @@ async fn call_tool_twice_sequential(
     client_tx.flush().await.unwrap();
     let resp1 = read_response(&mut reader, 2).await;
 
-    // Second call (id=3) -- sent only after first response; cache is populated.
+    // Second call (id=3) with `params2` -- sent only after first response; cache is populated.
     let msg2 = serde_json::json!({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": tool_name, "arguments": &params}
+        "params": {"name": tool_name, "arguments": &params2}
     })
     .to_string()
         + "\n";
@@ -188,5 +198,86 @@ async fn test_analyze_symbol_cache_invalidates_on_file_change() {
     assert!(
         structured_content(&resp4).is_none(),
         "structuredContent must be absent"
+    );
+}
+
+fn result_text(resp: &serde_json::Value) -> String {
+    resp["result"]["content"]
+        .as_array()
+        .and_then(|c| c.first())
+        .and_then(|c| c["text"].as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[tokio::test]
+async fn test_analyze_symbol_different_symbols_return_distinct_graphs() {
+    // Regression: the call-graph cache key omitted the queried symbol (and the
+    // analysis mode), so after the first call-graph query on a path every later
+    // query for a different symbol was served the first symbol's cached graph.
+    let cwd = std::env::current_dir().expect("must have cwd");
+    let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+    std::fs::write(
+        dir.path().join("lib.rs"),
+        "fn alpha() {}\n\nfn beta() {\n    alpha();\n}\n\nfn gamma() {\n    beta();\n}\n",
+    )
+    .expect("write fixture");
+
+    let base = serde_json::json!({
+        "path": dir.path().to_str().unwrap(),
+        "max_depth": 1
+    });
+    let mut params_alpha = base.clone();
+    params_alpha["symbol"] = serde_json::json!("alpha");
+    let mut params_beta = base.clone();
+    params_beta["symbol"] = serde_json::json!("beta");
+
+    // Same connection (L1 in-memory cache shared between the two calls).
+    let (r1, r2) = {
+        let (a, b) =
+            call_tool_pair_sequential("analyze_symbol", params_alpha.clone(), params_beta.clone())
+                .await;
+        assert!(is_success(&a), "alpha call must succeed; got: {a}");
+        assert!(is_success(&b), "beta call must succeed; got: {b}");
+        (a, b)
+    };
+    let text_alpha = result_text(&r1);
+    let text_beta = result_text(&r2);
+    assert_ne!(
+        text_alpha, text_beta,
+        "same-connection: different symbols must produce different graphs"
+    );
+    assert!(
+        text_alpha.contains("beta"),
+        "alpha's callers must include beta"
+    );
+    assert!(
+        text_beta.contains("gamma"),
+        "beta's callers must include gamma"
+    );
+    assert!(
+        !text_beta.contains("FOCUS: alpha"),
+        "beta's graph must not be labeled as alpha"
+    );
+
+    // Fresh connection (exercises the persistent L2 disk cache path). Sleep
+    // briefly so the first call's write-behind disk-cache write lands.
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let (r3, r4) = call_tool_pair_sequential("analyze_symbol", params_alpha, params_beta).await;
+    assert!(is_success(&r3), "fresh-connection alpha call must succeed");
+    assert!(is_success(&r4), "fresh-connection beta call must succeed");
+    let text_alpha2 = result_text(&r3);
+    let text_beta2 = result_text(&r4);
+    assert_ne!(
+        text_alpha2, text_beta2,
+        "fresh-connection: different symbols must produce different graphs (L2 disk key collision)"
+    );
+    assert!(
+        text_alpha2.contains("beta"),
+        "fresh-connection alpha's callers must include beta"
+    );
+    assert!(
+        text_beta2.contains("gamma"),
+        "fresh-connection beta's callers must include gamma"
     );
 }
