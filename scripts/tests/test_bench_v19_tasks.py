@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from bench_v19.generate_tasks import (
     F1_GAP_THRESHOLD,
+    FANIN_SEALED_HOP_DEPTH,
+    SEALED_N_TASKS,
     apply_discriminative_filter,
     filter_pilot_tasks,
+    generate_fanin_tasks,
     generate_tasks,
     generate_track_c_tasks,
+    select_fanin_symbols,
 )
+from bench_v19.runner_v19 import activation_gate
 
 ORACLE = [
     {
@@ -183,3 +188,144 @@ def test_track_a_hop_stratification_derives_from_call_edge_bfs(tmp_path):
     assert hop[1] == ["b.py"]
     assert hop[2] == ["b.py", "c.py"]
     assert hop[3] == ["b.py", "c.py"]
+
+
+def _fanin_fixture(tmp_path, n_callers: int, call: str = "sym") -> None:
+    """Snapshot with one definition and n_callers distinct caller files."""
+    (tmp_path / "lib.py").write_text(f"def {call}():\n    return 1\n")
+    for i in range(n_callers):
+        (tmp_path / f"caller_{i:03d}.py").write_text(
+            f"from lib import {call}\n\n{call}()\n"
+        )
+
+
+def test_generate_fanin_tasks_default_hop_is_sealed_hop2():
+    sel = [
+        {
+            "symbol": "sym",
+            "hop1_caller_files": 50,
+            "hop2_caller_files": 45,
+            "hop2_expected_files": ["a.py", "b.py"],
+            "hop3_caller_files": 60,
+            "hop3_expected_files": ["a.py", "b.py", "c.py"],
+            "rg_output_bytes": 9999,
+            "defining_files": ["lib.py"],
+        }
+    ]
+    tasks = generate_fanin_tasks(sel)
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t["tier"] == "fanin" and t["track"] == "A"
+    assert t["hop_depth"] == FANIN_SEALED_HOP_DEPTH == 2
+    assert t["expected_files"] == ["a.py", "b.py"]
+    assert "within 2 hop(s)" in t["prompt"]
+    assert "file:line" in t["prompt"]
+    # Stage-3 pilot reproduction: hop_depth=3 verbatim.
+    p = generate_fanin_tasks(sel, hop_depth=3)[0]
+    assert p["hop_depth"] == 3 and p["expected_files"] == [
+        "a.py",
+        "b.py",
+        "c.py",
+    ]
+
+
+def test_sealed_constants_recorded():
+    # Pool-bound per A4: the window yields 8 viable symbols on Django.
+    assert SEALED_N_TASKS == 8
+
+
+def test_select_fanin_symbols_gates_on_hop2_set(tmp_path):
+    from bench_v19 import oracle
+
+    # Hop-2 set inside the A4a window (60 direct callers, max 60).
+    _fanin_fixture(tmp_path, 60)
+    selections, exclusions = select_fanin_symbols(
+        tmp_path, max_symbols=1, min_hop1=40, min_hop3=40, min_sealed=40,
+        min_rg_bytes=0,
+    )
+    assert len(selections) == 1 and not exclusions
+    s = selections[0]
+    assert s["hop2_caller_files"] == 60
+    assert s["hop3_caller_files"] == 60
+    assert set(s["hop2_expected_files"]) == {
+        f"caller_{i:03d}.py" for i in range(60)
+    }
+    tasks = generate_fanin_tasks(selections)
+    assert tasks[0]["expected_files"] == s["hop2_expected_files"]
+    # Oracle sanity: BFS at sealed depth agrees with the recorded set.
+    idx = oracle.build_function_definition_index(tmp_path)
+    edges = oracle.build_call_edges(tmp_path, idx)
+    direct = oracle.callers_oracle_from(idx, edges, "sym", 2)
+    assert set(direct) == set(s["hop2_expected_files"])
+
+
+def test_select_fanin_symbols_excludes_small_hop2_set(tmp_path):
+    # Large hop-1 fan-in but hop-2 set below the sealed window:
+    # fail-closed exclusion with a recorded reason.
+    _fanin_fixture(tmp_path, 50)
+    selections, exclusions = select_fanin_symbols(
+        tmp_path, max_symbols=1, min_hop1=40, min_hop3=40, min_sealed=55,
+        min_rg_bytes=0,
+    )
+    assert not selections
+    assert len(exclusions) == 1
+    assert "outside the" in exclusions[0]["reason"]
+    assert "sealed window [55, 60]" in exclusions[0]["reason"]
+
+
+def test_select_fanin_symbols_excludes_oversized_hop2_set(tmp_path):
+    # A4a upper bound: 100 caller files is output-bounded (the re-pilot's
+    # 78-848-file tasks never completed) -> excluded.
+    _fanin_fixture(tmp_path, 100)
+    selections, exclusions = select_fanin_symbols(
+        tmp_path, max_symbols=1, min_hop1=40, min_hop3=40, min_rg_bytes=0,
+    )
+    assert not selections
+    assert len(exclusions) == 1
+    assert "outside the" in exclusions[0]["reason"]
+    assert "[20, 60]" in exclusions[0]["reason"]
+
+
+def test_select_fanin_symbols_excludes_subfloor_rg_output(tmp_path):
+    # In-window hop-2 set but tiny raw rg output: not context-flooding.
+    _fanin_fixture(tmp_path, 30)
+    selections, exclusions = select_fanin_symbols(
+        tmp_path, max_symbols=1, min_hop1=20, min_hop3=20, min_rg_bytes=10**9,
+    )
+    assert not selections
+    assert len(exclusions) == 1
+    assert "below the A4a" in exclusions[0]["reason"]
+
+
+def test_activation_gate_pending_below_min_sample():
+    # A4b: 3/4 = 0.75 must NOT halt the gate (sample too small to judge);
+    # this is exactly the re-pilot halt that motivated the amendment.
+    sessions = [
+        {"killed": False, "aptu_tool_calls": 1},
+        {"killed": False, "aptu_tool_calls": 1},
+        {"killed": False, "aptu_tool_calls": 1},
+        {"killed": False, "aptu_tool_calls": 0},
+    ]
+    gate = activation_gate(sessions)
+    assert gate["pass"] is True and gate["pending"] is True
+    assert gate["fraction"] is None and gate["scorable"] == 4
+    # At full sample the same active fraction fails, as designed.
+    full = sessions * 2 + [{"killed": False, "aptu_tool_calls": 0}]
+    gate = activation_gate(full)
+    assert gate["pass"] is False and "pending" not in gate
+    # Killed sessions are excluded from the sample, not counted against.
+    killed = sessions + [{"killed": True, "aptu_tool_calls": 0}] * 10
+    gate = activation_gate(killed)
+    assert gate["pending"] is True  # still only 4 scorable
+
+
+def test_activation_gate_passes_at_threshold_with_full_sample():
+    sessions = [{"killed": False, "aptu_tool_calls": 1}] * 8
+    gate = activation_gate(sessions)
+    assert gate["pass"] is True and gate["fraction"] == 1.0
+    # 7/9 active = 0.778 < 0.8 -> fail at full sample.
+    gate = activation_gate(
+        [{"killed": False, "aptu_tool_calls": 1}] * 7
+        + [{"killed": False, "aptu_tool_calls": 0}] * 2
+    )
+    assert gate["pass"] is False and gate["fraction"] == 7 / 9

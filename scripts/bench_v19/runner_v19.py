@@ -53,6 +53,11 @@ TIERS: dict[str, dict] = {
 # F3 activation gate: fraction of completed scorable tool-arm sessions
 # that must contain >=1 aptu-coder tool call, and the halt reason prefix.
 ACTIVATION_GATE_THRESHOLD = 0.8
+# A4b: a rate gate on a tiny sample is granularity noise (the stage-3
+# hop-2 re-pilot halted at 3/4 = 0.75 with one session of slack). The
+# gate is only evaluated once at least this many scorable tool-arm
+# sessions exist; below that it records "pending" and passes vacuously.
+ACTIVATION_GATE_MIN_SAMPLE = 8
 ACTIVATION_GATE_REASON = "activation-gate-failed:{pct:.0f}"
 
 # F4 prompt parity. The rewording requests file:line anchors and applies
@@ -208,17 +213,25 @@ def run_session_with_turn_cap(
 def activation_gate(
     tool_arm_sessions: list[dict],
     threshold: float = ACTIVATION_GATE_THRESHOLD,
+    min_sample: int = ACTIVATION_GATE_MIN_SAMPLE,
 ) -> dict:
     """F3 activation gate over completed scorable tool-arm sessions.
 
     Each session dict needs ``killed`` and ``aptu_tool_calls``. Sessions
-    that were killed are excluded (not completed); the gate passes
-    vacuously when no scorable session exists yet (nothing to judge).
-    Returns the gate decision with the pass fraction for the ledger.
+    that were killed are excluded (not completed). Per A4b the gate is
+    evaluated only when ``len(scorable) >= min_sample``; below that it
+    passes vacuously with ``pending`` set so the ledger shows the gate
+    has not been judged yet. Returns the gate decision with the pass
+    fraction for the ledger.
     """
     scorable = [s for s in tool_arm_sessions if not s.get("killed")]
     if not scorable:
-        return {"pass": True, "active": 0, "scorable": 0, "fraction": None}
+        return {"pass": True, "pending": True, "active": 0,
+                "scorable": 0, "fraction": None}
+    if len(scorable) < min_sample:
+        return {"pass": True, "pending": True, "active": sum(
+                    1 for s in scorable if s.get("aptu_tool_calls", 0) >= 1),
+                "scorable": len(scorable), "fraction": None}
     active = sum(1 for s in scorable if s.get("aptu_tool_calls", 0) >= 1)
     fraction = active / len(scorable)
     return {

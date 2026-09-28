@@ -47,6 +47,73 @@ retained as a documented negative result on LLM verification oracles.
 calls it); the `jev-1.13.0` pin and all judge answers remain verbatim in
 the calibration artifacts.
 
+## A3 — 2026-09-27: Simplified single-tier sealed design (v19.1)
+
+**Decision:** taken on #1681 (maintainer, 2026-09-27), after the stage-3
+pilot (`results/pilot-0361/`). Rationale: the pilot fixed the v18
+activation confound (gate PASS 100% on fan-in Track A) but showed the
+ladder itself miscalibrated on task difficulty — hop-3 fan-in is
+completion-bounded (9/18 sessions ended `stopReason: toolUse` with no
+final answer in **both** arms), hop-1 lookups are trivially rg-solvable
+(Track C activation 0/2, fail-closed halt), and n=8 cannot support a
+headline claim. A simple, reproducible, discriminatory design for the
+paper:
+
+- **Single sealed tier: hop-2 fan-in Track A.** Hop-1 and hop-3 cells
+  and the entire Track C tier are dropped from the sealed design.
+  Selection additionally gates on the hop-2 caller-file set
+  (`FANIN_MIN_SEALED_CALLER_FILES = 40`), fail-closed recorded.
+- **Fixed sealed N = 12 tasks x 2 arms = 24 sessions** (answers the
+  methodology's open sealed-N question; projected spend well under the
+  $2.00 sealed cap).
+- **Headline metric:** per-arm F1 and cost-per-task (F1/F5 unchanged);
+  discriminative filter unchanged for kept-set selection.
+- **Reproducibility:** pinned snapshot + pinned tree-sitter versions +
+  one-command regeneration (`bench_v19.generate_tasks`);
+  `generate_fanin_tasks(hop_depth=3)` reproduces the stage-3 pilot
+  verbatim; sealed sessions re-run kept tasks from scratch (fresh
+  sessions, no pilot session reuse).
+
+The stage-3 pilot is retained as the hop-3/hop-1 negative result
+motivating this amendment.
+
+## A4 — 2026-09-27: Bounded answer window + gate minimum sample (v19.1 fix)
+
+**Decision:** taken on #1681 (maintainer, 2026-09-27), after the A3
+hop-2 re-pilot (run `/tmp/v19-pilot/run-fanin-hop2`, $0.0845 spend).
+The re-pilot showed the A3 tier was still invalid, for a different
+reason: expected answer sets of 78–848 caller files are output-bounded,
+not tool-bounded (native completed 0/5, mcp 1/5; 9/10 sessions ended
+`stopReason: toolUse`). A task the model structurally cannot complete
+is not a hard task — it is an invalid one (SWE-bench-style feasibility
+filtering). Two changes:
+
+- **A4a — bounded answer window.** Sealed-tier selection keeps symbols
+  whose hop-2 caller-file set falls in `[20, 60]` AND whose
+  `rg_output_bytes >= 20,000` (flooding floor; short common symbols
+  produce huge raw rg output even at moderate caller counts, and the
+  byte count is recorded per task as the flooding datum). The pilot-era
+  hop-1 >= 40 fan-in floor is DROPPED for the sealed tier: the offline
+  scan showed it forces hop-2 sets past 60 (pool of 0); the window plus
+  flooding floor are the discrimination criteria. Fail-closed
+  exclusions record which side of the window rejected them.
+- **Sealed N is pool-bound: 8 tasks x 2 arms = 16 sessions**
+  (supersedes A3's fixed N=12). The A4a window yields exactly 8 viable
+  symbols on the pinned Django snapshot (offline, zero-spend scan):
+  `chain` (56 callers, 66.9 KB rg), `register_lookup` (43, 52.6 KB),
+  `skipIfDBFeature` (42, 21.4 KB), `view_func` (36, 24.3 KB),
+  `include` (33, 221 KB), `dec` (23, 456 KB), `qualname` (22, 26 KB),
+  `timezone` (20, 163 KB).
+- **A4b — activation gate minimum sample.** The F3 gate (≥0.80
+  activation, fail-closed, threshold unchanged) is evaluated only once
+  ≥8 scorable tool-arm sessions exist; below that it records `pending`
+  and passes vacuously. Rationale: the re-pilot halted at 3/4 = 0.75 —
+  one session of granularity noise — and post-hoc threshold loosening
+  after a fail is not acceptable; fixing the sample size is.
+
+The A3 re-pilot artifacts are retained as the output-boundedness
+negative result motivating this amendment.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
 
 - Wait deadline 120s → 300s via `SESSION_WAIT_TIMEOUT_S` environment

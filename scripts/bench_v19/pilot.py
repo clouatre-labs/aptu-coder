@@ -144,7 +144,8 @@ def main() -> None:
     ap.add_argument("--arms", default="native,mcp",
                     help="comma-separated: native,mcp[,mcp-gateway]")
     ap.add_argument("--cells", choices=("hop1", "hop2", "hop3", "all"),
-                    default="all")
+                    default="hop2",
+                    help="hop filter (default hop2 per amendment A3)")
     ap.add_argument("--max-pairs", type=int, default=None)
     ap.add_argument("--snapshot", type=Path, required=True)
     ap.add_argument("--run-root", type=Path,
@@ -259,7 +260,7 @@ def main() -> None:
             cwd=str(REPO)).stdout.strip(),
         "provider": v18.PROVIDER,
         "model": v18.MODEL,
-        "amendments": ["A1", "A2"],
+        "amendments": ["A1", "A2", "A3", "A4"],
         "carry-overs": [
             "session-wait-timeout-300s",
             "per-session-turn-cap",
