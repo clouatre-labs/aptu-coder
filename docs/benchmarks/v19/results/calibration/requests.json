@@ -1,0 +1,725 @@
+{
+  "model": "jev-1.13.0",
+  "requests": [
+    {
+      "state": {
+        "target_symbol": "safe_join",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/core/files/storage/filesystem.py",
+          "line": 196
+        },
+        "cited_context": "\n    def path(self, name):\n        return safe_join(self.location, name)\n\n    def size(self, name):"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "safe_join",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/template/loaders/filesystem.py",
+          "line": 35
+        },
+        "cited_context": "        for template_dir in self.get_dirs():\n            try:\n                name = safe_join(template_dir, template_name)\n            except SuspiciousFileOperation:\n                # The joined path was located outside of this template_dir"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "constant_time_compare",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/middleware/csrf.py",
+          "line": 157
+        },
+        "cited_context": "        request_csrf_token = _unmask_cipher_token(request_csrf_token)\n    assert len(request_csrf_token) == CSRF_SECRET_LENGTH\n    return constant_time_compare(request_csrf_token, csrf_secret)"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "redirect_to_login",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/auth/middleware.py",
+          "line": 86
+        },
+        "cited_context": "            path = request.get_full_path()\n\n        return redirect_to_login(\n            path,\n            resolved_login_url,"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "patch_vary_headers",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/middleware/cache.py",
+          "line": 133
+        },
+        "cited_context": "        # are not currently implemented by Django.\n        if request.headers.get(\"Authorization\") and \"public\" not in cache_control_parts:\n            patch_vary_headers(response, (\"Authorization\",))\n        if timeout and response.status_code == 200:\n            cache_key = learn_cache_key("
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_permission_codename",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/admin/options.py",
+          "line": 619
+        },
+        "cited_context": "        \"\"\"\n        opts = self.opts\n        codename = get_permission_codename(\"add\", opts)\n        return request.user.has_perm(\"%s.%s\" % (opts.app_label, codename))"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_func_args",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/tasks/backends/base.py",
+          "line": 52
+        },
+        "cited_context": "            raise InvalidTask(\"Backend does not support async Tasks.\")\n\n        task_func_args = get_func_args(task.func)\n        if task.takes_context and (\n            not task_func_args or task_func_args[0] != \"context\""
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "safe_join",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/_os.py",
+          "line": 65
+        },
+        "cited_context": "\n\ndef safe_join(base, *paths):\n    \"\"\"\n    Join one or more path components to the base path component intelligently."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "constant_time_compare",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/crypto.py",
+          "line": 81
+        },
+        "cited_context": "\n\ndef constant_time_compare(val1, val2):\n    \"\"\"Return True if the two strings are equal, False otherwise.\"\"\"\n    return secrets.compare_digest(force_bytes(val1), force_bytes(val2))"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "redirect_to_login",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/auth/views.py",
+          "line": 184
+        },
+        "cited_context": "\n\ndef redirect_to_login(next, login_url=None, redirect_field_name=REDIRECT_FIELD_NAME):\n    \"\"\"\n    Redirect the user to the login page, passing the given 'next' page."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "patch_vary_headers",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/cache.py",
+          "line": 303
+        },
+        "cited_context": "\n\ndef patch_vary_headers(response, newheaders):\n    \"\"\"\n    Add (or update) the \"Vary\" header in the given HttpResponse object."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "log_response",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/log.py",
+          "line": 292
+        },
+        "cited_context": "\n\ndef log_response(\n    message,\n    *args,"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_permission_codename",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/auth/__init__.py",
+          "line": 363
+        },
+        "cited_context": "\n\ndef get_permission_codename(action, opts):\n    \"\"\"\n    Return the codename of the permission for the specified action."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "captured_stdout",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/test/utils.py",
+          "line": 837
+        },
+        "cited_context": "\n\ndef captured_stdout():\n    \"\"\"Capture the output of sys.stdout:"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "safe_join",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/_os.py",
+          "line": 79
+        },
+        "cited_context": "    # further, one of the following conditions must be true:\n    #  a) The next character is the path separator (to prevent conditions like\n    #     safe_join(\"/dir\", \"/../d\"))\n    #  b) The final path must be the same as the base path.\n    #  c) The base path must be the most root path (meaning either \"/\" or"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "captured_stdout",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/test/utils.py",
+          "line": 824
+        },
+        "cited_context": "@contextmanager\ndef captured_output(stream_name):\n    \"\"\"Return a context manager used by captured_stdout/stdin/stderr\n    that temporarily replaces the sys stream *stream_name* with a StringIO."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "captured_stdout",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/test/utils.py",
+          "line": 840
+        },
+        "cited_context": "    \"\"\"Capture the output of sys.stdout:\n\n    with captured_stdout() as stdout:\n        print(\"hello\")\n    self.assertEqual(stdout.getvalue(), \"hello\\n\")"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "redirect_to_login",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "tests/auth_tests/test_views.py",
+          "line": 1053
+        },
+        "cited_context": "\nclass RedirectToLoginTests(AuthViewsTestCase):\n    \"\"\"Tests for the redirect_to_login view\"\"\"\n\n    @override_settings(LOGIN_URL=reverse_lazy(\"login\"))"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "patch_vary_headers",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "tests/cache/tests.py",
+          "line": 2300
+        },
+        "cited_context": "            ),\n            # Whitespace-padded wildcard in existing Vary must be recognized so\n            # that patch_vary_headers() still outputs a single \"*\" rather than\n            # appending new headers alongside the (unrecognized) padded \"*\".\n            (\"* \", (\"Accept-Language\",), \"*\"),"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "redirect_to_login",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/auth/decorators.py",
+          "line": 23
+        },
+        "cited_context": "\n    def decorator(view_func):\n        def _redirect_to_login(request):\n            path = request.build_absolute_uri()\n            resolved_login_url = resolve_url(login_url or settings.LOGIN_URL)"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "redirect_to_login",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/auth/decorators.py",
+          "line": 50
+        },
+        "cited_context": "                if test_pass:\n                    return await view_func(request, *args, **kwargs)\n                return _redirect_to_login(request)\n\n        else:"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "redirect_to_login",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/auth/decorators.py",
+          "line": 63
+        },
+        "cited_context": "                if test_pass:\n                    return view_func(request, *args, **kwargs)\n                return _redirect_to_login(request)\n\n        # Attributes used by LoginRequiredMiddleware."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_version_tuple",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/gis/geos/coordseq.py",
+          "line": 232
+        },
+        "cited_context": "        Return whether this coordinate sequence has M dimension.\n        \"\"\"\n        if geos_version_tuple() >= (3, 14):\n            return capi.cs_hasm(self._ptr)\n        else:"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_version_tuple",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/contrib/gis/geos/prototypes/io.py",
+          "line": 390
+        },
+        "cited_context": "    ptr_type = WKB_WRITE_PTR\n    destructor = wkb_writer_destroy\n    geos_version = geos_version_tuple()\n\n    def __init__(self, dim=2):"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "captured_stdout",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/test/utils.py",
+          "line": 847
+        },
+        "cited_context": "\n\ndef captured_stderr():\n    \"\"\"Capture the output of sys.stderr:"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_version_tuple",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/version.py",
+          "line": 250
+        },
+        "cited_context": "\n\nversion_component_re = _lazy_re_compile(r\"(\\d+|[a-z]+|\\.)\")"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "constant_time_compare",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/middleware/csrf.py",
+          "line": 200
+        },
+        "cited_context": "        return allowed_origin_subdomains\n\n    # The _accept and _reject methods currently only exist for the sake of the\n    # requires_csrf_token decorator.\n    def _accept(self, request):"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "log_response",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/core/handlers/exception.py",
+          "line": 100
+        },
+        "cited_context": "        if settings.DEBUG:\n            response = debug.technical_500_response(\n                request, *sys.exc_info(), status_code=400\n            )\n        else:"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "get_func_args",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/inspect.py",
+          "line": 30
+        },
+        "cited_context": "    is_method = inspect.ismethod(meth_or_func)\n    func = meth_or_func.__func__ if is_method else meth_or_func\n    return _get_func_parameters(func, remove_first=is_method)"
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    },
+    {
+      "state": {
+        "target_symbol": "patch_vary_headers",
+        "scope": "django repo snapshot (pinned commit dd6f6b1)",
+        "cited_anchor": {
+          "file": "django/utils/cache.py",
+          "line": 310
+        },
+        "cited_context": "    '*'. Otherwise, existing headers in \"Vary\" aren't removed.\n    \"\"\"\n    # Note that we need to keep the original order intact, because cache\n    # implementations may rely on the order of the Vary contents in, say,\n    # computing an MD5 hash."
+      },
+      "questions": {
+        "anchor_role": {
+          "type": "choice",
+          "instructions": "Classify what the cited context shows relative to the target symbol.",
+          "criteria": {
+            "call_of_target": "the cited line contains a call whose callee is the target symbol",
+            "definition_of_target": "the cited line defines the target symbol itself",
+            "textual_mention_only": "the symbol appears only in a comment, docstring, or string literal",
+            "other_symbol_same_name": "a call to a different symbol that happens to share the name",
+            "unrelated": "no relationship to the target symbol"
+          }
+        }
+      }
+    }
+  ]
+}

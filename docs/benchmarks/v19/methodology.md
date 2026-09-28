@@ -134,7 +134,12 @@ file:line against the vendored snapshot).
 
 #### Anchor adjudication layer (post-pilot amendment #1686)
 
-**Status: calibration-gated, not yet active.** The v19 pilot's stage-2
+**Status: DROPPED (amendment A2, 2025-09-26) — calibration failed its
+freeze gate (0.733 < 0.90); see `AMENDMENTS.md` and
+`results/calibration/` for the retained negative result. The AST oracle
+remains the sole ground truth.**
+
+Historical specification: the v19 pilot's stage-2
 smoke (WATCH-TRIP gate, #1681) exposed a textual-resolution failure
 mode: a semantic-role judgment (call site vs definition vs mention) was
 miscounted as a `fabricated-anchor`. To fix this, an anchor-adjudication
@@ -277,11 +282,11 @@ snapshot and **independently verified**:
    tasks trivially greppable (`fn check_*` naming convention). Task
    drafting must prefer cross-crate `clippy_utils` helper chains over
    within-lint lookups, or Track A collapses to Track C on this repo.
-7. **Sealed N per kept task.** v18 used N=40 total sessions. With
-   ~20–30 kept tasks across two repos, N per task may be as low as
-   1–2 pairs; whether the sealed stage re-uses v18's fixed N=40 or
-   scales with the kept-task count (with a revised cap) is a
-   pilot-stage decision.
+7. **Sealed N per kept task.** RESOLVED by amendment A3 (2026-09-27):
+   the sealed design is a single hop-2 fan-in tier with fixed
+   N = 12 tasks x 2 arms = 24 sessions (see `AMENDMENTS.md` A3).
+   Kept tasks are drawn from a fresh hop-2 pilot pass via the
+   unchanged discriminative filter; sealed sessions are fresh runs.
 
 ## Deliverables (implementation issue scope)
 

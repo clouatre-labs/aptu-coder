@@ -1,0 +1,187 @@
+[
+  {
+    "hop1_caller_files": 428,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "len"
+  },
+  {
+    "hop1_caller_files": 380,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "str"
+  },
+  {
+    "hop1_caller_files": 345,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "isinstance"
+  },
+  {
+    "hop1_caller_files": 269,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "getattr"
+  },
+  {
+    "hop1_caller_files": 253,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "override_settings"
+  },
+  {
+    "hop1_caller_files": 236,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "hasattr"
+  },
+  {
+    "hop1_caller_files": 157,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "ValueError"
+  },
+  {
+    "hop1_caller_files": 153,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "range"
+  },
+  {
+    "hop1_caller_files": 125,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "repr"
+  },
+  {
+    "hop1_caller_files": 123,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "sorted"
+  },
+  {
+    "hop1_caller_files": 111,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "int"
+  },
+  {
+    "hop1_caller_files": 109,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "_"
+  },
+  {
+    "hop1_caller_files": 95,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "HttpResponse"
+  },
+  {
+    "hop1_caller_files": 94,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "enumerate"
+  },
+  {
+    "hop1_caller_files": 93,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "TypeError"
+  },
+  {
+    "hop1_caller_files": 86,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "any"
+  },
+  {
+    "hop1_caller_files": 73,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "setattr"
+  },
+  {
+    "hop1_caller_files": 66,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "zip"
+  },
+  {
+    "hop1_caller_files": 64,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "Decimal"
+  },
+  {
+    "hop1_caller_files": 63,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "Value"
+  },
+  {
+    "hop1_caller_files": 62,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "bool"
+  },
+  {
+    "hop1_caller_files": 62,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "Path"
+  },
+  {
+    "hop1_caller_files": 60,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "ImproperlyConfigured"
+  },
+  {
+    "hop1_caller_files": 58,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "object"
+  },
+  {
+    "hop1_caller_files": 57,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "NotImplementedError"
+  },
+  {
+    "hop1_caller_files": 57,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "Context"
+  },
+  {
+    "hop1_caller_files": 56,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "iter"
+  },
+  {
+    "hop1_caller_files": 55,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "isolate_apps"
+  },
+  {
+    "hop1_caller_files": 53,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "RequestFactory"
+  },
+  {
+    "hop1_caller_files": 51,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "next"
+  },
+  {
+    "hop1_caller_files": 49,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "datetime"
+  },
+  {
+    "hop1_caller_files": 48,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "Q"
+  },
+  {
+    "hop1_caller_files": 44,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "re_path"
+  },
+  {
+    "hop1_caller_files": 44,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "ValidationError"
+  },
+  {
+    "hop1_caller_files": 43,
+    "reason": "hop-3 caller file set (43) below the F2 context-flooding threshold (60)",
+    "symbol": "register_lookup"
+  },
+  {
+    "hop1_caller_files": 43,
+    "reason": "callee is not a single unambiguous function definition in the snapshot",
+    "symbol": "hash"
+  },
+  {
+    "hop1_caller_files": 41,
+    "reason": "hop-3 caller file set (42) below the F2 context-flooding threshold (60)",
+    "symbol": "skipIfDBFeature"
+  }
+]

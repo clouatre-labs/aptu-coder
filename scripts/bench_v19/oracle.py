@@ -101,6 +101,64 @@ def _parse(path: Path, suffix: str):
     return parser.parse(path.read_bytes())
 
 
+def build_function_definition_index(snapshot_root: Path) -> dict[str, list[str]]:
+    """symbol -> sorted defining-file list, function definitions only.
+
+    Fan-in tier (F2) selection restricts to function/method symbols, so
+    classes captured by the general definition index are filtered out
+    here. Same unambiguity contract as ``build_definition_index``.
+    """
+    index: dict[str, set[str]] = defaultdict(set)
+    for path, suffix in _iter_source_files(snapshot_root):
+        if suffix != ".py":
+            continue  # F2 tier is Python-only (Django snapshot)
+        rel = path.relative_to(snapshot_root).as_posix()
+        query = LANGUAGES[suffix].query(
+            "(function_definition name: (identifier) @name)"
+        )
+        tree = _parse(path, suffix)
+        for name in _captured_names(tree.root_node, query):
+            index[name].add(rel)
+    return {name: sorted(files) for name, files in sorted(index.items())}
+
+
+def callers_oracle_from(
+    definition_index: dict[str, list[str]],
+    call_edges: list[tuple[str, str, int]],
+    symbol: str,
+    hop_depth: int,
+) -> list[str]:
+    """``callers_oracle`` on precomputed index/edges (reuse-safe).
+
+    Identical BFS semantics to ``callers_oracle``, but takes the
+    definition index and call edges as arguments so callers building
+    many hop sets for many symbols pay the parse cost once.
+    """
+    if hop_depth not in HOP_DEPTHS:
+        raise ValueError(f"hop depth must be one of {HOP_DEPTHS}")
+    _validate_symbol(symbol)
+    callers_of_symbol: dict[str, set[str]] = defaultdict(set)
+    symbols_defined_in: dict[str, set[str]] = defaultdict(set)
+    for caller, callee, _line in call_edges:
+        callers_of_symbol[callee].add(caller)
+    for defined, files in definition_index.items():
+        if len(files) > 1:
+            continue  # ambiguous symbols contribute no BFS joins
+        for file in files:
+            symbols_defined_in[file].add(defined)
+    current = direct_callers(call_edges, symbol)
+    seen = set(current)
+    for _ in range(hop_depth - 1):
+        frontier: set[str] = set()
+        for file in sorted(current):
+            for defined in sorted(symbols_defined_in.get(file, ())):
+                frontier |= callers_of_symbol.get(defined, set())
+        frontier -= seen
+        seen |= frontier
+        current = frontier
+    return sorted(seen)
+
+
 def build_definition_index(snapshot_root: Path) -> dict[str, list[str]]:
     """symbol -> sorted defining-file list (tree-sitter definition names)."""
     index: dict[str, set[str]] = defaultdict(set)
@@ -322,6 +380,24 @@ def build_lookup_oracle(snapshot_root: Path, symbol: str) -> dict:
         "expected_files": index.get(symbol, []),
         "excluded_reason": _ambiguity_reason(symbol, index),
     }
+
+
+def rg_output_bytes(snapshot_root: Path, symbol: str) -> int:
+    """Byte size of ``rg -n '<symbol>' -g '*.py'`` over the snapshot.
+
+    F2 justification data: the premise of the fan-in tier is that a
+    plain textual enumeration of the symbol's mentions floods a normal
+    context window. The measured byte count is recorded per task.
+    """
+    _validate_symbol(symbol)
+    proc = subprocess.run(
+        ["rg", "-n", symbol, "-g", "*.py", "--", str(snapshot_root)],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"oracle: rg output measurement failed: {proc.stderr.decode(errors='replace').strip()}")
+    return len(proc.stdout)
 
 
 def write_oracle(entries: list[dict], out_path: Path) -> None:
