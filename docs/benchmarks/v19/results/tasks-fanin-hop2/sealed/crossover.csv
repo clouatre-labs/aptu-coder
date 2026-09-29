@@ -1,0 +1,17 @@
+tier,task,arm,cost_usd,tokens_input,tokens_output,f1,score,solved
+fanin,task-fanin-chain,native,0.056252419999999984,83622,32656,0.3867403314917127,fabricated-anchor,False
+fanin,task-fanin-chain,mcp,0.019894429999999998,30409,15406,0.0,no-anchor,False
+fanin,task-fanin-dec,native,0.00638405,6885,5365,0.14285714285714285,partial,False
+fanin,task-fanin-dec,mcp,0.00207888,9524,882,0.0,no-anchor,False
+fanin,task-fanin-include,native,0.00071272,2468,662,0.0,partial,False
+fanin,task-fanin-include,mcp,0.025270580000000004,58580,17131,0.9166666666666666,fabricated-anchor,False
+fanin,task-fanin-qualname,native,0.01617084,28288,17550,0.46808510638297873,fabricated-anchor,False
+fanin,task-fanin-qualname,mcp,0.005676570000000001,14207,4476,0.4375,fabricated-anchor,False
+fanin,task-fanin-register_lookup,native,0.011063940000000001,21844,11055,0.375,partial,False
+fanin,task-fanin-register_lookup,mcp,0.01207184,26608,11584,0.8113207547169812,correct,True
+fanin,task-fanin-skipIfDBFeature,native,0.0027491399999999997,5776,2817,0.37037037037037035,partial,False
+fanin,task-fanin-skipIfDBFeature,mcp,0.009075589999999998,20479,5779,0.9647058823529412,correct,True
+fanin,task-fanin-timezone,native,0.03347413999999999,37898,30400,0.3278688524590164,correct,True
+fanin,task-fanin-timezone,mcp,0.01409891,41707,9991,0.0,no-anchor,False
+fanin,task-fanin-view_func,native,0.00626636,12910,7669,0.375,partial,False
+fanin,task-fanin-view_func,mcp,0.00706314,18214,5832,0.326530612244898,partial,False
