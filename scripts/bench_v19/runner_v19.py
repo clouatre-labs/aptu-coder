@@ -182,6 +182,7 @@ def run_session_with_turn_cap(
     elapsed = 0.0
     turns = 0
     capped = False
+    wait_timed_out = False
     while True:
         try:
             proc.wait(timeout=poll_s)
@@ -198,12 +199,26 @@ def run_session_with_turn_cap(
         if elapsed >= v18.SESSION_WAIT_TIMEOUT_S:
             proc.kill()
             proc.wait()
+            wait_timed_out = True
             break
     result = v18.meter_and_close(
         state, stage, task, arm, run_id, session_dir, None,
     )
     if capped:
         reason = f"turn-cap-exceeded:{turns}"
+        state.defects.append({
+            "stage": stage, "task": task, "arm": arm, "reason": reason,
+        })
+        result = v18.SessionResult(
+            stage, task, arm, run_id, True, reason, result.cost_usd,
+        )
+    elif wait_timed_out:
+        # A7b: a wait-deadline kill is a defect, same fail-closed
+        # visibility as a turn-cap kill. Previously this branch fell
+        # through with killed=False and no defect, so sessions killed at
+        # the wall-clock deadline were indistinguishable from sessions
+        # the model ended mid-loop (stopReason toolUse, no answer).
+        reason = f"wait-timeout-killed:{elapsed:.0f}s"
         state.defects.append({
             "stage": stage, "task": task, "arm": arm, "reason": reason,
         })

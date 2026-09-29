@@ -211,6 +211,33 @@ exceedance kills the session, records `turn-cap-exceeded:<n>`, and
 still meters spend. Pilot results at cap 25 are retained as recorded;
 no pilot numbers are retroactively recomputed.
 
+### A7b — 2026-09-29: sealed-stage wait deadline 900s; wait-deadline kills made visible (first sealed attempt invalidated)
+
+**Finding (gate-relevant defect).** The first sealed attempt
+(`run-sealed-hop2`, 16 sessions, $0.1482 metered) was invalidated: the
+binding constraint on fanin/hop-2 sessions was the 300s wall-clock wait
+deadline, not the A7 turn cap 40. All 10 sessions ending with
+`stopReason: toolUse` and no answer have within-session wall spans of
+245–299s; the deadline kill path in
+`runner_v19.run_session_with_turn_cap` fell through with `killed=False`
+and no defect entry, making deadline kills indistinguishable from
+sessions the model ended mid-loop. Under A5 gate discipline (a
+metering-visibility defect halts spend), the attempt is discarded from
+analysis; its spend remains metered for the record.
+
+**Adopted changes (both implemented before the re-run):**
+
+- `runner_v19.run_session_with_turn_cap` now records a
+  `wait-timeout-killed:<s>` defect with `killed=True` on deadline
+  kills, mirroring turn-cap handling (fail-closed visibility).
+- Sealed-stage re-run sets `SESSION_WAIT_TIMEOUT_S=900` via the
+  already-ratified environment-driven override (carry-over
+  ratification, "Wait deadline 120s → 300s via SESSION_WAIT_TIMEOUT_S
+  environment override"); the frozen v18 default is not edited. 900s
+  covers the observed 2325s outlier only partially, but with deadline
+  kills now visible as defects any residual truncation is detectable
+  and reportable rather than silent.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
 
 - Wait deadline 120s → 300s via `SESSION_WAIT_TIMEOUT_S` environment
