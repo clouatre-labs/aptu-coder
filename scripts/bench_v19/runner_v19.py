@@ -42,12 +42,15 @@ from bench_v18 import runner as v18
 v18.SESSION_WAIT_TIMEOUT_S = int(os.environ.get("SESSION_WAIT_TIMEOUT_S", "300"))
 
 # F1 budget tiers: per-tier turn caps (fail-closed, kill + defect on
-# exceedance). The fanin tier floods context with grep output, so it gets
-# a tighter cap than the rg-optimal control tier. Cost caps are NOT
-# tiered: per-session $0.25, pilot stage $0.60, ceiling $5.00 (v18).
+# exceedance). The fanin tier floods context with grep output; its cap
+# was raised 25 -> 40 by A6b (5/8 re-pilot sessions hit the cap 25
+# mid-loop without a final answer even with correct tool data; 40 is
+# the sealed-stage cap, still fail-closed via the same kill+defect
+# path). Cost caps are NOT tiered: per-session $0.25, pilot stage
+# $0.60, ceiling $5.00 (v18).
 TIERS: dict[str, dict] = {
     "control": {"turn_cap": 40},
-    "fanin": {"turn_cap": 25},
+    "fanin": {"turn_cap": 40},
 }
 
 # F3 activation gate: fraction of completed scorable tool-arm sessions

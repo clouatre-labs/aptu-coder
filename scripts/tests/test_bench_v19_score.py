@@ -48,3 +48,68 @@ def test_partial_recall_in_open_interval():
 def test_expected_digest_reused_from_v18():
     assert expected_digest("x") == expected_digest("x")
     assert expected_digest("x") != expected_digest("y")
+
+
+# ---- A6a: deterministic anchor verification (snapshot-based) ----
+
+from bench_v19.score import ANCHOR_WINDOW_LINES, verify_anchors  # noqa: E402
+
+
+def _make_snapshot(tmp_path, files: dict[str, str]):
+    for rel, content in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    return tmp_path
+
+
+def test_verify_anchors_real_call_site(tmp_path):
+    snap = _make_snapshot(tmp_path, {
+        "a/b.py": "def foo():\n    pass\n\nx = bar(1)\n",
+    })
+    verified, fabricated = verify_anchors(
+        "see a/b.py:4", "bar", snap
+    )
+    assert (verified, fabricated) == (1, 0)
+
+
+def test_verify_anchors_line_out_of_range(tmp_path):
+    snap = _make_snapshot(tmp_path, {"a/b.py": "bar()\n"})
+    verified, fabricated = verify_anchors("see a/b.py:99", "bar", snap)
+    assert (verified, fabricated) == (0, 1)
+
+
+def test_verify_anchors_missing_file(tmp_path):
+    verified, fabricated = verify_anchors("see no/such.py:1", "bar", tmp_path)
+    assert (verified, fabricated) == (0, 1)
+
+
+def test_verify_anchors_symbol_not_near_line(tmp_path):
+    snap = _make_snapshot(tmp_path, {"a/b.py": "unrelated()\n"})
+    verified, fabricated = verify_anchors("see a/b.py:1", "bar", snap)
+    assert (verified, fabricated) == (0, 1)
+
+
+def test_verify_anchors_symbol_within_window(tmp_path):
+    # Call spans lines: identifier on the line after the cited line.
+    body = "result = (\n    bar(1, 2)\n)\n"
+    snap = _make_snapshot(tmp_path, {"a/b.py": body})
+    verified, fabricated = verify_anchors("see a/b.py:1", "bar", snap)
+    assert verified == 1 and fabricated == 0
+    assert ANCHOR_WINDOW_LINES >= 1
+
+
+def test_verify_anchors_distinct_and_dedup(tmp_path):
+    snap = _make_snapshot(tmp_path, {
+        "a/b.py": "bar()\nx\ny\nz\nw\n",
+    })
+    text = "a/b.py:1 and a/b.py:1 and a/b.py:5"
+    verified, fabricated = verify_anchors(text, "bar", snap)
+    # :5 is outside the +/-2 window of the bar() call -> fabricated;
+    # the duplicated :1 anchor is deduplicated to one verified hit.
+    assert (verified, fabricated) == (1, 1)
+
+
+def test_verify_anchors_no_anchors_yields_zeroes(tmp_path):
+    verified, fabricated = verify_anchors("no anchors here", "bar", tmp_path)
+    assert (verified, fabricated) == (0, 0)

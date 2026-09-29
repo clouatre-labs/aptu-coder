@@ -163,6 +163,54 @@ byte-level verification that aptu-coder 0.36.1 (and main at
   the run restarted mcp-arm-only after the fix. No thresholds were
   changed.
 
+## A6 — 2026-09-29: Deterministic anchor verification replaces gold-membership fabricated check (scorer repair)
+
+**Decision:** ratified pre-sealed as a measurement-validity repair,
+before any sealed-stage spend relies on the scorer. Human spot-check of
+the two A5 re-pilot "fabricated-anchor" verdicts (skipIfDBFeature F1
+0.941, register_lookup F1 0.811) found every sampled `file:line` anchor
+genuine: file exists in the snapshot, line in range, symbol identifier
+present at the cited line (verified directly against the pinned
+snapshot). The old scorer computed `fabricated = |predicted files not
+in gold|`, which conflated ordinary false positives (a real hop-1
+caller outside the gold set's scope, e.g. the django/ framework files
+for register_lookup, P=0.683 R=1.000) with fabrication and forced the
+`fabricated-anchor` verdict whenever precision < 1.0 — making
+`correct` nearly unreachable on fan-in tasks.
+
+Adopted change (implemented in `scripts/bench_v19/score.py`, used by
+`scripts/bench_v19/pilot.py`):
+
+- `verify_anchors(text, symbol, snapshot)`: an anchor `path:line` is
+  fabricated iff the file does not exist in the snapshot, the line
+  number is out of range, or the symbol does not occur within ±2 lines
+  of the cited line (calls may span lines). Gold-set membership is
+  never consulted for fabrication; it affects only precision/recall/F1.
+- Verdict semantics unchanged: `correct` = recall ≥ 0.9 AND zero
+  fabricated anchors; `partial` = recall in (0, 0.9); `no-anchor` =
+  empty answer set.
+- Re-score of the two affected A5 sessions under the fixed scorer:
+  0 fabricated anchors each; both verdicts `correct`. F1 values
+  reproduce the recorded ones exactly (0.941, 0.811), confirming the
+  F1 math was unaffected — only the verdict label was wrong.
+- Frozen task set `tasks-track-a-hop2-a4.json` gains a `symbol` field
+  per entry (values cross-checked against `selections-a4.json`);
+  metadata only, `expected_files` and prompts untouched.
+
+## A7 — 2026-09-29: Sealed-stage fanin turn cap 25 → 40
+
+**Decision:** ratified pre-sealed (completion problem). 5/8 A5 re-pilot
+sessions hit the fanin turn cap 25 mid-loop without a final answer
+(`stopReason: toolUse`, `no-anchor`, F1 = 0) even after the A5 oracle
+gate confirmed tool data was correct. Turn cap 25 measurably cannot
+complete fanin/hop-2 sessions, so sealing at 25 would measure turn
+capacity, not tool value. The fanin tier cap in
+`scripts/bench_v19/runner_v19.py` `TIERS` is raised to 40 for the
+sealed stage (control tier already 40). The cap remains fail-closed:
+exceedance kills the session, records `turn-cap-exceeded:<n>`, and
+still meters spend. Pilot results at cap 25 are retained as recorded;
+no pilot numbers are retroactively recomputed.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
 
 - Wait deadline 120s → 300s via `SESSION_WAIT_TIMEOUT_S` environment
