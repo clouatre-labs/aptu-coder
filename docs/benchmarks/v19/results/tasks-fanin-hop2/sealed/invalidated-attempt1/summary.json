@@ -1,0 +1,414 @@
+{
+  "sessions": [
+    {
+      "run_id": "b175571b34a24172a282bc61b618e339",
+      "arm": "native",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00575571,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 10189,
+        "output": 7464,
+        "cacheRead": 16512,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-chain",
+        "expected_sha": "2968ea8a9db004d6"
+      }
+    },
+    {
+      "run_id": "099ee4887daf46718bc65d0aad74f180",
+      "arm": "mcp",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.008944019999999999,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 14710,
+        "output": 4812,
+        "cacheRead": 144384,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-chain",
+        "expected_sha": "2968ea8a9db004d6"
+      }
+    },
+    {
+      "run_id": "6497941e706343b88edceb49a4271bbc",
+      "arm": "native",
+      "task": "task-fanin-dec",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01414585,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 44809,
+        "output": 4481,
+        "cacheRead": 172800,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "partial",
+        "precision": 0.36363636363636365,
+        "recall": 0.17391304347826086,
+        "f1": 0.2352941176470588,
+        "task_id": "task-fanin-dec",
+        "expected_sha": "8950a8d3cfa1a9f2"
+      }
+    },
+    {
+      "run_id": "00e88bc121aa4022a9e317eaad4a5c5c",
+      "arm": "mcp",
+      "task": "task-fanin-dec",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.006049639999999999,
+      "aptu_tool_calls": 8,
+      "tokens": {
+        "input": 13156,
+        "output": 4612,
+        "cacheRead": 59008,
+        "cacheWrite": 0
+      },
+      "stopReason": "error",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-dec",
+        "expected_sha": "8950a8d3cfa1a9f2"
+      }
+    },
+    {
+      "run_id": "eb7c05f2e32e43e792edf2a77da7111f",
+      "arm": "native",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00999899,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 17975,
+        "output": 11737,
+        "cacheRead": 47808,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "fabricated-anchor",
+        "precision": 0.66,
+        "recall": 1.0,
+        "f1": 0.7951807228915663,
+        "task_id": "task-fanin-include",
+        "expected_sha": "c1b6a1c2869cc3de"
+      }
+    },
+    {
+      "run_id": "d72ed07cb9134f3f89c1e2c80c7034df",
+      "arm": "mcp",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01135084,
+      "aptu_tool_calls": 5,
+      "tokens": {
+        "input": 25268,
+        "output": 9104,
+        "cacheRead": 100288,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-include",
+        "expected_sha": "c1b6a1c2869cc3de"
+      }
+    },
+    {
+      "run_id": "60ca9b85fa194f16a39089f4beb6017e",
+      "arm": "native",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00860818,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 16536,
+        "output": 9917,
+        "cacheRead": 38976,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-qualname",
+        "expected_sha": "b4de0c72623900a5"
+      }
+    },
+    {
+      "run_id": "23dca608d3864b40be86354e8963b6c6",
+      "arm": "mcp",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01211651,
+      "aptu_tool_calls": 6,
+      "tokens": {
+        "input": 22733,
+        "output": 10528,
+        "cacheRead": 114752,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "fabricated-anchor",
+        "precision": 0.5294117647058824,
+        "recall": 0.4090909090909091,
+        "f1": 0.46153846153846156,
+        "task_id": "task-fanin-qualname",
+        "expected_sha": "b4de0c72623900a5"
+      }
+    },
+    {
+      "run_id": "ae46454be68e431f9c68e0b793ae7a5b",
+      "arm": "native",
+      "task": "task-fanin-register_lookup",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01170517,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 21629,
+        "output": 11273,
+        "cacheRead": 94144,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-register_lookup",
+        "expected_sha": "4dde6acdae4a9e66"
+      }
+    },
+    {
+      "run_id": "251ab71f32194da1b9da451a77d6d287",
+      "arm": "mcp",
+      "task": "task-fanin-register_lookup",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.010034479999999998,
+      "aptu_tool_calls": 9,
+      "tokens": {
+        "input": 18414,
+        "output": 6811,
+        "cacheRead": 128896,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "partial",
+        "precision": 0.38235294117647056,
+        "recall": 0.3023255813953488,
+        "f1": 0.33766233766233766,
+        "task_id": "task-fanin-register_lookup",
+        "expected_sha": "4dde6acdae4a9e66"
+      }
+    },
+    {
+      "run_id": "b300df548ef84c8086660614c3c93d89",
+      "arm": "native",
+      "task": "task-fanin-skipIfDBFeature",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00256873,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 4703,
+        "output": 3308,
+        "cacheRead": 6976,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "correct",
+        "precision": 0.9534883720930233,
+        "recall": 0.9761904761904762,
+        "f1": 0.9647058823529412,
+        "task_id": "task-fanin-skipIfDBFeature",
+        "expected_sha": "aad86783dd4d7f83"
+      }
+    },
+    {
+      "run_id": "1373dde064bc4f639c6e1868d1f05144",
+      "arm": "mcp",
+      "task": "task-fanin-skipIfDBFeature",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.007580659999999999,
+      "aptu_tool_calls": 6,
+      "tokens": {
+        "input": 17156,
+        "output": 5011,
+        "cacheRead": 83392,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "correct",
+        "precision": 0.9318181818181818,
+        "recall": 0.9761904761904762,
+        "f1": 0.9534883720930233,
+        "task_id": "task-fanin-skipIfDBFeature",
+        "expected_sha": "aad86783dd4d7f83"
+      }
+    },
+    {
+      "run_id": "d6f4a620a55a4f1598b0e0316c6923d7",
+      "arm": "native",
+      "task": "task-fanin-timezone",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.005812069999999999,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 10751,
+        "output": 7435,
+        "cacheRead": 16064,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-timezone",
+        "expected_sha": "2d69530b15acc79c"
+      }
+    },
+    {
+      "run_id": "e5b1e27be5da4474a7f11c42087c4c3e",
+      "arm": "mcp",
+      "task": "task-fanin-timezone",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.0129319,
+      "aptu_tool_calls": 27,
+      "tokens": {
+        "input": 16622,
+        "output": 8186,
+        "cacheRead": 211520,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "partial",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-timezone",
+        "expected_sha": "2d69530b15acc79c"
+      }
+    },
+    {
+      "run_id": "1069d2394f5d41118a4c45423567e792",
+      "arm": "native",
+      "task": "task-fanin-view_func",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.010408439999999998,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 21270,
+        "output": 11529,
+        "cacheRead": 48448,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "partial",
+        "precision": 1.0,
+        "recall": 0.027777777777777776,
+        "f1": 0.05405405405405406,
+        "task_id": "task-fanin-view_func",
+        "expected_sha": "9b4600eaab7e5f0a"
+      }
+    },
+    {
+      "run_id": "aed0689537cd4bfd8adb97002b8c3fd2",
+      "arm": "mcp",
+      "task": "task-fanin-view_func",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.010206329999999998,
+      "aptu_tool_calls": 3,
+      "tokens": {
+        "input": 22697,
+        "output": 10977,
+        "cacheRead": 43776,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-view_func",
+        "expected_sha": "9b4600eaab7e5f0a"
+      }
+    }
+  ],
+  "total_spent_usd": 0.148218,
+  "halted": false,
+  "halt_reason": null,
+  "defects": [],
+  "activation_gate": {
+    "pass": true,
+    "active": 7,
+    "scorable": 8,
+    "fraction": 0.875
+  }
+}

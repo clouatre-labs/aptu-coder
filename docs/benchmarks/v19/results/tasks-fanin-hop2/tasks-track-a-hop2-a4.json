@@ -1,6 +1,7 @@
 [
   {
     "id": "task-fanin-chain",
+    "symbol": "chain",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls chain within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -69,6 +70,7 @@
   },
   {
     "id": "task-fanin-dec",
+    "symbol": "dec",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls dec within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -104,6 +106,7 @@
   },
   {
     "id": "task-fanin-include",
+    "symbol": "include",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls include within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -149,6 +152,7 @@
   },
   {
     "id": "task-fanin-qualname",
+    "symbol": "qualname",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls qualname within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -183,6 +187,7 @@
   },
   {
     "id": "task-fanin-register_lookup",
+    "symbol": "register_lookup",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls register_lookup within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -238,6 +243,7 @@
   },
   {
     "id": "task-fanin-skipIfDBFeature",
+    "symbol": "skipIfDBFeature",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls skipIfDBFeature within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -292,6 +298,7 @@
   },
   {
     "id": "task-fanin-timezone",
+    "symbol": "timezone",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls timezone within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",
@@ -324,6 +331,7 @@
   },
   {
     "id": "task-fanin-view_func",
+    "symbol": "view_func",
     "tier": "fanin",
     "track": "A",
     "prompt": "List every file in this repository that calls view_func within 2 hop(s) of indirection. Report file paths only. Cite each file with file:line anchors for the calling lines.",

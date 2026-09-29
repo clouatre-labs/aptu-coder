@@ -39,7 +39,7 @@ from bench_v19 import runner_v19 as rv19  # noqa: E402
 
 STAGE = "pilot"
 STAGE_CAP = v18.STAGE_BUDGET_CAPS_USD[STAGE]
-APTU_CODER_VERSION = "0.36.1"
+APTU_CODER_VERSION = "0.37.0"
 SNAPSHOT_COMMIT = "dd6f6b1"
 SNAPSHOT_SHA256 = "9dc904f5a45be0eea03268642001e4054a7f83faacf546a69fc1a69b092d1e5e"
 
@@ -119,11 +119,20 @@ def run_one(state, task, arm, tier, snapshot, run_root) -> dict:
 
 
 def score_session(info: dict, task: dict, snapshot: Path) -> dict:
-    """Blinded-style scoring: v19score F1 for Track A, categorical Track C."""
+    """Blinded-style scoring: v19score F1 for Track A, categorical Track C.
+
+    A6a: fabricated anchors are determined by verifying each cited
+    file:line anchor against the snapshot (file exists, line in range,
+    symbol within the anchor window). Gold-set membership decides only
+    precision/recall/F1, never the fabricated count.
+    """
     answer = extract_paths(info["final_text"], snapshot)
     expected = set(task["expected_files"])
     if task["track"] == "A":
-        fabricated = sum(1 for p in answer if p not in expected)
+        symbol = task.get("symbol") or task["id"].rsplit("-", 1)[-1]
+        _, fabricated = v19score.verify_anchors(
+            info["final_text"], symbol, snapshot
+        )
         res = v19score.score_task(task, answer, fabricated)
     else:
         ok = answer == expected

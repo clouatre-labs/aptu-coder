@@ -70,3 +70,49 @@ def test_ladder_cells_restrict_gateway_to_hop1_track_c():
     cells = v19_runner.ladder_cells(tasks)
     gateway = [c["task_id"] for c in cells if c["arm"] == "mcp-gateway"]
     assert gateway == ["t-c1"]
+
+
+# ---- A7b: wait-deadline kills are recorded as fail-closed defects ----
+
+import json as _json  # noqa: E402
+
+from bench_v19 import runner_v19 as rv19_mod  # noqa: E402
+
+
+class _FakeProc:
+    """Minimal Popen stand-in: never exits on its own."""
+
+    def __init__(self):
+        pass
+
+    def wait(self, timeout=None):
+        import subprocess
+        raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+
+    def kill(self):
+        pass
+
+
+def test_wait_timeout_kill_recorded_as_defect(tmp_path, monkeypatch):
+    from bench_v18 import runner as v18
+
+    session_dir = tmp_path / "sess"
+    session_dir.mkdir()
+    (session_dir / "s.jsonl").write_text("", encoding="utf-8")
+    monkeypatch.setattr(v18, "SESSION_WAIT_TIMEOUT_S", 0)
+    monkeypatch.setattr(v18, "session_jsonl_files", lambda d: [session_dir / "s.jsonl"])
+    monkeypatch.setattr(
+        v18, "validate_session_dir", lambda d, r: d
+    )
+    metered = v18.SessionResult("pilot", "t", "mcp", "r", False, None, 0.01)
+    monkeypatch.setattr(v18, "meter_and_close", lambda *a, **k: metered)
+
+    state = v18.LadderState()
+    result = rv19_mod.run_session_with_turn_cap(
+        state, "pilot", "task", "mcp", "run1",
+        session_dir, ["true"], {}, tmp_path,
+        turn_cap=40, poll_s=0.0,
+    )
+    assert result.killed is True
+    assert result.defect.startswith("wait-timeout-killed:")
+    assert any(d["reason"] == result.defect for d in state.defects)

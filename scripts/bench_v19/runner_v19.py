@@ -42,12 +42,15 @@ from bench_v18 import runner as v18
 v18.SESSION_WAIT_TIMEOUT_S = int(os.environ.get("SESSION_WAIT_TIMEOUT_S", "300"))
 
 # F1 budget tiers: per-tier turn caps (fail-closed, kill + defect on
-# exceedance). The fanin tier floods context with grep output, so it gets
-# a tighter cap than the rg-optimal control tier. Cost caps are NOT
-# tiered: per-session $0.25, pilot stage $0.60, ceiling $5.00 (v18).
+# exceedance). The fanin tier floods context with grep output; its cap
+# was raised 25 -> 40 by A6b (5/8 re-pilot sessions hit the cap 25
+# mid-loop without a final answer even with correct tool data; 40 is
+# the sealed-stage cap, still fail-closed via the same kill+defect
+# path). Cost caps are NOT tiered: per-session $0.25, pilot stage
+# $0.60, ceiling $5.00 (v18).
 TIERS: dict[str, dict] = {
     "control": {"turn_cap": 40},
-    "fanin": {"turn_cap": 25},
+    "fanin": {"turn_cap": 40},
 }
 
 # F3 activation gate: fraction of completed scorable tool-arm sessions
@@ -179,6 +182,7 @@ def run_session_with_turn_cap(
     elapsed = 0.0
     turns = 0
     capped = False
+    wait_timed_out = False
     while True:
         try:
             proc.wait(timeout=poll_s)
@@ -195,12 +199,26 @@ def run_session_with_turn_cap(
         if elapsed >= v18.SESSION_WAIT_TIMEOUT_S:
             proc.kill()
             proc.wait()
+            wait_timed_out = True
             break
     result = v18.meter_and_close(
         state, stage, task, arm, run_id, session_dir, None,
     )
     if capped:
         reason = f"turn-cap-exceeded:{turns}"
+        state.defects.append({
+            "stage": stage, "task": task, "arm": arm, "reason": reason,
+        })
+        result = v18.SessionResult(
+            stage, task, arm, run_id, True, reason, result.cost_usd,
+        )
+    elif wait_timed_out:
+        # A7b: a wait-deadline kill is a defect, same fail-closed
+        # visibility as a turn-cap kill. Previously this branch fell
+        # through with killed=False and no defect, so sessions killed at
+        # the wall-clock deadline were indistinguishable from sessions
+        # the model ended mid-loop (stopReason toolUse, no answer).
+        reason = f"wait-timeout-killed:{elapsed:.0f}s"
         state.defects.append({
             "stage": stage, "task": task, "arm": arm, "reason": reason,
         })

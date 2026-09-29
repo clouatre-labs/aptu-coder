@@ -12,8 +12,59 @@ from __future__ import annotations
 
 from bench_v18.score import expected_digest, write_scores  # noqa: F401
 
+import re
+
 VERDICTS = ("correct", "partial", "fabricated-anchor", "no-anchor")
 CORRECT_RECALL_THRESHOLD = 0.9
+
+# A6a: file:line anchors cited in a final answer. Verification is against
+# the snapshot, never against the gold set.
+ANCHOR_RE = re.compile(r"([\w./-]+/[\w./-]+):(\d+)")
+# A call may span lines; the identifier may sit up to 2 lines away from
+# the cited line (before or after).
+ANCHOR_WINDOW_LINES = 2
+
+
+def verify_anchors(text: str, symbol: str, snapshot_root) -> tuple[int, int]:
+    """Deterministic anchor verification against the snapshot (A6a).
+
+    An anchor ``path:line`` is fabricated iff the file does not exist in
+    the snapshot, the line number is out of range, or the symbol
+    identifier does not occur within ``ANCHOR_WINDOW_LINES`` of the
+    cited line. Gold-set membership is never consulted here: a predicted
+    file absent from the gold set is an ordinary false positive and
+    affects only precision/F1, never the fabricated count.
+
+    Returns ``(verified_count, fabricated_count)`` over distinct
+    anchors. An answer that cites no file:line anchors at all yields
+    ``(0, 0)``; verdicts then rest on recall alone.
+    """
+    verified = 0
+    fabricated = 0
+    seen: set[tuple[str, int]] = set()
+    for match in ANCHOR_RE.finditer(text):
+        path = match.group(1)
+        lineno = int(match.group(2))
+        key = (path, lineno)
+        if key in seen:
+            continue
+        seen.add(key)
+        file_path = snapshot_root / path
+        try:
+            lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            fabricated += 1
+            continue
+        if not 1 <= lineno <= len(lines):
+            fabricated += 1
+            continue
+        lo = max(0, lineno - 1 - ANCHOR_WINDOW_LINES)
+        hi = lineno + ANCHOR_WINDOW_LINES
+        if symbol not in "\n".join(lines[lo:hi]):
+            fabricated += 1
+            continue
+        verified += 1
+    return verified, fabricated
 
 
 def f1_score(answer_set: set[str], expected_set: set[str]) -> dict:

@@ -1,0 +1,9 @@
+{
+  "kept": [
+    "task-fanin-chain",
+    "task-fanin-include",
+    "task-fanin-register_lookup",
+    "task-fanin-skipIfDBFeature",
+    "task-fanin-timezone"
+  ]
+}
