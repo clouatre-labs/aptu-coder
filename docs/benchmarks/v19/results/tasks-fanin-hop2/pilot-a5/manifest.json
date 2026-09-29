@@ -1,0 +1,23 @@
+{
+  "aptu-coder-version": "0.36.1",
+  "pi-version": "0.87.1",
+  "snapshot-commit": "dd6f6b1",
+  "snapshot-sha256": "9dc904f5a45be0eea03268642001e4054a7f83faacf546a69fc1a69b092d1e5e",
+  "repo-head": "560e6023e6c4251ec7463eb16c234620408c2e18",
+  "provider": "zai",
+  "model": "glm-5.3-flash",
+  "amendments": [
+    "A1",
+    "A2",
+    "A3",
+    "A4"
+  ],
+  "carry-overs": [
+    "session-wait-timeout-300s",
+    "per-session-turn-cap",
+    "track-a-file-line-anchor-prompt-rewording"
+  ],
+  "jev-layer": "dropped",
+  "tier": "fanin",
+  "turn_cap": 25
+}

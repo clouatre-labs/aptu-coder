@@ -114,6 +114,55 @@ filtering). Two changes:
 The A3 re-pilot artifacts are retained as the output-boundedness
 negative result motivating this amendment.
 
+## A5 — 2026-09-28: v19 pilots invalidated by analyze_symbol cache bug; tool-as-oracle becomes a permanent pre-sealed gate
+
+**Decision:** taken on #1681 (maintainer, 2026-09-28), after a
+byte-level verification that aptu-coder 0.36.1 (and main at
+`4fcf77b`) poisoned every v19 tool-arm session.
+
+- **The bug.** `analyze_symbol` call-graph mode cached results under a
+  key omitting the queried symbol and the analysis mode
+  (`CallGraphCacheKey` and the blake3 L2 disk key in
+  `symbol_focused.rs`). The persistent L2 disk cache served the first
+  symbol's graph to every later query for a different symbol on the
+  same path, with only the FOCUS line substituted. Verified on the
+  pinned Django snapshot: `chain`, `timezone`, `dec`,
+  `get_version_tuple` returned byte-identical paginated callers;
+  reproduced on a pristine snapshot copy. Fixed in the 0.37.0 line
+  (issue #1691, PR #1692) with unit + end-to-end MCP regression tests.
+- **Invalidation.** All v19 tool-vs-native sessions in which the tool
+  arm made ≥1 `analyze_symbol` call are VOID as comparative evidence;
+  the mcp-arm numbers are poisoned, the native-arm numbers stand.
+  Prior pilot spends are retained only as negative-result artifacts.
+- **F3 activation gate.** Per prior ratification (recorded here now):
+  killed sessions with ≥1 aptu tool call count as active for the F3
+  gate.
+- **Permanent gate: tool-as-oracle pre-sealed validation.** Before any
+  sealed-stage spend, the fixed binary is driven over stdio JSON-RPC
+  from the pinned snapshot and its per-symbol caller data is compared
+  to the research oracle. The A5 run (8 sealed symbols) confirms:
+  all 8 symbols return distinct, deterministic graphs (cache bug
+  gone); where tool and oracle semantics align exactly
+  (`skipIfDBFeature`: unambiguous symbol, identifier calls only) the
+  file-level agreement is **F1 = 1.000**; spot-checked gold anchors
+  are genuine (`chain(` at `django/db/models/base.py:224`,
+  `view_func(` at `django/utils/decorators.py:173`). Residual
+  file-level F1 gaps on `chain`/`qualname`/`timezone` are attributable
+  to documented semantic scope differences, not caching: the oracle
+  counts identifier calls only (attribute calls like `timezone.now()`
+  create no edge), is Python-only, and excludes test callers from hop
+  joins, while the tool resolves across languages and separates test
+  callers into their own attribution. The tool emits caller names
+  without per-caller file attribution for production callers, which
+  limits file-level scoring; this is noted as a tool-surface
+  observation, not a correctness defect.
+- **Harness fix (recorded for provenance).** `pilot.py --arms` was
+  validated but not honored (the pair `native+mcp` was hardcoded), so
+  the first A5 re-pilot attempt ran both arms before being halted;
+  its partial artifacts under `run-fanin-hop2-a5` are discarded and
+  the run restarted mcp-arm-only after the fix. No thresholds were
+  changed.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
 
 - Wait deadline 120s → 300s via `SESSION_WAIT_TIMEOUT_S` environment

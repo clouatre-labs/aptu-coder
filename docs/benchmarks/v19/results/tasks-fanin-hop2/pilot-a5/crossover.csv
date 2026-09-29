@@ -1,0 +1,9 @@
+tier,task,arm,cost_usd,tokens_input,tokens_output,f1,score,solved
+fanin,task-fanin-chain,mcp,0.01165585,26823,8084,0.0,no-anchor,False
+fanin,task-fanin-dec,mcp,0.013439389999999999,29539,9331,0.0,no-anchor,False
+fanin,task-fanin-include,mcp,0.012043339999999998,25324,9589,0.05882352941176471,partial,False
+fanin,task-fanin-qualname,mcp,0.009359949999999999,15447,9209,0.0,no-anchor,False
+fanin,task-fanin-register_lookup,mcp,0.01344625,26601,9293,0.8113207547169812,fabricated-anchor,False
+fanin,task-fanin-skipIfDBFeature,mcp,0.00641764,13758,4553,0.9411764705882352,fabricated-anchor,False
+fanin,task-fanin-timezone,mcp,0.00890681,15467,8458,0.0,no-anchor,False
+fanin,task-fanin-view_func,mcp,0.00958585,16697,9785,0.0,no-anchor,False

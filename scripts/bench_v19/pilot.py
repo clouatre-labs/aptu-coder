@@ -174,9 +174,9 @@ def main() -> None:
             break
         if state.halted:
             break
-        # native+mcp always run as a pair; mcp-gateway only where the
-        # cell gate admits it (hop-1 Track C).
-        pair_arms = ["native", "mcp"] + (
+        # Arms run as specified by --arms; mcp-gateway additionally only
+        # where the cell gate admits it (hop-1 Track C).
+        pair_arms = [arm for arm in arms if arm != "mcp-gateway"] + (
             ["mcp-gateway"] if "mcp-gateway" in arms and _arm_allowed(
                 arm="mcp-gateway", task=task) else [])
         batch: list[dict] = []
