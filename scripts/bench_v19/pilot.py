@@ -118,6 +118,31 @@ def run_one(state, task, arm, tier, snapshot, run_root) -> dict:
     return info
 
 
+def record_error_session_defect(state, info: dict, stage: str = STAGE) -> None:
+    """Fail-closed defect ledger entry for provider-error sessions.
+
+    A session ending ``stopReason == "error"`` is a provider-side
+    failure (e.g. zai/glm-5.3-flash 5xx mid-loop with an empty 0-token
+    assistant message), not an arm outcome. Mirrors the wait-timeout /
+    turn-cap fail-closed pattern in runner_v19: if no killed defect was
+    already recorded for the session, append a ``provider-error-stop``
+    entry to the run summary's defects ledger. Idempotent per
+    (task, arm) so re-invocation after scoring cannot duplicate entries.
+    """
+    if info.get("stopReason") != "error" or info.get("killed"):
+        return
+    if info.get("defect"):
+        return
+    reason = "provider-error-stop"
+    if any(d.get("task") == info["task"] and d.get("arm") == info["arm"]
+           and d.get("reason") == reason for d in state.defects):
+        return
+    state.defects.append({
+        "stage": stage, "task": info["task"], "arm": info["arm"],
+        "reason": reason,
+    })
+
+
 def score_session(info: dict, task: dict, snapshot: Path) -> dict:
     """Blinded-style scoring: v19score F1 for Track A, categorical Track C.
 
@@ -202,6 +227,9 @@ def main() -> None:
             blinding.seal_label_map(run_root, "sealed-at-run-time",
                                     assignments)
             info["score"] = score_session(info, task, snapshot)
+            # Fail-closed: an error-stop session is a harness defect,
+            # not an outcome; give it a ledger entry like the kills do.
+            record_error_session_defect(state, info)
             sessions.append(info)
             if arm != "native":
                 tool_arm_sessions.append(info)
