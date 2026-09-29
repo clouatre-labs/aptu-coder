@@ -1,0 +1,54 @@
+[
+ {
+  "task": "task-fanin-chain",
+  "arm": "mcp",
+  "before_f1": 0,
+  "before_stop": "error",
+  "before_verdict": "no-anchor",
+  "after_f1": 0,
+  "after_stop": "toolUse",
+  "after_defect": "turn-cap-exceeded:41",
+  "after_verdict": "no-anchor",
+  "replaced": false,
+  "repair_cost_usd": 0.0258
+ },
+ {
+  "task": "task-fanin-dec",
+  "arm": "mcp",
+  "before_f1": 0,
+  "before_stop": "error",
+  "before_verdict": "no-anchor",
+  "after_f1": 0.129,
+  "after_stop": "stop",
+  "after_defect": null,
+  "after_verdict": "fabricated-anchor",
+  "replaced": true,
+  "repair_cost_usd": 0.0124
+ },
+ {
+  "task": "task-fanin-timezone",
+  "arm": "mcp",
+  "before_f1": 0,
+  "before_stop": "error",
+  "before_verdict": "no-anchor",
+  "after_f1": 0,
+  "after_stop": "toolUse",
+  "after_defect": "wait-timeout-killed:900s",
+  "after_verdict": "no-anchor",
+  "replaced": false,
+  "repair_cost_usd": 0.0384
+ },
+ {
+  "task": "task-fanin-include",
+  "arm": "native",
+  "before_f1": 0,
+  "before_stop": "error",
+  "before_verdict": "partial",
+  "after_f1": 0.7952,
+  "after_stop": "stop",
+  "after_defect": null,
+  "after_verdict": "fabricated-anchor",
+  "replaced": true,
+  "repair_cost_usd": 0.0114
+ }
+]

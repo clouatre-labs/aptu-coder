@@ -39,6 +39,15 @@ Per-task verdicts (mcp arm): correct ×2 (skipIfDBFeature 0.953,
 register_lookup 0.811), fabricated-anchor ×2, partial ×1, no-anchor ×3
 (2 of which ended on provider `error`, not model choice).
 
+## A8 repair re-run (`repairs/`)
+
+The 4 provider-`error` sessions above were re-run on 2026-09-29 (same binary 0.37.0, same SHA256-verified snapshot, 900s wait deadline) per [AMENDMENTS A8](../../../AMENDMENTS.md); filtered task files lived under `/tmp` (frozen set untouched). Repair spend: **$0.0881**. See `repairs/summary.json`, `repairs/before-after.json`, `repairs/arm-means.json`, `repairs/sessions/`.
+
+- **Repaired (replaced):** dec/mcp (F1 0.0 → 0.129), include/native (F1 0.0 → 0.795).
+- **Not repaired (kept as-sealed):** chain/mcp — repair hit the A7 turn cap 40; timezone/mcp — repair hit the 900s wait deadline again (timezone/mcp appears structurally slow under the mcp arm, not a transient provider failure).
+
+Repair-adjusted means (error sessions replaced only where the repair completed): mcp 0.4482 (6/8 completed), native 0.4051 (8/8 completed) vs as-sealed 0.4321 / 0.3057 (5/8, 7/8).
+
 ## Known caveats (recorded, not silently dropped)
 
 - 4 mcp + 1 native sessions ended with `stopReason: "error"`

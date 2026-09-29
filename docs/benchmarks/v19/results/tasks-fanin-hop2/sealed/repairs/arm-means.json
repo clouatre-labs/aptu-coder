@@ -1,0 +1,14 @@
+{
+ "as_sealed": {
+  "mcp_mean_f1": 0.4321,
+  "native_mean_f1": 0.3057,
+  "mcp_completed": "5/8",
+  "native_completed": "7/8"
+ },
+ "repair_adjusted": {
+  "mcp_mean_f1": 0.4482,
+  "native_mean_f1": 0.4051,
+  "mcp_completed": "6/8",
+  "native_completed": "8/8"
+ }
+}
