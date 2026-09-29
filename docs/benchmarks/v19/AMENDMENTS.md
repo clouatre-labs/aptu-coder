@@ -249,7 +249,30 @@ analysis; its spend remains metered for the record.
 - Repair spend is metered separately and reported alongside the sealed-stage spend in the PR/analysis record.
 - No retroactive re-scoring of any kept session; the A6 scorer is unchanged.
 
+## A9 — 2026-09-29: cap-sensitivity probe performed; caps ratified as-is (no-change ratification)
+
+**Decision.** The A7/A7b cap-sensitivity probe
+(`scripts/bench_v19/probe.py`) re-runs the fixed cell set
+(chain/mcp, timezone/mcp, plus their completed native controls)
+across a 3x3 grid of turn cap {25, 40, 60} x wait deadline
+{300s, 900s, 1800s}, by save/set/restore of the `runner_v19.TIERS`
+turn caps and per-grid-point `setattr` of
+`v18.SESSION_WAIT_TIMEOUT_S`, reusing `pilot.run_one` verbatim so the
+fail-closed metering and the stage-budget ceiling are inherited with
+zero `pilot.py` edits. Results are recorded under a dedicated probe
+run root (`manifest.json` declares the full grid and budget up front;
+`cap-sensitivity.json` carries one binding row per cell x cap with
+stopReason, killed/defect, turns and wall-clock at termination, and
+cap-bound flags).
+
+**Ratification (no change).** The probe is measurement-only. The
+sealed-stage caps stand as ratified: fanin turn cap 40 (A7), wait
+deadline 900s (A7b). No cap value is changed by this entry; any
+future cap change requires its own ratified amendment citing the
+probe artifact.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
+
 
 - Wait deadline 120s → 300s via `SESSION_WAIT_TIMEOUT_S` environment
   override; the frozen v18 default is NOT edited.
