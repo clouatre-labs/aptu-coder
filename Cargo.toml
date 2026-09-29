@@ -89,3 +89,4 @@ inherits = "dev"
 opt-level = 1
 debug-assertions = true
 incremental = false
+# ci: trigger full workflow run on ready PR (path-filter no-op)
