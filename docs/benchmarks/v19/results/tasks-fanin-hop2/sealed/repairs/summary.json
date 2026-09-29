@@ -1,0 +1,111 @@
+{
+ "description": "A8 repair re-run of provider-error sealed sessions (2026-09-29)",
+ "replacement_policy": "A8: error sessions kept; repair replaces only where the repair completed (stop). chain/mcp repair hit turn-cap-exceeded:41; timezone/mcp repair hit wait-timeout-killed:900s \u2014 both stay as-sealed.",
+ "repair_spent_usd": 0.088,
+ "repair_binary": "0.37.0",
+ "snapshot_commit": "dd6f6b1",
+ "snapshot_tarball_sha256_verified": "9dc904f5a45be0eea03268642001e4054a7f83faacf546a69fc1a69b092d1e5e",
+ "wait_timeout_s": 900,
+ "sessions": [
+  {
+   "run_id": "f352380b8aaa4589bd5dc1e32f4224e2",
+   "arm": "mcp",
+   "task": "task-fanin-chain",
+   "tier": "fanin",
+   "killed": true,
+   "defect": "turn-cap-exceeded:41",
+   "cost_usd": 0.025790079999999993,
+   "aptu_tool_calls": 0,
+   "tokens": {
+    "input": 46630,
+    "output": 11291,
+    "cacheRead": 438336,
+    "cacheWrite": 0
+   },
+   "stopReason": "toolUse",
+   "score": {
+    "verdict": "no-anchor",
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "task_id": "task-fanin-chain",
+    "expected_sha": "2968ea8a9db004d6"
+   }
+  },
+  {
+   "run_id": "a056c85ce57c44c8afd312084f22e167",
+   "arm": "mcp",
+   "task": "task-fanin-dec",
+   "tier": "fanin",
+   "killed": false,
+   "defect": null,
+   "cost_usd": 0.01242805,
+   "aptu_tool_calls": 10,
+   "tokens": {
+    "input": 22287,
+    "output": 9818,
+    "cacheRead": 139200,
+    "cacheWrite": 0
+   },
+   "stopReason": "stop",
+   "score": {
+    "verdict": "fabricated-anchor",
+    "precision": 0.25,
+    "recall": 0.08695652173913043,
+    "f1": 0.12903225806451613,
+    "task_id": "task-fanin-dec",
+    "expected_sha": "8950a8d3cfa1a9f2"
+   }
+  },
+  {
+   "run_id": "b79713c3016a48899ad183368fcd92e4",
+   "arm": "mcp",
+   "task": "task-fanin-timezone",
+   "tier": "fanin",
+   "killed": true,
+   "defect": "wait-timeout-killed:900s",
+   "cost_usd": 0.03844431,
+   "aptu_tool_calls": 8,
+   "tokens": {
+    "input": 59699,
+    "output": 31377,
+    "cacheRead": 460032,
+    "cacheWrite": 0
+   },
+   "stopReason": "toolUse",
+   "score": {
+    "verdict": "no-anchor",
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "task_id": "task-fanin-timezone",
+    "expected_sha": "2d69530b15acc79c"
+   }
+  },
+  {
+   "run_id": "dcd9134a766641698a46c937772b439b",
+   "arm": "native",
+   "task": "task-fanin-include",
+   "tier": "fanin",
+   "killed": false,
+   "defect": null,
+   "cost_usd": 0.01138403,
+   "aptu_tool_calls": 0,
+   "tokens": {
+    "input": 19607,
+    "output": 12589,
+    "cacheRead": 71616,
+    "cacheWrite": 0
+   },
+   "stopReason": "stop",
+   "score": {
+    "verdict": "fabricated-anchor",
+    "precision": 0.66,
+    "recall": 1.0,
+    "f1": 0.7951807228915663,
+    "task_id": "task-fanin-include",
+    "expected_sha": "c1b6a1c2869cc3de"
+   }
+  }
+ ]
+}

@@ -238,6 +238,35 @@ analysis; its spend remains metered for the record.
   kills now visible as defects any residual truncation is detectable
   and reportable rather than silent.
 
+### A8 — 2026-09-29: repair re-run of provider-error sealed sessions (replacement policy)
+
+**Trigger.** 4 of the 16 sealed sessions ended `stopReason: "error"`
+(provider-side failures mid-loop, not model choice): chain/mcp,
+dec/mcp, timezone/mcp (native arm completed in each of these cells),
+and include/native (mcp arm completed in that cell). These are harness
+defects, not outcomes; leaving them in depresses arm completion rates
+and F1 for reasons unrelated to the treatment.
+
+**Adopted changes:**
+
+- Repair re-run of exactly those 4 (task, arm) cells using a filtered
+  task file under `/tmp` (frozen task set not modified), same binary
+  (0.37.0 — no Rust changes since the sealed run's `da0686d` build, so
+  the A5 oracle gate re-run is not required), same snapshot
+  (tarball sha256 verified against the pinned manifest),
+  `SESSION_WAIT_TIMEOUT_S=900`, run root
+  `/tmp/v19-pilot/run-sealed-repair/{mcp,native}`.
+- Replacement policy: the original error sessions are **kept** in the
+  sealed record verbatim; repair sessions are recorded under
+  `sealed/repairs/` with per-session before/after. Arm means are
+  reported both ways — as-sealed, and repair-adjusted (error sessions
+  replaced by their repair counterparts where the repair completed;
+  an error session whose repair also fails stays as-is).
+- Repair spend is metered separately and reported alongside the
+  sealed-stage spend in the PR/analysis record.
+- No retroactive re-scoring of any kept session; the A6 scorer is
+  unchanged.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
 
 - Wait deadline 120s → 300s via `SESSION_WAIT_TIMEOUT_S` environment
