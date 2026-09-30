@@ -41,22 +41,7 @@ See `tasks-fanin-hop2/sealed/summary.json` (as-sealed), `tasks-fanin-hop2/sealed
 
 ## A9b verify-repair pass
 
-After the A9a word-boundary anchor verifier landed (#1709), the four
-completed sealed cells carrying `fabricated-anchor` verdicts
-(chain/native, include/mcp, qualname/native, qualname/mcp) were
-re-run once each with a corrective prefix restating the anchor rule
-(`tasks-fanin-hop2/a9b-verify-repair/`). Replacement policy per A9:
-a cell is replaced only where the repair completed and re-scored with
-zero fabricated anchors. Exactly one cell qualified — qualname/native
-(F1 0.4681 fabricated → 0.4000 partial); include/mcp and qualname/mcp
-still cite fabricated anchors under the stricter verifier and
-chain/native hit the 900s wait deadline, so all three stay as-sealed.
-Repair-adjusted means: native 0.2972 (7/8), mcp 0.4321 (5/8).
-Repair spend **$0.0672**; binary aptu-coder 0.38.0; snapshot tarball
-SHA256 re-verified against the pinned manifest before spend. See
-`tasks-fanin-hop2/a9b-verify-repair/README.md` for the recorded
-caveats (including the 5-vs-4 fabricated-cell counting discrepancy
-between this line and the sealed summary).
+After the A9a word-boundary anchor verifier landed (#1709), the four completed sealed cells carrying `fabricated-anchor` verdicts (chain/native, include/mcp, qualname/native, qualname/mcp) were re-run once each with a corrective prefix restating the anchor rule (`tasks-fanin-hop2/a9b-verify-repair/`). Replacement policy per A9: a cell is replaced only where the repair completed and re-scored with zero fabricated anchors. Exactly one cell qualified — qualname/native (F1 0.4681 fabricated → 0.4000 partial); include/mcp and qualname/mcp still cite fabricated anchors under the stricter verifier and chain/native hit the 900s wait deadline, so all three stay as-sealed. Repair-adjusted means: native 0.2972 (7/8), mcp 0.4321 (5/8). Repair spend **$0.0672**; binary aptu-coder 0.38.0; snapshot tarball SHA256 re-verified against the pinned manifest before spend. See `tasks-fanin-hop2/a9b-verify-repair/README.md` for the recorded caveats (including the 5-vs-4 fabricated-cell counting discrepancy between this line and the sealed summary).
 
 ## Verdict
 
