@@ -120,10 +120,9 @@ mod tests {
         assert_eq!(language_for_extension("kts"), Some("kotlin"));
     }
 
-    /// The schema pattern is generated from `EXTENSION_MAP` itself, so this
-    /// test verifies the generator's semantics: with case-insensitivity
-    /// applied (JSON Schema clients validate with ECMAScript regexes, so the
-    /// pattern uses `[Xx]` per-character classes), every supported extension
+    /// The schema pattern must stay ECMAScript-valid (JSON Schema clients
+    /// validate with ECMAScript regexes, so the pattern uses `[Xx]`
+    /// per-character classes instead of `(?i)`): every supported extension
     /// must match and an unsupported one must not.
     #[test]
     #[cfg(feature = "schemars")]
