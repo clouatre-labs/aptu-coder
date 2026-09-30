@@ -120,23 +120,28 @@ mod tests {
         assert_eq!(language_for_extension("kts"), Some("kotlin"));
     }
 
-    /// Asserts every extension in `EXTENSION_MAP` appears as an alternation in
-    /// `SUPPORTED_FILE_EXT_PATTERN`, preventing drift when a new language is added.
-    /// The check is a substring match: the pattern has the form `...(ext1|ext2|...)...`
-    /// so each extension must appear as `ext|` or `ext)`.
+    /// The schema pattern must stay ECMAScript-valid (JSON Schema clients
+    /// validate with ECMAScript regexes, so the pattern uses `[Xx]`
+    /// per-character classes instead of `(?i)`): every supported extension
+    /// must match and an unsupported one must not.
     #[test]
+    #[cfg(feature = "schemars")]
     fn test_supported_file_ext_pattern_covers_all_extension_map_entries() {
-        #[cfg(feature = "schemars")]
-        for (ext, _lang) in EXTENSION_MAP {
-            let in_alternation = crate::schema_helpers::SUPPORTED_FILE_EXT_PATTERN
-                .contains(&format!("{ext}|"))
-                || crate::schema_helpers::SUPPORTED_FILE_EXT_PATTERN.contains(&format!("{ext})"));
+        let pattern = crate::schema_helpers::supported_file_ext_pattern();
+        assert!(!pattern.contains("(?i)"), "ECMAScript rejects (?i)");
+        let re = regex::Regex::new(&format!("(?i){pattern}")).unwrap();
+        for ext in supported_extensions() {
             assert!(
-                in_alternation,
-                "SUPPORTED_FILE_EXT_PATTERN is missing extension '{ext}' from EXTENSION_MAP; \
-                 add it to schema_helpers.rs"
+                re.is_match(&format!("src/file.{ext}")),
+                "pattern does not match supported extension '{ext}'"
+            );
+            assert!(
+                re.is_match(&format!("SRC/FILE.{}", ext.to_uppercase())),
+                "pattern is not case-insensitive for '{ext}'"
             );
         }
+        assert!(!re.is_match("src/file.txt"));
+        assert!(!re.is_match("src/file.rss"));
     }
 
     #[test]

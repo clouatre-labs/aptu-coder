@@ -50,13 +50,42 @@ pub fn max_depth_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     Schema::from(map)
 }
 
-/// Regex matching all supported source file extensions (case-insensitive).
+/// Builds an ECMAScript-valid regex matching all supported source file
+/// extensions (case-insensitive).
 ///
 /// Used as the `inputSchema` `pattern` constraint on `path` fields in
-/// `AnalyzeFileParams` and `AnalyzeModuleParams`. Covers every extension in
-/// `lang.rs` `EXTENSION_MAP`. Centralised here so adding a language requires
-/// one change, not two.
-pub const SUPPORTED_FILE_EXT_PATTERN: &str = r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn|html|htm|md|mdx|astro|css|yaml|yml|json|toml)$";
+/// `AnalyzeFileParams` and `AnalyzeModuleParams`. Generated from
+/// `lang.rs` `EXTENSION_MAP` (via `supported_extensions()`), so adding a
+/// language requires one change, not two.
+///
+/// JSON Schema `pattern` is an ECMAScript regex, where the `(?i)` inline
+/// flag is a `SyntaxError`, so case-insensitivity is expressed with
+/// per-character classes instead. Longer extensions precede shared shorter
+/// prefixes in the alternation so the regex engine reaches the correct
+/// branch before `$` fails on a shorter match.
+pub fn supported_file_ext_pattern() -> &'static str {
+    static PATTERN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATTERN.get_or_init(|| {
+        let mut exts = crate::lang::supported_extensions();
+        exts.sort_by_key(|ext| std::cmp::Reverse(ext.len()));
+        let alternation = exts
+            .iter()
+            .map(|ext| {
+                ext.chars()
+                    .map(|c| {
+                        if c.is_ascii_alphabetic() {
+                            format!("[{}{}]", c.to_ascii_uppercase(), c.to_ascii_lowercase())
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        format!(r"\.(?:{alternation})$")
+    })
+}
 
 /// Hard cap on `analyze_symbol`'s `max_depth` parameter (graph traversal
 /// depth). Usage data (this
@@ -72,7 +101,7 @@ pub const MAX_TOOL_DEPTH: u32 = 3;
 pub fn supported_file_path_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     let map = serde_json::json!({
         "type": "string",
-        "pattern": SUPPORTED_FILE_EXT_PATTERN
+        "pattern": crate::schema_helpers::supported_file_ext_pattern()
     })
     .as_object()
     .expect("json! object literal is always a Value::Object")
