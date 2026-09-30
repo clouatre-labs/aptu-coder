@@ -28,7 +28,7 @@ from pathlib import Path
 
 import tree_sitter_python
 import tree_sitter_rust
-from tree_sitter import Language, Node, Parser, Query
+from tree_sitter import Language, Node, Parser, Query, QueryCursor
 
 HOP_DEPTHS = (1, 2, 3)
 
@@ -75,14 +75,15 @@ def _validate_symbol(symbol: str) -> str:
 
 
 def _query_for(table: dict[str, str], suffix: str) -> Query:
-    return LANGUAGES[suffix].query(table[suffix])
+    return Query(LANGUAGES[suffix], table[suffix])
 
 
 def _captured_names(root: Node, query: Query) -> list[str]:
-    # captures() returns {capture_name: [nodes]} in py-tree-sitter 0.23.
+    # captures() returns {capture_name: [nodes]}. Query execution moved to
+    # QueryCursor in py-tree-sitter 0.25 (Language.query was removed in 0.26).
     return [
         node.text.decode("utf-8")
-        for nodes in query.captures(root).values()
+        for nodes in QueryCursor(query).captures(root).values()
         for node in nodes
     ]
 
@@ -113,8 +114,9 @@ def build_function_definition_index(snapshot_root: Path) -> dict[str, list[str]]
         if suffix != ".py":
             continue  # F2 tier is Python-only (Django snapshot)
         rel = path.relative_to(snapshot_root).as_posix()
-        query = LANGUAGES[suffix].query(
-            "(function_definition name: (identifier) @name)"
+        query = Query(
+            LANGUAGES[suffix],
+            "(function_definition name: (identifier) @name)",
         )
         tree = _parse(path, suffix)
         for name in _captured_names(tree.root_node, query):
@@ -218,7 +220,7 @@ def build_call_edges(
         rel = path.relative_to(snapshot_root).as_posix()
         query = _query_for(_CALL_QUERIES, suffix)
         tree = _parse(path, suffix)
-        for nodes in query.captures(tree.root_node).values():
+        for nodes in QueryCursor(query).captures(tree.root_node).values():
             for node in nodes:
                 callee = node.text.decode("utf-8")
                 if callee in ambiguous:
