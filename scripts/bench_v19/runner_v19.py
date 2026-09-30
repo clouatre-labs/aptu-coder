@@ -30,16 +30,14 @@ runner (never mutating bench_v18 module constants in its own file):
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 from bench_v18 import runner as v18
 
-# Carry-over ratification: 120s -> 300s wait deadline for v19, driven by
-# environment with a 300s default. Applied to the imported module object
-# before any meter_and_close call; bench_v18/runner.py is never edited.
-v18.SESSION_WAIT_TIMEOUT_S = int(os.environ.get("SESSION_WAIT_TIMEOUT_S", "300"))
+from bench_v19 import config
+
+config.apply_wait_timeout()
 
 # F1 budget tiers: per-tier turn caps (fail-closed, kill + defect on
 # exceedance). The fanin tier floods context with grep output; its cap

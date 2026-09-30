@@ -20,12 +20,11 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from bench_v18 import blinding  # noqa: E402
 from bench_v18 import runner as v18  # noqa: E402
-from bench_v19 import score as v19score  # noqa: E402
 
-# A7b wait override, mirroring runner_v19: without this import-time set,
-# the smoke driver silently runs at the v18 120s default and kills
-# mid-turn sessions the pilot ladder would have let finish.
-v18.SESSION_WAIT_TIMEOUT_S = int(os.environ.get("SESSION_WAIT_TIMEOUT_S", "300"))
+from bench_v19 import config
+from bench_v19 import score as v19score
+
+config.apply_wait_timeout()
 
 SNAPSHOT = Path("/tmp/v19-wiring/django").resolve()
 RUN_ROOT = Path("/tmp/v19-smoke2/run1")

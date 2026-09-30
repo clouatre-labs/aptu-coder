@@ -8,8 +8,9 @@ restores ``rv19.TIERS`` turn caps and ``setattr``s
 ``v18.SESSION_WAIT_TIMEOUT_S`` in try/finally, then calls
 ``pilot.run_one`` verbatim so the fail-closed metering and the
 stage-budget ceiling are inherited with zero pilot.py edits. The
-import-time-only env override on SESSION_WAIT_TIMEOUT_S is never relied
-on for per-grid-point control.
+shared bench_v19 config module owns the import-time env override on
+SESSION_WAIT_TIMEOUT_S; it is never relied on for per-grid-point
+control.
 
 Outputs under a dedicated probe run root: manifest.json (declaring the
 full grid and probe budget up front) and cap-sensitivity.json (one
