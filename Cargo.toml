@@ -47,11 +47,11 @@ tree-sitter-fortran = "0.6.0"
 tree-sitter-md = "0.5.3"
 tree-sitter-css = "0.25.0"
 tree-sitter-yaml = "0.7.2"
-opentelemetry = "0.32"
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"] }
-opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-client"] }
-opentelemetry-appender-tracing = { version = "0.32", features = ["log"] }
-tracing-opentelemetry = "0.33"
+opentelemetry = "0.33"
+opentelemetry_sdk = { version = "0.33", features = ["rt-tokio", "metrics"] }
+opentelemetry-otlp = { version = "0.33", features = ["http-proto", "reqwest-client"] }
+opentelemetry-appender-tracing = { version = "0.33", features = ["log"] }
+tracing-opentelemetry = "0.34"
 
 rustls = "0.23"
 axum = { version = "0.8", features = ["http1", "tokio"], default-features = false }
