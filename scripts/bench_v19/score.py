@@ -30,10 +30,13 @@ def verify_anchors(text: str, symbol: str, snapshot_root) -> tuple[int, int]:
 
     An anchor ``path:line`` is fabricated iff the file does not exist in
     the snapshot, the line number is out of range, or the symbol
-    identifier does not occur within ``ANCHOR_WINDOW_LINES`` of the
-    cited line. Gold-set membership is never consulted here: a predicted
-    file absent from the gold set is an ordinary false positive and
-    affects only precision/F1, never the fabricated count.
+    identifier does not occur as a distinct identifier (word-boundary
+    match, A9a) within ``ANCHOR_WINDOW_LINES`` of the cited line. A raw
+    substring hit is not sufficient: a mention of the symbol inside a
+    comment or as a substring of a longer identifier does not verify
+    the anchor. Gold-set membership is never consulted here: a
+    predicted file absent from the gold set is an ordinary false
+    positive and affects only precision/F1, never the fabricated count.
 
     Returns ``(verified_count, fabricated_count)`` over distinct
     anchors. An answer that cites no file:line anchors at all yields
@@ -60,7 +63,10 @@ def verify_anchors(text: str, symbol: str, snapshot_root) -> tuple[int, int]:
             continue
         lo = max(0, lineno - 1 - ANCHOR_WINDOW_LINES)
         hi = lineno + ANCHOR_WINDOW_LINES
-        if symbol not in "\n".join(lines[lo:hi]):
+        # A9a: word-boundary identifier match, not a raw substring
+        # check; substrings of longer identifiers or comment mentions
+        # that do not form a distinct identifier do not verify.
+        if re.search(rf"\b{re.escape(symbol)}\b", "\n".join(lines[lo:hi])) is None:
             fabricated += 1
             continue
         verified += 1
