@@ -25,8 +25,9 @@ use crate::tools::common::{err_to_tool_result, error_meta};
 use crate::{SIZE_LIMIT, err_to_tool_result_from_pagination};
 
 use crate::tools::analyze_symbol::{
-    AnalyzeSymbolContext, AnalyzeSymbolErrorSubtype, FocusedAnalysisParams, SubtypedResult,
-    emit_error_metric, err_invalid_params, validate_impl_only,
+    AnalyzeSymbolContext, AnalyzeSymbolErrorKind, AnalyzeSymbolErrorParams,
+    AnalyzeSymbolErrorSubtype, FocusedAnalysisParams, SubtypedResult, emit_error_metric,
+    err_invalid_params, validate_impl_only,
 };
 
 /// Paginates a slice of call chains and returns the paginated items with an optional next cursor.
@@ -144,7 +145,14 @@ pub(crate) async fn run_focused_with_auto_summary(
     })
     .await
     .map_err(|e| {
-        emit_error_metric(ctx, "internal_error", None, t_start, None);
+        emit_error_metric(
+            ctx,
+            "internal_error",
+            None,
+            t_start,
+            AnalyzeSymbolErrorParams::from_params(params, None)
+                .with_error_kind(AnalyzeSymbolErrorKind::Panic),
+        );
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis task panicked: {e}"),
@@ -152,7 +160,14 @@ pub(crate) async fn run_focused_with_auto_summary(
         )
     })?
     .map_err(|e| {
-        emit_error_metric(ctx, "internal_error", None, t_start, None);
+        emit_error_metric(
+            ctx,
+            "internal_error",
+            None,
+            t_start,
+            AnalyzeSymbolErrorParams::from_params(params, None)
+                .with_error_kind(AnalyzeSymbolErrorKind::AnalysisFailed),
+        );
         ErrorData::new(
             rmcp::model::ErrorCode::INTERNAL_ERROR,
             format!("analysis failed: {e}"),
@@ -262,7 +277,7 @@ pub(crate) async fn handle_focused_mode(
                     "invalid_params",
                     Some(AnalyzeSymbolErrorSubtype::GitRefFilterFailed),
                     t_start,
-                    None,
+                    AnalyzeSymbolErrorParams::from_params(params, None),
                 );
                 return Err(ErrorData::new(
                     rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -284,7 +299,13 @@ pub(crate) async fn handle_focused_mode(
     if params.impl_only == Some(true)
         && let Err((e, subtype)) = validate_impl_only(&entries)
     {
-        emit_error_metric(ctx, "invalid_params", Some(subtype), t_start, None);
+        emit_error_metric(
+            ctx,
+            "invalid_params",
+            Some(subtype),
+            t_start,
+            AnalyzeSymbolErrorParams::from_params(params, None),
+        );
         return Err(e);
     }
 
