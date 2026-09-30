@@ -37,6 +37,11 @@ pub struct MetricEvent {
     pub error_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_subtype: Option<String>,
+    /// Machine-readable cause of an `analyze_symbol` `internal_error` event (e.g.
+    /// "spawn_blocking_join", "analysis_failed", "panic", "handler_internal"). `None` for
+    /// ok events and for `invalid_params` events, which carry `error_subtype` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
@@ -168,6 +173,7 @@ pub(crate) struct MetricEventBuilder {
     uri_kind: Option<String>,
     error_type: Option<String>,
     error_subtype: Option<String>,
+    error_kind: Option<String>,
     session_id: Option<String>,
     seq: Option<u32>,
     cache_hit: Option<bool>,
@@ -242,6 +248,11 @@ impl MetricEventBuilder {
     #[must_use]
     pub(crate) fn error_subtype(mut self, v: Option<String>) -> Self {
         self.error_subtype = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn error_kind(mut self, v: Option<String>) -> Self {
+        self.error_kind = v;
         self
     }
     #[must_use]
@@ -420,6 +431,7 @@ impl MetricEventBuilder {
             uri_kind: self.uri_kind,
             error_type: self.error_type,
             error_subtype: self.error_subtype,
+            error_kind: self.error_kind,
             session_id: self.session_id,
             seq: self.seq,
             cache_hit: self.cache_hit,
@@ -851,6 +863,7 @@ mod tests {
             uri_kind: None,
             error_type: None,
             error_subtype: None,
+            error_kind: None,
             session_id: Some("1742468880123-42".to_string()),
             seq: Some(5),
             cache_hit: None,

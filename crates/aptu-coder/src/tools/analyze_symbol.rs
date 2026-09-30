@@ -57,6 +57,8 @@ pub(crate) struct FocusedAnalysisParams {
 pub(crate) enum AnalyzeSymbolErrorSubtype {
     /// `path` argument points to a file instead of a directory.
     PathIsFile,
+    /// `path` argument is empty or whitespace-only.
+    PathEmpty,
     /// `summary=true` combined with a pagination `cursor`.
     SummaryCursorConflict,
     /// `mode=import_lookup` combined with `match_mode`, `max_depth`, or `impl_only`.
@@ -87,6 +89,7 @@ impl AnalyzeSymbolErrorSubtype {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::PathIsFile => "path_is_file",
+            Self::PathEmpty => "path_empty",
             Self::SummaryCursorConflict => "summary_cursor_conflict",
             Self::ModeParamConflict => "mode_param_conflict",
             Self::ModeMissingSymbol => "mode_missing_symbol",
@@ -115,6 +118,93 @@ pub(crate) type InvalidParamsResult<T, E> = Result<T, (E, AnalyzeSymbolErrorSubt
 /// (subtype `None`, matching the `error_subtype` metrics contract).
 pub(crate) type SubtypedResult<T, E> = Result<T, (E, Option<AnalyzeSymbolErrorSubtype>)>;
 
+/// Machine-readable cause of an `analyze_symbol` `internal_error` event, recorded on
+/// `MetricEvent::error_kind` so the dominant internal_error bucket is diagnosable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnalyzeSymbolErrorKind {
+    /// `tokio::task::spawn_blocking` join handle returned an error.
+    SpawnBlockingJoin,
+    /// The blocking analysis closure itself returned an internal error.
+    AnalysisFailed,
+    /// The blocking analysis task panicked.
+    Panic,
+    /// Catch-all for internal errors raised directly in handler code.
+    HandlerInternal,
+}
+
+impl AnalyzeSymbolErrorKind {
+    #[must_use]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::SpawnBlockingJoin => "spawn_blocking_join",
+            Self::AnalysisFailed => "analysis_failed",
+            Self::Panic => "panic",
+            Self::HandlerInternal => "handler_internal",
+        }
+    }
+}
+
+impl std::fmt::Display for AnalyzeSymbolErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Parameter-shape fields recorded on `analyze_symbol` error events so error telemetry
+/// carries the same dimensions as ok events. Passed to [`emit_error_metric`]; omission
+/// of a field is a compile error at every call site.
+#[derive(Debug, Default)]
+pub(crate) struct AnalyzeSymbolErrorParams {
+    match_mode: Option<String>,
+    mode: Option<String>,
+    impl_only: bool,
+    is_paginated: bool,
+    follow_depth: Option<u32>,
+    git_ref_used: bool,
+    summary_mode: bool,
+    param_path_depth: Option<usize>,
+    error_kind: Option<AnalyzeSymbolErrorKind>,
+}
+
+impl AnalyzeSymbolErrorParams {
+    /// Extracts the parameter-shape fields from the tool call parameters, mirroring the
+    /// ok-path event construction exactly.
+    pub(crate) fn from_params(
+        params: &AnalyzeSymbolParams,
+        param_path_depth: Option<usize>,
+    ) -> Self {
+        Self {
+            match_mode: params
+                .match_mode
+                .as_ref()
+                .map(|m| format!("{:?}", m).to_lowercase()),
+            mode: params
+                .mode
+                .as_ref()
+                .map(|m| mode_name(m.clone()).to_owned()),
+            impl_only: params.impl_only.unwrap_or(false),
+            is_paginated: params.pagination.cursor.is_some(),
+            follow_depth: params.max_depth,
+            git_ref_used: params.git_ref.is_some(),
+            summary_mode: params.output_control.summary.unwrap_or(false),
+            param_path_depth,
+            error_kind: None,
+        }
+    }
+
+    /// All fields unset; for call sites where the parameters are no longer available.
+    #[must_use]
+    pub(crate) fn none() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub(crate) fn with_error_kind(mut self, kind: AnalyzeSymbolErrorKind) -> Self {
+        self.error_kind = Some(kind);
+        self
+    }
+}
+
 /// Helper function to emit error metrics for analyze_symbol.
 /// Extracts the error_type string from ErrorCode and records it on the span.
 pub(crate) fn emit_error_metric(
@@ -122,7 +212,7 @@ pub(crate) fn emit_error_metric(
     error_type: &str,
     error_subtype: Option<AnalyzeSymbolErrorSubtype>,
     t_start: std::time::Instant,
-    param_path_depth: Option<usize>,
+    error_params: AnalyzeSymbolErrorParams,
 ) {
     let dur = t_start.elapsed().as_millis().min(u64::MAX as u128) as u64;
     tracing::Span::current().record("error", true);
@@ -130,9 +220,17 @@ pub(crate) fn emit_error_metric(
     let mut builder = crate::metrics::MetricEventBuilder::new("analyze_symbol", "error", dur)
         .error_type(Some(error_type.to_string()))
         .error_subtype(error_subtype.map(|s| s.to_string()))
+        .error_kind(error_params.error_kind.map(|k| k.to_string()))
         .session_id(ctx.sid.clone())
-        .seq(Some(ctx.seq));
-    if let Some(depth) = param_path_depth {
+        .seq(Some(ctx.seq))
+        .match_mode(error_params.match_mode)
+        .mode(error_params.mode)
+        .impl_only(error_params.impl_only)
+        .is_paginated(error_params.is_paginated)
+        .follow_depth(error_params.follow_depth)
+        .git_ref_used(error_params.git_ref_used)
+        .summary_mode(error_params.summary_mode);
+    if let Some(depth) = error_params.param_path_depth {
         builder = builder.param_path_depth(depth);
     }
     ctx.metrics_tx.send(builder.build());
@@ -146,7 +244,13 @@ pub(crate) fn err_invalid_params(
     hint: &'static str,
     error_subtype: Option<AnalyzeSymbolErrorSubtype>,
 ) -> ErrorData {
-    emit_error_metric(ctx, "invalid_params", error_subtype, t_start, None);
+    emit_error_metric(
+        ctx,
+        "invalid_params",
+        error_subtype,
+        t_start,
+        AnalyzeSymbolErrorParams::none(),
+    );
     ErrorData::new(
         rmcp::model::ErrorCode::INVALID_PARAMS,
         message,
@@ -299,6 +403,10 @@ async fn handle_import_lookup(
         Ok(output)
     });
 
+    let error_params = AnalyzeSymbolErrorParams::from_params(
+        &params,
+        Some(crate::metrics::path_component_count(&param_path)),
+    );
     let output = match handle.await {
         Ok(Ok(v)) => v,
         Ok(Err((e, subtype))) => {
@@ -309,13 +417,7 @@ async fn handle_import_lookup(
                 rmcp::model::ErrorCode::INTERNAL_ERROR => "internal_error",
                 _ => "unknown",
             };
-            emit_error_metric(
-                &ctx,
-                error_type_str,
-                subtype,
-                t_start,
-                Some(crate::metrics::path_component_count(&param_path)),
-            );
+            emit_error_metric(&ctx, error_type_str, subtype, t_start, error_params);
             return Ok(err_to_tool_result(e));
         }
         Err(e) => {
@@ -324,7 +426,7 @@ async fn handle_import_lookup(
                 "internal_error",
                 None,
                 t_start,
-                Some(crate::metrics::path_component_count(&param_path)),
+                error_params.with_error_kind(AnalyzeSymbolErrorKind::SpawnBlockingJoin),
             );
             return Ok(err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -453,7 +555,11 @@ async fn handle_call_graph(
                     error_type_str,
                     None,
                     t_start,
-                    Some(crate::metrics::path_component_count(&param_path)),
+                    AnalyzeSymbolErrorParams::from_params(
+                        &params,
+                        Some(crate::metrics::path_component_count(&param_path)),
+                    )
+                    .with_error_kind(AnalyzeSymbolErrorKind::HandlerInternal),
                 );
             }
             return Ok(err_to_tool_result(e));
@@ -482,7 +588,10 @@ async fn handle_call_graph(
                 "invalid_params",
                 Some(subtype),
                 t_start,
-                Some(crate::metrics::path_component_count(&param_path)),
+                AnalyzeSymbolErrorParams::from_params(
+                    &params,
+                    Some(crate::metrics::path_component_count(&param_path)),
+                ),
             );
             return Ok(e);
         }
@@ -505,13 +614,19 @@ async fn handle_call_graph(
             } else {
                 "internal_error"
             };
-            emit_error_metric(
-                &ctx,
-                error_type_str,
-                subtype,
-                t_start,
+            let error_kind = if subtype.is_some() {
+                None
+            } else {
+                Some(AnalyzeSymbolErrorKind::HandlerInternal)
+            };
+            let mut error_params = AnalyzeSymbolErrorParams::from_params(
+                &params,
                 Some(crate::metrics::path_component_count(&param_path)),
             );
+            if let Some(kind) = error_kind {
+                error_params = error_params.with_error_kind(kind);
+            }
+            emit_error_metric(&ctx, error_type_str, subtype, t_start, error_params);
             return Ok(e);
         }
     };
@@ -641,6 +756,17 @@ fn validate_top_level_preconditions(
     cursor: Option<&str>,
     span: &tracing::Span,
 ) -> InvalidParamsResult<(), CallToolResult> {
+    if params.path.trim().is_empty() {
+        return Err((
+            invalid_params_result(
+                span,
+                "path must be a non-empty directory path",
+                "provide the directory path to analyze",
+            ),
+            AnalyzeSymbolErrorSubtype::PathEmpty,
+        ));
+    }
+
     if std::path::Path::new(&params.path).is_file() {
         return Err((
             invalid_params_result(
@@ -712,14 +838,26 @@ pub(crate) async fn analyze_symbol_handler(
     let cursor = normalize_cursor(params.pagination.cursor.as_deref());
 
     if let Err((result, subtype)) = validate_top_level_preconditions(&params, cursor, span) {
-        emit_error_metric(&ctx, "invalid_params", Some(subtype), t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(subtype),
+            t_start,
+            AnalyzeSymbolErrorParams::from_params(&params, None),
+        );
         return Ok(result);
     }
 
     let mode = resolve_mode(&params);
 
     if let Err((e, subtype)) = validate_mode_symbol(mode.clone(), &params.symbol) {
-        emit_error_metric(&ctx, "invalid_params", Some(subtype), t_start, None);
+        emit_error_metric(
+            &ctx,
+            "invalid_params",
+            Some(subtype),
+            t_start,
+            AnalyzeSymbolErrorParams::from_params(&params, None),
+        );
         return Ok(err_to_tool_result(e));
     }
 
@@ -886,11 +1024,129 @@ mod tests {
     }
 
     #[test]
+    fn analyze_symbol_error_kind_as_str_golden_list() {
+        // Arrange: every current variant, matched exhaustively so adding a new
+        // variant without updating this arm fails to compile.
+        for kind in [
+            AnalyzeSymbolErrorKind::SpawnBlockingJoin,
+            AnalyzeSymbolErrorKind::AnalysisFailed,
+            AnalyzeSymbolErrorKind::Panic,
+            AnalyzeSymbolErrorKind::HandlerInternal,
+        ] {
+            // Act
+            let expected = match kind {
+                AnalyzeSymbolErrorKind::SpawnBlockingJoin => "spawn_blocking_join",
+                AnalyzeSymbolErrorKind::AnalysisFailed => "analysis_failed",
+                AnalyzeSymbolErrorKind::Panic => "panic",
+                AnalyzeSymbolErrorKind::HandlerInternal => "handler_internal",
+            };
+
+            // Assert
+            assert_eq!(kind.as_str(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_empty_path_sets_path_empty_subtype() {
+        // Arrange: empty path is rejected before the directory walk.
+        let (ctx, mut rx) = test_context();
+        let params = test_params("", None, None);
+        let call = test_call(String::new());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(event.error_subtype.as_deref(), Some("path_empty"));
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_dot_path_does_not_trigger_empty_path_guard() {
+        // Arrange: '.' is a single path component and must stay valid; cap depth at 1
+        // so the walk over the crate directory stays cheap.
+        let (ctx, mut rx) = test_context();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": ".",
+            "symbol": "emit_error_metric",
+            "max_depth": 1,
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(".".to_string());
+
+        // Act
+        let _ = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert: the handler progressed past the guard, so no path_empty
+        // invalid_params event fired (the analysis itself may still fail internally
+        // in a bare test environment, but that carries no invalid_params subtype).
+        let event = rx.try_recv().expect("expected a metric event");
+        assert_eq!(event.error_type.as_deref(), Some("internal_error"));
+        assert_eq!(event.error_subtype.as_deref(), None);
+    }
+
+    #[test]
+    fn emit_error_metric_records_param_shape_fields_and_error_kind() {
+        // Arrange: parameters with every shape field set, plus an internal error kind.
+        let (ctx, mut rx) = test_context();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": "/tmp/proj",
+            "symbol": "foo",
+            "mode": "call_graph",
+            "match_mode": "prefix",
+            "max_depth": 2,
+            "impl_only": true,
+            "cursor": "some-cursor",
+            "summary": true,
+            "git_ref": "main",
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+
+        // Act
+        emit_error_metric(
+            &ctx,
+            "internal_error",
+            None,
+            std::time::Instant::now(),
+            AnalyzeSymbolErrorParams::from_params(&params, Some(2))
+                .with_error_kind(AnalyzeSymbolErrorKind::HandlerInternal),
+        );
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.match_mode.as_deref(), Some("prefix"));
+        assert_eq!(event.mode.as_deref(), Some("call_graph"));
+        assert!(event.impl_only);
+        assert!(event.is_paginated);
+        assert_eq!(event.follow_depth, Some(2));
+        assert!(event.git_ref_used);
+        assert!(event.summary_mode);
+        assert_eq!(event.param_path_depth, 2);
+        assert_eq!(event.error_kind.as_deref(), Some("handler_internal"));
+    }
+
+    #[test]
+    fn metric_event_serde_round_trips_old_jsonl_without_error_kind() {
+        // Arrange: a legacy JSONL line recorded before error_kind existed.
+        let legacy = r#"{"ts":1,"tool":"analyze_symbol","duration_ms":5,"output_chars":0,"param_path_depth":1,"max_depth":null,"result":"error","error_type":"internal_error"}"#;
+
+        // Act
+        let event: crate::metrics::MetricEvent =
+            serde_json::from_str(legacy).expect("legacy line deserializes via serde default");
+
+        // Assert
+        assert_eq!(event.error_kind, None);
+        assert_eq!(event.error_type.as_deref(), Some("internal_error"));
+    }
+
+    #[test]
     fn analyze_symbol_error_subtype_as_str_golden_list() {
         // Arrange: every current variant, matched exhaustively so adding a new
         // variant without updating this arm fails to compile.
         for subtype in [
             AnalyzeSymbolErrorSubtype::PathIsFile,
+            AnalyzeSymbolErrorSubtype::PathEmpty,
             AnalyzeSymbolErrorSubtype::SummaryCursorConflict,
             AnalyzeSymbolErrorSubtype::ModeParamConflict,
             AnalyzeSymbolErrorSubtype::ModeMissingSymbol,
@@ -906,6 +1162,7 @@ mod tests {
             // Act
             let expected = match subtype {
                 AnalyzeSymbolErrorSubtype::PathIsFile => "path_is_file",
+                AnalyzeSymbolErrorSubtype::PathEmpty => "path_empty",
                 AnalyzeSymbolErrorSubtype::SummaryCursorConflict => "summary_cursor_conflict",
                 AnalyzeSymbolErrorSubtype::ModeParamConflict => "mode_param_conflict",
                 AnalyzeSymbolErrorSubtype::ModeMissingSymbol => "mode_missing_symbol",

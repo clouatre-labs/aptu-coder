@@ -121,6 +121,7 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `exec_command` | `stdin_too_large` | `stdin` content exceeds the 1 MB size cap. |
 | `exec_command` | `heredoc_error` | Heredoc validation failed (malformed or unterminated heredoc). |
 | `analyze_symbol` | `path_is_file` | `path` argument points to a file instead of a directory. |
+| `analyze_symbol` | `path_empty` | `path` argument is empty or whitespace-only. |
 | `analyze_symbol` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
 | `analyze_symbol` | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `max_depth`, or `impl_only`. |
 | `analyze_symbol` | `mode_missing_symbol` | Non-call-graph `mode` without a non-empty `symbol`. |
@@ -134,6 +135,17 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `analyze_symbol` | `output_too_large` | Formatted output exceeds the size limit even with `summary=true`. |
 
 Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
+
+### error_kind values
+
+Populated only on `analyze_symbol` `internal_error` events, alongside the full parameter-shape fields (`match_mode`, `mode`, `impl_only`, `is_paginated`, `follow_depth`, `git_ref_used`, `summary_mode`, `param_path_depth`) so error telemetry is diagnosable by input shape. `null` for ok events and for `invalid_params` events, which carry `error_subtype` instead.
+
+| Value | Meaning |
+|---|---|
+| `spawn_blocking_join` | The `tokio::task::spawn_blocking` join handle returned an error. |
+| `analysis_failed` | The blocking analysis closure returned an internal error. |
+| `panic` | The blocking analysis task panicked. |
+| `handler_internal` | Internal error raised directly in handler code. |
 
 
 ## OpenTelemetry attribute mapping
