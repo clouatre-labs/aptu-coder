@@ -50,26 +50,42 @@ pub fn max_depth_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     Schema::from(map)
 }
 
-/// Regex matching all supported source file extensions (case-insensitive).
+/// Builds an ECMAScript-valid regex matching all supported source file
+/// extensions (case-insensitive).
 ///
 /// Used as the `inputSchema` `pattern` constraint on `path` fields in
-/// `AnalyzeFileParams` and `AnalyzeModuleParams`. Covers every extension in
-/// `lang.rs` `EXTENSION_MAP`. Centralised here so adding a language requires
-/// one change, not two.
+/// `AnalyzeFileParams` and `AnalyzeModuleParams`. Generated from
+/// `lang.rs` `EXTENSION_MAP` (via `supported_extensions()`), so adding a
+/// language requires one change, not two.
 ///
 /// JSON Schema `pattern` is an ECMAScript regex, where the `(?i)` inline
 /// flag is a `SyntaxError`, so case-insensitivity is expressed with
-/// per-character classes instead. Multi-char extensions precede shared
-/// single-char prefixes in the alternation.
-pub const SUPPORTED_FILE_EXT_PATTERN: &str = concat!(
-    r"\.(?:",
-    r"[Rr][Ss]|[Pp][Yy]|[Gg][Oo]|[Tt][Ss][Xx]|[Tt][Ss]|[Jj][Ss]|[Mm][Jj][Ss]|[Cc][Jj][Ss]|",
-    r"[Jj][Aa][Vv][Aa]|[Kk][Tt][Ss]|[Kk][Tt]|[Cc][Ss]|[Cc][Pp][Pp]|[Cc][Xx][Xx]|[Cc][Cc]|[Cc]|",
-    r"[Hh][Pp][Pp]|[Hh][Xx][Xx]|[Hh]|[Ff]77|[Ff]90|[Ff]95|[Ff]03|[Ff]08|[Ff][Oo][Rr]|[Ff][Tt][Nn]|[Ff]|",
-    r"[Hh][Tt][Mm][Ll]|[Hh][Tt][Mm]|[Mm][Dd][Xx]|[Mm][Dd]|[Aa][Ss][Tt][Rr][Oo]|[Cc][Ss][Ss]|",
-    r"[Yy][Aa][Mm][Ll]|[Yy][Mm][Ll]|[Jj][Ss][Oo][Nn]|[Tt][Oo][Mm][Ll]",
-    r")$"
-);
+/// per-character classes instead. Longer extensions precede shared shorter
+/// prefixes in the alternation so the regex engine reaches the correct
+/// branch before `$` fails on a shorter match.
+pub fn supported_file_ext_pattern() -> &'static str {
+    static PATTERN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATTERN.get_or_init(|| {
+        let mut exts = crate::lang::supported_extensions();
+        exts.sort_by_key(|ext| std::cmp::Reverse(ext.len()));
+        let alternation = exts
+            .iter()
+            .map(|ext| {
+                ext.chars()
+                    .map(|c| {
+                        if c.is_ascii_alphabetic() {
+                            format!("[{}{}]", c.to_ascii_uppercase(), c.to_ascii_lowercase())
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        format!(r"\.(?:{alternation})$")
+    })
+}
 
 /// Hard cap on `analyze_symbol`'s `max_depth` parameter (graph traversal
 /// depth). Usage data (this
@@ -85,7 +101,7 @@ pub const MAX_TOOL_DEPTH: u32 = 3;
 pub fn supported_file_path_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     let map = serde_json::json!({
         "type": "string",
-        "pattern": SUPPORTED_FILE_EXT_PATTERN
+        "pattern": crate::schema_helpers::supported_file_ext_pattern()
     })
     .as_object()
     .expect("json! object literal is always a Value::Object")

@@ -120,27 +120,29 @@ mod tests {
         assert_eq!(language_for_extension("kts"), Some("kotlin"));
     }
 
-    /// Asserts every extension in `EXTENSION_MAP` appears in
-    /// `SUPPORTED_FILE_EXT_PATTERN`, preventing drift when a new language is
-    /// added. The pattern expresses case-insensitivity with per-character
-    /// classes, so each character of an extension must appear as `[Xx]`.
+    /// The schema pattern is generated from `EXTENSION_MAP` itself, so this
+    /// test verifies the generator's semantics: with case-insensitivity
+    /// applied (JSON Schema clients validate with ECMAScript regexes, so the
+    /// pattern uses `[Xx]` per-character classes), every supported extension
+    /// must match and an unsupported one must not.
     #[test]
+    #[cfg(feature = "schemars")]
     fn test_supported_file_ext_pattern_covers_all_extension_map_entries() {
-        #[cfg(feature = "schemars")]
-        for (ext, _lang) in EXTENSION_MAP {
-            for c in ext.chars() {
-                let needle = if c.is_ascii_alphabetic() {
-                    format!("[{}{}]", c.to_ascii_uppercase(), c.to_ascii_lowercase())
-                } else {
-                    c.to_string()
-                };
-                assert!(
-                    crate::schema_helpers::SUPPORTED_FILE_EXT_PATTERN.contains(&needle),
-                    "SUPPORTED_FILE_EXT_PATTERN is missing extension '{ext}' from EXTENSION_MAP; \
-                     add it to schema_helpers.rs"
-                );
-            }
+        let pattern = crate::schema_helpers::supported_file_ext_pattern();
+        assert!(!pattern.contains("(?i)"), "ECMAScript rejects (?i)");
+        let re = regex::Regex::new(&format!("(?i){pattern}")).unwrap();
+        for ext in supported_extensions() {
+            assert!(
+                re.is_match(&format!("src/file.{ext}")),
+                "pattern does not match supported extension '{ext}'"
+            );
+            assert!(
+                re.is_match(&format!("SRC/FILE.{}", ext.to_uppercase())),
+                "pattern is not case-insensitive for '{ext}'"
+            );
         }
+        assert!(!re.is_match("src/file.txt"));
+        assert!(!re.is_match("src/file.rss"));
     }
 
     #[test]
