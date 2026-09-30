@@ -271,6 +271,34 @@ deadline 900s (A7b). No cap value is changed by this entry; any
 future cap change requires its own ratified amendment citing the
 probe artifact.
 
+## A9b — 2026-09-29: word-boundary anchor verifier (A9a) and verify-repair pass
+
+**Trigger.** The dominant v19 failure mode is fabricated anchors. The
+A6a verifier accepted a raw substring hit for the cited symbol within
+the anchor window, so a comment mention or a substring of a longer
+identifier could verify an anchor the tree-sitter oracle would reject.
+
+**Adopted changes:**
+
+- A9a: `scripts/bench_v19/score.py` `verify_anchors` now requires a
+  word-boundary identifier match (`re.search(rf"\b{symbol}\b", window)`)
+  for the cited symbol within `ANCHOR_WINDOW_LINES` of the cited line.
+  The window size, signature, return shape, verdict ordering, and
+  fail-closed behavior are unchanged; measurement, not re-scoring.
+- A9 verify-repair pass: `scripts/bench_v19/verify_repair.py` re-runs,
+  with one bounded attempt, exactly the completed (task, arm) cells
+  whose scored verdict is `fabricated-anchor`, re-prompting with a
+  corrective prefix listing the fabricated `path:line` anchors and
+  restating the anchor rule. Output follows the sealed-record repairs
+  shape (summary.json, before-after.json, arm-means.json).
+- Replacement policy: original fabricated-anchor sessions are kept in
+  the sealed record; a repair replaces its cell only where the repair
+  completed (stop, not killed) and re-scores with zero fabricated
+  anchors. The sealed-run code path in `pilot.py` is untouched; the
+  frozen task set is never modified (filtered copies go to temp paths).
+- No retroactive re-scoring of the v19 sealed results; the A9a verifier
+  change affects only subsequent scoring runs and repair re-scoring.
+
 ## Carry-over ratifications (pre-stage-3, recorded at stage-2)
 
 

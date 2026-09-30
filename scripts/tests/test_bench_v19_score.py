@@ -110,6 +110,15 @@ def test_verify_anchors_distinct_and_dedup(tmp_path):
     assert (verified, fabricated) == (1, 1)
 
 
+def test_verify_anchors_symbol_substring_of_longer_identifier(tmp_path):
+    # A9a edge case: the symbol occurs within the window only as a
+    # substring of a longer identifier; a word-boundary match is
+    # required, so the anchor is fabricated.
+    snap = _make_snapshot(tmp_path, {"a/b.py": "bar_catalog(1)\n"})
+    verified, fabricated = verify_anchors("see a/b.py:1", "bar", snap)
+    assert (verified, fabricated) == (0, 1)
+
+
 def test_verify_anchors_no_anchors_yields_zeroes(tmp_path):
     verified, fabricated = verify_anchors("no anchors here", "bar", tmp_path)
     assert (verified, fabricated) == (0, 0)
