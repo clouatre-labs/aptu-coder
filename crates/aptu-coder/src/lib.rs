@@ -748,7 +748,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "exec_command",
         title = "Exec Command",
-        description = "Execute a shell command; returns output and exit code as a text block. Output capped (30k stdout / 10k stderr / 2000 lines); full captures exposed as aptu-overflow:// links when capped. For file writes use edit_overwrite or edit_replace; heredoc writes (cat/tee + <<) are rejected. Prefer --json flags. 300 s server-side timeout; cancel via notifications/cancelled. Built-in filters may strip, cap, or substitute output; structuredContent identifies the filter and links the full pre-filter output.",
+        description = "Execute a shell command; returns output and exit code as a text block. Output capped (30k stdout / 10k stderr / 2000 lines); full captures exposed as aptu-overflow:// links when capped. File writes use edit_overwrite or edit_replace; heredoc (cat/tee + <<) are rejected. Prefer --json flags. 300 s server-side timeout; cancel via notifications/cancelled. Built-in filters may strip, cap, or substitute output; structuredContent identifies the filter and links the full pre-filter output.",
         output_schema = slim_output_schema::<ShellOutputMetadata>(),
         annotations(
             title = "Exec Command",
