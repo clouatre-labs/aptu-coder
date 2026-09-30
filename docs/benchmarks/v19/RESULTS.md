@@ -2,7 +2,7 @@
 
 Stage: tasks-fanin-hop2 sealed run (2026-09-29) + A8 repair re-run. Pool: 8 Track A fanin/hop-2 tasks × 2 arms (native, mcp) = 16 sealed sessions; 4 repair sessions. Provider zai / glm-5.3-flash; binary aptu-coder 0.37.0; snapshot django `dd6f6b1` (tarball SHA256-verified against the pinned manifest). Scorer: post-A6, deterministic (snapshot-verified anchors); Jev adjudication dropped per A2.
 
-Spend: valid sealed run $0.2283 + invalidated first attempt $0.1482 + A8 repair $0.0881 = **$0.4646** (session budget cap $2.00).
+Spends: valid sealed run $0.2283 + invalidated first attempt $0.1482 + A8 repair $0.0881 + A9b verify-repair $0.0672 = **$0.5318** (session budget cap $2.00).
 
 ## Framing: cost at iso-quality, not raw means
 
@@ -38,6 +38,10 @@ See `tasks-fanin-hop2/sealed/summary.json` (as-sealed), `tasks-fanin-hop2/sealed
 - **Single provider, single model, single snapshot, single tier.** All conclusions are scoped to zai/glm-5.3-flash on django `dd6f6b1` fanin/hop-2 Track A.
 - **Cap sensitivity unmeasured.** Turn cap 40 and 900s deadline are ratified values, not tuned ones; two sessions sit at exactly one cap.
 - **Anchor fabrication is the dominant failure mode** in both arms (5 fabricated-anchor verdicts across 20 scored sessions) — this is a scorer-verifier finding about cited `path:line` anchors, independent of arm.
+
+## A9b verify-repair pass
+
+After the A9a word-boundary anchor verifier landed (#1709), the four completed sealed cells carrying `fabricated-anchor` verdicts (chain/native, include/mcp, qualname/native, qualname/mcp) were re-run once each with a corrective prefix restating the anchor rule (`tasks-fanin-hop2/a9b-verify-repair/`). Replacement policy per A9: a cell is replaced only where the repair completed and re-scored with zero fabricated anchors. Exactly one cell qualified — qualname/native (F1 0.4681 fabricated → 0.4000 partial); include/mcp and qualname/mcp still cite fabricated anchors under the stricter verifier and chain/native hit the 900s wait deadline, so all three stay as-sealed. Repair-adjusted means: native 0.2972 (7/8), mcp 0.4321 (5/8). Repair spend **$0.0672**; binary aptu-coder 0.38.0; snapshot tarball SHA256 re-verified against the pinned manifest before spend. See `tasks-fanin-hop2/a9b-verify-repair/README.md` for the recorded caveats (including the 5-vs-4 fabricated-cell counting discrepancy between this line and the sealed summary).
 
 ## Verdict
 
