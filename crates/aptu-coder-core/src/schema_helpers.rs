@@ -56,7 +56,20 @@ pub fn max_depth_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
 /// `AnalyzeFileParams` and `AnalyzeModuleParams`. Covers every extension in
 /// `lang.rs` `EXTENSION_MAP`. Centralised here so adding a language requires
 /// one change, not two.
-pub const SUPPORTED_FILE_EXT_PATTERN: &str = r"(?i)\.(rs|py|go|ts|tsx|js|mjs|cjs|java|kt|kts|cs|cpp|cc|cxx|c|h|hpp|hxx|f|f77|f90|f95|f03|f08|for|ftn|html|htm|md|mdx|astro|css|yaml|yml|json|toml)$";
+///
+/// JSON Schema `pattern` is an ECMAScript regex, where the `(?i)` inline
+/// flag is a `SyntaxError`, so case-insensitivity is expressed with
+/// per-character classes instead. Multi-char extensions precede shared
+/// single-char prefixes in the alternation.
+pub const SUPPORTED_FILE_EXT_PATTERN: &str = concat!(
+    r"\.(?:",
+    r"[Rr][Ss]|[Pp][Yy]|[Gg][Oo]|[Tt][Ss][Xx]|[Tt][Ss]|[Jj][Ss]|[Mm][Jj][Ss]|[Cc][Jj][Ss]|",
+    r"[Jj][Aa][Vv][Aa]|[Kk][Tt][Ss]|[Kk][Tt]|[Cc][Ss]|[Cc][Pp][Pp]|[Cc][Xx][Xx]|[Cc][Cc]|[Cc]|",
+    r"[Hh][Pp][Pp]|[Hh][Xx][Xx]|[Hh]|[Ff]77|[Ff]90|[Ff]95|[Ff]03|[Ff]08|[Ff][Oo][Rr]|[Ff][Tt][Nn]|[Ff]|",
+    r"[Hh][Tt][Mm][Ll]|[Hh][Tt][Mm]|[Mm][Dd][Xx]|[Mm][Dd]|[Aa][Ss][Tt][Rr][Oo]|[Cc][Ss][Ss]|",
+    r"[Yy][Aa][Mm][Ll]|[Yy][Mm][Ll]|[Jj][Ss][Oo][Nn]|[Tt][Oo][Mm][Ll]",
+    r")$"
+);
 
 /// Hard cap on `analyze_symbol`'s `max_depth` parameter (graph traversal
 /// depth). Usage data (this
