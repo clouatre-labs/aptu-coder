@@ -1,0 +1,121 @@
+{
+  "description": "A9 verify-repair of fabricated-anchor sessions",
+  "replacement_policy": "A9: fabricated-anchor sessions kept; repair replaces only where the repair completed (stop) and re-scores with zero fabricated anchors.",
+  "repair_spent_usd": 0.067199,
+  "repair_binary": "0.38.0",
+  "snapshot_commit": "dd6f6b1",
+  "snapshot_tarball_sha256_verified": "9dc904f5a45be0eea03268642001e4054a7f83faacf546a69fc1a69b092d1e5e",
+  "wait_timeout_s": 900,
+  "defects": [
+    {
+      "stage": "pilot",
+      "task": "task-fanin-chain",
+      "arm": "native",
+      "reason": "wait-timeout-killed:900s"
+    }
+  ],
+  "pi-version": "0.99.0",
+  "sessions": [
+    {
+      "run_id": "db6fc0dc87864e3bbfa5f43ddfd24b20",
+      "arm": "native",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": true,
+      "defect": "wait-timeout-killed:900s",
+      "cost_usd": 0.034933389999999995,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 48589,
+        "output": 33740,
+        "cacheRead": 359168,
+        "cacheWrite": 0
+      },
+      "stopReason": "toolUse",
+      "score": {
+        "verdict": "no-anchor",
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "task_id": "task-fanin-chain",
+        "expected_sha": "2968ea8a9db004d6"
+      }
+    },
+    {
+      "run_id": "46acdd1c3b5f490a940667f6fd3b3b39",
+      "arm": "mcp",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.014706259999999999,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 26934,
+        "output": 13084,
+        "cacheRead": 137472,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "fabricated-anchor",
+        "precision": 0.8205128205128205,
+        "recall": 0.9696969696969697,
+        "f1": 0.8888888888888888,
+        "task_id": "task-fanin-include",
+        "expected_sha": "c1b6a1c2869cc3de"
+      }
+    },
+    {
+      "run_id": "ec3040ae6b6e4adc9aafd6207ea00832",
+      "arm": "native",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00297416,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 8284,
+        "output": 2626,
+        "cacheRead": 13952,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "partial",
+        "precision": 0.75,
+        "recall": 0.2727272727272727,
+        "f1": 0.39999999999999997,
+        "task_id": "task-fanin-qualname",
+        "expected_sha": "b4de0c72623900a5"
+      }
+    },
+    {
+      "run_id": "065f7cee26134a39a607c4757027e3a7",
+      "arm": "mcp",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.014585120000000002,
+      "aptu_tool_calls": 0,
+      "tokens": {
+        "input": 34818,
+        "output": 11329,
+        "cacheRead": 123264,
+        "cacheWrite": 0
+      },
+      "stopReason": "stop",
+      "score": {
+        "verdict": "fabricated-anchor",
+        "precision": 0.7,
+        "recall": 0.3181818181818182,
+        "f1": 0.4375,
+        "task_id": "task-fanin-qualname",
+        "expected_sha": "b4de0c72623900a5"
+      }
+    }
+  ],
+  "note": "repair_binary corrected from the stale pilot.py constant (0.37.0): the actual binary was aptu-coder 0.38.0 (aptu-coder --version at run time)."
+}
