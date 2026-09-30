@@ -1075,3 +1075,74 @@ pub struct FilterRule {
     /// Replacement text if filtered output is empty (success-only).
     pub on_empty: Option<String>,
 }
+
+/// A single path:line[:symbol] anchor to verify against a workspace root.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct AnchorItem {
+    /// Anchor file path, relative to `workspace_root`.
+    pub path: String,
+    /// 1-based line number cited by the anchor.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub line: usize,
+    /// Optional symbol that must occur as a distinct word within the anchor window.
+    pub symbol: Option<String>,
+}
+
+/// Verdict for a single verified anchor; echoes the input `path`, `line`, and
+/// `symbol` alongside the checks.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct AnchorResult {
+    /// Anchor file path as supplied.
+    pub path: String,
+    /// 1-based line number as supplied.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::integer_schema")
+    )]
+    pub line: usize,
+    /// Optional symbol as supplied.
+    pub symbol: Option<String>,
+    /// True when the anchor file exists and is readable as UTF-8.
+    pub exists: bool,
+    /// True when the 1-based line is within the file's line count.
+    pub in_range: bool,
+    /// Some(true)/Some(false) when the symbol was searched within the window;
+    /// None when the file is missing, unreadable, or the line is out of range.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::option_integer_schema")
+    )]
+    pub symbol_found: Option<bool>,
+    /// 1-based line of the first word-boundary symbol match within the window.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::option_integer_schema")
+    )]
+    pub window_line: Option<usize>,
+}
+
+/// Parameters for the `verify_anchors` tool.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct VerifyAnchorsParams {
+    /// Workspace root directory that anchor paths resolve against.
+    pub workspace_root: String,
+    /// Anchors to verify, in order.
+    pub anchors: Vec<AnchorItem>,
+}
+
+/// Output for the `verify_anchors` tool: one verdict per input anchor.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
+pub struct VerifyAnchorsOutput {
+    /// One verdict per input anchor, in input order.
+    pub results: Vec<AnchorResult>,
+}
