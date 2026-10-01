@@ -356,7 +356,7 @@ jobs:
     name: Bench Harness Unit Tests
     runs-on: ubuntu-26.04-arm
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
     timeout-minutes: 5
     permissions:
       contents: read
