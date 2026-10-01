@@ -8,13 +8,19 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version to publish (e.g. 0.13.2)'
-        required: true
+        description: 'Release version to publish (e.g. 0.13.2); empty resolves latest release'
+        required: false
         type: string
+        default: ''
+      dry_run:
+        description: 'Dry run (login only, skip publish)'
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
+  group: publish-registry
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -31,10 +37,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Resolve version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION}" ]; then
+            VERSION="${INPUT_VERSION}"
+          else
+            VERSION=$(gh release list --limit 1 --json tagName --jq '.[0].tagName | ltrimstr("v")')
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
       - name: Download MCPB files and compute SHA256
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           RELEASE_TAG="v${VERSION}"
@@ -59,8 +77,6 @@ jobs:
           echo "SHA_X86_64_LINUX_MUSL=${shas[x86_64-unknown-linux-musl]}" >> "$GITHUB_ENV"
 
       - name: Build server.json from template
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
@@ -93,6 +109,8 @@ jobs:
             server.json > server.json.tmp && mv server.json.tmp server.json
 
       - name: Install mcp-publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release download "v${MCP_PUBLISHER_VERSION}" \
@@ -112,6 +130,7 @@ jobs:
         run: mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
+        if: ${{ !inputs.dry_run }}
         run: mcp-publisher publish
 
       - name: Cleanup temporary files
