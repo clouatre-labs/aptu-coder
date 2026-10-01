@@ -9,4 +9,44 @@
 # in the filename. If the suite reports an expected failure that now passes,
 # CI fails by design -- remove the stale entry. Re-verify any entry added here
 # against the spec or a known upstream issue before committing.
-server: {}
+#
+# Group reasons, verified against local suite run 2026-10-01
+# (0.2.0-alpha.10, per-scenario checks.json output):
+# - tools-call-*: the suite invokes conformance reference fixture tools
+#   ("Failed: tool not found"). aptu-coder exposes its own analyzer tools;
+#   protocol-level tool behavior is covered by the passing tools-list scenario.
+# - resources-read-*: the suite reads fixture URIs like test://static-text
+#   ("invalid URI scheme: expected aptu-coder://"). aptu-coder serves
+#   aptu-coder:// resources; listing behavior is covered by resources-list.
+# - prompts-get-*: the suite gets reference fixture prompts
+#   ("Failed: prompts/get"); aptu-coder registers no fixture prompts.
+#   Listing behavior is covered by prompts-list.
+server:
+  # tools-call-simple-text: reference fixture tool not present in aptu-coder
+  - tools-call-simple-text
+  # tools-call-image: reference fixture tool not present in aptu-coder
+  - tools-call-image
+  # tools-call-audio: reference fixture tool not present in aptu-coder
+  - tools-call-audio
+  # tools-call-embedded-resource: reference fixture tool not present in aptu-coder
+  - tools-call-embedded-resource
+  # tools-call-mixed-content: reference fixture tool not present in aptu-coder
+  - tools-call-mixed-content
+  # tools-call-error: reference fixture tool not present in aptu-coder
+  - tools-call-error
+  # tools-call-with-progress: reference fixture tool not present in aptu-coder
+  - tools-call-with-progress
+  # resources-read-text: suite reads test:// fixture URIs; server serves aptu-coder:// only
+  - resources-read-text
+  # resources-read-binary: suite reads test:// fixture URIs; server serves aptu-coder:// only
+  - resources-read-binary
+  # resources-templates-read: suite reads test:// fixture URIs; server serves aptu-coder:// only
+  - resources-templates-read
+  # prompts-get-simple: no conformance fixture prompts registered
+  - prompts-get-simple
+  # prompts-get-with-args: no conformance fixture prompts registered
+  - prompts-get-with-args
+  # prompts-get-embedded-resource: no conformance fixture prompts registered
+  - prompts-get-embedded-resource
+  # prompts-get-with-image: no conformance fixture prompts registered
+  - prompts-get-with-image
