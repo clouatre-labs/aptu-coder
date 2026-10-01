@@ -375,12 +375,80 @@ jobs:
       - name: Run bench_v18 unit tests
         run: python3 -m pytest scripts/tests/ -q
 
+  mcp-conformance:
+    name: MCP Server Conformance
+    runs-on: ubuntu-26.04-arm
+    needs: changes
+    if: (needs.changes.outputs.code == 'true' || github.event_name != 'pull_request') && github.actor != 'renovate[bot]'
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.98.1"
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: false
+          shared-key: workspace-mcp-conformance
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build server
+        run: cargo build -p aptu-coder
+      - name: Start server
+        run: |
+          nohup ./target/debug/aptu-coder --port 8080 > /tmp/aptu-coder-server.log 2>&1 &
+          echo $! > /tmp/aptu-coder-server.pid
+      - name: Wait for /mcp endpoint
+        run: |
+          ready=false
+          attempts=0
+          while [[ "$attempts" -lt 30 ]]; do
+            attempts=$((attempts + 1))
+            if curl -sf -o /dev/null -X POST http://127.0.0.1:8080/mcp \
+              -H 'Content-Type: application/json' \
+              -H 'MCP-Protocol-Version: 2026-07-28' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::Server /mcp endpoint never became reachable after 60s"
+            exit 1
+          fi
+      - name: Run conformance suite
+        # Pinned to @modelcontextprotocol/conformance 0.2.0-alpha.10
+        run: |
+          set -o pipefail
+          npx -y @modelcontextprotocol/conformance@0.2.0-alpha.10 server \
+            --url http://127.0.0.1:8080/mcp \
+            --spec-version 2026-07-28 \
+            --expected-failures tests/mcp-conformance/expected-failures-2026-07-28-active.yaml 2>&1 \
+            | tee /tmp/conformance-output.txt
+      - name: Show server logs on failure
+        if: failure()
+        run: |
+          cat /tmp/conformance-output.txt || true
+          cat /tmp/aptu-coder-server.log || true
+      - name: Stop server
+        if: always()
+        run: |
+          if [[ -f /tmp/aptu-coder-server.pid ]]; then
+            kill "$(cat /tmp/aptu-coder-server.pid)" || true
+          fi
+
   ci-result:
     name: CI Result
     runs-on: ubuntu-26.04-arm
     if: always()
     permissions: {}
-    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks, pytest-bench]
+    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks, pytest-bench, mcp-conformance]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |

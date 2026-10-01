@@ -1,0 +1,10 @@
+# MCP server conformance baseline
+# Spec version: 2026-07-28
+# Suite: active (default for the conformance runner)
+# Pinned suite version: @modelcontextprotocol/conformance 0.2.0-alpha.10
+#
+# Staleness warning: entries in this file are verified failures as of the date
+# in the filename. If the suite reports an expected failure that now passes,
+# CI fails by design -- remove the stale entry. Re-verify any entry added here
+# against the spec or a known upstream issue before committing.
+server: {}
