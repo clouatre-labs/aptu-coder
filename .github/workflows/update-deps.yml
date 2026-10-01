@@ -29,8 +29,7 @@ jobs:
       - name: Update dependencies
         run: cargo update
 
-      - name: Test updated dependencies
-        run: cargo test
+      # No cargo test here: the lockfile PR is validated by ci.yml on the PR itself.
 
       - name: Commit and open PR if lockfile changed
         env:
