@@ -1,4 +1,4 @@
-# Audit: CI Adoption from block/goose -- October 2026
+# Audit: CI Adoption from aaif-goose/goose -- October 2026
 
 Date: 2026-10-01  
 Commit: 199a99a  
@@ -8,12 +8,12 @@ Toolchain: Rust 1.98.0 / rmcp 3.3.0 / tokio async
 ## See Also
 
 - [REPO-STANDARDS.md](../REPO-STANDARDS.md) -- contribution and CI standards
-- [block/goose mcp-conformance.yml](https://github.com/block/goose/blob/main/.github/workflows/mcp-conformance.yml) -- reference implementation
+- [aaif-goose/goose mcp-conformance.yml](https://github.com/aaif-goose/goose/blob/main/.github/workflows/mcp-conformance.yml) -- reference implementation
 - [modelcontextprotocol/conformance](https://github.com/modelcontextprotocol/conformance) -- official conformance suite
 
 ## Purpose
 
-Cross-repo review of block/goose CI to identify patterns worth adopting into aptu-coder while keeping CI fast, lean, and KISS. The repo rule is add-one-remove-one: any CI addition must be offset by a removal or trim so total compute stays flat. All findings were validated against live sources (`gh api` on block/goose and modelcontextprotocol/conformance, dorny/paths-filter documentation) before being turned into issues.
+Cross-repo review of aaif-goose/goose CI to identify patterns worth adopting into aptu-coder while keeping CI fast, lean, and KISS. The repo rule is add-one-remove-one: any CI addition must be offset by a removal or trim so total compute stays flat. All findings were validated against live sources (`gh api` on aaif-goose/goose and modelcontextprotocol/conformance, dorny/paths-filter documentation) before being turned into issues.
 
 ## Methodology
 
@@ -55,7 +55,7 @@ Goose patterns aptu-coder already has; no action taken:
 
 ### F1 -- MCP 2026-07-28 server conformance job (ADOPT)
 
-**Source:** block/goose `mcp-conformance.yml`; official `@modelcontextprotocol/conformance` npm suite
+**Source:** aaif-goose/goose `mcp-conformance.yml`; official `@modelcontextprotocol/conformance` npm suite
 
 Goose builds its binaries once, uploads them as a 1-day-retention artifact, and fans out a matrix of (spec-version x suite-version) conformance runs, each tolerating known failures via an in-repo YAML baseline passed as `--expected-failures`. Verified that the same suite supports server testing: `npx @modelcontextprotocol/conformance server --url <url> --spec-version 2026-07-28 --expected-failures <path>`.
 
