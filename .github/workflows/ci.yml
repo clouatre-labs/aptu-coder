@@ -26,6 +26,8 @@ permissions: {}
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Single point of change for the pinned Rust toolchain in this workflow.
+  RUST_TOOLCHAIN: "1.98.1"
 
 jobs:
   changes:
@@ -138,7 +140,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.98.1"
+          toolchain: "${{ env.RUST_TOOLCHAIN }}"
           components: rustfmt, clippy
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -178,7 +180,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.98.1"
+          toolchain: "${{ env.RUST_TOOLCHAIN }}"
           components: llvm-tools-preview
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -301,7 +303,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.98.1"
+          toolchain: "${{ env.RUST_TOOLCHAIN }}"
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -389,7 +391,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.98.1"
+          toolchain: "${{ env.RUST_TOOLCHAIN }}"
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
