@@ -411,10 +411,12 @@ jobs:
           attempts=0
           while [[ "$attempts" -lt 30 ]]; do
             attempts=$((attempts + 1))
+            # Initialize handshake: ping is rejected on this transport, so
+            # readiness is proven with a minimal initialize request.
             if curl -sf -o /dev/null -X POST http://127.0.0.1:8080/mcp \
               -H 'Content-Type: application/json' \
-              -H 'MCP-Protocol-Version: 2026-07-28' \
-              -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'; then
+              -H 'Accept: application/json, text/event-stream' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"ci-health-poll","version":"0"}}}'; then
               ready=true
               break
             fi
@@ -422,6 +424,7 @@ jobs:
           done
           if [[ "$ready" != "true" ]]; then
             echo "::error::Server /mcp endpoint never became reachable after 60s"
+            cat /tmp/aptu-coder-server.log || true
             exit 1
           fi
       - name: Run conformance suite
