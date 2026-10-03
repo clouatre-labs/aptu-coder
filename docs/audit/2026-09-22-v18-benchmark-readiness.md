@@ -65,6 +65,6 @@ Telemetry: `exec_command` is 72% of calls, top-3 (exec + both edits) 91.9%, anal
 
 - v18 methodology: `docs/benchmarks/v18/methodology.md` (PR #1563)
 - v17 postmortem: `docs/benchmarks/v17/`
-- dotfiles experiments: `~/git/dotfiles/experiments/` (README tables; brave-narrow-bench repro script)
+- dotfiles experiments: `~/git/clouatre-labs/dotfiles/experiments/` (README tables; brave-narrow-bench repro script)
 - Blog ablation: clouatre.ca, "How Much Tool Documentation Do AI Agents Actually Need?" (Zenodo DOI 10.5281/zenodo.22844431)
 - Telemetry window: 2026-09-14 (58,776 calls), full-history 82,504 calls, per the 2026-09-19 full audit
