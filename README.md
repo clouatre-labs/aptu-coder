@@ -8,7 +8,7 @@
   <a href="https://www.bestpractices.dev/projects/12275"><img alt="OpenSSF Best Practices" src="https://img.shields.io/cii/level/12275?style=for-the-badge" height="20"></a>
 </p>
 
-<p align="center">A Model Context Protocol (MCP) code-intelligence server that gives AI coding agents pre-parsed symbol tables and call graphs instead of raw file bytes, cutting token usage by up to 59% (see <a href="#benchmarks">Benchmarks</a>). OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
+<p align="center">A Model Context Protocol (MCP) code-intelligence server that gives AI coding agents pre-parsed symbol tables and call graphs instead of raw file bytes, cutting token usage by up to 59% in the cited benchmark conditions (see <a href="#benchmarks">Benchmarks</a>). OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
 
 <!-- mcp-name: io.github.clouatre-labs/aptu-coder -->
 
@@ -36,6 +36,10 @@ AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.
 | **Savings** | **46% fewer tokens, 42% cheaper** | **68% fewer tokens, 68% cheaper** |
 
 A real end-to-end multi-agent run against this repository itself: five refactoring issues (#1578–#1582) fixed by the [coder skill](https://github.com/clouatre-labs/agentic-coder-skill) in one orchestrated session — 23 subagent spawns (5 scout, 1 guard, 10 build, 7 check), ~1h42m, three human interventions — producing PRs #1584–#1588, all merged with CI green. [Case study](https://github.com/clouatre-labs/agentic-coder-skill/blob/main/docs/examples/2026-09-aptu-coder-5-issues.md).
+
+### Scope of the benchmark claims
+
+The token-savings figures above come from single, focused comprehension tasks where the agent used aptu-coder instead of shell search. Agentic coding loops have bash and ripgrep and can search the repo directly. The [v19 benchmark program](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/audit/2026-09-30-v19-pivot.md) (N=20 paired sessions, pre-registered claim gate) measured aptu-coder in those loops: no measurable answer-quality gain over bash + ripgrep on structural fan-in tasks (pooled paired F1 diff mean -0.071, 95% CI [-0.179, +0.038]; gate NOT-SUPPORTED); tool activation itself was reliable when tools were surfaced directly. Recommended uses: deterministic verification (`verify_anchors` against fabricated `path:line` citations), premise grounding for multi-agent workflows, and non-agentic MCP consumers (IDE assistants, CI jobs, scoring pipelines).
 
 ## Overview
 
