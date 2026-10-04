@@ -415,7 +415,8 @@ rg context-flooding floor stays untouched by decision.
 **Decision.** The sealed N-run becomes a stratified paired design:
 - Stratum 1: dd6f6b1 (main @ 6.2 alpha 0, pinned manifest sha256
   9dc904f5...), 12 pairs (its full widened pool).
-- Stratum 2: Django 6.1.1 (release tarball, sha256 32e24244...),
+- Stratum 2: Django 6.1.1 (release tarball, full SHA256
+  32e24244c151fb1e1257a4e550557f1c052a48a9e3b5b77604cdc48b84007d73),
   8 pairs (its full viable pool).
 - Total n=20 pairs; filters, arms, prompts, availability sentence,
   caps, A6/A9a scorer, and A8/A9b repair policies are unchanged.
