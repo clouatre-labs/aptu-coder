@@ -1,0 +1,286 @@
+{
+  "recovery_note": "Recovered post-incident (2026-10-04) from the executing agent transcript and the surviving raw run logs (/tmp/v19-nrun/logs/). The original summary.json was written uncommitted and lost in a branch switch; the raw session JSONLs are NOT recoverable. Per-session rows below carry the recorded metadata (cost, stopReason, defect, aptu tool calls) exactly as logged by the harness at run time.",
+  "total_spent_usd": 0.33042,
+  "halted": false,
+  "halt_reason": null,
+  "defects": [
+    {
+      "stage": "pilot",
+      "task": "task-fanin-chain",
+      "arm": "mcp",
+      "reason": "wait-timeout-killed:900s"
+    }
+  ],
+  "activation_gate": {
+    "pass": true,
+    "active": 11,
+    "scorable": 11,
+    "fraction": 1.0
+  },
+  "sessions": [
+    {
+      "run_id": "9d060d48dc2741a9a168089565827ebd",
+      "arm": "native",
+      "task": "task-fanin-back",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00927535,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "117c3402019c411e9ade3fb31bdef13b",
+      "arm": "mcp",
+      "task": "task-fanin-back",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.012511949999999997,
+      "aptu_tool_calls": 6,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "fb8ebdb870c649e6a1c82d2a4e3abd26",
+      "arm": "native",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.033258899999999994,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "c285fb3686e14b40a8d05f693b71f900",
+      "arm": "mcp",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": true,
+      "defect": "wait-timeout-killed:900s",
+      "cost_usd": 0.034399839999999994,
+      "aptu_tool_calls": 21,
+      "stopReason": "toolUse"
+    },
+    {
+      "run_id": "991fb53e0fc84c9d884af63c50dd200e",
+      "arm": "native",
+      "task": "task-fanin-dec",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01608029,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "1d80152f2ca443ea94b29dc3719582a5",
+      "arm": "mcp",
+      "task": "task-fanin-dec",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01179434,
+      "aptu_tool_calls": 10,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "b33876f39129403ebcd6530518e5e9fb",
+      "arm": "native",
+      "task": "task-fanin-formset_factory",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00460016,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "71a84a63bbb347fbb1e17f543dd64b07",
+      "arm": "mcp",
+      "task": "task-fanin-formset_factory",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.013635819999999998,
+      "aptu_tool_calls": 5,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "966c101952e34ca8ab0f92c50e9921c0",
+      "arm": "native",
+      "task": "task-fanin-function",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.006440389999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "6d4bdc3b03864c169dccab7e778c4b9f",
+      "arm": "mcp",
+      "task": "task-fanin-function",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00479006,
+      "aptu_tool_calls": 4,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "3a3c053791d047ed8da9e53666b3fb90",
+      "arm": "native",
+      "task": "task-fanin-handler",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.011156119999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "d668173b2284417e8eb574a21f5240e0",
+      "arm": "mcp",
+      "task": "task-fanin-handler",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.020303389999999994,
+      "aptu_tool_calls": 13,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "11d41c943c3f4d5c9c0e969a8a07f99c",
+      "arm": "native",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00901157,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "9a25ba64eb5a46f3b1e4317dc300e732",
+      "arm": "mcp",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01694961,
+      "aptu_tool_calls": 12,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "a3bfa24aebc64c19a2696055d5256ff1",
+      "arm": "native",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.021415099999999996,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "5fd4fe7891ea4250aabf3565fd5e4b49",
+      "arm": "mcp",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.013591279999999997,
+      "aptu_tool_calls": 8,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "85eaf82f2df748f08106c3e4d714edf4",
+      "arm": "native",
+      "task": "task-fanin-register_lookup",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00852669,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "666f5a7d32234f62b12ce69fc47282fd",
+      "arm": "mcp",
+      "task": "task-fanin-register_lookup",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.018856419999999995,
+      "aptu_tool_calls": 7,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "48a9781d94354316896cb162efd86902",
+      "arm": "native",
+      "task": "task-fanin-skipIfDBFeature",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00422027,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "ee6ab8172d8046c88031c38cf8b6190d",
+      "arm": "mcp",
+      "task": "task-fanin-skipIfDBFeature",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.007771419999999999,
+      "aptu_tool_calls": 4,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "64ad8bccd90c4f7ca08e783d5d89460f",
+      "arm": "native",
+      "task": "task-fanin-timezone",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.015399899999999998,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "b4ae0e08143c47a280fff84a345b5c5c",
+      "arm": "mcp",
+      "task": "task-fanin-timezone",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.018759969999999997,
+      "aptu_tool_calls": 15,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "6241f58a36964855b62e3a4dc9ee2ac3",
+      "arm": "native",
+      "task": "task-fanin-view_func",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.005420229999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "a2d18729318f4634baadc62cfeeb0421",
+      "arm": "mcp",
+      "task": "task-fanin-view_func",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.012250709999999998,
+      "aptu_tool_calls": 3,
+      "stopReason": "stop"
+    }
+  ]
+}

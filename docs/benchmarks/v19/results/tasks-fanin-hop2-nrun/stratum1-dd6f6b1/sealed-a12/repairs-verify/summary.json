@@ -1,0 +1,151 @@
+{
+  "recovery_note": "Recovered post-incident (2026-10-04) from /tmp/v19-nrun/logs/repairs.log and the agent transcript. Original summary.json lost uncommitted; raw repair-session JSONLs are NOT recoverable. Rows carry harness-logged cost, repair F1, and verdict exactly as recorded.",
+  "repair_spent_usd": 0.288885,
+  "stopped": null,
+  "sessions": [
+    {
+      "task": "task-fanin-back",
+      "arm": "native",
+      "cost_usd": 0.0036784499999999998,
+      "cumulative": 0.3341,
+      "f1": 0.14285714285714288,
+      "verdict": "partial"
+    },
+    {
+      "task": "task-fanin-back",
+      "arm": "mcp",
+      "cost_usd": 0.027146269999999997,
+      "cumulative": 0.3612,
+      "f1": 0.8695652173913044,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-chain",
+      "arm": "native",
+      "cost_usd": 0.00712983,
+      "cumulative": 0.3684,
+      "f1": 0.29333333333333333,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-dec",
+      "arm": "native",
+      "cost_usd": 0.0053708,
+      "cumulative": 0.3737,
+      "f1": 0.26666666666666666,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-dec",
+      "arm": "mcp",
+      "cost_usd": 0.013563460000000001,
+      "cumulative": 0.3873,
+      "f1": 0.14814814814814817,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-formset_factory",
+      "arm": "native",
+      "cost_usd": 0.0075276299999999996,
+      "cumulative": 0.3948,
+      "f1": 0.7142857142857142,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-formset_factory",
+      "arm": "mcp",
+      "cost_usd": 0.018452689999999997,
+      "cumulative": 0.4133,
+      "f1": 0.7407407407407408,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-function",
+      "arm": "native",
+      "cost_usd": 0.00394435,
+      "cumulative": 0.4172,
+      "f1": 0.4285714285714285,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-function",
+      "arm": "mcp",
+      "cost_usd": 0.012379799999999998,
+      "cumulative": 0.4296,
+      "f1": 0.7499999999999999,
+      "verdict": "partial"
+    },
+    {
+      "task": "task-fanin-handler",
+      "arm": "native",
+      "cost_usd": 0.00683653,
+      "cumulative": 0.4364,
+      "f1": 0.4,
+      "verdict": "partial"
+    },
+    {
+      "task": "task-fanin-handler",
+      "arm": "mcp",
+      "cost_usd": 0.01134295,
+      "cumulative": 0.4478,
+      "f1": 0.3529411764705882,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-include",
+      "arm": "mcp",
+      "cost_usd": 0.03181457,
+      "cumulative": 0.4796,
+      "f1": 0.9166666666666666,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-qualname",
+      "arm": "native",
+      "cost_usd": 0.00869772,
+      "cumulative": 0.4883,
+      "f1": 0.39999999999999997,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-qualname",
+      "arm": "mcp",
+      "cost_usd": 0.01055776,
+      "cumulative": 0.4989,
+      "f1": 0.5000000000000001,
+      "verdict": "fabricated-anchor"
+    },
+    {
+      "task": "task-fanin-register_lookup",
+      "arm": "mcp",
+      "cost_usd": 0.02226381,
+      "cumulative": 0.5211,
+      "f1": 0.38461538461538464,
+      "verdict": "partial"
+    },
+    {
+      "task": "task-fanin-timezone",
+      "arm": "native",
+      "cost_usd": 0.03397219,
+      "cumulative": 0.5551,
+      "f1": 0.0,
+      "verdict": "no-anchor"
+    },
+    {
+      "task": "task-fanin-timezone",
+      "arm": "mcp",
+      "cost_usd": 0.045235739999999997,
+      "cumulative": 0.6003,
+      "f1": 0.03773584905660377,
+      "verdict": "partial"
+    },
+    {
+      "task": "task-fanin-view_func",
+      "arm": "mcp",
+      "cost_usd": 0.01897022,
+      "cumulative": 0.6193,
+      "f1": 0.35294117647058826,
+      "verdict": "partial"
+    }
+  ]
+}

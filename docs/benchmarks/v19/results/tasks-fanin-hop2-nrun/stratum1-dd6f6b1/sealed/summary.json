@@ -1,0 +1,220 @@
+{
+  "recovery_note": "Recovered post-incident (2026-10-04) from the executing agent transcript and the surviving raw run logs (/tmp/v19-nrun/logs/). The original summary.json was written uncommitted and lost in a branch switch; the raw session JSONLs are NOT recoverable. Per-session rows below carry the recorded metadata (cost, stopReason, defect, aptu tool calls) exactly as logged by the harness at run time. This run root is drift EVIDENCE (gateway-mediated mcp calls), not data; excluded from all statistics per A12.",
+  "total_spent_usd": 0.298385,
+  "halted": true,
+  "halt_reason": "activation-gate-failed:0",
+  "defects": [
+    {
+      "stage": "pilot",
+      "task": "task-fanin-chain",
+      "arm": "mcp",
+      "reason": "wait-timeout-killed:900s"
+    }
+  ],
+  "activation_gate": {
+    "pass": false,
+    "active": 0,
+    "scorable": 8,
+    "fraction": 0.0
+  },
+  "sessions": [
+    {
+      "run_id": "d57bacb1be1e41709656e0f514389468",
+      "arm": "native",
+      "task": "task-fanin-back",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.00404176,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "f4d75beec067418b83e111a0359afe04",
+      "arm": "mcp",
+      "task": "task-fanin-back",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.012580200000000001,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "f85536a5fe814519b3e57b69cfb77cfe",
+      "arm": "native",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.007072489999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "b6069acea8e84e869c67196d59d33aad",
+      "arm": "mcp",
+      "task": "task-fanin-chain",
+      "tier": "fanin",
+      "killed": true,
+      "defect": "wait-timeout-killed:900s",
+      "cost_usd": 0.03434175,
+      "aptu_tool_calls": 0,
+      "stopReason": "toolUse"
+    },
+    {
+      "run_id": "f5f6a8f30262410e9b45c729c93a17be",
+      "arm": "native",
+      "task": "task-fanin-dec",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01057604,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "e1678cd67e334e33be3882717d5eb303",
+      "arm": "mcp",
+      "task": "task-fanin-dec",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.010306389999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "d7f69c82120a461890d25663c482b4f4",
+      "arm": "native",
+      "task": "task-fanin-formset_factory",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01140379,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "9b0df0667fc84ad7b8877d62314fdcbf",
+      "arm": "mcp",
+      "task": "task-fanin-formset_factory",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.0165197,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "d64fd934cea74818990179b4bfbbb619",
+      "arm": "native",
+      "task": "task-fanin-function",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.0037086499999999995,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "edd1a048a8ba472eb3541d598a8ffa9b",
+      "arm": "mcp",
+      "task": "task-fanin-function",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.03685029000000001,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "41166262f148498092af6a67abbc1656",
+      "arm": "native",
+      "task": "task-fanin-handler",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.020638169999999997,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "6a4c30c43ee74f0fb90d1b7a2c9179d6",
+      "arm": "mcp",
+      "task": "task-fanin-handler",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.017846700000000004,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "1c08a2a6b4604952a7f01992a86c247c",
+      "arm": "native",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.01376662,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "c7d8b129a7254d718242897670141cfd",
+      "arm": "mcp",
+      "task": "task-fanin-include",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.023618109999999998,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "b2d54df24fe64b44be65f9544ae0a32b",
+      "arm": "native",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.018123300000000002,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "a5447b100292436592a506c430949d9b",
+      "arm": "mcp",
+      "task": "task-fanin-qualname",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.033773519999999994,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "a8251712ee1741509d4d0e52a8a6c60a",
+      "arm": "native",
+      "task": "task-fanin-register_lookup",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.008759969999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    },
+    {
+      "run_id": "48a684dcb17b4383acf813df7a9c8179",
+      "arm": "mcp",
+      "task": "task-fanin-register_lookup",
+      "tier": "fanin",
+      "killed": false,
+      "defect": null,
+      "cost_usd": 0.014457949999999999,
+      "aptu_tool_calls": 0,
+      "stopReason": "stop"
+    }
+  ]
+}
