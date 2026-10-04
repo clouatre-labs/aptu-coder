@@ -438,3 +438,40 @@ informed this amendment.
 pin is added to the snapshot manifest as part of this amendment. The
 claim gate is unchanged (repair-adjusted 95% CI excludes 0 in mcp's
 favour AND mean paired diff >= 0.1).
+
+## A12 — 2026-09-30: runtime pin + tool-surface config fix; pre-sealed surface gate; re-run
+
+**Trigger.** The A11c run halted at 9/12 stratum-1 pairs ($0.2984
+metered): unpinned runtime drift (pi 0.87.1 -> 1.0.2,
+pi-mcp-adapter 4.x -> 5.0.0) silently broke the mcp arm's direct-tool
+surface; adapter 5.0.0 ignores a raw `directTools` key in Pi's
+`mcp.json` (fixed translation table maps `exposure: "direct"` ->
+`directTools: true`; adapter's own config file is `mcp-adapter.json`).
+F3 halted fail-closed at 0/8 direct blocks. Session-JSONL evidence is
+in the nrun README.
+
+**Decision.**
+- Harness fix (empirically verified, zero LLM spend):
+  `scripts/bench_v18/runner.py` writes the directTools-bearing server
+  payload to `mcp-adapter.json` instead of `mcp.json` for the three
+  MCP arms; payload content otherwise unchanged. This restores the
+  ratified direct `aptu-coder_*` surface (all 8 tools verified).
+- Runtime pin: adapter pinned via the shadow settings.json packages
+  entry `npm:pi-mcp-adapter@5.0.0`; pi version 1.0.2 recorded and
+  gated (no downgrade; the fix is forward-compatible with Pi >=0.99).
+- New pre-sealed gate (zero spend, offline): before each stratum, a
+  `pi --mode json` mock-endpoint run must emit a tools surface
+  containing `aptu-coder_analyze_directory` and
+  `aptu-coder_verify_anchors`; failure halts before spend. Also gate
+  `pi --version` and the adapter version per stratum.
+- The 9 partial stratum-1 pairs are INVALID under the ratified arm
+  definition (gateway-mediated mcp calls) and are excluded from all
+  statistics; they remain in the record as the defect evidence.
+- Both strata re-run fresh. Stage allowance superseded: $1.10 total
+  (invalid partial $0.2984 + 20 pairs x $0.0285 + repair allowance).
+
+**Comparability note.** The ratified 8-pair sealed run (pi 0.87.1,
+mcp.json honoured) and this N-run (pi 1.0.2 + adapter 5.0.0,
+mcp-adapter.json) express the same arm semantics (direct tools
+surfaced, identical payload); runtime versions are recorded in each
+manifest. The F4 availability sentence and prompts are unchanged.
