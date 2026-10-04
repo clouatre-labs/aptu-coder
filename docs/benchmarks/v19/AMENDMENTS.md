@@ -374,3 +374,31 @@ pairs; the true required n could differ. Per the minimum-sufficient-
 task-budget practice, the N-run reports the observed SD and post-hoc
 power alongside the CI, and unresolved comparisons are stated rather
 than hidden.
+
+## A11b — 2026-09-30: fan-in window widened to [10, 60]; rg floor unchanged
+
+**Trigger.** The A11 N-run halted before spend: an exhaustive probe of
+the pinned Django snapshot shows the A4a filters yield exactly 8 viable
+symbols on the entire snapshot (3,810 fail-closed exclusions recorded
+in `selections-a11.json.exhaustion-probe.json`); n=23 is
+arithmetically unsatisfiable without a filter change.
+
+**Decision.** One monotone relaxation: the hop-2 caller-file window
+widens from [20, 60] to **[10, 60]**. The rg context-flooding floor
+(>= 20,000 bytes) is unchanged, as is the unambiguous-single-definition
+invariant and the descending-caller-count ordering. Rationale: the
+window's role is "meaningful fan-in", and 10 hop-2 callers remains real
+fan-in; the 106 window-rejected candidates each passed both the
+rg-hostility and unambiguity gates, so the relaxation does not dilute
+the grep-hostile property that makes the tier discriminative. The
+frozen 8 remain the head of the selection (ordering unchanged).
+
+**Pre-registration note.** This amendment was written from the
+exclusion ledger only (design-side counts); no session outcomes,
+arm assignments, or F1 values were consulted in choosing the new
+window bounds.
+
+**Consequences.** Selection re-run with the widened window; n stays 23
+pairs (if the widened pool supports it) with the same endpoints,
+caps, repair policies, and claim gate as A11. The exhaustion probe is
+retained as evidence that the original window was fully harvested.
