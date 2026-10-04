@@ -1,0 +1,37 @@
+{
+  "stratum": 2,
+  "amendment": "A11c",
+  "pairs": 12,
+  "arms": [
+    "native",
+    "mcp"
+  ],
+  "snapshot": {
+    "repo": "django/django",
+    "tag": "6.1.1",
+    "tarball_url": "https://github.com/django/django/archive/refs/tags/6.1.1.tar.gz",
+    "tarball_sha256": "32e24244c151fb1e1257a4e550557f1c052a48a9e3b5b77604cdc48b84007d73",
+    "extraction_of_record": "/tmp/v19-nrun/x611/django-6.1.1",
+    "verification": "fresh fetch 2026-10-03 reproduces the A11c-ratified digest (three independent fetches byte-identical); extraction of record byte-identical to a fresh extraction (diff -rq clean)"
+  },
+  "filters": "A4a as widened by A11b: hop-2 caller-file window [10, 60], rg_output_bytes >= 20000, unambiguous single Python function definition, descending hop-1 caller-file count ordering",
+  "tier": "fanin-hop2",
+  "turn_cap": 40,
+  "wait_timeout_s": 900,
+  "scorer": "A6/A9a (word-boundary anchor verifier, snapshot-verified)",
+  "repair_policies": [
+    "A8 (provider errors)",
+    "A9b (completed fabricated-anchor cells)"
+  ],
+  "prompt_parity": "F4 (availability sentence, tool arm only)",
+  "provider": "zai",
+  "model": "glm-5.3-flash",
+  "aptu_coder_version": "0.39.0",
+  "budget": {
+    "stage_cap_usd": 0.71,
+    "observed_per_pair_usd": 0.0285,
+    "projected_usd": 0.228
+  },
+  "run_root": "sealed/",
+  "reprobe": "select_fanin_symbols on the extraction of record reproduces the ratified 8-symbol pool symbol-for-symbol and order-for-order (3777 fail-closed exclusions); re-probe evidence: selections-stratum2.json"
+}

@@ -306,3 +306,172 @@ identifier could verify an anchor the tree-sitter oracle would reject.
   override; the frozen v18 default is NOT edited.
 - Explicit per-session turn cap, fail-closed, recorded per session.
 - Track A caller prompts reworded to request `file:line` anchors.
+
+## A10 — 2026-09-30: Track C dropped from the sealed stage (control result recorded)
+
+**Trigger.** The stage-3 pilot's Track C activation gate failed 0/2
+(hop-1 lookups answered directly by both tool arms, no aptu call) and
+the run halted fail-closed per design. The recorded open decision was
+"harder lookups or restrict Track C to fan-in symbols with hop-2
+indirection".
+
+**Decision.** Neither redesign. Track C is dropped from the sealed
+stage. Rationale (KISS): the pilot result is itself the answer for the
+lookup family — hop-1 lookups sit below aptu-coder's applicability
+floor, so the needle cannot move there by construction, and the F2
+rg-optimal control tier (Track A hop-1) already provides the
+trivial-task control Track C existed to supply. A redesigned Track C
+would spend budget re-measuring a family the design already excludes.
+The 0/2 activation result is retained in the record as a
+negative/control result: aptu-coder shows no measurable effect on
+trivial lookups, which is the expected and correct outcome for a
+control arm.
+
+**Consequences.** No Track C sessions in the sealed N-run; the
+mcp-gateway tax-control arm has no sealed cells; the #1681 acceptance
+criterion "Track A reported separately from Track C" is satisfied by
+Track C's recorded null result rather than by new data.
+
+## A11 — 2026-09-30: sealed N-run ratified; n=23 pairs, pre-registered decision rule
+
+**Trigger.** The stage-3 pilot closed with an unresolved three-way
+decision (scale n with budget tiers / soften hop depth / re-scope the
+claim). The sealed 8-pair run on fanin/hop-2 Track A resolved the
+precondition: the tier is grep-hostile as designed, the F3 activation
+gate passes, and completion is 8/8 vs 6/8 — aptu-coder is measured in
+a condition where it can move the needle. What is missing is sample
+size, not a new tier.
+
+**Power analysis (from the A8/A9b-repair-adjusted sealed pairs).**
+Paired per-task F1 differences (mcp − native): mean 0.052, SD 0.338
+(n=8; 95% CI [−0.231, 0.334] — underpowered, contains both 0 and the
+0.2 discriminative gap). Required n for the ratified ΔF1 ≥ 0.2
+discriminative threshold at α = 0.05 (two-sided), power 0.8, paired
+design: **23 pairs per arm**.
+
+**Ratified design.**
+- Pool: fanin/hop-2 Track A, same frozen selection procedure (A4),
+  extended to 23 tasks; arms native/mcp, identical prompts and the
+  frozen availability sentence (F4); caps as ratified (turn cap 40,
+  wait 900s); A6/A9a scorer; A8 replacement policy applied before
+  scoring.
+- Primary endpoint: paired mean F1 difference (mcp − native) with 95%
+  CI, as-sealed and repair-adjusted.
+- Secondary endpoint: cost-at-iso-quality per A1 (correct-verdict
+  cells per dollar; F1 ≥ 0.75, snapshot-verified).
+- Pre-registered decision rule: the sealed stage supports the claim
+  "aptu-coder improves structural fan-in outcomes at iso-cost" iff the
+  repair-adjusted 95% CI excludes 0 in mcp's favour AND the mean
+  paired diff ≥ 0.1. Otherwise the paper's claim is re-scoped per the
+  pilot's option (iii) (activation + cost structure + methodology),
+  with the N-run recorded as the confirmatory negative result.
+- Budget: $0.0285/pair observed as-sealed → 23 pairs ≈ $0.66, plus a
+  25% repair allowance ≈ **$0.82 stage cap** (previous cumulative v19
+  spend $0.6318; combined < $1.50).
+
+**Sample-size honesty note.** The SD estimate comes from n=8 pilot
+pairs; the true required n could differ. Per the minimum-sufficient-
+task-budget practice, the N-run reports the observed SD and post-hoc
+power alongside the CI, and unresolved comparisons are stated rather
+than hidden.
+
+## A11b — 2026-09-30: fan-in window widened to [10, 60]; rg floor unchanged
+
+**Trigger.** The A11 N-run halted before spend: an exhaustive probe of
+the pinned Django snapshot shows the A4a filters yield exactly 8 viable
+symbols on the entire snapshot (3,810 fail-closed exclusions recorded
+in `selections-a11.json.exhaustion-probe.json`); n=23 is
+arithmetically unsatisfiable without a filter change.
+
+**Decision.** One monotone relaxation: the hop-2 caller-file window
+widens from [20, 60] to **[10, 60]**. The rg context-flooding floor
+(>= 20,000 bytes) is unchanged, as is the unambiguous-single-definition
+invariant and the descending-caller-count ordering. Rationale: the
+window's role is "meaningful fan-in", and 10 hop-2 callers remains real
+fan-in; the 106 window-rejected candidates each passed both the
+rg-hostility and unambiguity gates, so the relaxation does not dilute
+the grep-hostile property that makes the tier discriminative. The
+frozen 8 remain the head of the selection (ordering unchanged).
+
+**Pre-registration note.** This amendment was written from the
+exclusion ledger only (design-side counts); no session outcomes,
+arm assignments, or F1 values were consulted in choosing the new
+window bounds.
+
+**Consequences.** Selection re-run with the widened window; n stays 23
+pairs (if the widened pool supports it) with the same endpoints,
+caps, repair policies, and claim gate as A11. The exhaustion probe is
+retained as evidence that the original window was fully harvested.
+
+## A11c — 2026-09-30: stratified sealed N-run; second snapshot (Django 6.1.1); n=20 pairs
+
+**Trigger.** The A11b re-probe shows the widened pool on dd6f6b1
+(main @ 6.2 alpha 0) is capped at 12 viable symbols, and zero-spend
+probes of Django 6.1.1, 6.0.8, and 5.2.17 (tarball SHA256s recorded in
+the probe record) yield 8, 7, and 7 viable symbols respectively under
+the identical frozen filters. No single snapshot reaches n=23; the
+rg context-flooding floor stays untouched by decision.
+
+**Decision.** The sealed N-run becomes a stratified paired design:
+- Stratum 1: dd6f6b1 (main @ 6.2 alpha 0, pinned manifest sha256
+  9dc904f5...), 12 pairs (its full widened pool).
+- Stratum 2: Django 6.1.1 (release tarball, full SHA256
+  32e24244c151fb1e1257a4e550557f1c052a48a9e3b5b77604cdc48b84007d73),
+  8 pairs (its full viable pool).
+- Total n=20 pairs; filters, arms, prompts, availability sentence,
+  caps, A6/A9a scorer, and A8/A9b repair policies are unchanged.
+- Primary endpoint: pooled paired F1 difference (mcp - native) over
+  all 20 pairs, 95% CI (t, df=19); per-stratum paired breakdown
+  reported alongside. Pooling is valid because each pair shares its
+  snapshot, so the snapshot effect is absorbed into the within-pair
+  difference.
+- Power: at the pilot SD 0.338, n=20 gives MDE 0.188 at alpha=0.05
+  two-sided, power 0.8, below the ratified 0.2 gap.
+- Budget: 20 x $0.0285 observed + 25% repair allowance ~ $0.71 stage
+  cap (supersedes the A11 $0.95 allowance).
+
+**Pre-registration note.** Stratum sizes were fixed by the pools
+themselves, probed before any session outcomes existed; no arm data
+informed this amendment.
+
+**Consequences.** Selections and manifests are per-stratum; the 6.1.1
+pin is added to the snapshot manifest as part of this amendment. The
+claim gate is unchanged (repair-adjusted 95% CI excludes 0 in mcp's
+favour AND mean paired diff >= 0.1).
+
+## A12 — 2026-09-30: runtime pin + tool-surface config fix; pre-sealed surface gate; re-run
+
+**Trigger.** The A11c run halted at 9/12 stratum-1 pairs ($0.2984
+metered): unpinned runtime drift (pi 0.87.1 -> 1.0.2,
+pi-mcp-adapter 4.x -> 5.0.0) silently broke the mcp arm's direct-tool
+surface; adapter 5.0.0 ignores a raw `directTools` key in Pi's
+`mcp.json` (fixed translation table maps `exposure: "direct"` ->
+`directTools: true`; adapter's own config file is `mcp-adapter.json`).
+F3 halted fail-closed at 0/8 direct blocks. Session-JSONL evidence is
+in the nrun README.
+
+**Decision.**
+- Harness fix (empirically verified, zero LLM spend):
+  `scripts/bench_v18/runner.py` writes the directTools-bearing server
+  payload to `mcp-adapter.json` instead of `mcp.json` for the three
+  MCP arms; payload content otherwise unchanged. This restores the
+  ratified direct `aptu-coder_*` surface (all 8 tools verified).
+- Runtime pin: adapter pinned via the shadow settings.json packages
+  entry `npm:pi-mcp-adapter@5.0.0`; pi version 1.0.2 recorded and
+  gated (no downgrade; the fix is forward-compatible with Pi >=0.99).
+- New pre-sealed gate (zero spend, offline): before each stratum, a
+  `pi --mode json` mock-endpoint run must emit a tools surface
+  containing `aptu-coder_analyze_directory` and
+  `aptu-coder_verify_anchors`; failure halts before spend. Also gate
+  `pi --version` and the adapter version per stratum.
+- The 9 partial stratum-1 pairs are INVALID under the ratified arm
+  definition (gateway-mediated mcp calls) and are excluded from all
+  statistics; they remain in the record as the defect evidence.
+- Both strata re-run fresh. Stage allowance superseded: $1.10 total
+  (invalid partial $0.2984 + 20 pairs x $0.0285 + repair allowance).
+
+**Comparability note.** The ratified 8-pair sealed run (pi 0.87.1,
+mcp.json honoured) and this N-run (pi 1.0.2 + adapter 5.0.0,
+mcp-adapter.json) express the same arm semantics (direct tools
+surfaced, identical payload); runtime versions are recorded in each
+manifest. The F4 availability sentence and prompts are unchanged.
