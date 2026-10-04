@@ -1,0 +1,35 @@
+{
+  "stratum": 1,
+  "amendment": "A11c",
+  "pairs": 12,
+  "arms": [
+    "native",
+    "mcp"
+  ],
+  "snapshot": {
+    "repo": "django/django",
+    "commit": "dd6f6b1531984823e3dc56740dfa93f3ceb09357",
+    "tarball_sha256": "9dc904f5a45be0eea03268642001e4054a7f83faacf546a69fc1a69b092d1e5e",
+    "extraction_of_record": "/tmp/v19-nrun/django-dd6f6b1531984823e3dc56740dfa93f3ceb09357",
+    "verification": "tarball re-fetched and SHA256-verified; extraction of record byte-identical to a fresh extraction (diff -rq clean, 2026-10-03)"
+  },
+  "filters": "A4a as widened by A11b: hop-2 caller-file window [10, 60], rg_output_bytes >= 20000, unambiguous single Python function definition, descending hop-1 caller-file count ordering",
+  "tier": "fanin-hop2",
+  "turn_cap": 40,
+  "wait_timeout_s": 900,
+  "scorer": "A6/A9a (word-boundary anchor verifier, snapshot-verified)",
+  "repair_policies": [
+    "A8 (provider errors)",
+    "A9b (completed fabricated-anchor cells)"
+  ],
+  "prompt_parity": "F4 (availability sentence, tool arm only)",
+  "provider": "zai",
+  "model": "glm-5.3-flash",
+  "aptu_coder_version": "0.39.0",
+  "budget": {
+    "stage_cap_usd": 0.71,
+    "observed_per_pair_usd": 0.0285,
+    "projected_usd": 0.342
+  },
+  "run_root": "sealed/"
+}

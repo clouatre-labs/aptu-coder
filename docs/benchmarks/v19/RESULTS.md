@@ -46,3 +46,25 @@ After the A9a word-boundary anchor verifier landed (#1709), the four completed s
 ## Verdict
 
 **Directional evidence only, not a causal claim.** On this sealed pool, the mcp arm produced the only high-quality (snapshot-verified correct) sessions and did so cheaply, while the native arm reached higher mean F1 only after repairing a harness-defect session. Completion is now 8/8 vs 6/8 in native's favour. The sample is too small, and cap- and provider-sensitivity too unmeasured, to claim MCP beats native. The durable outputs of this stage are the process repairs (A6 scorer verification, A7b kill visibility, A8 replacement policy) and a sealed, reproducible record for future stages to extend.
+
+## Sealed-stage GO/NO-GO (A10/A11, 2026-09-30)
+
+**GO** for a sealed N-run on fanin/hop-2 Track A, n=23 pairs per arm,
+under the A11 pre-registered decision rule. Basis: the tier is the
+needle-moving condition (grep-hostile, activation gate passed, both
+arms complete), the existing 8-pair evidence is directionally
+pro-mcp but underpowered (paired diff mean 0.052, SD 0.338, CI
+[−0.231, 0.334]), and the run is affordable (~$0.82 stage cap).
+
+**Track C: closed as a control result** per A10 — hop-1 lookups sit
+below the tool's applicability floor (0/2 activation in the pilot);
+no sealed Track C cells; no redesign spend. The #1681 criterion
+"Track A vs Track C reported separately, no pooling" is met by
+Track C's recorded null.
+
+**Claim gate.** The N-run supports the iso-quality claim only if the
+repair-adjusted 95% CI on the paired F1 diff excludes 0 in mcp's
+favour with mean diff ≥ 0.1; otherwise the paper re-scopes to
+activation + cost structure + methodology (pilot option iii). The
+existing sealed 8-pair run remains in the record as the pilot for
+this N-run; no retroactive re-scoring.

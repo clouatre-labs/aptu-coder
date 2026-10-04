@@ -1,0 +1,387 @@
+{
+  "recovery_note": "RECOVERY PROVENANCE: the original nrun-closeout-analysis.json was written uncommitted and lost in a branch switch. This file is reconstructed (2026-10-04) from values printed by the closeout script in the executing agent's transcript and cross-checked against the surviving raw run logs and the transcript's final JSON handoff. All statistics below are the recovered as-computed values, reproduced verbatim; they are NOT recomputed from raw session data (the raw session JSONLs are unrecoverable). Per-pair absolute F1 values (f1_native/f1_mcp as-sealed) were not printed by the transcript and are therefore absent; per-pair paired diffs, verdicts, stops, and call counts are as recovered.",
+  "gate": "not-supported",
+  "pooled_sealed": {
+    "n": 20,
+    "mean": -0.0888,
+    "sd": 0.2536,
+    "ci95": [
+      -0.2075,
+      0.0298
+    ],
+    "power": 0.3472
+  },
+  "pooled_adjusted": {
+    "n": 20,
+    "mean": -0.0709,
+    "sd": 0.2319,
+    "ci95": [
+      -0.1794,
+      0.0377
+    ],
+    "power": 0.277
+  },
+  "secondary": {
+    "completion": {
+      "native": "20/20",
+      "mcp": "16/20 (s1 11/12, s2 5/8)"
+    },
+    "correct_cells": {
+      "native": 2,
+      "mcp": 2
+    },
+    "pair_session_cost_usd": {
+      "native": 0.2501,
+      "mcp": 0.3536
+    },
+    "correct_cells_per_dollar": {
+      "native": 7.99,
+      "mcp": 5.66
+    },
+    "mean_f1_sealed_pooled": {
+      "native": 0.4147,
+      "mcp": 0.3258
+    },
+    "mean_f1_adjusted_pooled": {
+      "native": 0.4236,
+      "mcp": 0.3527
+    },
+    "tokens_pooled": {
+      "native": {
+        "input": 460046,
+        "output": 250834
+      },
+      "mcp": {
+        "input": 552935,
+        "output": 270464
+      }
+    },
+    "aptu_tool_calls_total": {
+      "native": 0,
+      "mcp": 262
+    }
+  },
+  "strata": {
+    "stratum1": {
+      "pairs": [
+        {
+          "task": "task-fanin-back",
+          "d_sealed": 0.062,
+          "d_adjusted": -0.08,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 6
+        },
+        {
+          "task": "task-fanin-chain",
+          "d_sealed": -0.136,
+          "d_adjusted": -0.136,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "no-anchor",
+          "mcp_stop": "toolUse",
+          "calls_mcp": 21
+        },
+        {
+          "task": "task-fanin-dec",
+          "d_sealed": -0.047,
+          "d_adjusted": -0.047,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 10
+        },
+        {
+          "task": "task-fanin-formset_factory",
+          "d_sealed": 0.0,
+          "d_adjusted": 0.0,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 5
+        },
+        {
+          "task": "task-fanin-function",
+          "d_sealed": -0.375,
+          "d_adjusted": 0.375,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 4
+        },
+        {
+          "task": "task-fanin-handler",
+          "d_sealed": -0.13,
+          "d_adjusted": -0.03,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 13
+        },
+        {
+          "task": "task-fanin-include",
+          "d_sealed": -0.025,
+          "d_adjusted": -0.025,
+          "nat_verdict": "correct",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 12
+        },
+        {
+          "task": "task-fanin-qualname",
+          "d_sealed": 0.142,
+          "d_adjusted": 0.142,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 8
+        },
+        {
+          "task": "task-fanin-register_lookup",
+          "d_sealed": -0.032,
+          "d_adjusted": -0.0,
+          "nat_verdict": "partial",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 7
+        },
+        {
+          "task": "task-fanin-skipIfDBFeature",
+          "d_sealed": 0.0,
+          "d_adjusted": 0.0,
+          "nat_verdict": "correct",
+          "mcp_verdict": "correct",
+          "mcp_stop": "stop",
+          "calls_mcp": 4
+        },
+        {
+          "task": "task-fanin-timezone",
+          "d_sealed": 0.031,
+          "d_adjusted": -0.298,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 15
+        },
+        {
+          "task": "task-fanin-view_func",
+          "d_sealed": -0.056,
+          "d_adjusted": 0.005,
+          "nat_verdict": "partial",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 3
+        }
+      ],
+      "total_spent_usd": 0.33042,
+      "repair_cost_usd": 0.288885,
+      "activation_gate": {
+        "pass": true,
+        "active": 11,
+        "scorable": 11,
+        "fraction": 1.0
+      },
+      "defects": [
+        {
+          "stage": "pilot",
+          "task": "task-fanin-chain",
+          "arm": "mcp",
+          "reason": "wait-timeout-killed:900s"
+        }
+      ],
+      "arm_stats": {
+        "native": {
+          "cost_usd": 0.144805,
+          "completed": "12/12",
+          "correct_cells": 2,
+          "correct_per_dollar": 13.81,
+          "tokens": {
+            "input": 277769,
+            "output": 141917,
+            "cacheRead": 1072704,
+            "cacheWrite": 0
+          },
+          "aptu_tool_calls_total": 0,
+          "mean_f1": 0.4327,
+          "mean_f1_repair_adjusted": 0.4363
+        },
+        "mcp": {
+          "cost_usd": 0.185615,
+          "completed": "11/12",
+          "correct_cells": 1,
+          "correct_per_dollar": 5.39,
+          "tokens": {
+            "input": 319153,
+            "output": 149021,
+            "cacheRead": 2107712,
+            "cacheWrite": 0
+          },
+          "aptu_tool_calls_total": 108,
+          "mean_f1": 0.3856,
+          "mean_f1_repair_adjusted": 0.4284
+        }
+      },
+      "repair_cells_replaced": {
+        "task-fanin-back|native": 0.1429,
+        "task-fanin-function|mcp": 0.75,
+        "task-fanin-handler|native": 0.4,
+        "task-fanin-register_lookup|mcp": 0.3846,
+        "task-fanin-timezone|mcp": 0.0377,
+        "task-fanin-view_func|mcp": 0.3529
+      },
+      "in_flight_killed": []
+    },
+    "stratum2": {
+      "pairs": [
+        {
+          "task": "task-fanin-back",
+          "d_sealed": -0.105,
+          "d_adjusted": -0.105,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "no-anchor",
+          "mcp_stop": "toolUse",
+          "calls_mcp": 41
+        },
+        {
+          "task": "task-fanin-chain",
+          "d_sealed": 0.031,
+          "d_adjusted": -0.131,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 11
+        },
+        {
+          "task": "task-fanin-dec",
+          "d_sealed": -0.393,
+          "d_adjusted": 0.074,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "partial",
+          "mcp_stop": "stop",
+          "calls_mcp": 13
+        },
+        {
+          "task": "task-fanin-formset_factory",
+          "d_sealed": -0.025,
+          "d_adjusted": 0.0,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 17
+        },
+        {
+          "task": "task-fanin-function",
+          "d_sealed": 0.0,
+          "d_adjusted": 0.0,
+          "nat_verdict": "no-anchor",
+          "mcp_verdict": "fabricated-anchor",
+          "mcp_stop": "stop",
+          "calls_mcp": 21
+        },
+        {
+          "task": "task-fanin-include",
+          "d_sealed": -0.842,
+          "d_adjusted": -0.842,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "no-anchor",
+          "mcp_stop": "toolUse",
+          "calls_mcp": 30
+        },
+        {
+          "task": "task-fanin-register_lookup",
+          "d_sealed": 0.441,
+          "d_adjusted": 0.0,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "correct",
+          "mcp_stop": "stop",
+          "calls_mcp": 8
+        },
+        {
+          "task": "task-fanin-timezone",
+          "d_sealed": -0.317,
+          "d_adjusted": -0.317,
+          "nat_verdict": "fabricated-anchor",
+          "mcp_verdict": "no-anchor",
+          "mcp_stop": "toolUse",
+          "calls_mcp": 13
+        }
+      ],
+      "total_spent_usd": 0.273341,
+      "repair_cost_usd": 0.15446,
+      "activation_gate": {
+        "pass": true,
+        "pending": true,
+        "active": 5,
+        "scorable": 5,
+        "fraction": null
+      },
+      "defects": [
+        {
+          "stage": "pilot",
+          "task": "task-fanin-back",
+          "arm": "mcp",
+          "reason": "turn-cap-exceeded:41"
+        },
+        {
+          "stage": "pilot",
+          "task": "task-fanin-include",
+          "arm": "mcp",
+          "reason": "turn-cap-exceeded:41"
+        },
+        {
+          "stage": "pilot",
+          "task": "task-fanin-timezone",
+          "arm": "mcp",
+          "reason": "wait-timeout-killed:900s"
+        }
+      ],
+      "arm_stats": {
+        "native": {
+          "cost_usd": 0.105322,
+          "completed": "8/8",
+          "correct_cells": 0,
+          "correct_per_dollar": 0.0,
+          "tokens": {
+            "input": 182277,
+            "output": 108917,
+            "cacheRead": 784064,
+            "cacheWrite": 0
+          },
+          "aptu_tool_calls_total": 0,
+          "mean_f1": 0.3875,
+          "mean_f1_repair_adjusted": 0.4046
+        },
+        "mcp": {
+          "cost_usd": 0.168019,
+          "completed": "5/8",
+          "correct_cells": 1,
+          "correct_per_dollar": 5.95,
+          "tokens": {
+            "input": 233782,
+            "output": 121443,
+            "cacheRead": 2407680,
+            "cacheWrite": 0
+          },
+          "aptu_tool_calls_total": 154,
+          "mean_f1": 0.2362,
+          "mean_f1_repair_adjusted": 0.2393
+        }
+      },
+      "repair_cells_replaced": {
+        "task-fanin-dec|native": 0.14814814814814817,
+        "task-fanin-formset_factory|native": 0.7142857142857142,
+        "task-fanin-chain|native": 0.2978723404255319,
+        "task-fanin-register_lookup|native": 0.8113207547169812,
+        "task-fanin-formset_factory|mcp": 0.7142857142857142
+      },
+      "in_flight_killed": [
+        {
+          "task": "task-fanin-timezone",
+          "arm": "native",
+          "stopReason": "toolUse",
+          "cost_usd": 0.0
+        }
+      ]
+    }
+  }
+}
