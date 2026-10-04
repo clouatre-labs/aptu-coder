@@ -402,3 +402,38 @@ window bounds.
 pairs (if the widened pool supports it) with the same endpoints,
 caps, repair policies, and claim gate as A11. The exhaustion probe is
 retained as evidence that the original window was fully harvested.
+
+## A11c — 2026-09-30: stratified sealed N-run; second snapshot (Django 6.1.1); n=20 pairs
+
+**Trigger.** The A11b re-probe shows the widened pool on dd6f6b1
+(main @ 6.2 alpha 0) is capped at 12 viable symbols, and zero-spend
+probes of Django 6.1.1, 6.0.8, and 5.2.17 (tarball SHA256s recorded in
+the probe record) yield 8, 7, and 7 viable symbols respectively under
+the identical frozen filters. No single snapshot reaches n=23; the
+rg context-flooding floor stays untouched by decision.
+
+**Decision.** The sealed N-run becomes a stratified paired design:
+- Stratum 1: dd6f6b1 (main @ 6.2 alpha 0, pinned manifest sha256
+  9dc904f5...), 12 pairs (its full widened pool).
+- Stratum 2: Django 6.1.1 (release tarball, sha256 32e24244...),
+  8 pairs (its full viable pool).
+- Total n=20 pairs; filters, arms, prompts, availability sentence,
+  caps, A6/A9a scorer, and A8/A9b repair policies are unchanged.
+- Primary endpoint: pooled paired F1 difference (mcp - native) over
+  all 20 pairs, 95% CI (t, df=19); per-stratum paired breakdown
+  reported alongside. Pooling is valid because each pair shares its
+  snapshot, so the snapshot effect is absorbed into the within-pair
+  difference.
+- Power: at the pilot SD 0.338, n=20 gives MDE 0.188 at alpha=0.05
+  two-sided, power 0.8, below the ratified 0.2 gap.
+- Budget: 20 x $0.0285 observed + 25% repair allowance ~ $0.71 stage
+  cap (supersedes the A11 $0.95 allowance).
+
+**Pre-registration note.** Stratum sizes were fixed by the pools
+themselves, probed before any session outcomes existed; no arm data
+informed this amendment.
+
+**Consequences.** Selections and manifests are per-stratum; the 6.1.1
+pin is added to the snapshot manifest as part of this amendment. The
+claim gate is unchanged (repair-adjusted 95% CI excludes 0 in mcp's
+favour AND mean paired diff >= 0.1).
