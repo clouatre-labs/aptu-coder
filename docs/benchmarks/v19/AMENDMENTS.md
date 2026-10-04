@@ -306,3 +306,71 @@ identifier could verify an anchor the tree-sitter oracle would reject.
   override; the frozen v18 default is NOT edited.
 - Explicit per-session turn cap, fail-closed, recorded per session.
 - Track A caller prompts reworded to request `file:line` anchors.
+
+## A10 — 2026-09-30: Track C dropped from the sealed stage (control result recorded)
+
+**Trigger.** The stage-3 pilot's Track C activation gate failed 0/2
+(hop-1 lookups answered directly by both tool arms, no aptu call) and
+the run halted fail-closed per design. The recorded open decision was
+"harder lookups or restrict Track C to fan-in symbols with hop-2
+indirection".
+
+**Decision.** Neither redesign. Track C is dropped from the sealed
+stage. Rationale (KISS): the pilot result is itself the answer for the
+lookup family — hop-1 lookups sit below aptu-coder's applicability
+floor, so the needle cannot move there by construction, and the F2
+rg-optimal control tier (Track A hop-1) already provides the
+trivial-task control Track C existed to supply. A redesigned Track C
+would spend budget re-measuring a family the design already excludes.
+The 0/2 activation result is retained in the record as a
+negative/control result: aptu-coder shows no measurable effect on
+trivial lookups, which is the expected and correct outcome for a
+control arm.
+
+**Consequences.** No Track C sessions in the sealed N-run; the
+mcp-gateway tax-control arm has no sealed cells; the #1681 acceptance
+criterion "Track A reported separately from Track C" is satisfied by
+Track C's recorded null result rather than by new data.
+
+## A11 — 2026-09-30: sealed N-run ratified; n=23 pairs, pre-registered decision rule
+
+**Trigger.** The stage-3 pilot closed with an unresolved three-way
+decision (scale n with budget tiers / soften hop depth / re-scope the
+claim). The sealed 8-pair run on fanin/hop-2 Track A resolved the
+precondition: the tier is grep-hostile as designed, the F3 activation
+gate passes, and completion is 8/8 vs 6/8 — aptu-coder is measured in
+a condition where it can move the needle. What is missing is sample
+size, not a new tier.
+
+**Power analysis (from the A8/A9b-repair-adjusted sealed pairs).**
+Paired per-task F1 differences (mcp − native): mean 0.052, SD 0.338
+(n=8; 95% CI [−0.231, 0.334] — underpowered, contains both 0 and the
+0.2 discriminative gap). Required n for the ratified ΔF1 ≥ 0.2
+discriminative threshold at α = 0.05 (two-sided), power 0.8, paired
+design: **23 pairs per arm**.
+
+**Ratified design.**
+- Pool: fanin/hop-2 Track A, same frozen selection procedure (A4),
+  extended to 23 tasks; arms native/mcp, identical prompts and the
+  frozen availability sentence (F4); caps as ratified (turn cap 40,
+  wait 900s); A6/A9a scorer; A8 replacement policy applied before
+  scoring.
+- Primary endpoint: paired mean F1 difference (mcp − native) with 95%
+  CI, as-sealed and repair-adjusted.
+- Secondary endpoint: cost-at-iso-quality per A1 (correct-verdict
+  cells per dollar; F1 ≥ 0.75, snapshot-verified).
+- Pre-registered decision rule: the sealed stage supports the claim
+  "aptu-coder improves structural fan-in outcomes at iso-cost" iff the
+  repair-adjusted 95% CI excludes 0 in mcp's favour AND the mean
+  paired diff ≥ 0.1. Otherwise the paper's claim is re-scoped per the
+  pilot's option (iii) (activation + cost structure + methodology),
+  with the N-run recorded as the confirmatory negative result.
+- Budget: $0.0285/pair observed as-sealed → 23 pairs ≈ $0.66, plus a
+  25% repair allowance ≈ **$0.82 stage cap** (previous cumulative v19
+  spend $0.6318; combined < $1.50).
+
+**Sample-size honesty note.** The SD estimate comes from n=8 pilot
+pairs; the true required n could differ. Per the minimum-sufficient-
+task-budget practice, the N-run reports the observed SD and post-hoc
+power alongside the CI, and unresolved comparisons are stated rather
+than hidden.
