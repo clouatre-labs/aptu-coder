@@ -35,6 +35,7 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
     ("kts", "kotlin"),
     ("py", "python"),
     ("rs", "rust"),
+    ("swift", "swift"),
     ("ts", "typescript"),
     ("tsx", "tsx"),
     ("html", "html"),
@@ -52,7 +53,7 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
 /// Returns the language identifier for the given file extension, or `None` if unsupported.
 ///
 /// The lookup is case-insensitive. Supported extensions include `rs`, `py`, `go`, `java`,
-/// `ts`, `tsx`, `js`, `mjs`, `cjs`, `c`, `cc`, `cpp`, `cxx`, `h`, `hpp`, `hxx`, `cs`,
+/// `ts`, `tsx`, `js`, `mjs`, `cjs`, `c`, `cc`, `cpp`, `cxx`, `h`, `hpp`, `hxx`, `cs`, `swift`,
 /// Fortran variants `f`, `f77`, `f90`, `f95`, `f03`, `f08`, `for`, `ftn`,
 /// HTML variants `html`, `htm`, and Markdown variants `md`, `mdx`.
 #[must_use]
@@ -91,6 +92,7 @@ pub fn supported_languages() -> &'static [&'static str] {
         "c",
         "cpp",
         "csharp",
+        "swift",
         "html",
         "markdown",
     ]
@@ -118,6 +120,36 @@ mod tests {
         assert_eq!(language_for_extension("cc"), Some("cpp"));
         assert_eq!(language_for_extension("kt"), Some("kotlin"));
         assert_eq!(language_for_extension("kts"), Some("kotlin"));
+    }
+
+    #[test]
+    fn test_extension_map_resolves() {
+        // Every EXTENSION_MAP entry must appear in supported_extensions(),
+        // and each mapped language must be listed in supported_languages()
+        // or handled by the regex fallback in languages::try_regex_fallback.
+        let languages = supported_languages();
+        for (_, lang) in EXTENSION_MAP {
+            assert!(
+                supported_extensions()
+                    .iter()
+                    .any(|e| EXTENSION_MAP.iter().any(|(e2, l2)| e2 == e && l2 == lang)),
+                "language '{lang}' missing from extension map consistency sweep"
+            );
+            if !languages.contains(lang) {
+                // Languages absent from the hardcoded list must still resolve
+                // (regex fallback or tree-sitter) -- no dangling extensions.
+                assert!(
+                    crate::languages::get_language_info(lang).is_some()
+                        || crate::languages::try_regex_fallback("", lang).is_some(),
+                    "language '{lang}' is neither listed in supported_languages() nor resolvable"
+                );
+            }
+        }
+        assert!(
+            languages.contains(&"swift"),
+            "swift must be listed in supported_languages()"
+        );
+        assert_eq!(language_for_extension("swift"), Some("swift"));
     }
 
     /// The schema pattern must stay ECMAScript-valid (JSON Schema clients

@@ -43,7 +43,7 @@ The token-savings figures above come from single, focused comprehension tasks wh
 
 ## Overview
 
-aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and call graphs, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
+aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and call graphs, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 19 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
 
 Structural context is built once and reused: an on-disk cache keyed by blake3 content hashes keeps results correct across concurrent writes. The same structural graph backs the [Knowledge Graph](#knowledge-graph) resource surface below. For consumers that hold source text without an on-disk path, `aptu-coder-core` also exposes `analyze_str` as a public Rust library API (see [ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)).
 
@@ -67,6 +67,7 @@ Further reading on the design philosophy: [The Agentic SDLC Governance Stack](ht
 | Markdown | `.md`, `.mdx` |
 | Python | `.py` |
 | Rust | `.rs` |
+| Swift | `.swift` |
 | TOML | `.toml` |
 | TSX | `.tsx` |
 | TypeScript | `.ts` |

@@ -5,7 +5,7 @@
 //! Provides query strings and extraction handlers for supported languages.
 //! Language support is controlled by Cargo `lang-*` features (by default all
 //! available language handlers are enabled): Astro, C/C++, C#, CSS, Fortran, Go,
-//! HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML.
+//! HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, Swift, TOML, TSX, TypeScript, YAML.
 
 pub mod cpp;
 pub mod csharp;
@@ -20,6 +20,7 @@ pub mod markdown;
 pub mod python;
 pub mod regex_fallback;
 pub mod rust;
+pub mod swift;
 pub mod typescript;
 pub mod yaml;
 
@@ -176,6 +177,21 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: Some(java::find_receiver_type),
             extract_inheritance: Some(java::extract_inheritance),
         }),
+        "swift" => Some(LanguageInfo {
+            name: "swift",
+            language: tree_sitter_swift::LANGUAGE.into(),
+            element_query: swift::ELEMENT_QUERY,
+            call_query: swift::CALL_QUERY,
+            reference_query: Some(swift::REFERENCE_QUERY),
+            import_query: Some(swift::IMPORT_QUERY),
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: Some(swift::DEFUSE_QUERY),
+            extract_function_name: Some(swift::extract_function_name),
+            find_method_for_receiver: Some(swift::find_method_for_receiver),
+            find_receiver_type: Some(swift::find_receiver_type),
+            extract_inheritance: Some(swift::extract_inheritance),
+        }),
         "kotlin" => Some(LanguageInfo {
             name: "kotlin",
             language: tree_sitter_kotlin_ng::LANGUAGE.into(),
@@ -313,6 +329,7 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
         "csharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
         "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
         "css" => Some(tree_sitter_css::LANGUAGE.into()),
+        "swift" => Some(tree_sitter_swift::LANGUAGE.into()),
         "yaml" => Some(tree_sitter_yaml::LANGUAGE.into()),
         _ => None,
     }
