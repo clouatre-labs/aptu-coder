@@ -109,6 +109,7 @@ mod tests {
         assert_eq!(language_for_extension("go"), Some("go"));
         assert_eq!(language_for_extension("java"), Some("java"));
         assert_eq!(language_for_extension("ts"), Some("typescript"));
+        assert_eq!(language_for_extension("tsx"), Some("tsx"));
         assert_eq!(language_for_extension("swift"), Some("swift"));
         assert_eq!(language_for_extension("f90"), Some("fortran"));
         assert_eq!(language_for_extension("for"), Some("fortran"));
