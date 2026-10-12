@@ -35,6 +35,7 @@ const EXTENSION_MAP: &[(&str, &str)] = &[
     ("kts", "kotlin"),
     ("py", "python"),
     ("rs", "rust"),
+    ("swift", "swift"),
     ("ts", "typescript"),
     ("tsx", "tsx"),
     ("html", "html"),
@@ -91,6 +92,7 @@ pub fn supported_languages() -> &'static [&'static str] {
         "c",
         "cpp",
         "csharp",
+        "swift",
         "html",
         "markdown",
     ]
@@ -117,6 +119,7 @@ mod tests {
         assert_eq!(language_for_extension("hpp"), Some("cpp"));
         assert_eq!(language_for_extension("cc"), Some("cpp"));
         assert_eq!(language_for_extension("kt"), Some("kotlin"));
+        assert_eq!(language_for_extension("swift"), Some("swift"));
         assert_eq!(language_for_extension("kts"), Some("kotlin"));
     }
 
@@ -142,6 +145,29 @@ mod tests {
         }
         assert!(!re.is_match("src/file.txt"));
         assert!(!re.is_match("src/file.rss"));
+    }
+
+    #[test]
+    fn test_supported_languages_contains_swift() {
+        assert!(
+            supported_languages().contains(&"swift"),
+            "swift must be listed in supported_languages()"
+        );
+    }
+
+    /// Every language named in EXTENSION_MAP must be analysable: either it is
+    /// listed in supported_languages() (tree-sitter path) or it has a regex
+    /// fallback (css/yaml/json/toml/astro). Otherwise file-type detection
+    /// would report a language the engine cannot handle.
+    #[test]
+    fn test_extension_map_languages_are_all_supported() {
+        for lang in EXTENSION_MAP.iter().map(|(_, l)| *l) {
+            assert!(
+                supported_languages().contains(&lang)
+                    || crate::languages::try_regex_fallback("", lang).is_some(),
+                "language '{lang}' in EXTENSION_MAP missing from supported_languages()"
+            );
+        }
     }
 
     #[test]

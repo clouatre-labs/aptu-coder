@@ -20,6 +20,7 @@ pub mod markdown;
 pub mod python;
 pub mod regex_fallback;
 pub mod rust;
+pub mod swift;
 pub mod typescript;
 pub mod yaml;
 
@@ -245,6 +246,21 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
         // skipping the file.
         // TODO: implement once tree-sitter-html ^0.25 ships.
         //       Track releases: https://github.com/tree-sitter/tree-sitter-html/releases
+        "swift" => Some(LanguageInfo {
+            name: "swift",
+            language: tree_sitter_swift::LANGUAGE.into(),
+            element_query: swift::ELEMENT_QUERY,
+            call_query: swift::CALL_QUERY,
+            reference_query: Some(swift::REFERENCE_QUERY),
+            import_query: Some(swift::IMPORT_QUERY),
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: Some(swift::DEFUSE_QUERY),
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: Some(swift::extract_inheritance),
+        }),
         "html" => None,
         "markdown" => Some(LanguageInfo {
             name: "markdown",
@@ -312,6 +328,7 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
         "fortran" => Some(tree_sitter_fortran::LANGUAGE.into()),
         "csharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
         "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        "swift" => Some(tree_sitter_swift::LANGUAGE.into()),
         "css" => Some(tree_sitter_css::LANGUAGE.into()),
         "yaml" => Some(tree_sitter_yaml::LANGUAGE.into()),
         _ => None,
@@ -367,6 +384,33 @@ mod tests {
         assert!(
             get_ts_language("rust").is_some(),
             "expected Some for 'rust'"
+        );
+    }
+
+    #[test]
+    fn test_get_language_info_swift() {
+        // Happy path: swift returns Some and all queries compile against the grammar
+        let info = get_language_info("swift").expect("expected Some for 'swift'");
+        assert_eq!(info.name, "swift");
+        let q = tree_sitter::Query::new(&info.language, info.element_query)
+            .expect("ELEMENT_QUERY must compile against swift grammar");
+        tree_sitter::Query::new(&info.language, info.call_query)
+            .expect("CALL_QUERY must compile against swift grammar");
+        tree_sitter::Query::new(&info.language, info.reference_query.expect("ref"))
+            .expect("REFERENCE_QUERY must compile against swift grammar");
+        tree_sitter::Query::new(&info.language, info.import_query.expect("import"))
+            .expect("IMPORT_QUERY must compile against swift grammar");
+        tree_sitter::Query::new(&info.language, info.defuse_query.expect("defuse"))
+            .expect("DEFUSE_QUERY must compile against swift grammar");
+        assert!(q.capture_names().contains(&"func_name"));
+        assert!(q.capture_names().contains(&"class_name"));
+    }
+
+    #[test]
+    fn test_get_ts_language_swift() {
+        assert_eq!(
+            get_ts_language("swift"),
+            Some(tree_sitter_swift::LANGUAGE.into())
         );
     }
 
