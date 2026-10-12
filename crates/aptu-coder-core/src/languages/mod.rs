@@ -20,6 +20,7 @@ pub mod markdown;
 pub mod python;
 pub mod regex_fallback;
 pub mod rust;
+pub mod swift;
 pub mod typescript;
 pub mod yaml;
 
@@ -291,6 +292,21 @@ pub fn get_language_info(lang_name: &str) -> Option<LanguageInfo> {
             find_receiver_type: None,
             extract_inheritance: None,
         }),
+        "swift" => Some(LanguageInfo {
+            name: "swift",
+            language: tree_sitter_swift::LANGUAGE.into(),
+            element_query: swift::ELEMENT_QUERY,
+            call_query: swift::CALL_QUERY,
+            reference_query: Some(swift::REFERENCE_QUERY),
+            import_query: Some(swift::IMPORT_QUERY),
+            impl_query: None,
+            impl_trait_query: None,
+            defuse_query: Some(swift::DEFUSE_QUERY),
+            extract_function_name: None,
+            find_method_for_receiver: None,
+            find_receiver_type: None,
+            extract_inheritance: Some(swift::extract_inheritance),
+        }),
         _ => None,
     }
 }
@@ -314,6 +330,7 @@ pub fn get_ts_language(lang_name: &str) -> Option<Language> {
         "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
         "css" => Some(tree_sitter_css::LANGUAGE.into()),
         "yaml" => Some(tree_sitter_yaml::LANGUAGE.into()),
+        "swift" => Some(tree_sitter_swift::LANGUAGE.into()),
         _ => None,
     }
 }
