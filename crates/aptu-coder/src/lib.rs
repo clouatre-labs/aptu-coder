@@ -130,9 +130,12 @@ impl ShellOutput {
 }
 
 /// Metadata-only view of [`ShellOutput`] serialized as exec_command's
-/// structuredContent. stdout/stderr themselves are excluded: the text block is
-/// the single model-visible output channel; overflow slot-file paths survive
-/// here so full captures remain recoverable.
+/// structuredContent. Attached to results only when the metadata carries
+/// information the text block does not (truncation, overflow slot-file paths,
+/// filter effects, timeout, or drain errors); when output is inline and
+/// unfiltered, no structuredContent is set so clients that prefer it still
+/// surface the text block. stdout/stderr themselves are excluded: the text
+/// block is the single model-visible output channel.
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct ShellOutputMetadata {
     /// Exit code; mirrors `ShellOutput::exit_code`.

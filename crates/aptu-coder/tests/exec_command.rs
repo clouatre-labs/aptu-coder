@@ -165,8 +165,10 @@ async fn exec_command_working_dir_rejection() {
         !resp["result"]["isError"].as_bool().unwrap_or(true),
         "exec_command with working_dir outside CWD must succeed: {resp}"
     );
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
+    assert!(
+        text_block(&resp).contains("hi"),
+        "text block missing output: {resp}"
+    );
 }
 
 #[tokio::test]
@@ -256,19 +258,9 @@ fn test_truncate_output_by_bytes() {
 async fn test_handler_structured_output() {
     let resp = call_exec_command_raw(serde_json::json!({"command": "echo hello"})).await;
     let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
-    // Happy path: structuredContent carries metadata only -- no stdout/stderr
-    // keys, and no path keys when nothing overflowed.
-    assert!(
-        sc.get("stdout").is_none() && sc.get("stderr").is_none(),
-        "structuredContent must not carry stdout/stderr: {sc}"
-    );
-    assert!(
-        sc.get("stdout_path").is_none() && sc.get("stderr_path").is_none(),
-        "path keys must be absent (not null) when no output overflowed: {sc}"
-    );
-    assert!(sc["output_truncated"].as_bool() == Some(false), "{sc}");
-    // Output is delivered via the text block.
+    // No metadata worth surfacing: structuredContent stays absent so clients
+    // that prefer it still forward the text block.
+    assert!(sc.is_null(), "structuredContent must be absent: {sc}");
     assert!(
         text_block(&resp).contains("hello"),
         "text block missing 'hello': {resp}"
@@ -291,11 +283,19 @@ async fn test_handler_invalid_working_dir() {
 #[tokio::test]
 async fn test_handler_nonzero_exit() {
     let resp = call_exec_command_raw(serde_json::json!({"command": "exit 42"})).await;
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["exit_code"], 42, "exit_code mismatch: {sc}");
     assert!(
         resp["result"]["isError"].as_bool().unwrap_or(false),
         "expected isError=true for non-zero exit: {resp}"
+    );
+    // No truncation/filter metadata: structuredContent stays absent so the
+    // text block (which carries the exit code) remains model-visible.
+    assert!(
+        resp["result"]["structuredContent"].is_null(),
+        "structuredContent must be absent: {resp}"
+    );
+    assert!(
+        text_block(&resp).contains("Exit code: 42"),
+        "text block missing exit code: {resp}"
     );
 }
 
@@ -340,8 +340,6 @@ async fn test_exec_command_large_stdout_no_deadlock() {
     }))
     .await;
 
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["exit_code"], 0, "exit code should be 0: {sc}");
     assert!(
         text_block(&resp).contains("1"),
         "text block should contain output: {resp}"
@@ -350,16 +348,15 @@ async fn test_exec_command_large_stdout_no_deadlock() {
 
 #[tokio::test]
 async fn test_exec_command_backgrounded_process() {
-    // Test that backgrounded process returns with output_truncated=false (normal case)
+    // Test that a backgrounded process returns with an inline text block
     let resp = call_exec_command_raw(serde_json::json!({
         "command": "echo 'parent done'"
     }))
     .await;
 
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(
-        sc["output_truncated"], false,
-        "normal command should not truncate: {sc}"
+    assert!(
+        resp["result"]["structuredContent"].is_null(),
+        "structuredContent must be absent for inline output: {resp}"
     );
     assert!(
         text_block(&resp).contains("parent done"),
@@ -662,11 +659,13 @@ async fn test_exec_cache_hit_on_sequential_repeat() {
     let resp2 = call_exec_command_raw(params2).await;
     let stdout2 = text_block(&resp2).to_string();
 
-    // Assert: both calls succeeded with identical output (both ran the command)
-    let sc1 = &resp1["result"]["structuredContent"];
-    let sc2 = &resp2["result"]["structuredContent"];
-    assert_eq!(sc1["exit_code"], 0, "first call should succeed: {sc1}");
-    assert_eq!(sc2["exit_code"], 0, "second call should succeed: {sc2}");
+    // Assert: both calls succeeded with identical output (both ran the command);
+    // structuredContent stays absent (inline output, non-cacheable tool)
+    assert!(
+        resp1["result"]["structuredContent"].is_null()
+            && resp2["result"]["structuredContent"].is_null(),
+        "structuredContent must be absent for inline output"
+    );
     assert_eq!(
         stdout1, stdout2,
         "both calls should produce the same output"
@@ -674,15 +673,6 @@ async fn test_exec_cache_hit_on_sequential_repeat() {
     assert!(
         stdout1.contains("cache_test_123"),
         "output should contain the echo string"
-    );
-    // Assert: cache_hit is absent (exec_command is non-cacheable)
-    assert!(
-        sc1["cache_hit"].is_null(),
-        "cache_hit must be absent for exec_command: {sc1}"
-    );
-    assert!(
-        sc2["cache_hit"].is_null(),
-        "cache_hit must be absent for exec_command: {sc2}"
     );
 }
 
@@ -698,18 +688,16 @@ async fn test_exec_cache_skipped_with_stdin() {
 
     // Act: call with stdin
     let resp = call_exec_command_raw(params).await;
-    let sc = &resp["result"]["structuredContent"];
 
-    // Assert: command executed and stdin was passed through
-    assert_eq!(sc["exit_code"], 0, "cat with stdin should succeed: {sc}");
+    // Assert: command executed and stdin was passed through; structuredContent
+    // stays absent (inline output, non-cacheable tool regardless of stdin)
+    assert!(
+        resp["result"]["structuredContent"].is_null(),
+        "structuredContent must be absent for inline output: {resp}"
+    );
     assert!(
         text_block(&resp).contains("test_stdin_data"),
         "text block should contain the stdin content: {resp}"
-    );
-    // Assert: cache_hit is absent (exec_command is non-cacheable regardless of stdin)
-    assert!(
-        sc["cache_hit"].is_null(),
-        "cache_hit must be absent for exec_command with stdin: {sc}"
     );
 }
 
@@ -751,19 +739,16 @@ async fn test_exec_slot_files_not_written_for_small_output() {
     let params = serde_json::json!({"command": cmd});
 
     let resp = call_exec_command_raw(params).await;
-    let sc = &resp["result"]["structuredContent"];
 
-    assert_eq!(
-        sc["output_truncated"], false,
-        "small output must not be truncated: {sc}"
+    // Inline output: structuredContent must be absent, so no slot-path keys
+    // can leak and clients keep the text block visible.
+    assert!(
+        resp["result"]["structuredContent"].is_null(),
+        "structuredContent must be absent for small output: {resp}"
     );
     assert!(
-        sc["stdout_path"].is_null(),
-        "stdout_path must be absent for small output: {sc}"
-    );
-    assert!(
-        sc["stderr_path"].is_null(),
-        "stderr_path must be absent for small output: {sc}"
+        text_block(&resp).contains("slot_file_test"),
+        "text block missing output: {resp}"
     );
 }
 
@@ -851,8 +836,6 @@ async fn test_exec_command_working_dir_outside_cwd() {
         !resp["result"]["isError"].as_bool().unwrap_or(true),
         "working_dir outside server CWD must succeed for exec_command: {resp}"
     );
-    let sc = &resp["result"]["structuredContent"];
-    assert_eq!(sc["exit_code"], 0, "exit_code mismatch: {sc}");
     assert!(
         text_block(&resp).contains("hello"),
         "text block missing 'hello': {resp}"
