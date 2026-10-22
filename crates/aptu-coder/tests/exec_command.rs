@@ -29,6 +29,33 @@ async fn exec_command_output_is_ansi_stripped() {
     );
 }
 
+/// exec_command must not declare an output schema: its structuredContent is
+/// conditional (attached only when metadata adds information the text block
+/// lacks), and MCP forbids omitting structuredContent from a result when the
+/// tool declares an output schema. Spec-compliant clients (pi) reject every
+/// inline-output call otherwise.
+#[tokio::test]
+async fn exec_command_declares_no_output_schema() {
+    // Arrange: list tools over a fresh in-process MCP connection.
+    let analyzer = common::make_test_analyzer();
+    let resp = common::send_raw_request(analyzer, "tools/list", serde_json::json!({})).await;
+
+    // Act: locate exec_command in the tool list.
+    let tools = resp["result"]["tools"]
+        .as_array()
+        .expect("tools/list result array");
+    let exec = tools
+        .iter()
+        .find(|t| t["name"].as_str() == Some("exec_command"))
+        .expect("exec_command in tools/list");
+
+    // Assert: no outputSchema is declared.
+    assert!(
+        exec["outputSchema"].is_null(),
+        "exec_command must not declare outputSchema: {exec}"
+    );
+}
+
 async fn call_exec_command_raw(params: serde_json::Value) -> serde_json::Value {
     call_tool_raw("exec_command", params).await
 }
