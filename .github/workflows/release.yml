@@ -370,26 +370,58 @@ jobs:
               f.writelines(out)
           PYEOF
 
-      - name: Create feature branch and commit formula update
+      - name: Create feature branch and commit formula update via GraphQL
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
+          set -euo pipefail
           cd homebrew-tap
           RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
           BRANCH_NAME="update-aptu-coder-${RELEASE_TAG}"
+          REPO="clouatre-labs/homebrew-tap"
 
-          git config user.email "hugues@linux.com"
-          git config user.name "Hugues Clouatre"
-          git fetch origin
+          # Remove stale branch from a previous run if present.
           if git ls-remote --exit-code origin "$BRANCH_NAME" 2>/dev/null; then
             echo "Stale branch $BRANCH_NAME exists, deleting..."
             git push origin --delete "$BRANCH_NAME"
           fi
-          git checkout -b "$BRANCH_NAME"
-          git rm -f Formula/code-analyze-mcp.rb 2>/dev/null || true
-          git add Formula/aptu-coder.rb
-          git commit --signoff -m "Update aptu-coder formula for ${RELEASE_TAG}"
-          git push origin "$BRANCH_NAME"
+
+          # Resolve main branch head; the branch ref is created from it.
+          MAIN_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" --jq '.object.sha')
+
+          # Create the feature branch ref first (createCommitOnBranch requires it).
+          gh api "repos/${REPO}/git/refs" \
+            -f ref="refs/heads/${BRANCH_NAME}" \
+            -f sha="${MAIN_SHA}" > /dev/null
+
+          # Commit via GraphQL createCommitOnBranch so GitHub signs the commit
+          # (committer "GitHub <noreply@github.com>"); raw git commits are
+          # unsigned and blocked by the org required_signatures ruleset.
+          # Author comes from the token identity; the Signed-off-by trailer
+          # satisfies the DCO check.
+          B64_CONTENT=$(base64 -w0 Formula/aptu-coder.rb)
+          jq -n \
+            --arg branch "${BRANCH_NAME}" \
+            --arg expectedHeadOid "${MAIN_SHA}" \
+            --arg headline "Update aptu-coder formula for ${RELEASE_TAG}" \
+            --arg path "Formula/aptu-coder.rb" \
+            --arg b64 "${B64_CONTENT}" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: {
+                input: {
+                  branch: { repositoryNameWithOwner: "clouatre-labs/homebrew-tap", branchName: $branch },
+                  expectedHeadOid: $expectedHeadOid,
+                  message: {
+                    headline: $headline,
+                    body: "Signed-off-by: Hugues Clouâtre <hugues@linux.com>"
+                  },
+                  fileChanges: {
+                    additions: [ { path: $path, contents: $b64 } ]
+                  }
+                }
+              }
+            }' | gh api graphql --input -
 
       - name: Create pull request with auto-merge
         env:
