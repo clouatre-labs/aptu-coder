@@ -50,7 +50,7 @@ Integration tests for the `aptu-coder` crate live in `crates/aptu-coder/tests/`.
 Patterns contributors consistently get wrong:
 
 - Use `ContentBlock`, not `Content` or `RawContent`
-- Every `#[tool(...)]` requires `output_schema = schema_for_type::<T>()` and `title = "..."`
+- Every `#[tool(...)]` requires `output_schema = schema_for_type::<T>()` and `title = "..."`. Sole exception: `exec_command` declares no output schema because its `structuredContent` is conditional (attached only when metadata adds information the text block lacks); MCP forbids omitting `structuredContent` from a result when the tool declares an output schema, and spec-compliant clients (pi) reject such results.
 - Tool methods take `_context: RequestContext<RoleServer>` as second parameter
 - `#[tool_router]` goes on `impl CodeAnalyzer`; `#[tool_handler]` goes on `impl ServerHandler for CodeAnalyzer` -- they are separate impls
 - Apply `.with_meta(Some(no_cache_meta()))` on every `CallToolResult::success(...)` response
