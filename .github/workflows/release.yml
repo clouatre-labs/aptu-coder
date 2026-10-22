@@ -370,9 +370,20 @@ jobs:
               f.writelines(out)
           PYEOF
 
+      - name: Mint homebrew-tap app token
+        id: tap-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.HOMEBREW_TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: clouatre-labs
+          repositories: homebrew-tap
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Create feature branch and commit formula update via GraphQL
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
         run: |
           set -euo pipefail
           cd homebrew-tap
@@ -397,8 +408,8 @@ jobs:
           # Commit via GraphQL createCommitOnBranch so GitHub signs the commit
           # (committer "GitHub <noreply@github.com>"); raw git commits are
           # unsigned and blocked by the org required_signatures ruleset.
-          # Author comes from the token identity; the Signed-off-by trailer
-          # satisfies the DCO check.
+          # Commit is web-flow signed and authored by the app bot;
+          # required_signatures and DCO both pass with no trailer.
           B64_CONTENT=$(base64 -w0 Formula/aptu-coder.rb)
           jq -n \
             --arg branch "${BRANCH_NAME}" \
@@ -412,10 +423,7 @@ jobs:
                 input: {
                   branch: { repositoryNameWithOwner: "clouatre-labs/homebrew-tap", branchName: $branch },
                   expectedHeadOid: $expectedHeadOid,
-                  message: {
-                    headline: $headline,
-                    body: "Signed-off-by: Hugues Clouâtre <hugues@linux.com>"
-                  },
+                  message: { headline: $headline },
                   fileChanges: {
                     additions: [ { path: $path, contents: $b64 } ]
                   }
@@ -425,7 +433,7 @@ jobs:
 
       - name: Create pull request with auto-merge
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
         run: |
           cd homebrew-tap
           RELEASE_TAG="v${{ needs.create-release.outputs.version }}"
