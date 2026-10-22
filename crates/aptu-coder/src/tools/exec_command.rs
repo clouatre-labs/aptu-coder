@@ -670,7 +670,21 @@ pub(crate) async fn exec_command_impl(
         }
     };
 
-    result.structured_content = Some(structured);
+    // Some clients (e.g. Claude Code) forward only structuredContent to the
+    // model when a result carries both content and structuredContent, hiding
+    // the text block. Attach structuredContent only when the metadata carries
+    // information the text block does not (truncation, overflow slot-file
+    // paths, filter effects, timeout, or drain errors); otherwise the text
+    // block stays the model-visible output.
+    let metadata_needed = output_truncated
+        || output.stdout_path.is_some()
+        || output.stderr_path.is_some()
+        || output.filter_applied.is_some()
+        || output.timed_out
+        || output.output_collection_error.is_some();
+    if metadata_needed {
+        result.structured_content = Some(structured);
+    }
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     let mut metric_builder = crate::metrics::MetricEventBuilder::new("exec_command", "ok", dur)
         .output_chars(text.len())
