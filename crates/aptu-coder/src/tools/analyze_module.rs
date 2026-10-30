@@ -15,6 +15,10 @@ use tracing::instrument;
 
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 
+/// Stable `error_subtype` value for `analyze_module` `invalid_params` telemetry,
+/// following the golden-list pattern of `analyze_symbol::AnalyzeSymbolErrorSubtype`.
+pub(crate) const PATH_IS_DIRECTORY: &str = "path_is_directory";
+
 /// Shared handler context passed to extracted `analyze_module` free functions.
 ///
 /// Bundles the `CodeAnalyzer` fields needed by the handler, keeping them
@@ -53,6 +57,7 @@ pub(crate) async fn analyze_module_handler(
             crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
                 .param_path_depth(crate::metrics::path_component_count(&param_path))
                 .error_type(Some("invalid_params".to_string()))
+                .error_subtype(Some(PATH_IS_DIRECTORY.to_string()))
                 .session_id(sid.clone())
                 .seq(Some(seq))
                 .build(),
@@ -241,4 +246,16 @@ pub(crate) async fn analyze_module_handler(
             .build(),
     );
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analyze_module_error_subtype_golden_list() {
+        // Arrange/Act/Assert: the single stable invalid_params subtype, pinned so
+        // an edit cannot silently shift the telemetry taxonomy.
+        assert_eq!(PATH_IS_DIRECTORY, "path_is_directory");
+    }
 }

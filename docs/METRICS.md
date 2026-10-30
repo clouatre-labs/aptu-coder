@@ -113,7 +113,18 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `edit_replace` | `ambiguous` | `old_text` matched more than one location and `replace_all` was not set. |
 | `edit_replace` | `stale_context` | The circuit breaker tripped after repeated `not_found`/`ambiguous` failures on the same path in one session. |
 | `edit_replace` | `stale_content_hash` | The caller-supplied `expected_content_hash` no longer matches the file on disk. |
-| `edit_replace` | `batch_validation_failed` | One or more `edits[]` entries failed preflight validation (per-index `old_text`/`new_text` checks); no write occurred and the file is unchanged. |
+| `edit_replace` | `empty_old_text` | Batch preflight: an `edits[]` entry had an empty `old_text`; no write occurred and the file is unchanged. |
+| `edit_replace` | `old_text_not_found` | Batch preflight: an `edits[]` entry's `old_text` matched no region of the file; no write occurred. |
+| `edit_replace` | `ambiguous_match` | Batch preflight: an `edits[]` entry's `old_text` matched multiple regions without `replace_all`; no write occurred. Batches mixing classes are attributed to the earliest failure. |
+| `edit_replace` | `overlapping_edits` | Batch preflight: an `edits[]` entry's region intersected an earlier edit's region; no write occurred. |
+| `edit_replace` | `path_not_a_file` | `path` points to a directory instead of a file. |
+| `edit_replace` | `invalid_edit_params` | Mutual-exclusion or emptiness validation of the batch vs single-edit form failed. |
+| `edit_replace` | `path_not_found` | Path validation: `path` does not exist. |
+| `edit_replace` | `permission_denied` | Path validation: `path` is not accessible. |
+| `edit_replace` | `path_outside_working_dir` | Path validation: `path` resolves outside the working directory. |
+| `edit_replace` | `path_missing_filename` | Path validation: `path` has no filename component (bare `..`, `.`, or trailing slash). |
+| `edit_replace` | `parent_not_directory` | Path validation: `path`'s parent is not a directory. |
+| `edit_replace` | `path_invalid` | Path validation failed for another reason (invalid path text, inaccessible CWD). |
 | `exec_command` | `working_dir_not_dir` | `working_dir` canonicalized to a path that exists but is not a directory. |
 | `exec_command` | `working_dir_not_found` | `working_dir` failed to canonicalize (does not exist or is inaccessible). |
 | `exec_command` | `cd_path_not_dir` | A promoted `cd <path> &&` prefix resolved to a path that is not a directory. |
@@ -135,6 +146,23 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `analyze_symbol` | `output_too_large` | Formatted output exceeds the size limit even with `summary=true`. |
 | `analyze_symbol` | `symbol_not_found` | `symbol` matches no indexed symbol in the target directory (caller-input failure reclassified from internal_error). |
 | `analyze_symbol` | `symbol_multiple_candidates` | `symbol` matched multiple candidates under a non-exact `match_mode`. |
+| `analyze_file` | `path_is_directory` | `path` argument points to a directory instead of a file. |
+| `analyze_file` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
+| `analyze_file` | `output_too_large` | Formatted output exceeds the size limit without `summary`/`fields`. |
+| `analyze_file` | `invalid_cursor` | The pagination `cursor` failed to decode. |
+| `analyze_file` | `path_not_found` | Path validation: `path` does not exist. |
+| `analyze_file` | `permission_denied` | Path validation: `path` is not accessible. |
+| `analyze_file` | `path_outside_working_dir` | Path validation: `path` resolves outside the working directory. |
+| `analyze_file` | `path_missing_filename` | Path validation: `path` has no filename component. |
+| `analyze_file` | `parent_not_directory` | Path validation: `path`'s parent is not a directory. |
+| `analyze_file` | `path_invalid` | Path validation failed for another reason. |
+| `analyze_module` | `path_is_directory` | `path` argument points to a directory instead of a file. |
+| `analyze_module` | `path_not_found` | Path validation: `path` does not exist. |
+| `analyze_module` | `permission_denied` | Path validation: `path` is not accessible. |
+| `analyze_module` | `path_outside_working_dir` | Path validation: `path` resolves outside the working directory. |
+| `analyze_module` | `path_missing_filename` | Path validation: `path` has no filename component. |
+| `analyze_module` | `parent_not_directory` | Path validation: `path`'s parent is not a directory. |
+| `analyze_module` | `path_invalid` | Path validation failed for another reason. |
 
 Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
 

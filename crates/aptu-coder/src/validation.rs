@@ -335,4 +335,86 @@ mod tests {
             );
         }
     }
+
+    fn path_error_subtype_classifies_all_validate_path_messages() {
+        // Arrange: every static message validate_path / validate_parent_in_root
+        // can produce, including the io-kind-prefixed variants.
+        let cases: Vec<(ErrorData, &str)> = vec![
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "path not found: foo.rs".to_string(),
+                    None,
+                ),
+                "path_not_found",
+            ),
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "permission denied: foo.rs".to_string(),
+                    None,
+                ),
+                "permission_denied",
+            ),
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "path is outside the working directory".to_string(),
+                    None,
+                ),
+                "path_outside_working_dir",
+            ),
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "path must include a filename component".to_string(),
+                    None,
+                ),
+                "path_missing_filename",
+            ),
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "parent path is not a directory".to_string(),
+                    None,
+                ),
+                "parent_not_directory",
+            ),
+            (
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INVALID_PARAMS,
+                    "path is invalid: foo.rs".to_string(),
+                    None,
+                ),
+                "path_invalid",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            // Act + Assert
+            assert_eq!(path_error_subtype(&error), expected);
+        }
+    }
+}
+
+/// Stable telemetry subtype for a path-validation `invalid_params` error,
+/// classified by the error's message. Messages are crate-internal constants
+/// (see `validate_path` / `validate_parent_in_root` above); the unit test in
+/// this module pins the mapping so a message edit cannot silently shift the
+/// subtype taxonomy.
+pub(crate) fn path_error_subtype(e: &ErrorData) -> &'static str {
+    let msg: &str = &e.message;
+    if msg.starts_with("path not found") {
+        "path_not_found"
+    } else if msg.starts_with("permission denied") {
+        "permission_denied"
+    } else if msg.starts_with("path is outside the working directory") {
+        "path_outside_working_dir"
+    } else if msg.starts_with("path must include a filename component") {
+        "path_missing_filename"
+    } else if msg.starts_with("parent path is not a directory") {
+        "parent_not_directory"
+    } else {
+        "path_invalid"
+    }
 }

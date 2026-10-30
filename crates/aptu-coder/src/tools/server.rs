@@ -225,11 +225,13 @@ pub(crate) fn emit_terminal_error_metric(
     sid: Option<String>,
     t_start: std::time::Instant,
     path: &str,
+    error_subtype: Option<&'static str>,
 ) {
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     metrics_tx.send(
         crate::metrics::MetricEventBuilder::new(tool, "error", dur)
             .error_type(Some("invalid_params".to_string()))
+            .error_subtype(error_subtype.map(std::string::ToString::to_string))
             .param_path_depth(crate::metrics::path_component_count(path))
             .session_id(sid)
             .seq(Some(seq))

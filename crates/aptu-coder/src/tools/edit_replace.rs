@@ -80,22 +80,25 @@ impl StaleContextGuard {
 
 /// Resolves and validates the target path for an edit operation.
 ///
-/// Returns `Ok(PathBuf)` on success, or `Err(CallToolResult)` when path validation
-/// fails. Directory-path errors are detected inside `edit_replace_block_inner`
+/// Returns `Ok(PathBuf)` on success, or `Err((CallToolResult, subtype))` when path
+/// validation fails, with the telemetry subtype classified from the validation
+/// error. Directory-path errors are detected inside `edit_replace_block_inner`
 /// (running in spawn_blocking) rather than here, to avoid a blocking metadata
 /// syscall in the async context.
+#[allow(clippy::result_large_err)]
 fn resolve_edit_path(
     path: &str,
     working_dir: Option<&str>,
     span: &tracing::Span,
-) -> Result<PathBuf, CallToolResult> {
+) -> Result<PathBuf, (CallToolResult, &'static str)> {
     let resolved = if let Some(wd) = working_dir {
         match validate_path_relative_to(path, true, std::path::Path::new(wd)) {
             Ok(p) => p,
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
-                return Err(err_to_tool_result(e));
+                let subtype = crate::validation::path_error_subtype(&e);
+                return Err((err_to_tool_result(e), subtype));
             }
         }
     } else {
@@ -104,7 +107,8 @@ fn resolve_edit_path(
             Err(e) => {
                 span.record("error", true);
                 span.record("error.type", "invalid_params");
-                return Err(err_to_tool_result(e));
+                let subtype = crate::validation::path_error_subtype(&e);
+                return Err((err_to_tool_result(e), subtype));
             }
         }
     };
@@ -118,6 +122,7 @@ fn send_replace_error_metric(
     t_start: std::time::Instant,
     param_path: &str,
     error_type: &str,
+    error_subtype: Option<&'static str>,
     working_dir_used: bool,
     edit_count: usize,
 ) {
@@ -126,6 +131,7 @@ fn send_replace_error_metric(
         crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
             .param_path_depth(crate::metrics::path_component_count(param_path))
             .error_type(Some(error_type.to_string()))
+            .error_subtype(error_subtype.map(std::string::ToString::to_string))
             .session_id(ctx.sid.clone())
             .seq(Some(ctx.seq))
             .working_dir_used(working_dir_used)
@@ -342,6 +348,7 @@ fn handle_edit_error(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(param_path))
                     .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some("path_not_a_file".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -364,6 +371,7 @@ fn handle_edit_error(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(param_path))
                     .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some("invalid_edit_params".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -417,11 +425,18 @@ fn handle_edit_error(
             // Circuit breaker was already incremented once by the coordinator for the
             // entire batch; this arm only formats the combined per-index diagnostic.
             span.record("error.type", "invalid_params");
+            // Per-class telemetry: split the dominant batch_validation_failed bucket
+            // by the class of the first (lowest-index) failure; batches mixing classes
+            // are attributed to their earliest failure. Model-visible text is unchanged.
+            let subtype = failures
+                .first()
+                .map(|f| f.class.as_str())
+                .unwrap_or("batch_validation_failed");
             ctx.metrics_tx.send(
                 crate::metrics::MetricEventBuilder::new("edit_replace", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(param_path))
                     .error_type(Some("invalid_params".to_string()))
-                    .error_subtype(Some("batch_validation_failed".to_string()))
+                    .error_subtype(Some(subtype.to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -515,12 +530,13 @@ pub(crate) async fn edit_replace(
     let edit_count = params.edits.as_ref().map_or(1, Vec::len);
     let resolved_path = match resolve_edit_path(&param_path, params.working_dir.as_deref(), span) {
         Ok(p) => p,
-        Err(result) => {
+        Err((result, subtype)) => {
             send_replace_error_metric(
                 &ctx,
                 t_start,
                 &param_path,
                 "invalid_params",
+                Some(subtype),
                 working_dir_used,
                 edit_count,
             );
@@ -654,6 +670,7 @@ pub(crate) async fn edit_replace(
                 t_start,
                 &param_path,
                 "internal_error",
+                None,
                 working_dir_used,
                 edit_count,
             );

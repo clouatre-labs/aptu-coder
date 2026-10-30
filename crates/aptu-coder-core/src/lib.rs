@@ -76,7 +76,8 @@ pub use analyze::{
 };
 pub use config::AnalysisConfig;
 pub use edit::{
-    BatchFailure, EditError, edit_overwrite_content, edit_replace_batch, edit_replace_block,
+    BatchFailure, BatchFailureClass, EditError, edit_overwrite_content, edit_replace_batch,
+    edit_replace_block,
 };
 pub use graph::{GraphError, InternalCallChain};
 pub use lang::{language_for_extension, supported_languages};
