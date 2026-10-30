@@ -221,7 +221,7 @@ pub struct AnalyzeSymbolParams {
     /// Directory path to search for the symbol
     pub path: String,
 
-    /// Symbol name to build call graph for (function or method, plain name without :: path; must be defined in the directory given by path). Example: `parse_config` finds all callers and callees of that function.
+    /// Plain symbol name (no :: path) defined in the directory given by path; function or method. Example: `parse_config` finds all callers and callees of that function.
     pub symbol: String,
 
     /// Symbol matching mode (default: exact). exact: case-sensitive exact match. insensitive: case-insensitive exact match. prefix: case-insensitive prefix match. contains: case-insensitive substring match.

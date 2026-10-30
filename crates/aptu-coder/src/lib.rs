@@ -566,7 +566,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_symbol",
         title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is who calls X or what does X call. Modes: call_graph (default), import_lookup, def_use. symbol must be a plain unqualified name (no :: paths) defined in that directory; if unsure of the name, discover it with analyze_file or analyze_directory first, and use match_mode=insensitive/prefix/contains for uncertain matches. Paginates with an opaque cursor (20). Fails if file path supplied or if impl_only=true on a non-Rust directory. git_ref restricts to changed files.",
+        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is who calls X or what does X call. Modes: call_graph (default), import_lookup, def_use. symbol must be a plain unqualified name defined in that directory. Paginates with an opaque cursor (20). Fails if file path supplied or if impl_only=true on a non-Rust directory. git_ref restricts to changed files.",
         annotations(
             title = "Analyze Symbol",
             read_only_hint = true,
