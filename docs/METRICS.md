@@ -133,6 +133,8 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `analyze_symbol` | `pagination_def_use_invalid` | DefUse-mode pagination rejected the requested cursor/offset. |
 | `analyze_symbol` | `impl_only_requires_rust` | `impl_only=true` on a directory containing no Rust source files. |
 | `analyze_symbol` | `output_too_large` | Formatted output exceeds the size limit even with `summary=true`. |
+| `analyze_symbol` | `symbol_not_found` | `symbol` matches no indexed symbol in the target directory (caller-input failure reclassified from internal_error). |
+| `analyze_symbol` | `symbol_multiple_candidates` | `symbol` matched multiple candidates under a non-exact `match_mode`. |
 
 Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
 
