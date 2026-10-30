@@ -82,6 +82,10 @@ pub(crate) enum AnalyzeSymbolErrorSubtype {
     ImplOnlyRequiresRust,
     /// Formatted output exceeds the size limit even with `summary=true`.
     OutputTooLarge,
+    /// `symbol` matches no indexed symbol in the target directory.
+    SymbolNotFound,
+    /// `symbol` matched multiple candidates under a non-exact `match_mode`.
+    SymbolMultipleCandidates,
 }
 
 impl AnalyzeSymbolErrorSubtype {
@@ -101,6 +105,8 @@ impl AnalyzeSymbolErrorSubtype {
             Self::PaginationDefUseInvalid => "pagination_def_use_invalid",
             Self::ImplOnlyRequiresRust => "impl_only_requires_rust",
             Self::OutputTooLarge => "output_too_large",
+            Self::SymbolNotFound => "symbol_not_found",
+            Self::SymbolMultipleCandidates => "symbol_multiple_candidates",
         }
     }
 }
@@ -1079,11 +1085,13 @@ mod tests {
         let _ = analyze_symbol_handler(ctx, params, call).await;
 
         // Assert: the handler progressed past the guard, so no path_empty
-        // invalid_params event fired (the analysis itself may still fail internally
-        // in a bare test environment, but that carries no invalid_params subtype).
+        // invalid_params event fired. The symbol is not defined at depth 1 of the
+        // crate root, so analysis ends in the reclassified caller-input failure:
+        // invalid_params with the symbol_not_found subtype (previously misclassified
+        // as internal_error before issue #1766).
         let event = rx.try_recv().expect("expected a metric event");
-        assert_eq!(event.error_type.as_deref(), Some("internal_error"));
-        assert_eq!(event.error_subtype.as_deref(), None);
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(event.error_subtype.as_deref(), Some("symbol_not_found"));
     }
 
     #[test]
@@ -1158,6 +1166,8 @@ mod tests {
             AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid,
             AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust,
             AnalyzeSymbolErrorSubtype::OutputTooLarge,
+            AnalyzeSymbolErrorSubtype::SymbolNotFound,
+            AnalyzeSymbolErrorSubtype::SymbolMultipleCandidates,
         ] {
             // Act
             let expected = match subtype {
@@ -1176,6 +1186,8 @@ mod tests {
                 AnalyzeSymbolErrorSubtype::PaginationDefUseInvalid => "pagination_def_use_invalid",
                 AnalyzeSymbolErrorSubtype::ImplOnlyRequiresRust => "impl_only_requires_rust",
                 AnalyzeSymbolErrorSubtype::OutputTooLarge => "output_too_large",
+                AnalyzeSymbolErrorSubtype::SymbolNotFound => "symbol_not_found",
+                AnalyzeSymbolErrorSubtype::SymbolMultipleCandidates => "symbol_multiple_candidates",
             };
 
             // Assert
@@ -1245,6 +1257,75 @@ mod tests {
         let (_, subtype) = result.expect_err("expected a decode failure for a malformed cursor");
         assert_eq!(subtype, AnalyzeSymbolErrorSubtype::InvalidCursor);
         assert_eq!(subtype.as_str(), "invalid_cursor");
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_symbol_not_found_sets_invalid_params_with_hint() {
+        // Arrange: a Rust directory and a symbol that matches nothing; the analysis
+        // failure is a caller-input error and must be invalid_params, not internal_error.
+        let (ctx, mut rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").expect("write temp file");
+        let path = dir.path().to_str().expect("valid utf8 path").to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "no_such_symbol_anywhere",
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let result = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert: telemetry records invalid_params + symbol_not_found, and the
+        // model-visible result keeps the GraphError hint text.
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(event.error_subtype.as_deref(), Some("symbol_not_found"));
+        let result = result.expect("handler returns a result, not a transport error");
+        assert!(result.is_error.is_some());
+        let text = match result.content.first() {
+            Some(rmcp::model::ContentBlock::Text(t)) => t.text.clone(),
+            other => panic!("expected text content, got {other:?}"),
+        };
+        assert!(
+            text.contains("Symbol not found"),
+            "hint must be preserved in the message, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn analyze_symbol_handler_multiple_candidates_sets_invalid_params_subtype() {
+        // Arrange: contains match matching two symbols, so resolution is ambiguous —
+        // also a caller-input failure, distinct from symbol_not_found.
+        let (ctx, mut rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("lib.rs"),
+            "fn alpha() {}\nfn alphabet() {}\n",
+        )
+        .expect("write temp file");
+        let path = dir.path().to_str().expect("valid utf8 path").to_string();
+        let params: AnalyzeSymbolParams = serde_json::from_value(serde_json::json!({
+            "path": path,
+            "symbol": "alpha",
+            "match_mode": "contains",
+        }))
+        .expect("valid AnalyzeSymbolParams JSON");
+        let call = test_call(path.clone());
+
+        // Act
+        let result = analyze_symbol_handler(ctx, params, call).await;
+
+        // Assert
+        let event = rx.try_recv().expect("expected an error metric event");
+        assert_eq!(event.error_type.as_deref(), Some("invalid_params"));
+        assert_eq!(
+            event.error_subtype.as_deref(),
+            Some("symbol_multiple_candidates")
+        );
+        let result = result.expect("handler returns a result, not a transport error");
+        assert!(result.is_error.is_some());
     }
 
     #[tokio::test]

@@ -159,20 +159,68 @@ pub(crate) async fn run_focused_with_auto_summary(
             None,
         )
     })?
-    .map_err(|e| {
-        emit_error_metric(
-            ctx,
-            "internal_error",
-            None,
-            t_start,
-            AnalyzeSymbolErrorParams::from_params(params, None)
-                .with_error_kind(AnalyzeSymbolErrorKind::AnalysisFailed),
-        );
-        ErrorData::new(
-            rmcp::model::ErrorCode::INTERNAL_ERROR,
-            format!("analysis failed: {e}"),
-            None,
-        )
+    .map_err(|e| match &e {
+        // Caller-input failures: the symbol name (or its match mode) is the client's
+        // responsibility, so per MCP JSON-RPC norms these are invalid_params (-32602),
+        // not internal faults. The Display of both GraphError variants embeds the
+        // corrective hint built in `crates/aptu-coder-core/src/graph/call_graph.rs`,
+        // preserving it in the model-visible message.
+        analyze::AnalyzeError::Graph(aptu_coder_core::graph::GraphError::SymbolNotFound {
+            ..
+        }) => {
+            emit_error_metric(
+                ctx,
+                "invalid_params",
+                Some(AnalyzeSymbolErrorSubtype::SymbolNotFound),
+                t_start,
+                AnalyzeSymbolErrorParams::from_params(params, None),
+            );
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                e.to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "adjust match_mode or refine the symbol name",
+                )),
+            )
+        }
+        analyze::AnalyzeError::Graph(aptu_coder_core::graph::GraphError::MultipleCandidates {
+            ..
+        }) => {
+            emit_error_metric(
+                ctx,
+                "invalid_params",
+                Some(AnalyzeSymbolErrorSubtype::SymbolMultipleCandidates),
+                t_start,
+                AnalyzeSymbolErrorParams::from_params(params, None),
+            );
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                e.to_string(),
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "use match_mode=exact to target one of the listed candidates",
+                )),
+            )
+        }
+        // Genuine analysis faults (parse/IO/internal graph errors) remain internal_error.
+        _ => {
+            emit_error_metric(
+                ctx,
+                "internal_error",
+                None,
+                t_start,
+                AnalyzeSymbolErrorParams::from_params(params, None)
+                    .with_error_kind(AnalyzeSymbolErrorKind::AnalysisFailed),
+            );
+            ErrorData::new(
+                rmcp::model::ErrorCode::INTERNAL_ERROR,
+                format!("analysis failed: {e}"),
+                None,
+            )
+        }
     })?;
 
     if params.output_control.summary.is_none() && output.formatted.len() > SIZE_LIMIT {
