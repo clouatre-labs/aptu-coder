@@ -366,6 +366,7 @@ impl CodeAnalyzer {
         sid: Option<String>,
         t_start: std::time::Instant,
         path: &str,
+        error_subtype: Option<&'static str>,
     ) {
         crate::tools::server::emit_terminal_error_metric(
             &self.metrics_tx,
@@ -374,6 +375,7 @@ impl CodeAnalyzer {
             sid,
             t_start,
             path,
+            error_subtype,
         );
     }
 
@@ -475,6 +477,7 @@ impl CodeAnalyzer {
                     sid.clone(),
                     t_start,
                     &params.path,
+                    None,
                 );
                 return Ok(err_to_tool_result(e));
             }
@@ -541,6 +544,7 @@ impl CodeAnalyzer {
                     sid.clone(),
                     t_start,
                     &params.path,
+                    Some(crate::validation::path_error_subtype(&e)),
                 );
                 return Ok(err_to_tool_result(e));
             }
@@ -595,6 +599,7 @@ impl CodeAnalyzer {
                     sid.clone(),
                     t_start,
                     &params.path,
+                    None,
                 );
                 return Ok(err_to_tool_result(e));
             }
@@ -657,6 +662,7 @@ impl CodeAnalyzer {
                     sid.clone(),
                     t_start,
                     &params.path,
+                    Some(crate::validation::path_error_subtype(&e)),
                 );
                 return Ok(err_to_tool_result(e));
             }

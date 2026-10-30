@@ -135,6 +135,19 @@ pub(crate) async fn handle_file_details_mode(
     }
 }
 
+/// Stable `error_subtype` values for `analyze_file` `invalid_params` telemetry,
+/// following the golden-list pattern of `analyze_symbol::AnalyzeSymbolErrorSubtype`.
+pub(crate) mod subtypes {
+    /// `path` argument points to a directory instead of a file.
+    pub(super) const PATH_IS_DIRECTORY: &str = "path_is_directory";
+    /// `summary=true` combined with a pagination `cursor`.
+    pub(super) const SUMMARY_CURSOR_CONFLICT: &str = "summary_cursor_conflict";
+    /// Formatted output exceeds the size limit without summary/fields.
+    pub(super) const OUTPUT_TOO_LARGE: &str = "output_too_large";
+    /// The pagination `cursor` failed to decode.
+    pub(super) const INVALID_CURSOR: &str = "invalid_cursor";
+}
+
 /// Emit a terminal `result="error"` metric on an `invalid_params` early return
 /// so the invocation does not disappear from the shutdown summary call_count.
 /// `error_type` reflects the failure class: `invalid_params` for validation
@@ -149,12 +162,14 @@ fn emit_validation_error(
     param_path: &str,
     cursor: Option<&str>,
     error_type: &str,
+    error_subtype: Option<&'static str>,
 ) {
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_file", "error", dur)
             .param_path_depth(crate::metrics::path_component_count(param_path))
             .error_type(Some(error_type.to_string()))
+            .error_subtype(error_subtype.map(std::string::ToString::to_string))
             .session_id(sid.clone())
             .seq(Some(seq))
             .file_ext(crate::metrics::path_file_ext(param_path))
@@ -194,6 +209,7 @@ pub(crate) async fn analyze_file_handler(
             &param_path,
             cursor,
             "invalid_params",
+            Some(subtypes::PATH_IS_DIRECTORY),
         );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -220,6 +236,7 @@ pub(crate) async fn analyze_file_handler(
             &param_path,
             cursor,
             "invalid_params",
+            Some(subtypes::SUMMARY_CURSOR_CONFLICT),
         );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -294,6 +311,7 @@ pub(crate) async fn analyze_file_handler(
             &param_path,
             cursor,
             "invalid_params",
+            Some(subtypes::OUTPUT_TOO_LARGE),
         );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -311,6 +329,11 @@ pub(crate) async fn analyze_file_handler(
         Ok(o) => o,
         Err(e) => {
             return super::common::emit_internal_error(span, "invalid_params", e, |error_type| {
+                let subtype = if error_type == "invalid_params" {
+                    Some(subtypes::INVALID_CURSOR)
+                } else {
+                    None
+                };
                 emit_validation_error(
                     ctx,
                     &params,
@@ -320,6 +343,7 @@ pub(crate) async fn analyze_file_handler(
                     &param_path,
                     cursor,
                     error_type,
+                    subtype,
                 );
             });
         }
@@ -357,6 +381,7 @@ pub(crate) async fn analyze_file_handler(
                             &param_path,
                             cursor,
                             error_type,
+                            None,
                         );
                     },
                 );
@@ -472,11 +497,22 @@ mod tests {
             "src/lib.rs",
             None,
             "internal_error",
+            None,
         );
 
         // Assert
         let event = rx.try_recv().expect("expected a terminal error metric");
         assert_eq!(event.result, "error");
         assert_eq!(event.error_type.as_deref(), Some("internal_error"));
+    }
+
+    #[test]
+    fn analyze_file_error_subtype_golden_list() {
+        // Arrange/Act/Assert: every stable subtype constant, pinned so an edit
+        // cannot silently shift the telemetry taxonomy.
+        assert_eq!(subtypes::PATH_IS_DIRECTORY, "path_is_directory");
+        assert_eq!(subtypes::SUMMARY_CURSOR_CONFLICT, "summary_cursor_conflict");
+        assert_eq!(subtypes::OUTPUT_TOO_LARGE, "output_too_large");
+        assert_eq!(subtypes::INVALID_CURSOR, "invalid_cursor");
     }
 }

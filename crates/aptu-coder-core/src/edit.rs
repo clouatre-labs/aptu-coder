@@ -62,6 +62,40 @@ fn format_batch_failures(failures: &[BatchFailure]) -> String {
         .join("; ")
 }
 
+/// Machine-readable class of a batch edit validation failure, recorded on
+/// `BatchFailure::class` so `edit_replace` telemetry can split the dominant
+/// `batch_validation_failed` error bucket into per-cause subtypes.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchFailureClass {
+    /// `old_text` was empty after normalization.
+    EmptyOldText,
+    /// `old_text` matched no region of the file (including trim-end fallback).
+    OldTextNotFound,
+    /// `old_text` matched multiple regions without `replace_all`.
+    AmbiguousMatch,
+    /// The edit region intersected an earlier edit's region.
+    OverlappingEdits,
+}
+
+impl BatchFailureClass {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyOldText => "empty_old_text",
+            Self::OldTextNotFound => "old_text_not_found",
+            Self::AmbiguousMatch => "ambiguous_match",
+            Self::OverlappingEdits => "overlapping_edits",
+        }
+    }
+}
+
+impl std::fmt::Display for BatchFailureClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Per-index failure detail for [`EditError::BatchValidationFailed`].
 #[derive(Debug, Clone)]
 pub struct BatchFailure {
@@ -69,6 +103,8 @@ pub struct BatchFailure {
     pub index: usize,
     /// Human-readable reason including the 1-based line number where relevant.
     pub message: String,
+    /// Machine-readable failure class for telemetry subtyping.
+    pub class: BatchFailureClass,
 }
 
 fn write_file_atomic(path: &Path, content: &str) -> Result<(), EditError> {
@@ -436,10 +472,19 @@ pub fn edit_replace_batch(
     let mut all_spans: Vec<(usize, usize, usize)> = Vec::new(); // (start, end, edit_index)
     let mut failures: Vec<BatchFailure> = Vec::new();
     for (index, edit) in edits.iter().enumerate() {
-        let mut push = |message: String| failures.push(BatchFailure { index, message });
+        let mut push = |message: String, class: BatchFailureClass| {
+            failures.push(BatchFailure {
+                index,
+                message,
+                class,
+            })
+        };
         let norm_old = normalize_for_match(&edit.old_text);
         if norm_old.is_empty() {
-            push("old_text must not be empty".to_string());
+            push(
+                "old_text must not be empty".to_string(),
+                BatchFailureClass::EmptyOldText,
+            );
             continue;
         }
         let norm_old_len = norm_old.len();
@@ -452,10 +497,13 @@ pub fn edit_replace_batch(
             // trim-end matching. Spans are already in original byte space.
             let spans = find_trim_end_matches(&norm_content, norm_old.as_ref(), &crlf_positions);
             if spans.is_empty() {
-                push(format!(
-                    "old_text not found in {} — verify the text matches exactly, including whitespace and newlines",
-                    path.display()
-                ));
+                push(
+                    format!(
+                        "old_text not found in {} — verify the text matches exactly, including whitespace and newlines",
+                        path.display()
+                    ),
+                    BatchFailureClass::OldTextNotFound,
+                );
                 continue;
             }
             if spans.len() > 1 && !edit.replace_all.unwrap_or(false) {
@@ -465,11 +513,14 @@ pub fn edit_replace_batch(
                     .map(|l| l.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                push(format!(
-                    "old_text appears {} times in {} (lines {lines}) — make old_text longer and more specific to uniquely identify the block",
-                    spans.len(),
-                    path.display()
-                ));
+                push(
+                    format!(
+                        "old_text appears {} times in {} (lines {lines}) — make old_text longer and more specific to uniquely identify the block",
+                        spans.len(),
+                        path.display()
+                    ),
+                    BatchFailureClass::AmbiguousMatch,
+                );
                 continue;
             }
             for (start, end) in spans {
@@ -483,11 +534,14 @@ pub fn edit_replace_batch(
                 .map(|&o| line_at(o).to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            push(format!(
-                "old_text appears {} times in {} (lines {lines}) — make old_text longer and more specific to uniquely identify the block",
-                matches.len(),
-                path.display()
-            ));
+            push(
+                format!(
+                    "old_text appears {} times in {} (lines {lines}) — make old_text longer and more specific to uniquely identify the block",
+                    matches.len(),
+                    path.display()
+                ),
+                BatchFailureClass::AmbiguousMatch,
+            );
             continue;
         }
         for norm_start in matches {
@@ -510,6 +564,7 @@ pub fn edit_replace_batch(
                 message: format!(
                     "edit region (bytes {start}..{end}) overlaps an earlier edit region ending at byte {prev_end}; all edits must target non-overlapping regions"
                 ),
+                class: BatchFailureClass::OverlappingEdits,
             });
             continue;
         }
@@ -860,6 +915,66 @@ mod tests {
                     .as_str()
             )
         );
+    }
+
+    #[test]
+    fn edit_replace_batch_failure_classes_cover_all_variants() {
+        // Arrange: one file per class; each batch fails for a distinct reason.
+        let dir = tempfile::tempdir().unwrap();
+
+        // empty_old_text
+        let path = dir.path().join("empty.txt");
+        std::fs::write(&path, "content").unwrap();
+        match edit_replace_batch(&path, &[be("", "X")], None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert_eq!(failures[0].class, BatchFailureClass::EmptyOldText);
+                assert_eq!(failures[0].class.as_str(), "empty_old_text");
+            }
+            other => panic!("expected empty_old_text failure, got {other:?}"),
+        }
+
+        // old_text_not_found
+        let path = dir.path().join("missing.txt");
+        std::fs::write(&path, "content").unwrap();
+        match edit_replace_batch(&path, &[be("absent", "X")], None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert_eq!(failures[0].class, BatchFailureClass::OldTextNotFound);
+                assert_eq!(failures[0].class.as_str(), "old_text_not_found");
+            }
+            other => panic!("expected old_text_not_found failure, got {other:?}"),
+        }
+
+        // ambiguous_match
+        let path = dir.path().join("ambiguous.txt");
+        std::fs::write(&path, "dup dup").unwrap();
+        match edit_replace_batch(&path, &[be("dup", "X")], None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert_eq!(failures[0].class, BatchFailureClass::AmbiguousMatch);
+                assert_eq!(failures[0].class.as_str(), "ambiguous_match");
+            }
+            other => panic!("expected ambiguous_match failure, got {other:?}"),
+        }
+
+        // overlapping_edits
+        let path = dir.path().join("overlap.txt");
+        std::fs::write(&path, "hello world").unwrap();
+        match edit_replace_batch(&path, &[be("hello", "X"), be("hello w", "Y")], None) {
+            Err(EditError::BatchValidationFailed { failures }) => {
+                assert!(
+                    failures
+                        .iter()
+                        .any(|f| f.class == BatchFailureClass::OverlappingEdits)
+                );
+                assert_eq!(
+                    failures
+                        .iter()
+                        .find(|f| f.class == BatchFailureClass::OverlappingEdits)
+                        .map(|f| f.class.as_str()),
+                    Some("overlapping_edits")
+                );
+            }
+            other => panic!("expected overlapping_edits failure, got {other:?}"),
+        }
     }
 
     /// Asserts the batch fails validation with a failure at `expected_index`.
