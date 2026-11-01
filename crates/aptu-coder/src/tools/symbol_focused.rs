@@ -378,71 +378,8 @@ pub(crate) async fn handle_focused_mode(
         return Ok((CacheTier::L1Memory, (*cached).clone()));
     }
 
-    // Compute L2 disk cache key by streaming CallGraphCacheKey fields through blake3.
-    // Same pattern as analyze_directory: symbol + mode + root_path + git_ref + max_depth
-    // + match_mode + impl_only + per-file mtimes.
-    let disk_key = {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(params.symbol.as_bytes());
-        let mode_str = match serde_json::to_string(
-            params
-                .mode
-                .as_ref()
-                .unwrap_or(&SymbolAnalysisMode::default()),
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                // Serialization of a unit-like enum should never fail; if it does,
-                // an empty string would produce a non-unique cache key, so warn loudly.
-                tracing::warn!(
-                    error = %e,
-                    "analyze_symbol: failed to serialize mode for disk cache key; \
-                     falling back to empty string (cache key may collide)"
-                );
-                String::new()
-            }
-        };
-        hasher.update(mode_str.as_bytes());
-        hasher.update(path.as_os_str().to_string_lossy().as_bytes());
-        if let Some(ref git_ref) = params.git_ref {
-            hasher.update(git_ref.as_bytes());
-        }
-        hasher.update(&params.max_depth.unwrap_or(1).to_le_bytes());
-        let match_mode_str =
-            match serde_json::to_string(&params.match_mode.clone().unwrap_or_default()) {
-                Ok(s) => s,
-                Err(e) => {
-                    // Serialization of a unit-like enum should never fail; if it does,
-                    // an empty string would produce a non-unique cache key, so warn loudly.
-                    tracing::warn!(
-                        error = %e,
-                        "analyze_symbol: failed to serialize match_mode for disk cache key; \
-                         falling back to empty string (cache key may collide)"
-                    );
-                    String::new()
-                }
-            };
-        hasher.update(match_mode_str.as_bytes());
-        hasher.update(&[u8::from(params.impl_only.unwrap_or(false))]);
-        // Stream sorted per-file (path, mtime_nanos) pairs for freshness.
-        let mut sorted_entries: Vec<_> = entries.iter().filter(|e| !e.is_dir).collect();
-        sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
-        for entry in &sorted_entries {
-            // `path` is always a canonical absolute path (validated upstream by
-            // validate_path before handle_focused_mode is called), so strip_prefix
-            // succeeds for every entry under it. The unwrap_or fallback retains the
-            // full absolute path, which is still unique and safe for hashing.
-            let rel = entry.path.strip_prefix(path).unwrap_or(&entry.path);
-            hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
-            let mtime_nanos = entry
-                .mtime
-                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0);
-            hasher.update(&mtime_nanos.to_le_bytes());
-        }
-        hasher.finalize()
-    };
+    // Compute L2 disk cache key (single hashing site: CallGraphCacheKey::disk_key).
+    let disk_key = cache_key.disk_key();
 
     // Check L2 disk cache.
     if let Some(mut cached) = ctx
