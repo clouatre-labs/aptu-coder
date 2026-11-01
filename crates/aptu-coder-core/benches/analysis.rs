@@ -470,6 +470,54 @@ fn structural_graph_query_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
+fn cache_paths_benchmark(c: &mut Criterion) {
+    use aptu_coder_core::cache::DirectoryCacheKey;
+    use aptu_coder_core::types::AnalysisMode;
+
+    let root = Path::new("src");
+    let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
+    // AnalysisMode is #[non_exhaustive]; deserialize the Overview variant.
+    let mode: AnalysisMode =
+        serde_json::from_str("\"overview\"").expect("valid AnalysisMode variant");
+
+    let mut group = c.benchmark_group("cache_paths");
+    group.sample_size(10);
+
+    // Directory key build: parallel map + sort over walk entries.
+    group.bench_function("directory_key_build", |b| {
+        b.iter(|| {
+            DirectoryCacheKey::from_entries(
+                std::hint::black_box(&entries),
+                None,
+                mode.clone(),
+                None,
+            )
+        });
+    });
+
+    // Disk key: blake3 streaming over the sorted key fields.
+    let key = DirectoryCacheKey::from_entries(&entries, None, mode, None);
+    group.bench_function("directory_disk_key_hash", |b| {
+        b.iter(|| key.disk_key(root));
+    });
+
+    // File-hash path: single read + blake3 (analyze_file L2 key).
+    group.bench_function("file_read_hash", |b| {
+        b.iter(|| {
+            let bytes = std::fs::read("src/lib.rs").unwrap_or_default();
+            blake3::hash(std::hint::black_box(&bytes))
+        });
+    });
+
+    // Symbol put path: blake3 over stored formatted text.
+    let formatted = String::from_utf8(std::fs::read("src/lib.rs").unwrap_or_default()).unwrap();
+    group.bench_function("symbol_output_hash", |b| {
+        b.iter(|| blake3::hash(std::hint::black_box(formatted.as_bytes())))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     overview_benchmark,
@@ -482,6 +530,7 @@ criterion_group!(
     analyze_directory_depth_benchmark,
     call_graph_cache_benchmark,
     structural_graph_benchmark,
-    structural_graph_query_benchmark
+    structural_graph_query_benchmark,
+    cache_paths_benchmark
 );
 criterion_main!(benches);

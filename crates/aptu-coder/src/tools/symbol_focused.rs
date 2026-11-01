@@ -445,10 +445,15 @@ pub(crate) async fn handle_focused_mode(
     };
 
     // Check L2 disk cache.
-    if let Some(cached) = ctx
+    if let Some(mut cached) = ctx
         .disk_cache
         .get::<analyze::FocusedAnalysisOutput>("analyze_symbol", &disk_key)
     {
+        // Recompute the put-time content hash for the L1 promotion; the
+        // serialized form does not carry it.
+        if cached.content_hash.is_none() {
+            cached.content_hash = Some(format!("{}", blake3::hash(cached.formatted.as_bytes())));
+        }
         let arc = Arc::new(cached.clone());
         ctx.call_graph_cache.put(cache_key, arc);
         return Ok((CacheTier::L2Disk, cached));
@@ -482,6 +487,10 @@ pub(crate) async fn handle_focused_mode(
             );
         }
     }
+
+    // Store the put-time content hash over the stored (pre-cursor) formatted
+    // text so L1 hits can serve _meta.content_hash without re-hashing.
+    output.content_hash = Some(format!("{}", blake3::hash(output.formatted.as_bytes())));
 
     // Store in L1 cache for subsequent calls.
     ctx.call_graph_cache

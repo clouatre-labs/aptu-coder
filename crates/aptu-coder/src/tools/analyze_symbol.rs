@@ -484,7 +484,16 @@ async fn handle_import_lookup(
 /// Shared by the call-graph and detail result paths so the hash/meta prologue
 /// is not duplicated.
 fn ok_result_with_hash(final_text: &str) -> CallToolResult {
-    let content_hash = format!("{}", blake3::hash(final_text.as_bytes()));
+    ok_result_with_precomputed_hash(final_text, None)
+}
+
+/// Like [`ok_result_with_hash`], but reuses a put-time hash when available so
+/// cache hits need no `blake3::hash` over the full output.
+fn ok_result_with_precomputed_hash(final_text: &str, content_hash: Option<&str>) -> CallToolResult {
+    let content_hash = content_hash.map_or_else(
+        || format!("{}", blake3::hash(final_text.as_bytes())),
+        ToOwned::to_owned,
+    );
     let mut meta = no_cache_meta().0;
     meta.insert(
         "content_hash".to_string(),
@@ -681,9 +690,11 @@ async fn handle_call_graph(
     // Update next_cursor in output
     output.next_cursor.clone_from(&callee_cursor);
 
-    // Build final text output with pagination cursor if present
-    let mut final_text = output.formatted.clone();
-    if let Some(next) = callee_cursor {
+    // Build final text output with pagination cursor if present.
+    // Without a cursor, reuse the put-time content hash and move the formatted
+    // text: no full-output String clone and no blake3::hash on cache hits.
+    let (final_text, precomputed_hash) = if let Some(next) = callee_cursor {
+        let mut final_text = output.formatted.clone();
         final_text.push('\n');
         final_text.push_str("NEXT_CURSOR: ");
         final_text.push_str(&next);
@@ -691,12 +702,16 @@ async fn handle_call_graph(
             final_text.push('\n');
             final_text.push_str(super::common::PAGINATION_USAGE);
         }
-    }
+        (final_text, None)
+    } else {
+        let hash = output.content_hash.clone();
+        (std::mem::take(&mut output.formatted), hash)
+    };
 
     // Record cache tier in span
     tracing::Span::current().record("cache_tier", graph_cache_tier.as_str());
 
-    let result = ok_result_with_hash(&final_text);
+    let result = ok_result_with_precomputed_hash(&final_text, precomputed_hash.as_deref());
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
 
     // Collect cache stats for metrics

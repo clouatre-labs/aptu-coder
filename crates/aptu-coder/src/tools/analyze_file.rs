@@ -60,7 +60,7 @@ pub(crate) async fn handle_file_details_mode(
         return Ok((arc, CacheTier::L2Disk));
     }
 
-    match analyze::analyze_file(&params.path, None) {
+    match analyze::analyze_file_from_bytes(&params.path, file_bytes.clone(), None) {
         Ok(output) => {
             let arc_output = Arc::new(output);
             if let Some(key) = cache_key {

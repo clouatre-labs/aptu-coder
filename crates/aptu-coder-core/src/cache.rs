@@ -12,7 +12,7 @@ use crate::types::{AnalysisMode, SymbolAnalysisMode, SymbolMatchMode};
 use lru::LruCache;
 use rayon::prelude::*;
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -108,6 +108,35 @@ impl DirectoryCacheKey {
             max_depth,
             git_ref: git_ref.map(ToOwned::to_owned),
         }
+    }
+
+    /// Derive the L2 disk cache key by hashing this key's fields with blake3.
+    ///
+    /// Note: mtimes are normalized to whole seconds (`as_secs`), so a sub-second
+    /// metadata change does not invalidate the disk entry; this is a deliberate
+    /// one-time disk-entry invalidation boundary from the `SystemTime` -> secs
+    /// normalization.
+    #[must_use]
+    pub fn disk_key(&self, root: &Path) -> blake3::Hash {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(root.to_string_lossy().as_bytes());
+        for (path, mtime) in &self.files {
+            hasher.update(path.to_string_lossy().as_bytes());
+            hasher.update(
+                &mtime
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs())
+                    .to_le_bytes(),
+            );
+        }
+        hasher.update(format!("{:?}", self.mode).as_bytes());
+        if let Some(depth) = self.max_depth {
+            hasher.update(&depth.to_le_bytes());
+        }
+        if let Some(git_ref) = &self.git_ref {
+            hasher.update(git_ref.as_bytes());
+        }
+        hasher.finalize()
     }
 }
 
@@ -544,6 +573,38 @@ mod tests {
             mtime: None,
             canonical_path: PathBuf::new(),
         }
+    }
+
+    #[test]
+    fn test_disk_key_stable_and_mtime_sensitive() {
+        // Arrange: two entries with distinct whole-second mtimes.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut a = file_entry(&dir.path().join("a.rs"));
+        let b = file_entry(&dir.path().join("b.rs"));
+        a.mtime = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100));
+
+        // Act
+        let key1 = DirectoryCacheKey::from_entries(
+            &[a.clone(), b.clone()],
+            None,
+            AnalysisMode::Overview,
+            None,
+        );
+        let key2 =
+            DirectoryCacheKey::from_entries(&[a.clone(), b], None, AnalysisMode::Overview, None);
+        let stable = key1.disk_key(dir.path()) == key2.disk_key(dir.path());
+
+        // Mutate mtime by a whole second: the disk key must change (staleness).
+        a.mtime = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(101));
+        let key3 = DirectoryCacheKey::from_entries(&[a], None, AnalysisMode::Overview, None);
+
+        // Assert
+        assert!(stable, "identical entries must produce identical disk keys");
+        assert_ne!(
+            key1.disk_key(dir.path()),
+            key3.disk_key(dir.path()),
+            "a second-level mtime change must change the disk key"
+        );
     }
 
     #[test]
