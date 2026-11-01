@@ -508,11 +508,14 @@ pub(crate) async fn analyze_directory_handler(
     );
 
     let mut final_text = output.formatted.clone();
-    if use_paginated && let Some(cursor) = paginated.next_cursor {
+    if use_paginated && let Some(next) = paginated.next_cursor {
         final_text.push('\n');
         final_text.push_str("NEXT_CURSOR: ");
-        final_text.push_str(&cursor);
-        final_text.push_str("\nPagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.");
+        final_text.push_str(&next);
+        if cursor.is_none() {
+            final_text.push('\n');
+            final_text.push_str(super::common::PAGINATION_USAGE);
+        }
     }
 
     tracing::Span::current().record("cache_tier", dir_cache_hit.as_str());
@@ -1028,8 +1031,71 @@ mod tests {
             "page 2 must terminate: {text2}"
         );
         assert!(
+            !text2.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "last page must not carry the usage sentence: {text2}"
+        );
+        assert!(
             text2.contains("file_59.rs"),
             "page 2 must contain remaining files"
+        );
+    }
+
+    #[tokio::test]
+    async fn pagination_page_2_suppresses_usage_sentence() {
+        // Arrange: 110 files span 3 pages at fixed page size 50, so page 2
+        // carries a cursor while being neither the first nor the last page.
+        let cwd = std::env::current_dir().expect("cwd");
+        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+        for i in 0..110 {
+            let name = dir.path().join(format!("file_{i:03}.rs"));
+            std::fs::write(&name, "fn f() {}").expect("write file");
+        }
+        let path = dir.path().to_str().expect("utf8").to_string();
+        let (ctx, _rx) = test_context();
+        let make_params = |cursor: Option<String>| {
+            let mut v = serde_json::json!({ "path": path, "summary": false, "max_depth": 0 });
+            if let Some(c) = cursor {
+                v["cursor"] = serde_json::json!(c);
+            }
+            let params: AnalyzeDirectoryParams = serde_json::from_value(v).expect("valid params");
+            params
+        };
+
+        // Act: page 1.
+        let result1 = analyze_directory_handler(
+            &ctx,
+            make_params(None),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let text1 = text_of(&result1);
+        let cursor = text1
+            .lines()
+            .find_map(|l| l.strip_prefix("NEXT_CURSOR: "))
+            .expect("page 1 must emit a NEXT_CURSOR line")
+            .to_string();
+
+        // Act: page 2 via cursor.
+        let result2 = analyze_directory_handler(
+            &ctx,
+            make_params(Some(cursor)),
+            test_call(path.clone()),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let text2 = text_of(&result2);
+
+        // Assert: page 2 paginates onward but drops the usage sentence.
+        assert!(
+            text2.contains("NEXT_CURSOR: "),
+            "page 2 must still paginate: {text2}"
+        );
+        assert!(
+            !text2.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "page 2 must not repeat the usage sentence: {text2}"
         );
     }
 }

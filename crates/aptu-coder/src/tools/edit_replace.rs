@@ -154,7 +154,7 @@ fn build_not_found_message(first_20_lines: &str, old_text_for_hint: &str) -> Str
     let total_lines = all_lines.len();
     let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
     let mut best_line_idx = 0usize;
-    let mut best_line = "";
+    let mut best_line = all_lines.first().copied().unwrap_or("");
     let mut best_lcp = 0usize;
 
     for (i, file_line) in all_lines.iter().enumerate() {
@@ -170,7 +170,8 @@ fn build_not_found_message(first_20_lines: &str, old_text_for_hint: &str) -> Str
         }
     }
 
-    // Show 3 lines centered on best_line_idx (clamped to file bounds)
+    // Show 3 lines centered on best_line_idx (clamped to file bounds), skipping
+    // the best line itself so it appears only once, in the Nearest match sentence.
     let start = best_line_idx.saturating_sub(1);
     let end = (start + 3).min(total_lines);
     let start = end.saturating_sub(3).min(start);
@@ -178,6 +179,7 @@ fn build_not_found_message(first_20_lines: &str, old_text_for_hint: &str) -> Str
     let numbered_lines: String = all_lines[start..end]
         .iter()
         .enumerate()
+        .filter(|(i, _)| start + i != best_line_idx)
         .map(|(i, line)| format!("  Line {}: {}", start + i + 1, line))
         .collect::<Vec<_>>()
         .join("\n");
@@ -416,7 +418,7 @@ fn handle_edit_error(
             err_to_tool_result(ErrorData::new(
                 rmcp::model::ErrorCode::INVALID_PARAMS,
                 format!(
-                    "Content hash mismatch: the file has changed since you last read it.\nExpected hash: {expected}\nActual hash:   {actual}\nRe-read the file with analyze_file or analyze_module, then retry edit_replace with the current content hash in expected_content_hash."
+                    "Content hash mismatch: the file has changed since you last read it.\nExpected hash: {expected}\nActual hash:   {actual}"
                 ),
                 Some(meta),
             ))
@@ -745,6 +747,15 @@ mod tests {
         assert!(msg.contains("0 matches"));
         assert!(msg.contains("analyze_file or analyze_module"));
         assert!(!msg.contains("The file begins"));
+    }
+
+    #[test]
+    fn build_not_found_message_empty_file_no_panic() {
+        // Regression: a file whose lines() yields nothing (e.g. only a newline)
+        // must produce the not-found diagnostic without panicking.
+        let msg = build_not_found_message("\n", "fn foo() {}");
+        assert!(msg.contains("0 matches"));
+        assert!(msg.contains("analyze_file or analyze_module"));
     }
 
     #[test]

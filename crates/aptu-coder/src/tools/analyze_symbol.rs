@@ -683,11 +683,14 @@ async fn handle_call_graph(
 
     // Build final text output with pagination cursor if present
     let mut final_text = output.formatted.clone();
-    if let Some(cursor) = callee_cursor {
+    if let Some(next) = callee_cursor {
         final_text.push('\n');
         final_text.push_str("NEXT_CURSOR: ");
-        final_text.push_str(&cursor);
-        final_text.push_str("\nPagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.");
+        final_text.push_str(&next);
+        if cursor.is_none() {
+            final_text.push('\n');
+            final_text.push_str(super::common::PAGINATION_USAGE);
+        }
     }
 
     // Record cache tier in span
@@ -1355,6 +1358,72 @@ mod tests {
         assert_eq!(
             event.error_subtype.as_deref(),
             Some("git_ref_filter_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn pagination_usage_sentence_appears_on_page_1_only() {
+        // Arrange: 120 caller functions exceed the default page size of 100,
+        // so the call graph paginates.
+        let (ctx, _rx) = test_context();
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        let mut body = String::from("fn target() {}\n");
+        for i in 0..120 {
+            body.push_str(&format!("fn caller_{i:03}() {{ target(); }}\n"));
+        }
+        std::fs::write(dir.path().join("lib.rs"), body).expect("write temp file");
+        let path = dir.path().to_str().expect("utf8").to_string();
+        let text_of = |r: &rmcp::model::CallToolResult| match r.content.first().expect("content") {
+            rmcp::model::ContentBlock::Text(t) => t.text.clone(),
+            other => panic!("expected text content, got {other:?}"),
+        };
+
+        let (ctx1, _rx1) = test_context();
+        let (ctx2, _rx2) = test_context();
+        let make_params = |cursor: Option<&str>| {
+            serde_json::from_value::<AnalyzeSymbolParams>(serde_json::json!({
+                "path": path,
+                "symbol": "target",
+                "summary": false,
+                "cursor": cursor,
+            }))
+            .expect("valid AnalyzeSymbolParams JSON")
+        };
+        // Act: page 1 without a cursor.
+        let (text1, cursor) = {
+            let result1 = analyze_symbol_handler(ctx1, make_params(None), test_call(path.clone()))
+                .await
+                .expect("handler ok");
+            let t = text_of(&result1);
+            let c = t
+                .lines()
+                .find_map(|l| l.strip_prefix("NEXT_CURSOR: "))
+                .expect("page 1 must emit a NEXT_CURSOR line")
+                .to_string();
+            (t, c)
+        };
+
+        // Assert: page 1 has NEXT_CURSOR and the usage sentence.
+        assert!(
+            text1.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "page 1 must carry pagination guidance: {text1}"
+        );
+
+        // Act: page 2 with the cursor.
+        let result2 =
+            analyze_symbol_handler(ctx2, make_params(Some(&cursor)), test_call(path.clone()))
+                .await
+                .expect("handler ok");
+        let text2 = text_of(&result2);
+
+        // Assert: page 2 keeps NEXT_CURSOR but drops the usage sentence.
+        assert!(
+            text2.contains("NEXT_CURSOR: "),
+            "page 2 must still paginate: {text2}"
+        );
+        assert!(
+            !text2.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "page 2 must not repeat the usage sentence: {text2}"
         );
     }
 }

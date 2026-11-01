@@ -15,6 +15,10 @@ pub(crate) fn summary_cursor_conflict(summary: Option<bool>, cursor: Option<&str
     summary == Some(true) && cursor.is_some()
 }
 
+/// Usage sentence appended on the first page (no request cursor) of paginated
+/// analyze tools. Cursor-bearing pages emit only the NEXT_CURSOR line.
+pub(crate) const PAGINATION_USAGE: &str = "Pagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.";
+
 /// Normalizes an empty-string `cursor` to `None`, treating `cursor=""` as equivalent to an
 /// omitted cursor (first page). Non-empty cursors pass through unchanged; genuine malformed
 /// non-empty cursors are still rejected downstream by `decode_cursor`.

@@ -912,7 +912,22 @@ pub(crate) fn extract_def_use(
                     } else {
                         source_lines[next].trim_end()
                     };
-                    format!("{prev_text}\n{cur_text}\n{next_text}")
+                    let clamp = |s: &str| {
+                        const MAX: usize = 120;
+                        if s.chars().count() > MAX {
+                            let mut out: String = s.chars().take(MAX).collect();
+                            out.push('\u{2026}');
+                            out
+                        } else {
+                            s.to_string()
+                        }
+                    };
+                    format!(
+                        "{}\n{}\n{}",
+                        clamp(prev_text),
+                        clamp(cur_text),
+                        clamp(next_text)
+                    )
                 };
 
                 // Get enclosing function scope
