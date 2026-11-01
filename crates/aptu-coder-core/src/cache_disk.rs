@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Disk-based cache for analysis results.
 //!
-//! Provides persistent, file-backed caching of analysis outputs with atomic writes,
-//! per-shard locking, and stale-file eviction.
+//! Provides persistent, file-backed caching of analysis outputs with atomic writes
+//! and per-shard locking.
 
 use crate::file_lock;
 use serde::{Serialize, de::DeserializeOwned};
@@ -42,13 +42,6 @@ impl DiskCache {
     #[must_use]
     pub fn drain_write_failures(&self) -> u64 {
         self.write_failures.swap(0, Ordering::Relaxed)
-    }
-
-    /// Returns true when cumulative write failures have reached `DISK_CACHE_DEGRADED_THRESHOLD`.
-    /// Callers can use this to emit a degraded health signal without polling the counter.
-    #[must_use]
-    pub fn is_degraded(&self) -> bool {
-        self.total_write_failures.load(Ordering::Relaxed) >= DISK_CACHE_DEGRADED_THRESHOLD
     }
 
     /// Returns cache statistics as (entry_count, total_size_bytes).
@@ -206,52 +199,6 @@ impl DiskCache {
             );
         }
     }
-
-    /// Removes files not accessed within retention_days. Best-effort; silently drops errors.
-    pub fn evict_stale(&self, retention_days: u64) {
-        if self.disabled {
-            return;
-        }
-        let cutoff = std::time::SystemTime::now()
-            .checked_sub(std::time::Duration::from_secs(retention_days * 86_400))
-            .unwrap_or(std::time::UNIX_EPOCH);
-        if let Ok((evicted_count, evicted_bytes)) = evict_dir_recursive(&self.base, cutoff) {
-            self.entry_count.fetch_sub(evicted_count, Ordering::Relaxed);
-            self.total_size_bytes
-                .fetch_sub(evicted_bytes, Ordering::Relaxed);
-        }
-    }
-}
-
-fn evict_dir_recursive(
-    dir: &std::path::Path,
-    cutoff: std::time::SystemTime,
-) -> std::io::Result<(u64, u64)> {
-    let mut evicted_count = 0u64;
-    let mut evicted_bytes = 0u64;
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let meta = entry.metadata()?;
-        let path = entry.path();
-        if meta.is_dir() {
-            if let Ok((count, bytes)) = evict_dir_recursive(&path, cutoff) {
-                evicted_count += count;
-                evicted_bytes += bytes;
-            }
-        } else if meta.is_file()
-            && let Ok(mtime) = meta.modified()
-            && mtime < cutoff
-        {
-            let file_size = meta.len();
-            if let Err(e) = std::fs::remove_file(&path) {
-                warn!(path = %path.display(), error = %e, "disk cache: failed to evict stale cache file");
-            } else {
-                evicted_count += 1;
-                evicted_bytes += file_size;
-            }
-        }
-    }
-    Ok((evicted_count, evicted_bytes))
 }
 
 /// Acquire a shared (read) lock on the per-shard `.lock` sentinel.

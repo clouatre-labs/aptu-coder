@@ -9,6 +9,27 @@ use aptu_coder_core::pagination::decode_cursor;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData, MetaObject};
 use std::sync::{Mutex, MutexGuard};
 
+/// Appends the pagination footer to `final_text` when a next cursor exists.
+///
+/// Emits `\n` + `NEXT_CURSOR: <cursor>`, and when `cursor_param` is `None`
+/// (first page, no cursor passed by the caller) also emits the usage sentence.
+/// Byte-identical to the previously inlined assembly at each call site.
+pub(crate) fn append_pagination_footer(
+    final_text: &mut String,
+    next_cursor: Option<&str>,
+    cursor_param: Option<&str>,
+) {
+    if let Some(next) = next_cursor {
+        final_text.push('\n');
+        final_text.push_str("NEXT_CURSOR: ");
+        final_text.push_str(next);
+        if cursor_param.is_none() {
+            final_text.push('\n');
+            final_text.push_str(PAGINATION_USAGE);
+        }
+    }
+}
+
 /// Locks `mutex`, recovering from poisoning by resetting the guarded value to
 /// `T::default()` (fresh state), mirroring `lock_or_recover` in
 /// `aptu_coder_core::cache`. A single panicked task must not convert every
