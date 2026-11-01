@@ -377,6 +377,14 @@ pub fn analyze_file(
     path: &str,
     ast_recursion_limit: Option<usize>,
 ) -> Result<FileAnalysisOutput, AnalyzeError> {
+    // Enforce the size limit from metadata BEFORE reading, mirroring
+    // read_source_checked, so oversized files are never fully read.
+    if Path::new(path).metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
+        tracing::debug!("skipping large file: {}", path);
+        return Err(AnalyzeError::Parser(
+            crate::parser::ParserError::ParseError("file too large".to_string()),
+        ));
+    }
     let bytes = std::fs::read(path)
         .map_err(|e| AnalyzeError::Parser(crate::parser::ParserError::ParseError(e.to_string())))?;
     analyze_file_from_bytes(path, bytes, ast_recursion_limit)
