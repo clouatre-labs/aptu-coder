@@ -173,14 +173,19 @@ enum SkipReason {
 ///
 /// Returns `Ok(content)` when the file should be analyzed, `Err(reason)` to skip it.
 fn check_file_eligibility(entry: &WalkEntry) -> Result<String, SkipReason> {
-    // Check file size before reading
-    if entry.path.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
+    // Enforce the size limit from metadata BEFORE reading, so oversized files
+    // are never fully read into memory only to be discarded.
+    let size = std::fs::metadata(&entry.path)
+        .map_err(|_| SkipReason::Unreadable)?
+        .len();
+    if size > MAX_FILE_SIZE_BYTES {
         tracing::debug!("skipping large file: {}", entry.path.display());
         return Err(SkipReason::Oversized);
     }
+    let bytes = std::fs::read(&entry.path).map_err(|_| SkipReason::Unreadable)?;
 
-    // Try to read file content; skip binary or unreadable files
-    std::fs::read_to_string(&entry.path).map_err(|_| SkipReason::Unreadable)
+    // Skip binary or unreadable files
+    String::from_utf8(bytes).map_err(|_| SkipReason::Unreadable)
 }
 
 /// Process a single file entry and extract its analysis data.
@@ -372,9 +377,40 @@ pub fn analyze_file(
     path: &str,
     ast_recursion_limit: Option<usize>,
 ) -> Result<FileAnalysisOutput, AnalyzeError> {
+    // Enforce the size limit from metadata BEFORE reading, mirroring
+    // read_source_checked, so oversized files are never fully read.
+    if Path::new(path).metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_SIZE_BYTES {
+        tracing::debug!("skipping large file: {}", path);
+        return Err(AnalyzeError::Parser(
+            crate::parser::ParserError::ParseError("file too large".to_string()),
+        ));
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|e| AnalyzeError::Parser(crate::parser::ParserError::ParseError(e.to_string())))?;
+    analyze_file_from_bytes(path, bytes, ast_recursion_limit)
+}
+
+/// Analyze already-read file bytes, avoiding a second read of the file.
+///
+/// Size checking and UTF-8 validation mirror `read_source_checked` so that
+/// behavior is unchanged; the bytes are consumed without an extra copy.
+#[instrument(skip(bytes), fields(path))]
+pub fn analyze_file_from_bytes(
+    path: &str,
+    bytes: Vec<u8>,
+    ast_recursion_limit: Option<usize>,
+) -> Result<FileAnalysisOutput, AnalyzeError> {
     let start = Instant::now();
 
-    let source = read_source_checked(path)?;
+    if bytes.len() as u64 > MAX_FILE_SIZE_BYTES {
+        tracing::debug!("skipping large file: {}", path);
+        return Err(AnalyzeError::Parser(
+            crate::parser::ParserError::ParseError("file too large".to_string()),
+        ));
+    }
+
+    let source = String::from_utf8(bytes)
+        .map_err(|e| AnalyzeError::Parser(crate::parser::ParserError::ParseError(e.to_string())))?;
 
     let line_count = source.lines().count();
 
@@ -564,6 +600,12 @@ pub struct FocusedAnalysisOutput {
     /// Definition and use sites for the symbol.
     #[serde(default)]
     pub def_use_sites: Vec<crate::types::DefUseSite>,
+    /// blake3 hash of the stored (pre-cursor) formatted text, computed at cache
+    /// put time and reused on L1 hits so hits need no re-hash. Not serialized;
+    /// recomputed on L2 promotion.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schemars", schemars(skip))]
+    pub content_hash: Option<String>,
 }
 
 /// Parameters for focused symbol analysis. Groups high-arity parameters to keep
@@ -598,6 +640,53 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn focused_output_serialization_omits_content_hash() {
+        // Arrange: a focused output with a populated internal-only hash field.
+        let output = FocusedAnalysisOutput {
+            formatted: "text".to_string(),
+            next_cursor: None,
+            prod_chains: Vec::new(),
+            test_chains: Vec::new(),
+            outgoing_chains: Vec::new(),
+            def_count: 0,
+            unfiltered_caller_count: 0,
+            impl_trait_caller_count: 0,
+            callers: None,
+            test_callers: None,
+            callees: None,
+            def_use_sites: Vec::new(),
+            content_hash: Some("abc".to_string()),
+        };
+
+        // Act
+        let json = serde_json::to_string(&output).expect("serialize");
+
+        // Assert: the internal-only hash must never leak into serialized output.
+        assert!(
+            !json.contains("content_hash"),
+            "content_hash leaked: {json}"
+        );
+    }
+
+    #[test]
+    fn analyze_file_from_bytes_matches_analyze_file() {
+        // Arrange: one temp file; bytes read once and passed to the bytes variant.
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("t.rs");
+        fs::write(&path, "fn main() {}\n").expect("write fixture");
+        let path_str = path.to_str().expect("utf8 path");
+
+        // Act
+        let from_path = analyze_file(path_str, None).expect("analyze_file");
+        let bytes = fs::read(path_str).expect("read bytes");
+        let from_bytes = analyze_file_from_bytes(path_str, bytes, None).expect("from bytes");
+
+        // Assert: byte-identical formatted output from either entry point.
+        assert_eq!(from_path.formatted, from_bytes.formatted);
+        assert_eq!(from_path.line_count, from_bytes.line_count);
+    }
 
     #[test]
     fn analyze_str_rust_happy_path() {

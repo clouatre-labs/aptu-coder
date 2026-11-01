@@ -194,28 +194,11 @@ pub(crate) async fn handle_overview_mode(
     }
 
     let root = Path::new(&params.path);
-    let disk_key = {
-        let mut hasher = blake3::Hasher::new();
-        let mut sorted_entries: Vec<_> = all_entries.iter().collect();
-        sorted_entries.sort_by(|a, b| a.path.cmp(&b.path));
-        for entry in &sorted_entries {
-            let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path);
-            hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
-            let mtime_secs = entry
-                .mtime
-                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            hasher.update(&mtime_secs.to_le_bytes());
-        }
-        if let Some(depth) = canonical_max_depth {
-            hasher.update(depth.to_string().as_bytes());
-        }
-        if let Some(ref git_ref) = params.git_ref {
-            hasher.update(git_ref.as_bytes());
-        }
-        hasher.finalize()
-    };
+    // Derive the disk key from the already-built DirectoryCacheKey: one sorted
+    // key structure serves both the L1 lookup and the L2 disk key. The full
+    // walk (files and directories) is passed so the hashed byte stream matches
+    // the historical disk-key encoding.
+    let disk_key = cache_key.disk_key(root, &all_entries);
 
     if let Some(cached) = ctx
         .disk_cache
