@@ -303,6 +303,28 @@ pub(crate) fn validate_path_relative_to(
     Ok(canonical_path)
 }
 
+/// Stable telemetry subtype for a path-validation `invalid_params` error,
+/// classified by the error's message. Messages are crate-internal constants
+/// (see `validate_path` / `validate_parent_in_root` above); the unit test in
+/// this module pins the mapping so a message edit cannot silently shift the
+/// subtype taxonomy.
+pub(crate) fn path_error_subtype(e: &ErrorData) -> &'static str {
+    let msg: &str = &e.message;
+    if msg.starts_with("path not found") {
+        "path_not_found"
+    } else if msg.starts_with("permission denied") {
+        "permission_denied"
+    } else if msg.starts_with("path is outside the working directory") {
+        "path_outside_working_dir"
+    } else if msg.starts_with("path must include a filename component") {
+        "path_missing_filename"
+    } else if msg.starts_with("parent path is not a directory") {
+        "parent_not_directory"
+    } else {
+        "path_invalid"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +358,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn path_error_subtype_classifies_all_validate_path_messages() {
         // Arrange: every static message validate_path / validate_parent_in_root
         // can produce, including the io-kind-prefixed variants.
@@ -394,27 +417,5 @@ mod tests {
             // Act + Assert
             assert_eq!(path_error_subtype(&error), expected);
         }
-    }
-}
-
-/// Stable telemetry subtype for a path-validation `invalid_params` error,
-/// classified by the error's message. Messages are crate-internal constants
-/// (see `validate_path` / `validate_parent_in_root` above); the unit test in
-/// this module pins the mapping so a message edit cannot silently shift the
-/// subtype taxonomy.
-pub(crate) fn path_error_subtype(e: &ErrorData) -> &'static str {
-    let msg: &str = &e.message;
-    if msg.starts_with("path not found") {
-        "path_not_found"
-    } else if msg.starts_with("permission denied") {
-        "permission_denied"
-    } else if msg.starts_with("path is outside the working directory") {
-        "path_outside_working_dir"
-    } else if msg.starts_with("path must include a filename component") {
-        "path_missing_filename"
-    } else if msg.starts_with("parent path is not a directory") {
-        "parent_not_directory"
-    } else {
-        "path_invalid"
     }
 }
