@@ -592,7 +592,7 @@ pub struct FocusedAnalysisOutput {
     /// blake3 hash of the stored (pre-cursor) formatted text, computed at cache
     /// put time and reused on L1 hits so hits need no re-hash. Not serialized;
     /// recomputed on L2 promotion.
-    #[serde(default)]
+    #[serde(skip)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
     pub content_hash: Option<String>,
 }
@@ -629,6 +629,35 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn focused_output_serialization_omits_content_hash() {
+        // Arrange: a focused output with a populated internal-only hash field.
+        let output = FocusedAnalysisOutput {
+            formatted: "text".to_string(),
+            next_cursor: None,
+            prod_chains: Vec::new(),
+            test_chains: Vec::new(),
+            outgoing_chains: Vec::new(),
+            def_count: 0,
+            unfiltered_caller_count: 0,
+            impl_trait_caller_count: 0,
+            callers: None,
+            test_callers: None,
+            callees: None,
+            def_use_sites: Vec::new(),
+            content_hash: Some("abc".to_string()),
+        };
+
+        // Act
+        let json = serde_json::to_string(&output).expect("serialize");
+
+        // Assert: the internal-only hash must never leak into serialized output.
+        assert!(
+            !json.contains("content_hash"),
+            "content_hash leaked: {json}"
+        );
+    }
 
     #[test]
     fn analyze_file_from_bytes_matches_analyze_file() {

@@ -498,7 +498,7 @@ fn cache_paths_benchmark(c: &mut Criterion) {
     // Disk key: blake3 streaming over the sorted key fields.
     let key = DirectoryCacheKey::from_entries(&entries, None, mode, None);
     group.bench_function("directory_disk_key_hash", |b| {
-        b.iter(|| key.disk_key(root));
+        b.iter(|| key.disk_key(root, &entries));
     });
 
     // File-hash path: single read + blake3 (analyze_file L2 key).

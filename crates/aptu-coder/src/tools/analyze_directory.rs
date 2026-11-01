@@ -195,8 +195,10 @@ pub(crate) async fn handle_overview_mode(
 
     let root = Path::new(&params.path);
     // Derive the disk key from the already-built DirectoryCacheKey: one sorted
-    // key structure serves both the L1 lookup and the L2 disk key.
-    let disk_key = cache_key.disk_key(root);
+    // key structure serves both the L1 lookup and the L2 disk key. The full
+    // walk (files and directories) is passed so the hashed byte stream matches
+    // the historical disk-key encoding.
+    let disk_key = cache_key.disk_key(root, &all_entries);
 
     if let Some(cached) = ctx
         .disk_cache

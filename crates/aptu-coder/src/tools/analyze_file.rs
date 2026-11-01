@@ -79,7 +79,7 @@ pub(crate) async fn handle_file_details_mode(
         // error propagates (a failed read may cost the retry, like main).
         analyze::analyze_file(&params.path, None)
     } else {
-        analyze::analyze_file_from_bytes(&params.path, file_bytes.clone(), None)
+        analyze::analyze_file_from_bytes(&params.path, file_bytes, None)
     };
     match analysis {
         Ok(output) => {
@@ -119,6 +119,9 @@ pub(crate) async fn handle_file_details_mode(
         }
         Err(e) => match &e {
             analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(_)) => {
+                // `file_bytes` was consumed by `analyze_file_from_bytes`; re-read
+                // here to build the fallback preview. Error path only.
+                let file_bytes = std::fs::read(&params.path).unwrap_or_default();
                 let source = String::from_utf8_lossy(&file_bytes);
                 let line_count = source.lines().count();
                 let ext = std::path::Path::new(&params.path)

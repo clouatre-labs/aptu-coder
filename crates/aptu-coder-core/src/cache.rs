@@ -112,26 +112,33 @@ impl DirectoryCacheKey {
 
     /// Derive the L2 disk cache key by hashing this key's fields with blake3.
     ///
-    /// Note: mtimes are normalized to whole seconds (`as_secs`), so a sub-second
-    /// metadata change does not invalidate the disk entry; this is a deliberate
-    /// one-time disk-entry invalidation boundary from the `SystemTime` -> secs
-    /// normalization.
+    /// Encoding compatibility: the hashed fields deliberately preserve the
+    /// pre-existing encoding (root-relative paths, whole-second mtimes, depth as
+    /// a decimal string, git_ref; NO root and NO mode) so existing disk entries
+    /// remain valid across this change. Only mtime handling is normalized: all
+    /// mtimes are reduced to whole seconds (`as_secs`), so a sub-second metadata
+    /// change does not invalidate the disk entry. This was a one-time
+    /// invalidation boundary when `SystemTime` precision was first normalized.
+    ///
+    /// `dir_entries` must be the full directory walk (files AND directories) so
+    /// the hashed byte stream matches the historical key, which included
+    /// directory entries with a zero mtime. Entries are sorted by path here.
     #[must_use]
-    pub fn disk_key(&self, root: &Path) -> blake3::Hash {
+    pub fn disk_key(&self, root: &Path, dir_entries: &[WalkEntry]) -> blake3::Hash {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(root.to_string_lossy().as_bytes());
-        for (path, mtime) in &self.files {
-            hasher.update(path.to_string_lossy().as_bytes());
-            hasher.update(
-                &mtime
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_secs())
-                    .to_le_bytes(),
-            );
+        let mut sorted: Vec<&WalkEntry> = dir_entries.iter().collect();
+        sorted.sort_by(|a, b| a.path.cmp(&b.path));
+        for entry in sorted {
+            let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path);
+            hasher.update(rel.to_string_lossy().as_bytes());
+            let mtime_secs = entry
+                .mtime
+                .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            hasher.update(&mtime_secs.to_le_bytes());
         }
-        hasher.update(format!("{:?}", self.mode).as_bytes());
         if let Some(depth) = self.max_depth {
-            hasher.update(&depth.to_le_bytes());
+            hasher.update(depth.to_string().as_bytes());
         }
         if let Some(git_ref) = &self.git_ref {
             hasher.update(git_ref.as_bytes());
@@ -584,26 +591,67 @@ mod tests {
         a.mtime = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100));
 
         // Act
-        let key1 = DirectoryCacheKey::from_entries(
-            &[a.clone(), b.clone()],
-            None,
-            AnalysisMode::Overview,
-            None,
-        );
-        let key2 =
-            DirectoryCacheKey::from_entries(&[a.clone(), b], None, AnalysisMode::Overview, None);
-        let stable = key1.disk_key(dir.path()) == key2.disk_key(dir.path());
+        let entries = vec![a.clone(), b.clone()];
+        let key1 = DirectoryCacheKey::from_entries(&entries, None, AnalysisMode::Overview, None);
+        let stable = key1.disk_key(dir.path(), &entries) == key1.disk_key(dir.path(), &entries);
 
         // Mutate mtime by a whole second: the disk key must change (staleness).
         a.mtime = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(101));
         let key3 = DirectoryCacheKey::from_entries(&[a], None, AnalysisMode::Overview, None);
+        let mutated_entries = vec![file_entry(&dir.path().join("b.rs"))];
 
         // Assert
         assert!(stable, "identical entries must produce identical disk keys");
         assert_ne!(
-            key1.disk_key(dir.path()),
-            key3.disk_key(dir.path()),
+            key1.disk_key(dir.path(), &entries),
+            key3.disk_key(dir.path(), &mutated_entries),
             "a second-level mtime change must change the disk key"
+        );
+    }
+
+    /// Regression: the disk-key encoding must preserve the pre-existing format
+    /// (relative paths, whole-second mtimes, depth as decimal string, git_ref;
+    /// no root and no mode) so pre-existing disk entries stay valid. Only
+    /// sub-second mtime variation is normalized away.
+    #[test]
+    fn test_disk_key_ignores_subsecond_mtime_and_omits_mode_and_root() {
+        // Arrange
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut entry = file_entry(&dir.path().join("a.rs"));
+        entry.mtime = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(7));
+        let key_overview =
+            DirectoryCacheKey::from_entries(&[entry.clone()], None, AnalysisMode::Overview, None);
+        let key_symbols = DirectoryCacheKey::from_entries(
+            &[entry.clone()],
+            None,
+            AnalysisMode::FileDetails,
+            None,
+        );
+
+        // Act: sub-second mtime variation must not change the disk key.
+        let mut subsecond = entry.clone();
+        subsecond.mtime = Some(
+            SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(7)
+                + std::time::Duration::from_nanos(500),
+        );
+        let key_subsecond = DirectoryCacheKey::from_entries(
+            &[subsecond.clone()],
+            None,
+            AnalysisMode::Overview,
+            None,
+        );
+
+        // Assert
+        assert_eq!(
+            key_overview.disk_key(dir.path(), &[entry.clone()]),
+            key_subsecond.disk_key(dir.path(), &[subsecond.clone()]),
+            "sub-second mtime changes must not invalidate the disk entry"
+        );
+        assert_eq!(
+            key_overview.disk_key(dir.path(), &[entry.clone()]),
+            key_symbols.disk_key(dir.path(), &[entry]),
+            "mode must not be hashed: historical encoding omitted it"
         );
     }
 
