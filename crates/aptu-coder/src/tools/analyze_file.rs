@@ -46,7 +46,21 @@ pub(crate) async fn handle_file_details_mode(
         return Ok((cached, CacheTier::L1Memory));
     }
 
-    let file_bytes = std::fs::read(&params.path).unwrap_or_default();
+    // Read failure must stay observably identical to origin/main: the empty
+    // vector only feeds the disk key (a distinct key), but the error itself is
+    // propagated by re-reading via `analyze_file` -- we never analyze empty
+    // bytes and never write an empty-bytes result to the disk cache.
+    let read_failed;
+    let file_bytes = match std::fs::read(&params.path) {
+        Ok(bytes) => {
+            read_failed = false;
+            bytes
+        }
+        Err(_) => {
+            read_failed = true;
+            Vec::new()
+        }
+    };
     let disk_key = blake3::hash(&file_bytes);
 
     if let Some(cached) = ctx
@@ -60,7 +74,14 @@ pub(crate) async fn handle_file_details_mode(
         return Ok((arc, CacheTier::L2Disk));
     }
 
-    match analyze::analyze_file_from_bytes(&params.path, file_bytes.clone(), None) {
+    let analysis = if read_failed {
+        // Preserve origin/main semantics: retry via the path so the read
+        // error propagates (a failed read may cost the retry, like main).
+        analyze::analyze_file(&params.path, None)
+    } else {
+        analyze::analyze_file_from_bytes(&params.path, file_bytes.clone(), None)
+    };
+    match analysis {
         Ok(output) => {
             let arc_output = Arc::new(output);
             if let Some(key) = cache_key {

@@ -592,3 +592,37 @@ async fn test_unsupported_extension_fallback_note_in_formatted() {
         output.formatted
     );
 }
+
+#[tokio::test]
+async fn test_read_failure_propagates_error_and_avoids_empty_hash_cache() {
+    // Edge case (regression pin): a read failure must return an error exactly
+    // like origin/main (which retried the path read inside analyze_file), and
+    // must not poison the disk cache under the empty-bytes hash key. If the
+    // empty-bytes result had been written to the disk cache, analyzing an
+    // actual empty file afterwards would report a disk hit.
+    let temp_dir = tempfile::TempDir::new().expect("should create temp dir");
+    let missing_file = temp_dir.path().join("missing.rs");
+
+    let analyzer = make_analyzer();
+    let mut params = AnalyzeFileParams::default();
+    params.path = missing_file.to_string_lossy().to_string();
+
+    let result = analyzer.handle_file_details_mode(&params).await;
+    assert!(result.is_err(), "read failure must return an error");
+
+    // No cache poisoning under the empty-bytes disk key: a real empty file
+    // must be a cache miss (main semantics), not a disk hit.
+    let empty_file = temp_dir.path().join("empty.rs");
+    std::fs::write(&empty_file, "").expect("should write empty file");
+    params.path = empty_file.to_string_lossy().to_string();
+    let (output, tier) = analyzer
+        .handle_file_details_mode(&params)
+        .await
+        .expect("empty file must analyze successfully");
+    assert_eq!(output.line_count, 0, "empty file must have zero lines");
+    assert_ne!(
+        tier,
+        aptu_coder_core::cache::CacheTier::L2Disk,
+        "empty file must not be served from a poisoned disk cache; got {tier:?}"
+    );
+}
