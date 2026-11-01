@@ -173,13 +173,16 @@ enum SkipReason {
 ///
 /// Returns `Ok(content)` when the file should be analyzed, `Err(reason)` to skip it.
 fn check_file_eligibility(entry: &WalkEntry) -> Result<String, SkipReason> {
-    // Read once; skip oversized files based on the read length instead of a
-    // separate metadata() stat.
-    let bytes = std::fs::read(&entry.path).map_err(|_| SkipReason::Unreadable)?;
-    if bytes.len() as u64 > MAX_FILE_SIZE_BYTES {
+    // Enforce the size limit from metadata BEFORE reading, so oversized files
+    // are never fully read into memory only to be discarded.
+    let size = std::fs::metadata(&entry.path)
+        .map_err(|_| SkipReason::Unreadable)?
+        .len();
+    if size > MAX_FILE_SIZE_BYTES {
         tracing::debug!("skipping large file: {}", entry.path.display());
         return Err(SkipReason::Oversized);
     }
+    let bytes = std::fs::read(&entry.path).map_err(|_| SkipReason::Unreadable)?;
 
     // Skip binary or unreadable files
     String::from_utf8(bytes).map_err(|_| SkipReason::Unreadable)

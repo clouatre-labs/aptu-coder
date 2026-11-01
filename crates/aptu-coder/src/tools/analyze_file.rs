@@ -63,9 +63,13 @@ pub(crate) async fn handle_file_details_mode(
     };
     let disk_key = blake3::hash(&file_bytes);
 
-    if let Some(cached) = ctx
-        .disk_cache
-        .get::<analyze::FileAnalysisOutput>("analyze_file", &disk_key)
+    // A failed read must never touch the disk cache: its empty-buffer key
+    // would collide with a genuinely empty file. The error still propagates
+    // below via the `analyze_file` retry.
+    if !read_failed
+        && let Some(cached) = ctx
+            .disk_cache
+            .get::<analyze::FileAnalysisOutput>("analyze_file", &disk_key)
     {
         let arc = Arc::new(cached);
         if let Some(ref key) = cache_key {
@@ -82,7 +86,9 @@ pub(crate) async fn handle_file_details_mode(
         analyze::analyze_file_from_bytes(&params.path, file_bytes, None)
     };
     match analysis {
-        Ok(output) => {
+        // Only a successful initial read may write the disk cache; the retry
+        // path (`read_failed`) must not cache under the empty-buffer key.
+        Ok(output) if !read_failed => {
             let arc_output = Arc::new(output);
             if let Some(key) = cache_key {
                 ctx.cache.put(key, arc_output.clone());
@@ -117,6 +123,9 @@ pub(crate) async fn handle_file_details_mode(
             }
             Ok((arc_output, CacheTier::Miss))
         }
+        // Failed initial read that succeeded on retry (e.g. race): return the
+        // result without any disk-cache write under the empty-buffer key.
+        Ok(output) => Ok((Arc::new(output), CacheTier::Miss)),
         Err(e) => match &e {
             analyze::AnalyzeError::Parser(ParserError::UnsupportedLanguage(_)) => {
                 // `file_bytes` was consumed by `analyze_file_from_bytes`; re-read

@@ -1380,7 +1380,7 @@ mod tests {
     async fn pagination_usage_sentence_appears_on_page_1_only() {
         // Arrange: 120 caller functions exceed the default page size of 100,
         // so the call graph paginates.
-        let (ctx, _rx) = test_context();
+        let (_ctx, _rx) = test_context();
         let dir = tempfile::TempDir::new().expect("create temp dir");
         let mut body = String::from("fn target() {}\n");
         for i in 0..120 {

@@ -122,13 +122,15 @@ impl DirectoryCacheKey {
     ///
     /// `dir_entries` must be the full directory walk (files AND directories) so
     /// the hashed byte stream matches the historical key, which included
-    /// directory entries with a zero mtime. Entries are sorted by path here.
+    /// directory entries with a zero mtime. Per the traversal sort contract,
+    /// `dir_entries` are already sorted by path (see `walk_parallel`), so no
+    /// re-sort happens in this hot path.
     #[must_use]
     pub fn disk_key(&self, root: &Path, dir_entries: &[WalkEntry]) -> blake3::Hash {
         let mut hasher = blake3::Hasher::new();
-        let mut sorted: Vec<&WalkEntry> = dir_entries.iter().collect();
-        sorted.sort_by(|a, b| a.path.cmp(&b.path));
-        for entry in sorted {
+        // Caller contract: `dir_entries` arrive sorted by path (traversal sort
+        // contract), so the key bytes are deterministic without re-sorting.
+        for entry in dir_entries {
             let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path);
             hasher.update(rel.to_string_lossy().as_bytes());
             let mtime_secs = entry
@@ -580,6 +582,26 @@ mod tests {
             mtime: None,
             canonical_path: PathBuf::new(),
         }
+    }
+
+    /// The disk key must be a deterministic function of the key fields and the
+    /// (sorted) walk entries: identical inputs always yield identical bytes.
+    #[test]
+    fn test_disk_key_deterministic_bytes() {
+        // Arrange: two independently built keys over identical sorted entries.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = file_entry(&dir.path().join("a.rs"));
+        let b = file_entry(&dir.path().join("b.rs"));
+        let entries = vec![a, b];
+        let key1 = DirectoryCacheKey::from_entries(&entries, Some(2), AnalysisMode::Overview, None);
+        let key2 = DirectoryCacheKey::from_entries(&entries, Some(2), AnalysisMode::Overview, None);
+
+        // Act
+        let h1 = key1.disk_key(dir.path(), &entries);
+        let h2 = key2.disk_key(dir.path(), &entries);
+
+        // Assert
+        assert_eq!(h1, h2, "identical inputs must yield identical key bytes");
     }
 
     #[test]
