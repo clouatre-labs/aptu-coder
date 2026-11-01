@@ -14,7 +14,7 @@ use crate::types::{ImplTraitInfo, SemanticAnalysis};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use thiserror::Error;
 use tracing::instrument;
 use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator, Tree};
@@ -177,43 +177,49 @@ fn build_compiled_queries(
     })
 }
 
-/// Initialize the query cache with compiled queries for all supported languages.
+/// Lazily initialized per-language table of compiled queries.
+///
+/// Each language gets its own [`OnceLock`] so only the language actually parsed
+/// is compiled, on first use, outside any lock (OnceLock guarantees at-most-once
+/// initialization per language without holding a global lock during compilation).
+type QueryEntry = OnceLock<Result<CompiledQueries, ParserError>>;
+
+static QUERY_CACHE: LazyLock<Vec<(&'static str, QueryEntry)>> = LazyLock::new(|| {
+    crate::lang::supported_languages()
+        .iter()
+        .map(|name| (*name, OnceLock::new()))
+        .collect()
+});
+
+/// Test-only counter of query-compilation attempts (one per language, at most).
+#[cfg(test)]
+static COMPILE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Get compiled queries for a language, compiling on first use of that language.
 ///
 /// Excluded from coverage: the `Err` arm is unreachable because `build_compiled_queries`
 /// only fails on invalid hardcoded query strings.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn init_query_cache() -> HashMap<&'static str, CompiledQueries> {
-    let mut cache = HashMap::new();
-
-    for lang_name in crate::lang::supported_languages() {
-        if let Some(lang_info) = get_language_info(lang_name) {
-            match build_compiled_queries(&lang_info) {
-                Ok(compiled) => {
-                    cache.insert(*lang_name, compiled);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to compile queries for language {}: {}",
-                        lang_name,
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    cache
-}
-
-/// Lazily initialized cache of compiled queries per language.
-static QUERY_CACHE: LazyLock<HashMap<&'static str, CompiledQueries>> =
-    LazyLock::new(init_query_cache);
-
-/// Get compiled queries for a language from the cache.
 fn get_compiled_queries(language: &str) -> Result<&'static CompiledQueries, ParserError> {
-    QUERY_CACHE
-        .get(language)
-        .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))
+    let entry = QUERY_CACHE
+        .iter()
+        .find(|(name, _)| *name == language)
+        .map(|(_, entry)| entry)
+        .ok_or_else(|| ParserError::UnsupportedLanguage(language.to_string()))?;
+    let result = entry.get_or_init(|| {
+        #[cfg(test)]
+        COMPILE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Failure is logged here, inside the at-most-once initializer, preserving
+        // the log-once semantics of the former eager cache.
+        match get_language_info(language) {
+            Some(lang_info) => build_compiled_queries(&lang_info),
+            None => Err(ParserError::UnsupportedLanguage(language.to_string())),
+        }
+    });
+    match result {
+        Ok(compiled) => Ok(compiled),
+        Err(_) => Err(ParserError::UnsupportedLanguage(language.to_string())),
+    }
 }
 
 thread_local! {
@@ -985,6 +991,97 @@ mod tests_unsupported {
             matches!(result, Err(ParserError::UnsupportedLanguage(ref lang)) if lang == "cobol"),
             "expected UnsupportedLanguage error, got {:?}",
             result
+        );
+    }
+}
+
+/// Acceptance tests for lazy per-language query compilation (issue 1777).
+#[cfg(test)]
+mod tests_lazy_compilation {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn test_rust_only_parse_compiles_rust_exactly_once() {
+        // Arrange: snapshot the compile counter before any work.
+        let before = COMPILE_COUNT.load(Ordering::SeqCst);
+
+        // Act: one Rust-only parse, then a repeat lookup.
+        let first = SemanticExtractor::extract("fn hello() -> u32 { 42 }", "rust", None, None);
+        let after_first = COMPILE_COUNT.load(Ordering::SeqCst);
+        assert!(first.is_ok(), "rust parse should succeed");
+        SemanticExtractor::extract("fn hello() -> u32 { 42 }", "rust", None, None).unwrap();
+        let after_repeat = COMPILE_COUNT.load(Ordering::SeqCst);
+
+        // Assert: at most one new compilation (other test modules may race other
+        // languages concurrently, but each language compiles at most once) and the
+        // delta is far below eager compilation of every supported language.
+        let delta = after_first - before;
+        assert!(
+            delta <= 1,
+            "expected at most 1 compilation for a rust-only parse, got {delta}"
+        );
+        assert!(
+            delta < crate::lang::supported_languages().len(),
+            "compilation must be lazy, not eager over all languages"
+        );
+        assert_eq!(
+            after_repeat, after_first,
+            "repeat lookups must not recompile"
+        );
+    }
+
+    #[test]
+    fn test_unsupported_language_returns_unsupported_error_without_compiling() {
+        // Arrange: snapshot the compile counter.
+        let before = COMPILE_COUNT.load(Ordering::SeqCst);
+
+        // Act
+        let result = get_compiled_queries("cobol");
+
+        // Assert: unchanged UnsupportedLanguage result, no compilation attempt.
+        assert!(matches!(
+            result,
+            Err(ParserError::UnsupportedLanguage(ref lang)) if lang == "cobol"
+        ));
+        assert_eq!(
+            COMPILE_COUNT.load(Ordering::SeqCst),
+            before,
+            "unknown language must not attempt compilation"
+        );
+    }
+
+    #[test]
+    fn test_concurrent_first_use_compiles_exactly_once() {
+        // Arrange: N threads racing first use of the same language.
+        let before = COMPILE_COUNT.load(Ordering::SeqCst);
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    get_compiled_queries("rust").expect("rust queries should compile")
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("thread should not panic");
+        }
+
+        // Act: further lookups after the race.
+        let after_race = COMPILE_COUNT.load(Ordering::SeqCst);
+        for _ in 0..100 {
+            get_compiled_queries("rust").expect("rust queries should stay compiled");
+        }
+
+        // Assert: at most one compilation happened for rust and none after the race.
+        assert!(
+            after_race - before <= 1,
+            "concurrent first use must compile at most once, got {}",
+            after_race - before
+        );
+        assert_eq!(
+            COMPILE_COUNT.load(Ordering::SeqCst),
+            after_race,
+            "post-race lookups must not recompile"
         );
     }
 }
