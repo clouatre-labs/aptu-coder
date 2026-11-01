@@ -979,6 +979,120 @@ fn caller_c() { target(); }
     }
 
     #[test]
+    fn test_def_use_snippet_lines_clamped_to_120_chars() {
+        // Arrange: a write to x on a line longer than 120 chars, plus padding
+        // context lines that stay short.
+        let long_stmt = format!("    let x = {}; // {}", 1, "pad".repeat(60));
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(
+            temp_dir.path().join("lib.rs"),
+            format!("fn example() {{\n{long_stmt}\n    x += 1;\n}}\n"),
+        )
+        .unwrap();
+        let entries = walk_directory(temp_dir.path(), None).unwrap();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let ct = CancellationToken::new();
+        let params = FocusedAnalysisConfig {
+            focus: "x".to_string(),
+            match_mode: SymbolMatchMode::Exact,
+            follow_depth: 1,
+            max_depth: None,
+            ast_recursion_limit: None,
+            use_summary: false,
+            impl_only: None,
+            def_use: true,
+            parse_timeout_micros: None,
+        };
+
+        // Act
+        let output = analyze_focused_with_progress_with_entries(
+            temp_dir.path(),
+            &params,
+            &counter,
+            &ct,
+            &entries,
+            None,
+        )
+        .expect("def_use analysis should succeed");
+
+        // Assert: every snippet line is at most 120 chars plus ellipsis, and the
+        // long line is clamped with an ellipsis marker; short lines unchanged.
+        assert!(!output.def_use_sites.is_empty());
+        for site in &output.def_use_sites {
+            for line in site.snippet.lines() {
+                if line.ends_with('\u{2026}') {
+                    let stripped = line.strip_suffix('\u{2026}').expect("ellipsis suffix");
+                    assert_eq!(stripped.chars().count(), 120, "clamped line: {line}");
+                } else {
+                    assert!(
+                        line.chars().count() <= 120,
+                        "unclamped line too long: {line}"
+                    );
+                }
+            }
+        }
+        assert!(
+            output
+                .def_use_sites
+                .iter()
+                .any(|s| s.snippet.contains('\u{2026}')),
+            "the >120-char line must be clamped with an ellipsis"
+        );
+    }
+
+    #[test]
+    fn test_def_use_snippet_short_lines_byte_identical() {
+        // Arrange: short lines only; the snippet must equal the raw source lines.
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(
+            temp_dir.path().join("lib.rs"),
+            "fn example() {\n    let x = 10;\n    x += 1;\n}\n",
+        )
+        .unwrap();
+        let entries = walk_directory(temp_dir.path(), None).unwrap();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let ct = CancellationToken::new();
+        let params = FocusedAnalysisConfig {
+            focus: "x".to_string(),
+            match_mode: SymbolMatchMode::Exact,
+            follow_depth: 1,
+            max_depth: None,
+            ast_recursion_limit: None,
+            use_summary: false,
+            impl_only: None,
+            def_use: true,
+            parse_timeout_micros: None,
+        };
+
+        // Act
+        let output = analyze_focused_with_progress_with_entries(
+            temp_dir.path(),
+            &params,
+            &counter,
+            &ct,
+            &entries,
+            None,
+        )
+        .expect("def_use analysis should succeed");
+
+        // Assert: short lines carry no ellipsis and match source text verbatim.
+        assert!(
+            output
+                .def_use_sites
+                .iter()
+                .all(|s| !s.snippet.contains('\u{2026}')),
+            "short lines must remain byte-identical"
+        );
+        assert!(
+            output
+                .def_use_sites
+                .iter()
+                .any(|s| s.snippet.contains("let x = 10;")),
+            "snippet must contain the source line verbatim"
+        );
+    }
+
+    #[test]
     fn test_def_use_focused_analysis() {
         let temp_dir = TempDir::new().unwrap();
         fs::write(

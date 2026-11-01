@@ -411,11 +411,14 @@ pub(crate) async fn analyze_file_handler(
     };
 
     let mut final_text = formatted.clone();
-    if !use_summary && let Some(ref cursor) = next_cursor {
+    if !use_summary && let Some(ref next) = next_cursor {
         final_text.push('\n');
         final_text.push_str("NEXT_CURSOR: ");
-        final_text.push_str(cursor);
-        final_text.push_str("\nPagination: pass cursor=<NEXT_CURSOR> from the line above on your next call with identical params; page sizes are server-owned.");
+        final_text.push_str(next);
+        if cursor.is_none() {
+            final_text.push('\n');
+            final_text.push_str(super::common::PAGINATION_USAGE);
+        }
     }
 
     tracing::Span::current().record("cache_tier", file_cache_hit.as_str());
@@ -514,5 +517,82 @@ mod tests {
         assert_eq!(subtypes::SUMMARY_CURSOR_CONFLICT, "summary_cursor_conflict");
         assert_eq!(subtypes::OUTPUT_TOO_LARGE, "output_too_large");
         assert_eq!(subtypes::INVALID_CURSOR, "invalid_cursor");
+    }
+
+    /// Extracts the text payload from a successful result's content blocks.
+    fn text_of(result: &CallToolResult) -> String {
+        match result.content.first().expect("content") {
+            ContentBlock::Text(t) => t.text.clone(),
+            other => panic!("expected text content, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn pagination_usage_sentence_appears_on_page_1_only() {
+        // Arrange: 120 top-level functions span 3 pages at page size 50.
+        let cwd = std::env::current_dir().expect("cwd");
+        let dir = tempfile::TempDir::new_in(&cwd).expect("tempdir");
+        let body: String = (0..120).map(|i| format!("fn f_{i:03}() {{}}\n")).collect();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, body).expect("write file");
+        let path_str = path.to_str().expect("utf8").to_string();
+        let (ctx, _rx) = test_context();
+        let make_params = |cursor: Option<String>| {
+            let mut v = serde_json::json!({ "path": path_str });
+            if let Some(c) = cursor {
+                v["cursor"] = serde_json::json!(c);
+            }
+            let params: AnalyzeFileParams = serde_json::from_value(v).expect("valid params");
+            params
+        };
+
+        // Act: page 1 without a cursor.
+        let result1 = analyze_file_handler(
+            &ctx,
+            make_params(None),
+            0,
+            None,
+            std::time::Instant::now(),
+            path_str.clone(),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let text1 = text_of(&result1);
+
+        // Assert: page 1 has both NEXT_CURSOR and the usage sentence.
+        let cursor = text1
+            .lines()
+            .find_map(|l| l.strip_prefix("NEXT_CURSOR: "))
+            .expect("page 1 must emit a NEXT_CURSOR line")
+            .to_string();
+        assert!(
+            text1.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "page 1 must carry pagination guidance"
+        );
+
+        // Act: page 2 with the cursor.
+        let result2 = analyze_file_handler(
+            &ctx,
+            make_params(Some(cursor)),
+            0,
+            None,
+            std::time::Instant::now(),
+            path_str.clone(),
+            &tracing::Span::none(),
+        )
+        .await
+        .expect("handler ok");
+        let text2 = text_of(&result2);
+
+        // Assert: page 2 has NEXT_CURSOR but no usage sentence.
+        assert!(
+            text2.contains("NEXT_CURSOR: "),
+            "page 2 must still paginate: {text2}"
+        );
+        assert!(
+            !text2.contains("Pagination: pass cursor=<NEXT_CURSOR>"),
+            "page 2 must not repeat the usage sentence: {text2}"
+        );
     }
 }

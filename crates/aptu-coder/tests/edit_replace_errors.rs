@@ -42,8 +42,67 @@ async fn test_edit_replace_not_found_shows_file_preview() {
     assert!(msg.contains("The file around line"));
     assert!(msg.contains("line one"));
     assert!(msg.contains("Nearest match:"));
+    assert_eq!(
+        msg.matches("line one").count(),
+        1,
+        "best line must appear exactly once: {msg}"
+    );
     assert!(!msg.contains(working_dir));
     assert!(!msg.contains(file_name));
+}
+
+/// A stale content hash keeps both hashes full-length in the text but carries the
+/// retry instruction only once, in the structured error meta (not the text).
+#[tokio::test]
+async fn test_edit_replace_stale_hash_retry_instruction_in_meta_only() {
+    let cwd = std::env::current_dir().expect("should get cwd");
+    let temp_dir = tempfile::TempDir::new_in(&cwd).expect("should create temp dir in cwd");
+    let working_dir = temp_dir
+        .path()
+        .to_str()
+        .expect("temp dir path is valid UTF-8");
+    let file_name = "test.txt";
+    std::fs::write(temp_dir.path().join(file_name), "content here\n").expect("should write file");
+
+    let bad_hash = "0".repeat(64);
+    let resp = call_tool_raw(
+        "edit_replace",
+        serde_json::json!({
+            "path": file_name,
+            "old_text": "content",
+            "new_text": "replaced",
+            "expected_content_hash": bad_hash,
+            "working_dir": working_dir
+        }),
+    )
+    .await;
+
+    assert!(
+        resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected error but got success: {resp}"
+    );
+    let msg = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("should have error text");
+    assert!(msg.contains("Content hash mismatch"), "msg: {msg}");
+    assert!(
+        msg.contains(&bad_hash),
+        "expected hash must stay full-length in text: {msg}"
+    );
+    let raw = resp.to_string();
+    assert_eq!(
+        raw.matches("re-read the file with analyze_file").count(),
+        1,
+        "retry instruction must appear exactly once (meta only): {raw}"
+    );
+    let meta = &resp["result"]["structuredContent"];
+    assert!(
+        meta["suggestedAction"]
+            .as_str()
+            .unwrap_or("")
+            .contains("re-read the file with analyze_file"),
+        "meta must carry recovery guidance: {meta}"
+    );
 }
 
 /// When old_text matches multiple locations, the error message includes
