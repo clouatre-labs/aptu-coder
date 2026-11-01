@@ -491,15 +491,13 @@ pub(crate) async fn analyze_directory_handler(
     );
 
     let mut final_text = output.formatted.clone();
-    if use_paginated && let Some(next) = paginated.next_cursor {
-        final_text.push('\n');
-        final_text.push_str("NEXT_CURSOR: ");
-        final_text.push_str(&next);
-        if cursor.is_none() {
-            final_text.push('\n');
-            final_text.push_str(super::common::PAGINATION_USAGE);
-        }
-    }
+    super::common::append_pagination_footer(
+        &mut final_text,
+        use_paginated
+            .then_some(paginated.next_cursor.as_deref())
+            .flatten(),
+        cursor,
+    );
 
     tracing::Span::current().record("cache_tier", dir_cache_hit.as_str());
 

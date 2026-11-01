@@ -693,15 +693,9 @@ async fn handle_call_graph(
     // Build final text output with pagination cursor if present.
     // Without a cursor, reuse the put-time content hash and move the formatted
     // text: no full-output String clone and no blake3::hash on cache hits.
-    let (final_text, precomputed_hash) = if let Some(next) = callee_cursor {
+    let (final_text, precomputed_hash) = if callee_cursor.is_some() {
         let mut final_text = output.formatted.clone();
-        final_text.push('\n');
-        final_text.push_str("NEXT_CURSOR: ");
-        final_text.push_str(&next);
-        if cursor.is_none() {
-            final_text.push('\n');
-            final_text.push_str(super::common::PAGINATION_USAGE);
-        }
+        super::common::append_pagination_footer(&mut final_text, callee_cursor.as_deref(), cursor);
         (final_text, None)
     } else {
         let hash = output.content_hash.clone();
