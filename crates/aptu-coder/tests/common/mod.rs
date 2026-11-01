@@ -10,10 +10,10 @@ use tokio::sync::Mutex as TokioMutex;
 /// so tests can assert on emitted events (including the one-time `schema_surface`).
 pub fn make_test_analyzer_with_metrics() -> (
     aptu_coder::CodeAnalyzer,
-    tokio::sync::mpsc::UnboundedReceiver<aptu_coder::MetricEvent>,
+    tokio::sync::mpsc::Receiver<aptu_coder::MetricEvent>,
 ) {
     let peer = Arc::new(TokioMutex::new(None));
-    let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (metrics_tx, metrics_rx) = tokio::sync::mpsc::channel(aptu_coder::METRICS_CHANNEL_CAPACITY);
     let analyzer = aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(metrics_tx));
     (analyzer, metrics_rx)
 }

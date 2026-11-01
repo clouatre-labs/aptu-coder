@@ -12,13 +12,13 @@ use common::make_test_analyzer_with_metrics;
 use rmcp::serve_server;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 /// Shared MCP connection with a metrics tap for sequential calls.
 struct Harness {
     client_tx: tokio::io::WriteHalf<tokio::io::DuplexStream>,
     reader: tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>,
-    metrics_rx: UnboundedReceiver<MetricEvent>,
+    metrics_rx: Receiver<MetricEvent>,
 }
 
 impl Harness {

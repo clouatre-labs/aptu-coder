@@ -46,7 +46,7 @@ async fn read_with_event(
     unsafe {
         std::env::set_var("APTU_CODER_DISK_CACHE_DIR", cache_dir);
     }
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::channel(aptu_coder::METRICS_CHANNEL_CAPACITY);
     let peer = Arc::new(Mutex::new(None));
     let analyzer = aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(tx));
     let response =

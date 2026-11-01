@@ -595,9 +595,9 @@ mod tests {
     /// emitted events.
     fn test_context() -> (
         AnalyzeDirectoryContext,
-        tokio::sync::mpsc::UnboundedReceiver<crate::metrics::MetricEvent>,
+        tokio::sync::mpsc::Receiver<crate::metrics::MetricEvent>,
     ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let ctx = AnalyzeDirectoryContext {
             cache: AnalysisCache::new(1),
             disk_cache: Arc::new(aptu_coder_core::cache::DiskCache::new(
@@ -679,7 +679,7 @@ mod tests {
 
     /// Builds a context with an enabled disk cache rooted at `disk_base`.
     fn test_context_with_disk(disk_base: std::path::PathBuf) -> AnalyzeDirectoryContext {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _rx) = tokio::sync::mpsc::channel(crate::metrics::METRICS_CHANNEL_CAPACITY);
         AnalyzeDirectoryContext {
             cache: AnalysisCache::new(1),
             disk_cache: Arc::new(aptu_coder_core::cache::DiskCache::new(disk_base, false)),

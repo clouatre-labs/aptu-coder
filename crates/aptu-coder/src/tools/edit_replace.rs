@@ -54,10 +54,7 @@ impl StaleContextGuard {
     /// Increments the failure counter for `canonical` and returns `true` when the
     /// circuit breaker threshold has been reached.
     fn increment(&mut self, canonical: &str) -> bool {
-        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
-        // this is fatal and should propagate.
-        #[allow(clippy::expect_used)]
-        let mut counts = self.counts.lock().expect("edit_failure_counts poisoned");
+        let mut counts = super::common::lock_or_recover(&self.counts, "edit_failure_counts");
         if counts.len() >= EDIT_FAILURE_MAP_CAP {
             counts.clear();
         }
@@ -70,10 +67,7 @@ impl StaleContextGuard {
 
     /// Resets the failure counter for `canonical` after a successful edit.
     fn reset(&mut self, canonical: &str) {
-        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
-        // this is fatal and should propagate.
-        #[allow(clippy::expect_used)]
-        let mut counts = self.counts.lock().expect("edit_failure_counts poisoned");
+        let mut counts = super::common::lock_or_recover(&self.counts, "edit_failure_counts");
         counts.remove(&(self.sid.clone(), canonical.to_owned()));
     }
 }
@@ -549,13 +543,8 @@ pub(crate) async fn edit_replace(
     // Look up or create the per-path mutex from the registry.
     // The lock is acquired INSIDE spawn_blocking so the async worker is never blocked.
     let path_lock = {
-        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
-        // this is fatal and should propagate.
-        #[allow(clippy::expect_used)]
-        let mut locks = ctx
-            .file_edit_locks
-            .lock()
-            .expect("file_edit_locks poisoned");
+        let mut locks =
+            super::common::lock_registry_or_recover(ctx.file_edit_locks, "file_edit_locks");
         Arc::clone(
             locks
                 .entry(resolved_path.clone())
@@ -607,10 +596,7 @@ pub(crate) async fn edit_replace(
         // Acquire the per-path lock as the first line inside spawn_blocking,
         // holding it across the entire read-modify-write cycle (and across the
         // entire batch read-validate-write when batching).
-        // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
-        // this is fatal and should propagate.
-        #[allow(clippy::expect_used)]
-        let _guard = path_lock.lock().expect("per-path edit lock poisoned");
+        let _guard = super::common::lock_or_recover(&path_lock, "per-path edit lock");
         if let Some(edits) = &batch_edits {
             aptu_coder_core::edit_replace_batch(
                 &resolved_path,
@@ -851,5 +837,34 @@ mod tests {
         }
         assert!(guard.increment(&resolved_target.display().to_string()));
         assert_eq!(counts.lock().unwrap().len(), 1);
+    }
+
+    /// Edge case: a deliberately poisoned counts mutex recovers via lock_or_recover
+    /// instead of panicking; increment and reset still work and the edit path succeeds.
+    #[test]
+    fn stale_context_guard_poisoned_counts_mutex_recovers() {
+        let counts: Arc<Mutex<HashMap<(String, String), u8>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        // Poison the mutex by panicking while holding the guard.
+        {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = counts.lock().unwrap();
+                panic!("deliberate poison");
+            }));
+            assert!(result.is_err(), "panic must poison the mutex");
+        }
+        let mut guard = StaleContextGuard::new(Some("session1".to_string()), Arc::clone(&counts));
+        // After poisoning, every lock recovers to a fresh empty map (the mutex
+        // stays poisoned permanently), so increments never accumulate and the
+        // circuit breaker cannot trip -- the stale-state cost is bounded and
+        // benign by design. reset still succeeds.
+        assert!(!guard.increment("some/path.rs"));
+        assert!(!guard.increment("some/path.rs"));
+        guard.reset("some/path.rs");
+        let recovered = crate::tools::common::lock_or_recover(&counts, "edit_failure_counts");
+        assert!(
+            recovered.is_empty(),
+            "recovered map stays empty; counters do not accumulate post-poison"
+        );
     }
 }

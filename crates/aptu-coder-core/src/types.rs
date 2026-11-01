@@ -1136,6 +1136,10 @@ pub struct VerifyAnchorsParams {
     /// Workspace root directory that anchor paths resolve against.
     pub workspace_root: String,
     /// Anchors to verify, in order.
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "crate::schema_helpers::anchors_array_schema")
+    )]
     pub anchors: Vec<AnchorItem>,
 }
 

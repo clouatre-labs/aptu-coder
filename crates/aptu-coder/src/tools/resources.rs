@@ -397,18 +397,23 @@ fn parse_graph_uri(uri: &str) -> Result<(GraphQuery, OutputFormat), ErrorData> {
 /// entire request; a malformed node or edge in the graph should not prevent the client
 /// from receiving the rest of the result set. Edges with endpoints missing from the node
 /// list (due to serialization failure) are also dropped.
+/// Serialized graph payload: node JSON values paired with (source, target, edge) tuples.
+type QueryGraphPayload = (
+    Vec<serde_json::Value>,
+    Vec<(usize, usize, serde_json::Value)>,
+);
+
 fn query_to_graph(
     graph: &StructuralGraph,
     query: &GraphQuery,
-) -> (
-    Vec<serde_json::Value>,
-    Vec<(usize, usize, serde_json::Value)>,
-) {
+) -> Result<QueryGraphPayload, ErrorData> {
     let (node_indices, edge_tuples) = match query {
-        GraphQuery::BlastRadius { symbol, depth, .. } => {
-            graph.blast_radius_subgraph(symbol, *depth)
-        }
-        GraphQuery::Subgraph { symbol, .. } => graph.blast_radius_subgraph(symbol, 2),
+        GraphQuery::BlastRadius { symbol, depth, .. } => graph
+            .blast_radius_subgraph(symbol, *depth)
+            .map_err(graph_symbol_error)?,
+        GraphQuery::Subgraph { symbol, .. } => graph
+            .blast_radius_subgraph(symbol, 2)
+            .map_err(graph_symbol_error)?,
         GraphQuery::BidirectionalBlastRadius {
             symbols,
             max_nodes,
@@ -445,7 +450,13 @@ fn query_to_graph(
         })
         .collect();
 
-    (nodes, edges)
+    Ok((nodes, edges))
+}
+
+/// Maps a graph symbol-resolution failure to an `INVALID_PARAMS` error carrying the
+/// symbol name, mirroring the `analyze_symbol` classification of client-input errors.
+fn graph_symbol_error(e: aptu_coder_core::graph::GraphError) -> ErrorData {
+    ErrorData::new(ErrorCode::INVALID_PARAMS, e.to_string(), None)
 }
 
 /// Decode a list-handler cursor (core base64-STANDARD encoding) to a page offset.
@@ -575,9 +586,17 @@ pub(crate) fn read_resource_impl(
         // as a new direct dependency of this crate just for a 3-arm match.
         let node_indices = match &query {
             GraphQuery::BlastRadius { symbol, depth, .. } => {
-                graph.blast_radius_subgraph(symbol, *depth).0
+                graph
+                    .blast_radius_subgraph(symbol, *depth)
+                    .map_err(graph_symbol_error)?
+                    .0
             }
-            GraphQuery::Subgraph { symbol, .. } => graph.blast_radius_subgraph(symbol, 2).0,
+            GraphQuery::Subgraph { symbol, .. } => {
+                graph
+                    .blast_radius_subgraph(symbol, 2)
+                    .map_err(graph_symbol_error)?
+                    .0
+            }
             GraphQuery::BidirectionalBlastRadius {
                 symbols,
                 max_nodes,
@@ -601,7 +620,7 @@ pub(crate) fn read_resource_impl(
         ));
     }
 
-    let (all_nodes, all_edges) = query_to_graph(&graph, &query);
+    let (all_nodes, all_edges) = query_to_graph(&graph, &query)?;
     let total = all_nodes.len();
     let offset = query.cursor_offset();
 
@@ -850,7 +869,7 @@ mod tests {
             depth: 3,
             cursor_offset: 0,
         };
-        let (nodes, edges) = query_to_graph(&graph, &query);
+        let (nodes, edges) = query_to_graph(&graph, &query).expect("symbol resolves");
         assert!(!nodes.is_empty(), "nodes should be non-empty");
         assert!(!edges.is_empty(), "edges should be non-empty");
         // Check that at least one edge has kind equal to the string "Calls"
@@ -858,6 +877,33 @@ mod tests {
             .iter()
             .any(|(_, _, kind)| kind.as_str() == Some("Calls"));
         assert!(has_calls_edge, "should have at least one Calls edge");
+    }
+
+    #[test]
+    fn test_query_to_graph_unresolvable_symbol_errors_with_name() {
+        let graph = make_graph_with_call("caller_func", "callee_func");
+        let query = GraphQuery::BlastRadius {
+            repo_hash: "x".to_string(),
+            symbol: "no_such_symbol".to_string(),
+            depth: 3,
+            cursor_offset: 0,
+        };
+        let err = query_to_graph(&graph, &query).expect_err("unresolvable symbol must error");
+        assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("no_such_symbol"), "{}", err.message);
+    }
+
+    #[test]
+    fn test_query_to_graph_subgraph_arm_unresolvable_symbol_errors() {
+        let graph = make_graph_with_call("caller_func", "callee_func");
+        let query = GraphQuery::Subgraph {
+            repo_hash: "x".to_string(),
+            symbol: "missing_sym".to_string(),
+            cursor_offset: 0,
+        };
+        let err = query_to_graph(&graph, &query).expect_err("unresolvable symbol must error");
+        assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("missing_sym"), "{}", err.message);
     }
 
     #[test]
@@ -910,7 +956,7 @@ mod tests {
             depth: 3,
             cursor_offset: 0,
         };
-        let (nodes, edges) = query_to_graph(&graph, &query);
+        let (nodes, edges) = query_to_graph(&graph, &query).expect("symbol resolves");
         assert_eq!(nodes.len(), 3, "should have 3 nodes (main + 2 helpers)");
         assert_eq!(edges.len(), 2, "should have 2 Calls edges");
     }
@@ -999,7 +1045,7 @@ mod tests {
             depth: 3,
             cursor_offset: 0,
         };
-        let (nodes, edges) = query_to_graph(&graph, &query);
+        let (nodes, edges) = query_to_graph(&graph, &query).expect("symbol resolves");
         assert!(!nodes.is_empty(), "nodes should be non-empty");
         assert!(!edges.is_empty(), "edges should be non-empty");
     }
@@ -1240,7 +1286,7 @@ mod tests {
             depth: 3,
             cursor_offset: 0,
         };
-        let (nodes, edges) = query_to_graph(&graph, &query);
+        let (nodes, edges) = query_to_graph(&graph, &query).expect("symbol resolves");
         // Starting from b, bidirectional BFS should find a (caller), b (start), and c (callee)
         assert!(
             !nodes.is_empty(),

@@ -452,7 +452,10 @@ fn structural_graph_query_benchmark(c: &mut Criterion) {
     group.sample_size(10);
 
     group.bench_function("render_subgraph_text", |b| {
-        let seed_nodes = graph.blast_radius_subgraph("analyze_directory", 3).0;
+        let seed_nodes = graph
+            .blast_radius_subgraph("analyze_directory", 3)
+            .map(|(nodes, _)| nodes)
+            .unwrap_or_default();
         b.iter(|| graph.render_subgraph_text(std::hint::black_box(&seed_nodes)))
     });
 
