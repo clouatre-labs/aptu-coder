@@ -154,7 +154,7 @@ fn build_not_found_message(first_20_lines: &str, old_text_for_hint: &str) -> Str
     let total_lines = all_lines.len();
     let first_old_line = old_text_for_hint.lines().next().unwrap_or("");
     let mut best_line_idx = 0usize;
-    let mut best_line = all_lines[0];
+    let mut best_line = all_lines.first().copied().unwrap_or("");
     let mut best_lcp = 0usize;
 
     for (i, file_line) in all_lines.iter().enumerate() {
@@ -747,6 +747,15 @@ mod tests {
         assert!(msg.contains("0 matches"));
         assert!(msg.contains("analyze_file or analyze_module"));
         assert!(!msg.contains("The file begins"));
+    }
+
+    #[test]
+    fn build_not_found_message_empty_file_no_panic() {
+        // Regression: a file whose lines() yields nothing (e.g. only a newline)
+        // must produce the not-found diagnostic without panicking.
+        let msg = build_not_found_message("\n", "fn foo() {}");
+        assert!(msg.contains("0 matches"));
+        assert!(msg.contains("analyze_file or analyze_module"));
     }
 
     #[test]
