@@ -238,6 +238,68 @@ impl CallGraphCacheKey {
             file_mtimes,
         }
     }
+
+    /// Derive the L2 disk cache key by hashing this key's fields with blake3.
+    ///
+    /// The byte stream deliberately preserves the historical inline encoding
+    /// from `analyze_symbol` so existing disk entries remain valid: symbol,
+    /// serde_json of mode, root path (lossy), git_ref if present,
+    /// `follow_depth` as little-endian bytes, serde_json of match_mode,
+    /// a single byte for `impl_only`, then sorted root-relative path and
+    /// mtime-nanos pairs. `ast_recursion_limit` is intentionally NOT hashed;
+    /// it is `None` at the only call site and the historical key never
+    /// included it. Note `follow_depth` is stored already-defaulted (the old
+    /// inline block hashed `params.max_depth.unwrap_or(1)`, the same value
+    /// the call site passes here), so plain little-endian encoding matches.
+    ///
+    /// `file_mtimes` stores absolute entry paths; they are stripped against
+    /// `root_path` (with the full path as fallback) to reproduce the
+    /// historical root-relative stream.
+    #[must_use]
+    pub fn disk_key(&self) -> blake3::Hash {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.symbol.as_bytes());
+        let mode_str = match serde_json::to_string(&self.mode) {
+            Ok(s) => s,
+            Err(e) => {
+                // Serialization of a unit-like enum should never fail; if it
+                // does, an empty string would produce a non-unique cache key,
+                // so warn loudly.
+                warn!(
+                    error = %e,
+                    "failed to serialize mode for disk cache key; \
+                     falling back to empty string (cache key may collide)"
+                );
+                String::new()
+            }
+        };
+        hasher.update(mode_str.as_bytes());
+        hasher.update(self.root_path.as_os_str().to_string_lossy().as_bytes());
+        if let Some(git_ref) = &self.git_ref {
+            hasher.update(git_ref.as_bytes());
+        }
+        hasher.update(&self.follow_depth.to_le_bytes());
+        let match_mode_str = match serde_json::to_string(&self.match_mode) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "failed to serialize match_mode for disk cache key; \
+                     falling back to empty string (cache key may collide)"
+                );
+                String::new()
+            }
+        };
+        hasher.update(match_mode_str.as_bytes());
+        hasher.update(&[u8::from(self.impl_only)]);
+        // `file_mtimes` is already sorted by path (see `from_entries`).
+        for (path, mtime_nanos) in &self.file_mtimes {
+            let rel = path.strip_prefix(&self.root_path).unwrap_or(path);
+            hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
+            hasher.update(&mtime_nanos.to_le_bytes());
+        }
+        hasher.finalize()
+    }
 }
 
 /// Cached call graph result: the fully-built `FocusedAnalysisOutput`.
@@ -994,5 +1056,110 @@ mod tests {
         // Cloned instances share eviction_count
         assert_eq!(cache1.eviction_count(), 1);
         assert_eq!(cache2.eviction_count(), 1);
+    }
+
+    /// Replicates the pre-refactor inline disk-key byte stream from
+    /// `crates/aptu-coder/src/tools/symbol_focused.rs` (analyze_symbol L2 key)
+    /// so the golden pin below is derived from the historical encoding.
+    // The match statements intentionally mirror the historical inline block.
+    #[allow(clippy::manual_unwrap_or_default)]
+    fn legacy_inline_disk_key(key: &CallGraphCacheKey, entries: &[WalkEntry]) -> blake3::Hash {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(key.symbol.as_bytes());
+        let mode_str = match serde_json::to_string(&key.mode) {
+            Ok(s) => s,
+            Err(_) => String::new(),
+        };
+        hasher.update(mode_str.as_bytes());
+        hasher.update(key.root_path.as_os_str().to_string_lossy().as_bytes());
+        if let Some(git_ref) = &key.git_ref {
+            hasher.update(git_ref.as_bytes());
+        }
+        hasher.update(&key.follow_depth.to_le_bytes());
+        let match_mode_str = match serde_json::to_string(&key.match_mode) {
+            Ok(s) => s,
+            Err(_) => String::new(),
+        };
+        hasher.update(match_mode_str.as_bytes());
+        hasher.update(&[u8::from(key.impl_only)]);
+        let mut sorted: Vec<_> = entries.iter().filter(|e| !e.is_dir).collect();
+        sorted.sort_by(|a, b| a.path.cmp(&b.path));
+        for entry in &sorted {
+            let rel = entry
+                .path
+                .strip_prefix(&key.root_path)
+                .unwrap_or(&entry.path);
+            hasher.update(rel.as_os_str().to_string_lossy().as_bytes());
+            let mtime_nanos = entry
+                .mtime
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            hasher.update(&mtime_nanos.to_le_bytes());
+        }
+        hasher.finalize()
+    }
+
+    #[test]
+    fn test_call_graph_disk_key_golden_pin() {
+        // Arrange: fixed inputs matching the historical analyze_symbol L2 key
+        // (symbol, mode, root, git_ref, depth, match_mode, impl_only, entries
+        // with fixed mtimes plus one dir entry that must be filtered out).
+        let root = Path::new("/tmp/golden-root");
+        let f1 = root.join("a.rs");
+        let f2 = root.join("sub/b.rs");
+        let base = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let entries = vec![
+            WalkEntry {
+                path: root.to_path_buf(),
+                depth: 0,
+                is_dir: true,
+                is_symlink: false,
+                symlink_target: None,
+                mtime: None,
+                canonical_path: PathBuf::new(),
+            },
+            WalkEntry {
+                path: f1,
+                depth: 1,
+                is_dir: false,
+                is_symlink: false,
+                symlink_target: None,
+                mtime: Some(base),
+                canonical_path: PathBuf::new(),
+            },
+            WalkEntry {
+                path: f2,
+                depth: 2,
+                is_dir: false,
+                is_symlink: false,
+                symlink_target: None,
+                mtime: Some(base + std::time::Duration::from_nanos(123)),
+                canonical_path: PathBuf::new(),
+            },
+        ];
+        let key = CallGraphCacheKey::from_entries(
+            root,
+            &entries,
+            Some("main"),
+            2,
+            &SymbolMatchMode::Contains,
+            true,
+            None,
+            "parse_config",
+            &SymbolAnalysisMode::CallGraph,
+        );
+
+        // Act + Assert: the digest must match the historical inline encoding
+        // exactly (pinned hex), so existing L2 disk entries stay valid.
+        // Pinned digest of the historical inline encoding (see
+        // `legacy_inline_disk_key` below); changing the byte stream here
+        // would invalidate every existing L2 disk entry.
+        assert_eq!(
+            key.disk_key().to_hex().to_string(),
+            "8a6ca4af846ac5370b5eb2005663b26d853d49981a2997f85b230137948e55f6"
+        );
+        // Cross-check against the legacy inline stream for belt-and-braces.
+        assert_eq!(key.disk_key(), legacy_inline_disk_key(&key, &entries));
     }
 }
