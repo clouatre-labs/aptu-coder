@@ -94,6 +94,27 @@ pub fn supported_file_ext_pattern() -> &'static str {
 /// is one hop of headroom over observed max.
 pub const MAX_TOOL_DEPTH: u32 = 3;
 
+/// Hard cap on the number of anchors accepted per `verify_anchors` call,
+/// enforced both in the emitted JSON schema (`maxItems`) and as an early
+/// handler check before any filesystem access.
+pub const MAX_ANCHORS: usize = 100;
+
+/// Returns an array schema with a `maxItems` constraint for `verify_anchors`'s
+/// `anchors` field. Used as `schema_with` so oversized batches are rejected at
+/// the protocol layer.
+// SAFETY: json! macro always produces a Value::Object for object literals.
+#[allow(clippy::expect_used)]
+pub fn anchors_array_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
+    let map = json!({
+        "type": "array",
+        "maxItems": MAX_ANCHORS
+    })
+    .as_object()
+    .expect("json! object literal is always a Value::Object")
+    .clone();
+    Schema::from(map)
+}
+
 /// Returns a string schema with a `pattern` constraint covering all supported
 /// source file extensions. Used as `schema_with` on `path` fields.
 // SAFETY: json! macro always produces a Value::Object for object literals.

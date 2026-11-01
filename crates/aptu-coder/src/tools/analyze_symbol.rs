@@ -901,9 +901,9 @@ mod tests {
     /// returning the context and the receiving end so tests can inspect emitted events.
     fn test_context() -> (
         AnalyzeSymbolContext,
-        tokio::sync::mpsc::UnboundedReceiver<crate::metrics::MetricEvent>,
+        tokio::sync::mpsc::Receiver<crate::metrics::MetricEvent>,
     ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let ctx = AnalyzeSymbolContext {
             metrics_tx: crate::metrics::MetricsSender(tx),
             call_graph_cache: CallGraphCache::new(1),

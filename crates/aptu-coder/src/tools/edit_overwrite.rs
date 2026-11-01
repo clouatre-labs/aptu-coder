@@ -197,13 +197,8 @@ pub(crate) async fn edit_overwrite(
     {
         let sid_str = ctx.sid.clone().unwrap_or_default();
         let canonical = output.path.clone();
-        #[allow(clippy::expect_used)]
-        let mut counts = ctx
-            .edit_failure_counts
-            .lock()
-            // SAFETY: mutex lock failure indicates a poisoned lock from a panic in another task;
-            // this is fatal and should propagate.
-            .expect("edit_failure_counts poisoned");
+        let mut counts =
+            super::common::lock_or_recover(ctx.edit_failure_counts, "edit_failure_counts");
         counts.remove(&(sid_str, canonical));
     }
 

@@ -7,6 +7,30 @@
 
 use aptu_coder_core::pagination::decode_cursor;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData, MetaObject};
+use std::sync::{Mutex, MutexGuard};
+
+/// Locks `mutex`, recovering from poisoning by resetting the guarded value to
+/// `T::default()` (fresh state), mirroring `lock_or_recover` in
+/// `aptu_coder_core::cache`. A single panicked task must not convert every
+/// subsequent edit into internal errors; the stale-state cost is bounded and
+/// benign (observability counts, empty lock registries).
+pub(crate) fn lock_or_recover<'a, T: Default>(
+    mutex: &'a Mutex<T>,
+    what: &'static str,
+) -> MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!(
+                what,
+                "mutex poisoned; recovering with fresh state instead of panicking"
+            );
+            let mut guard = poisoned.into_inner();
+            *guard = T::default();
+            guard
+        }
+    }
+}
 
 /// Returns `true` when `summary=true` and a `cursor` are both provided, which is an invalid
 /// combination since summary mode and pagination are mutually exclusive.
@@ -67,6 +91,26 @@ pub(crate) fn paginate_or_internal_error<T: Clone>(
 #[cfg(test)]
 mod tests {
     use super::normalize_cursor;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// Edge case: lock_or_recover recovers a deliberately poisoned mutex with a
+    /// fresh default value instead of panicking.
+    #[test]
+    fn lock_or_recover_poisoned_mutex_recovers_fresh() {
+        let mutex: Mutex<HashMap<String, u8>> = Mutex::new(HashMap::new());
+        {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = mutex.lock().unwrap();
+                panic!("deliberate poison");
+            }));
+            assert!(result.is_err());
+        }
+        let mut guard = super::lock_or_recover(&mutex, "test_mutex");
+        assert!(guard.is_empty(), "recovery resets to the fresh default");
+        guard.insert("k".to_string(), 1);
+        assert_eq!(guard.get("k"), Some(&1));
+    }
 
     #[test]
     fn normalize_cursor_none_stays_none() {

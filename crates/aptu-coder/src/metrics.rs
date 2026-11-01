@@ -502,11 +502,28 @@ pub(crate) fn emit_schema_surface(sender: &MetricsSender, tools: &[rmcp::model::
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
 #[derive(Clone)]
-pub struct MetricsSender(pub tokio::sync::mpsc::UnboundedSender<MetricEvent>);
+pub struct MetricsSender(pub tokio::sync::mpsc::Sender<MetricEvent>);
+
+/// Fixed capacity of the bounded metrics channel; keeps RSS flat when the writer
+/// task stalls (e.g. a metrics .lock fcntl-held by another process).
+pub const METRICS_CHANNEL_CAPACITY: usize = 4096;
+
+/// Count of metric events dropped because the bounded channel was full.
+static DROPPED_EVENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Current count of dropped metric events (overflow of the bounded channel).
+#[cfg(test)]
+pub(crate) fn dropped_events() -> u64 {
+    DROPPED_EVENTS.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 impl MetricsSender {
     pub fn send(&self, event: MetricEvent) {
-        let _ = self.0.send(event);
+        // Non-blocking observability contract: never block the caller. When the
+        // bounded channel is full the event is dropped and counted.
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = self.0.try_send(event) {
+            DROPPED_EVENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -680,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_emit_schema_surface_event_shape() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(METRICS_CHANNEL_CAPACITY);
         let tools = crate::CodeAnalyzer::list_tools();
         emit_schema_surface(&MetricsSender(tx), &tools);
         let event = rx.try_recv().unwrap();
@@ -710,7 +727,7 @@ mod tests {
 
     #[test]
     fn test_emit_schema_surface_empty_tool_list_does_not_panic() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(METRICS_CHANNEL_CAPACITY);
         emit_schema_surface(&MetricsSender(tx), &[]);
         let event = rx.try_recv().unwrap();
         let map = event.schema_chars.expect("schema_chars populated");
@@ -726,7 +743,7 @@ mod tests {
     fn test_emit_schema_surface_tools_without_output_schema_record_zero() {
         let mut tool = crate::CodeAnalyzer::list_tools()[0].clone();
         tool.output_schema = None;
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(METRICS_CHANNEL_CAPACITY);
         emit_schema_surface(&MetricsSender(tx), std::slice::from_ref(&tool));
         let event = rx.try_recv().unwrap();
         let out_map = event
@@ -963,4 +980,30 @@ fn test_read_resource_error_code_is_bounded() {
         ("RESOURCE_NOT_FOUND", None)
     );
     assert_eq!(classify_error_code(ErrorCode(-12345)), ("MCP_ERROR", None));
+}
+
+/// Edge case: overflow of the bounded channel drops the event and increments the
+/// drop counter without blocking the caller.
+#[test]
+fn test_bounded_channel_overflow_drops_and_counts() {
+    let (tx, _rx) = tokio::sync::mpsc::channel::<MetricEvent>(1);
+    let sender = MetricsSender(tx);
+    // Fill the single slot.
+    sender.send(MetricEvent {
+        ts: 1,
+        ..Default::default()
+    });
+    let before = dropped_events();
+    // These overflow (no receiver drain); must not block and must be counted.
+    for _ in 0..3 {
+        sender.send(MetricEvent {
+            ts: 2,
+            ..Default::default()
+        });
+    }
+    assert_eq!(
+        dropped_events() - before,
+        3,
+        "each overflow drops and counts"
+    );
 }

@@ -50,6 +50,36 @@ pub(crate) async fn verify_anchors_handler(
     let sid = ctx.sid.clone();
     let seq = ctx.seq;
 
+    // Reject oversized batches before any filesystem access.
+    if params.anchors.len() > aptu_coder_core::schema_helpers::MAX_ANCHORS {
+        let mut meta = error_meta(
+            "validation",
+            false,
+            "split the batch into multiple verify_anchors calls",
+        );
+        if let Some(obj) = meta.as_object_mut() {
+            obj.insert(
+                "max_anchors".to_string(),
+                serde_json::json!(aptu_coder_core::schema_helpers::MAX_ANCHORS),
+            );
+        }
+        return fail(
+            &ctx,
+            span,
+            t_start,
+            "invalid_params",
+            ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!(
+                    "anchors exceeds the maximum of {} per call: got {}",
+                    aptu_coder_core::schema_helpers::MAX_ANCHORS,
+                    params.anchors.len()
+                ),
+                Some(meta),
+            ),
+        );
+    }
+
     // Resolve the workspace root relative to the process CWD before any fs access.
     let root = match crate::validation::canonical_cwd().and_then(|cwd| {
         crate::validation::validate_path_relative_to(&params.workspace_root, true, &cwd)

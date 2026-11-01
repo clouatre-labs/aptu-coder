@@ -18,16 +18,13 @@ use tokio::sync::mpsc;
 
 /// Receiver half of the metrics channel; drains events and writes them to daily-rotated JSONL files.
 pub struct MetricsWriter {
-    rx: tokio::sync::mpsc::UnboundedReceiver<MetricEvent>,
+    rx: tokio::sync::mpsc::Receiver<MetricEvent>,
     base_dir: PathBuf,
     dir_created: bool,
 }
 
 impl MetricsWriter {
-    pub fn new(
-        rx: tokio::sync::mpsc::UnboundedReceiver<MetricEvent>,
-        base_dir: Option<PathBuf>,
-    ) -> Self {
+    pub fn new(rx: tokio::sync::mpsc::Receiver<MetricEvent>, base_dir: Option<PathBuf>) -> Self {
         let dir = base_dir.unwrap_or_else(xdg_metrics_dir);
         Self {
             rx,
@@ -154,7 +151,7 @@ impl MetricsWriter {
 
     /// Receive and accumulate a batch of events from the channel.
     async fn receive_batch(
-        rx: &mut tokio::sync::mpsc::UnboundedReceiver<MetricEvent>,
+        rx: &mut tokio::sync::mpsc::Receiver<MetricEvent>,
         tool_counts: &mut std::collections::HashMap<&'static str, ToolMetrics>,
         export_session_id: &mut Option<String>,
     ) -> Option<Vec<MetricEvent>> {
@@ -461,19 +458,21 @@ mod tests {
 
     #[tokio::test]
     async fn receive_batch_populates_est_output_tokens_on_per_call_events() {
-        let (tx, mut rx) = mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, mut rx) = mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         tx.send(MetricEvent {
             tool: "analyze_file",
             result: "ok",
             output_chars: 400,
             ..Default::default()
         })
+        .await
         .unwrap();
         tx.send(
             crate::metrics::MetricEventBuilder::new("schema_surface", "ok", 0)
                 .output_chars(1234)
                 .build(),
         )
+        .await
         .unwrap();
         drop(tx);
 
@@ -489,13 +488,14 @@ mod tests {
 
     #[tokio::test]
     async fn receive_batch_excludes_receipt_events_from_est_output_tokens() {
-        let (tx, mut rx) = mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, mut rx) = mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         tx.send(MetricEvent {
             tool: "analyze_file",
             result: "received",
             output_chars: 400,
             ..Default::default()
         })
+        .await
         .unwrap();
         tx.send(MetricEvent {
             tool: "analyze_file",
@@ -503,6 +503,7 @@ mod tests {
             output_chars: 400,
             ..Default::default()
         })
+        .await
         .unwrap();
         drop(tx);
 
@@ -698,7 +699,8 @@ mod tests {
     async fn test_metrics_writer_batching() {
         let _guard = metrics_export_lock().await;
         let dir = TempDir::new().unwrap();
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
         let make_event = || MetricEvent {
             ts: unix_ms(),
@@ -723,9 +725,9 @@ mod tests {
             file_ext: None,
             ..Default::default()
         };
-        tx.send(make_event()).unwrap();
-        tx.send(make_event()).unwrap();
-        tx.send(make_event()).unwrap();
+        tx.send(make_event()).await.unwrap();
+        tx.send(make_event()).await.unwrap();
+        tx.send(make_event()).await.unwrap();
         drop(tx);
         writer.run().await;
         let entries: Vec<_> = std::fs::read_dir(dir.path())
@@ -819,7 +821,8 @@ mod tests {
         }
 
         // Act: run writer with a couple of events and drop the sender to trigger shutdown
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
 
         let make_event = || MetricEvent {
@@ -845,8 +848,8 @@ mod tests {
             ..Default::default()
         };
 
-        tx.send(make_event()).unwrap();
-        tx.send(make_event()).unwrap();
+        tx.send(make_event()).await.unwrap();
+        tx.send(make_event()).await.unwrap();
         drop(tx);
         writer.run().await;
 
@@ -874,7 +877,8 @@ mod tests {
         let _guard = metrics_export_lock().await;
         // Edge case: no APTU_CODER_METRICS_EXPORT_FILE -> no export file written
         let dir = TempDir::new().unwrap();
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
 
         let make_event = || MetricEvent {
@@ -901,7 +905,7 @@ mod tests {
             ..Default::default()
         };
 
-        tx.send(make_event()).unwrap();
+        tx.send(make_event()).await.unwrap();
         drop(tx);
         writer.run().await;
 
@@ -929,7 +933,8 @@ mod tests {
             std::env::set_var("APTU_CODER_METRICS_EXPORT_FILE", "relative/export.json");
         }
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
 
         let make_event = || MetricEvent {
@@ -956,7 +961,7 @@ mod tests {
             ..Default::default()
         };
 
-        tx.send(make_event()).unwrap();
+        tx.send(make_event()).await.unwrap();
         drop(tx);
         writer.run().await;
 
@@ -989,7 +994,8 @@ mod tests {
         let _guard = metrics_export_lock().await;
         // Assert: lock file is created next to JSONL file with deterministic name
         let dir = TempDir::new().unwrap();
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer = MetricsWriter::new(rx, Some(dir.path().to_path_buf()));
         let make_event = || MetricEvent {
             ts: unix_ms(),
@@ -1014,7 +1020,7 @@ mod tests {
             file_ext: None,
             ..Default::default()
         };
-        tx.send(make_event()).unwrap();
+        tx.send(make_event()).await.unwrap();
         drop(tx);
         writer.run().await;
 
@@ -1046,7 +1052,8 @@ mod tests {
         let base = dir.path().to_path_buf();
 
         // Writer 1
-        let (tx1, rx1) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx1, rx1) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer1 = MetricsWriter::new(rx1, Some(base.clone()));
         let make_event = || MetricEvent {
             ts: unix_ms(),
@@ -1071,15 +1078,16 @@ mod tests {
             file_ext: None,
             ..Default::default()
         };
-        tx1.send(make_event()).unwrap();
-        tx1.send(make_event()).unwrap();
+        tx1.send(make_event()).await.unwrap();
+        tx1.send(make_event()).await.unwrap();
         drop(tx1);
 
         // Writer 2
-        let (tx2, rx2) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+        let (tx2, rx2) =
+            tokio::sync::mpsc::channel::<MetricEvent>(crate::metrics::METRICS_CHANNEL_CAPACITY);
         let writer2 = MetricsWriter::new(rx2, Some(base));
-        tx2.send(make_event()).unwrap();
-        tx2.send(make_event()).unwrap();
+        tx2.send(make_event()).await.unwrap();
+        tx2.send(make_event()).await.unwrap();
         drop(tx2);
 
         // Run both writers concurrently

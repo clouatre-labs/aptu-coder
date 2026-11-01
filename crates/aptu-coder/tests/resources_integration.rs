@@ -23,7 +23,8 @@ use serial_test::serial;
 
 fn make_analyzer() -> aptu_coder::CodeAnalyzer {
     let peer = Arc::new(TokioMutex::new(None));
-    let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (metrics_tx, _metrics_rx) =
+        tokio::sync::mpsc::channel(aptu_coder::METRICS_CHANNEL_CAPACITY);
     aptu_coder::CodeAnalyzer::new(peer, aptu_coder::MetricsSender(metrics_tx))
 }
 

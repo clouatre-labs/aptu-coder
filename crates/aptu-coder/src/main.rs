@@ -244,8 +244,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install global tracing subscriber with optional OTel layers
     setup_tracing(otel_provider.clone(), log_provider.clone());
 
-    // Create metrics channel and spawn writer
-    let (metrics_tx, metrics_rx) = tokio::sync::mpsc::unbounded_channel::<MetricEvent>();
+    // Create bounded metrics channel and spawn writer. Capacity is fixed so a
+    // stalled writer cannot grow RSS; overflow drops events (counted).
+    let (metrics_tx, metrics_rx) =
+        tokio::sync::mpsc::channel::<MetricEvent>(aptu_coder::METRICS_CHANNEL_CAPACITY);
     tokio::spawn(MetricsWriter::new(metrics_rx, None).run());
 
     let analyzer = CodeAnalyzer::new(peer, MetricsSender(metrics_tx));

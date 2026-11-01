@@ -3,7 +3,7 @@
 //! Structural knowledge graph over petgraph DiGraph with BFS blast-radius traversal.
 
 use crate::analyze::FileAnalysisOutput;
-use crate::graph::call_graph::CallGraph;
+use crate::graph::call_graph::{CallGraph, GraphError};
 use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -45,6 +45,10 @@ pub struct StructuralGraph {
     #[serde(skip)]
     symbol_index: HashMap<String, Vec<NodeIndex>>,
 }
+
+/// Nodes and edges of a blast-radius subgraph: BFS-ordered node indices and all
+/// edges whose endpoints are both in the visited set.
+pub type BlastRadiusSubgraph = (Vec<NodeIndex>, Vec<(NodeIndex, NodeIndex, Edge)>);
 
 type BuildNodesResult = (
     DiGraph<Node, Edge>,
@@ -357,25 +361,31 @@ impl StructuralGraph {
 
     /// Blast-radius subgraph including both nodes and edges.
     ///
-    /// Returns a tuple of (nodes, edges) where:
+    /// Returns `Ok((nodes, edges))` where:
     /// - nodes: Vec<NodeIndex> with the start symbol first, followed by all discovered nodes in BFS order
     /// - edges: Vec<(NodeIndex, NodeIndex, Edge)> containing every edge whose source and target
     ///   are both in the visited set (not just edges walked by the BFS tree), allowing clients
     ///   to fully reconstruct the subgraph's connectivity
     ///
-    /// If the symbol is not found, returns (vec![], vec![]).
+    /// Returns `Err(GraphError::SymbolNotFound)` when the symbol does not resolve
+    /// (a found symbol always appears as nodes[0], so empty can only mean not-found).
     pub fn blast_radius_subgraph(
         &self,
         symbol: &str,
         depth: usize,
-    ) -> (Vec<NodeIndex>, Vec<(NodeIndex, NodeIndex, Edge)>) {
+    ) -> Result<BlastRadiusSubgraph, GraphError> {
         let Some(start) = self
             .symbol_index
             .get(symbol)
             .and_then(|v| v.first())
             .copied()
         else {
-            return (vec![], vec![]);
+            return Err(GraphError::SymbolNotFound {
+                symbol: symbol.to_string(),
+                hint: "The symbol is not present in the built graph; run analyze_symbol on the \
+                       directory and check spelling."
+                    .to_string(),
+            });
         };
 
         let (visited, tail) = self.bfs_frontier(start, depth);
@@ -392,7 +402,7 @@ impl StructuralGraph {
             .map(|e| (e.source(), e.target(), e.weight().clone()))
             .collect();
 
-        (nodes, edges)
+        Ok((nodes, edges))
     }
 
     /// Renders a subgraph defined by `nodes` into a prompt-ready string representation.
