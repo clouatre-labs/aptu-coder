@@ -212,7 +212,15 @@ fn get_compiled_queries(language: &str) -> Result<&'static CompiledQueries, Pars
         // Failure is logged here, inside the at-most-once initializer, preserving
         // the log-once semantics of the former eager cache.
         match get_language_info(language) {
-            Some(lang_info) => build_compiled_queries(&lang_info),
+            Some(lang_info) => match build_compiled_queries(&lang_info) {
+                Ok(compiled) => Ok(compiled),
+                Err(e) => {
+                    // At-most-once failure log: the initializer runs once per
+                    // language, preserving the eager cache's log-once semantics.
+                    tracing::error!("Failed to compile queries for language {}: {}", language, e);
+                    Err(e)
+                }
+            },
             None => Err(ParserError::UnsupportedLanguage(language.to_string())),
         }
     });
