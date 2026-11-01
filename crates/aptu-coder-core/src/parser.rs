@@ -1027,7 +1027,6 @@ mod tests_unsupported {
 #[cfg(test)]
 mod tests_lazy_compilation {
     use super::*;
-    use std::sync::atomic::Ordering;
 
     #[test]
     fn test_rust_only_parse_compiles_rust_exactly_once() {
