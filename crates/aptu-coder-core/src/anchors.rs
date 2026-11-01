@@ -63,7 +63,7 @@ where
             ));
         }
     }
-    results.into_iter().map(Option::unwrap).collect()
+    results.into_iter().flatten().collect()
 }
 
 /// Verify a single anchor against the pre-read lines of its (already resolved)

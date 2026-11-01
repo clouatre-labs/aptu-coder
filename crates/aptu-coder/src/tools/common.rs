@@ -32,6 +32,26 @@ pub(crate) fn lock_or_recover<'a, T: Default>(
     }
 }
 
+/// Locks `mutex`, recovering from poisoning via `PoisonError::into_inner()`
+/// so existing entries are retained. Use for registries such as
+/// `file_edit_locks`, where resetting to a fresh default would discard live
+/// per-path locks held by in-flight edits, reintroducing concurrency.
+pub(crate) fn lock_registry_or_recover<'a, T>(
+    mutex: &'a Mutex<T>,
+    what: &'static str,
+) -> MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!(
+                what,
+                "mutex poisoned; recovering with retained state instead of panicking"
+            );
+            poisoned.into_inner()
+        }
+    }
+}
+
 /// Returns `true` when `summary=true` and a `cursor` are both provided, which is an invalid
 /// combination since summary mode and pagination are mutually exclusive.
 #[must_use]
@@ -110,6 +130,32 @@ mod tests {
         assert!(guard.is_empty(), "recovery resets to the fresh default");
         guard.insert("k".to_string(), 1);
         assert_eq!(guard.get("k"), Some(&1));
+    }
+
+    /// Edge case: lock_registry_or_recover recovers a deliberately poisoned
+    /// registry mutex while retaining all existing entries (live per-path
+    /// locks must survive poisoning).
+    #[test]
+    fn lock_registry_or_recover_poisoned_mutex_retains_entries() {
+        use std::sync::Arc;
+        let mutex: Mutex<HashMap<String, Arc<()>>> = Mutex::new(HashMap::new());
+        mutex
+            .lock()
+            .unwrap()
+            .insert("a.rs".to_string(), Arc::new(()));
+        {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = mutex.lock().unwrap();
+                panic!("deliberate poison");
+            }));
+            assert!(result.is_err());
+        }
+        let guard = super::lock_registry_or_recover(&mutex, "test_registry");
+        assert!(
+            guard.contains_key("a.rs"),
+            "recovery retains existing registry entries"
+        );
+        assert_eq!(guard.len(), 1);
     }
 
     #[test]

@@ -543,7 +543,8 @@ pub(crate) async fn edit_replace(
     // Look up or create the per-path mutex from the registry.
     // The lock is acquired INSIDE spawn_blocking so the async worker is never blocked.
     let path_lock = {
-        let mut locks = super::common::lock_or_recover(ctx.file_edit_locks, "file_edit_locks");
+        let mut locks =
+            super::common::lock_registry_or_recover(ctx.file_edit_locks, "file_edit_locks");
         Arc::clone(
             locks
                 .entry(resolved_path.clone())

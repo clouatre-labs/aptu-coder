@@ -104,10 +104,12 @@ pub const MAX_ANCHORS: usize = 100;
 /// the protocol layer.
 // SAFETY: json! macro always produces a Value::Object for object literals.
 #[allow(clippy::expect_used)]
-pub fn anchors_array_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
+pub fn anchors_array_schema(generator: &mut schemars::SchemaGenerator) -> Schema {
+    let items = generator.subschema_for::<crate::types::AnchorItem>();
     let map = json!({
         "type": "array",
-        "maxItems": MAX_ANCHORS
+        "maxItems": MAX_ANCHORS,
+        "items": items
     })
     .as_object()
     .expect("json! object literal is always a Value::Object")
