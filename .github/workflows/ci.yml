@@ -73,33 +73,15 @@ jobs:
               - '.github/scripts/docs-output-contract-check.sh'
               - 'README.md'
 
-  commitlint:
+  lint-commits:
     name: Lint Commits
-    runs-on: ubuntu-26.04-arm
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 5
     permissions:
       contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: "26"
-      - name: Install commitlint
-        run: |
-          npm install --no-save \
-            @commitlint/cli@20.5.3 \
-            @commitlint/config-conventional@20.5.3
-      - name: Validate commit messages
-        run: |
-          npx commitlint \
-            --from ${{ github.event.pull_request.base.sha }} \
-            --to ${{ github.event.pull_request.head.sha }} \
-            --verbose
+    uses: clouatre-labs/.github/.github/workflows/lint-commits.yml@fef1bf12f9563d11165b271a8ae0c5640e69e72c # reusable lint-commits
+    with:
+      base-sha: ${{ github.event.pull_request.base.sha }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      label: ubuntu-26.04-arm
 
   check-base:
     name: Check Branch Base
@@ -454,7 +436,7 @@ jobs:
     runs-on: ubuntu-26.04-arm
     if: always()
     permissions: {}
-    needs: [changes, commitlint, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks, pytest-bench, mcp-conformance]
+    needs: [changes, lint-commits, check-base, lint, coverage, deny, lint-docs, msrv, semver-checks, pytest-bench, mcp-conformance]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |
