@@ -77,10 +77,11 @@ jobs:
     name: Lint Commits
     permissions:
       contents: read
-    uses: clouatre-labs/.github/.github/workflows/lint-commits.yml@c546e09adb87caef81ae109cb3c27d016bea0fae # reusable lint-commits
+    uses: clouatre-labs/.github/.github/workflows/lint-commits.yml@fef1bf12f9563d11165b271a8ae0c5640e69e72c # reusable lint-commits
     with:
       base-sha: ${{ github.event.pull_request.base.sha }}
       head-sha: ${{ github.event.pull_request.head.sha }}
+      label: ubuntu-26.04-arm
 
   check-base:
     name: Check Branch Base
