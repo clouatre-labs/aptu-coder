@@ -30,7 +30,6 @@
 #![cfg_attr(test, allow(clippy::expect_used))]
 
 pub mod analyze;
-pub mod anchors;
 pub mod ansi;
 pub mod cache;
 pub mod cache_disk;

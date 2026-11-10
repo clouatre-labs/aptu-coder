@@ -9,9 +9,6 @@
 //! - **`analyze_file`**: Semantic extraction (functions, classes, imports)
 //! - **`analyze_module`**: Lightweight function and import index
 //!
-//! **Verification family:**
-//! - **`verify_anchors`**: Batch-verify path:line[:symbol] anchors against a workspace root
-//!
 //! **Edit family:**
 //! - **`edit_overwrite`**: Create or overwrite files
 //! - **`edit_replace`**: Replace text blocks in files
@@ -213,7 +210,7 @@ use aptu_coder_core::cache::AnalysisCache;
 use aptu_coder_core::cache::CacheTier;
 use aptu_coder_core::types::{
     AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, EditOverwriteParams,
-    EditReplaceOutput, EditReplaceParams, VerifyAnchorsOutput, VerifyAnchorsParams,
+    EditReplaceOutput, EditReplaceParams,
 };
 use filters::CompiledRule;
 
@@ -593,41 +590,6 @@ impl CodeAnalyzer {
             seq,
         };
         tools::analyze_module::analyze_module_handler(ctx, params, param_path, &span, t_start).await
-    }
-
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
-    #[tool(
-        name = "verify_anchors",
-        title = "Verify Anchors",
-        description = "Verifies a batch of path:line[:symbol] anchors against a workspace root: file exists, 1-based line within range, and optional word-boundary symbol match within a plus or minus 2 line window; fail-closed semantics, never fabricates success. structuredContent carries one verdict per anchor (exists, in_range, symbol_found, window_line).",
-        output_schema = slim_output_schema::<VerifyAnchorsOutput>(),
-        annotations(
-            title = "Verify Anchors",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
-    async fn verify_anchors(
-        &self,
-        params: Parameters<VerifyAnchorsParams>,
-        context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let params = params.0;
-        let t_start = std::time::Instant::now();
-        let (seq, sid) = self.begin_tool_call("verify_anchors", &context.meta).await;
-        let span = tracing::Span::current();
-        span.record("gen_ai.system", "mcp");
-        span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "verify_anchors");
-        span.record("path", &params.workspace_root);
-        let ctx = tools::VerifyAnchorsContext {
-            metrics_tx: self.metrics_tx.clone(),
-            sid: sid.clone(),
-            seq,
-        };
-        tools::verify_anchors::verify_anchors_handler(ctx, params, &span, t_start).await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
