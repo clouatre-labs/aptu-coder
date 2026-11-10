@@ -114,9 +114,12 @@ bootstrap. Decision gate: remove, confidence 0.94. Keep the golden-test lessons 
 history.
 
 ### R2. Cut `analyze_symbol` (~2,120 LOC with dispatch) — do it, staged
-The largest handler in the codebase: 27 calls (52% errors) in 3 weeks of pi sessions, 0
-events in the 10-day server telemetry, and the v19 verdict removes its strategic
-justification. Decision gate: cut, confidence 0.68, with "slim" as fallback. Staging: deprecate
+Both under-utilized and not useful: the v19 crossover benchmark measured its core premise
+directly — no F1 gain in agentic loops that have bash+rg (paired F1 diff -0.071, N=20) —
+and clients discovered this empirically. Usage collapsed from 638 calls/month (October)
+to 27 calls in 3 weeks of pi sessions (52% errors, "symbol not defined in directory" class)
+and 0 events in the 10-day server telemetry. Not useful as positioned, hence under-utilized.
+Decision gate: cut, confidence 0.68, with "slim" as fallback. Staging: deprecate
 in the schema description first (one release), remove next release, watch telemetry for
 objections. If any consumer objects, fall back to keeping only the exact-match, no-pagination
 mode (~one third of the LOC).
@@ -174,14 +177,19 @@ existing 2026-08-01 audit predates GA; mark it superseded once the conformance p
 - Opaque-cursor pagination and cache-key consolidation (#1783/#1786/#1792): validated by
   criterion benches; no further churn.
 
-## 5. Follow-up work items (atomic PRs, in order)
+## 5. Follow-up work items (atomic, tracked as issues)
 
 1. Remove `verify_anchors` (R1) + update README/docs/`docs-output-contract-check.sh`.
-2. Error-text fix for wrong-cased fields (R4).
-3. Deprecation notice on `analyze_symbol` (R2 stage 1).
-4. Publish telemetry-gate verdict; make `error_subtype` non-null (R5).
-5. Execute the KG ablation benchmark; cut or keep KG resources on its result (R3).
-6. MCP 2026-07-28 conformance pass (R8).
+   Tracked as [#1806](https://github.com/clouatre-labs/aptu-coder/issues/1806).
+2. Remove `analyze_symbol` (R2). Tracked as
+   [#1807](https://github.com/clouatre-labs/aptu-coder/issues/1807).
+3. Edit-tool validation errors: name expected snake_case fields; make `error_subtype`
+   non-null on all error paths (R4 + R5). Tracked as
+   [#1808](https://github.com/clouatre-labs/aptu-coder/issues/1808).
+4. Execute the KG ablation benchmark; cut KG resources if NOT-SUPPORTED (R3). Tracked as
+   [#1809](https://github.com/clouatre-labs/aptu-coder/issues/1809).
+5. MCP 2026-07-28 conformance pass (R8). Tracked as
+   [#1810](https://github.com/clouatre-labs/aptu-coder/issues/1810).
 
 *Table 1: aptu-coder tool share and server-side error rates (section 1.1).*
 *Table 2: client-side error rates from pi sessions (section 1.2).*
