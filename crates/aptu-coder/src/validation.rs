@@ -227,9 +227,9 @@ pub(crate) fn canonical_cwd() -> Result<std::path::PathBuf, ErrorData> {
 ///   Path resolution only. No containment check. The caller
 ///   (orchestrator/operator) is responsible for access control.
 pub(crate) fn validate_path_relative_to(
+    working_dir: &std::path::Path,
     path: &str,
     require_exists: bool,
-    working_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf, ErrorData> {
     // Canonicalize the working_dir to resolve symlinks
     let canonical_working_dir = std::fs::canonicalize(working_dir).map_err(|e| {
