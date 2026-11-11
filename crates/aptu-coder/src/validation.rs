@@ -232,12 +232,12 @@ pub(crate) fn validate_path_relative_to(
     working_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf, ErrorData> {
     // Canonicalize the working_dir to resolve symlinks
-    let canonical_working_dir = std::fs::canonicalize(working_dir).map_err(|e| {
+    let canonical_base_dir = std::fs::canonicalize(working_dir).map_err(|e| {
         io_error_to_path_error(&e, "working_dir", "provide a valid working directory")
     })?;
 
     // Verify working_dir is actually a directory
-    if !std::fs::metadata(&canonical_working_dir)
+    if !std::fs::metadata(&canonical_base_dir)
         .map(|m| m.is_dir())
         .unwrap_or(false)
     {
@@ -254,7 +254,7 @@ pub(crate) fn validate_path_relative_to(
 
     // Resolve the target path relative to working_dir
     let canonical_path = if require_exists {
-        let target_path = canonical_working_dir.join(path);
+        let target_path = canonical_base_dir.join(path);
         std::fs::canonicalize(&target_path).map_err(|e| {
             io_error_to_path_error(
                 &e,
@@ -264,7 +264,7 @@ pub(crate) fn validate_path_relative_to(
         })?
     } else {
         // For new files (require_exists=false), resolve the path against
-        // canonical_working_dir with no containment check: the caller's
+        // canonical_base_dir with no containment check: the caller's
         // working_dir is the operator-defined scope, and canonicalize requires
         // the parent directory to exist.
         let p = std::path::Path::new(path);
@@ -281,7 +281,7 @@ pub(crate) fn validate_path_relative_to(
         })?;
 
         let raw_parent =
-            canonical_working_dir.join(p.parent().unwrap_or_else(|| std::path::Path::new("")));
+            canonical_base_dir.join(p.parent().unwrap_or_else(|| std::path::Path::new("")));
         let canonical_parent = std::fs::canonicalize(&raw_parent).map_err(|e| {
             io_error_to_path_error(&e, path, "provide a path with an existing parent directory")
         })?;
