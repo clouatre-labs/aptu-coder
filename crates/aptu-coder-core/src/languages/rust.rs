@@ -118,7 +118,7 @@ pub fn find_receiver_type(node: &Node, source: &str) -> Option<String> {
 /// Rust class nodes (`struct_item`, `enum_item`, `trait_item`) have no syntactic inheritance.
 /// Inheritance is via `impl` blocks, not on the type declaration itself.
 #[must_use]
-pub fn extract_inheritance(_node: &Node, _source: &str) -> Vec<String> {
+pub fn extract_inheritance(_node: &Node, _source: &str) -> Vec<(String, String)> {
     Vec::new()
 }
 
