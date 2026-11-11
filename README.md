@@ -19,21 +19,14 @@ Most code-intelligence tooling for AI agents indexes a codebase into a cloud emb
 
 ## Benchmarks
 
-Auth migration task on Claude Code against [Django](https://github.com/django/django) (Python) source tree. [Full methodology](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/benchmarks/v12/methodology.md).
+Paired comprehension tasks on Claude Code (MCP mode vs native shell search). Methodology: [Django](https://github.com/django/django) auth migration ([v12](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/benchmarks/v12/methodology.md)) and [OpenFAST](https://github.com/OpenFAST/openfast) AeroDyn integration audit ([v13](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/benchmarks/v13/methodology.md)).
 
-| Mode | Sonnet 4.6 | Haiku 4.5 |
-|---|---|---|
-| MCP | 112k tokens, $0.39 | 406k tokens, $0.42 |
-| Native | 276k tokens, $0.95 | 473k tokens, $0.53 |
-| **Savings** | **59% fewer tokens, 59% cheaper** | **14% fewer tokens, 21% cheaper** |
-
-AeroDyn integration audit task on Claude Code against [OpenFAST](https://github.com/OpenFAST/openfast) (Fortran) source tree. [Full methodology](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/benchmarks/v13/methodology.md).
-
-| Mode | Sonnet 4.6 | Haiku 4.5 |
-|---|---|---|
-| MCP | 472k tokens, $1.65 | 687k tokens, $0.72 |
-| Native | 877k tokens, $2.85 | 2162k tokens, $2.21 |
-| **Savings** | **46% fewer tokens, 42% cheaper** | **68% fewer tokens, 68% cheaper** |
+| Task | Mode | Sonnet 4.6 | Haiku 4.5 | Savings |
+|---|---|---|---|---|
+| Django (Python) | MCP | 112k tokens, $0.39 | 406k tokens, $0.42 | **59% fewer tokens, 59% cheaper** (Sonnet) |
+| Django (Python) | Native | 276k tokens, $0.95 | 473k tokens, $0.53 | 14% fewer tokens, 21% cheaper (Haiku) |
+| OpenFAST (Fortran) | MCP | 472k tokens, $1.65 | 687k tokens, $0.72 | **46% fewer tokens, 42% cheaper** (Sonnet) |
+| OpenFAST (Fortran) | Native | 877k tokens, $2.85 | 2162k tokens, $2.21 | **68% fewer tokens, 68% cheaper** (Haiku) |
 
 A real end-to-end multi-agent run against this repository itself: five refactoring issues (#1578–#1582) fixed by the [coder skill](https://github.com/clouatre-labs/agentic-coder-skill) in one orchestrated session — 23 subagent spawns (5 scout, 1 guard, 10 build, 7 check), ~1h42m, three human interventions — producing PRs #1584–#1588, all merged with CI green. [Case study](https://github.com/clouatre-labs/agentic-coder-skill/blob/main/docs/examples/2026-09-aptu-coder-5-issues.md).
 
@@ -47,30 +40,11 @@ aptu-coder is a comprehension layer for coding agents: it gives an agent harness
 
 Structural context is built once and reused: an on-disk cache keyed by blake3 content hashes keeps results correct across concurrent writes. For consumers that hold source text without an on-disk path, `aptu-coder-core` also exposes `analyze_str` as a public Rust library API (see [ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)).
 
-Further reading on the design philosophy: [The Agentic SDLC Governance Stack](https://clouatre.ca/blog/ai-sdlc-governance-stack/), [Context Engineering for Multi-Agent Reliability](https://clouatre.ca/blog/context-engineering-multi-agent-reliability/), and [Orchestrating AI Agents: Subagent Architecture](https://clouatre.ca/blog/orchestrating-ai-agents-subagent-architecture/).
+Further reading on the design philosophy, from the author's [blog](https://clouatre.ca/blog/): [The Agentic SDLC Governance Stack](https://clouatre.ca/blog/ai-sdlc-governance-stack/), [Context Engineering for Multi-Agent Reliability](https://clouatre.ca/blog/context-engineering-multi-agent-reliability/), and [Orchestrating AI Agents: Subagent Architecture](https://clouatre.ca/blog/orchestrating-ai-agents-subagent-architecture/).
 
 ## Supported Languages
 
-| Language | Extensions |
-|----------|------------|
-| Astro | `.astro` |
-| C/C++ | `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hxx` |
-| C# | `.cs` |
-| CSS | `.css` |
-| Fortran | `.f`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08`, `.for`, `.ftn` |
-| Go | `.go` |
-| HTML | `.html`, `.htm` |
-| Java | `.java` |
-| JavaScript | `.js`, `.mjs`, `.cjs` |
-| JSON | `.json` |
-| Kotlin | `.kt`, `.kts` |
-| Markdown | `.md`, `.mdx` |
-| Python | `.py` |
-| Rust | `.rs` |
-| TOML | `.toml` |
-| TSX | `.tsx` |
-| TypeScript | `.ts` |
-| YAML | `.yaml`, `.yml` |
+Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML. The full extension map lives in [`crates/aptu-coder-core/src/lang.rs`](https://github.com/clouatre-labs/aptu-coder/blob/main/crates/aptu-coder-core/src/lang.rs).
 
 ## Installation
 
@@ -147,21 +121,16 @@ extensions:
 
 All optional parameters may be omitted. Shared optional parameters for `analyze_directory`, `analyze_file`, and `analyze_module`:
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `summary` | boolean | auto | Compact output; auto-triggers above 50K chars |
-| `cursor` | string | -- | Pagination cursor from a previous response's `next_cursor` |
+All optional parameters may be omitted. `analyze_directory`, `analyze_file`, and `analyze_module` accept `summary` (compact output, auto-triggers above 50K chars) and `cursor` (pagination token). Page size is server-owned; there is no client `page_size` parameter (passing one returns INVALID_PARAMS).
 
-Page size is server-owned; there is no client `page_size` parameter (passing one returns INVALID_PARAMS).
+- `analyze_directory` -- directory tree with LOC, function, and class counts; respects `.gitignore`
+- `analyze_file` -- functions, classes, and imports with signatures and line ranges; graceful fallback for unsupported extensions
+- `analyze_module` -- lightweight function and import index (~75% smaller than `analyze_file`)
+- `edit_overwrite` -- create or overwrite a file; creates parent directories
+- `edit_replace` -- replace a unique exact text block (or all occurrences with `replace_all`); batch form `edits[]` applies multiple replacements atomically; optional `expected_content_hash` rejects stale edits
+- `exec_command` -- run a shell command; output is capped, filtered, and returned with exit code; cancelled requests kill the command
 
-| Tool | Purpose | Languages |
-|------|---------|-----------|
-| `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore`; file paths in the output are relative to the working directory | all |
-| `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions | all |
-| `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
-| `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
-| `edit_replace` | Replace a unique exact text block or all non-overlapping occurrences (replace_all=true); errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching; optional expected_content_hash (blake3 hex of raw bytes) rejects stale edits; concurrent edits to the same file are serialized per-path; returns occurrences_replaced count. Batch form: pass `edits[]` (array of `{old_text, new_text, replace_all}`) instead of `old_text`/`new_text` to apply multiple replacements to one file atomically (any invalid edit aborts with per-index errors, no write) | all |
-| `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; the command is killed when the request is cancelled; server-owned post-exit drain window (500 ms default); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter); structuredContent carries metadata only (exit code, truncation, collection-error flags), command output lives in the text stream | any |
+Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
@@ -185,11 +154,7 @@ analyze_file path: /my/project/src/lib.rs cursor: eyJvZmZzZXQiOjUwfQ==
 
 `exec_command` applies three independent byte-level caps to prevent large command outputs from flooding the context:
 
-| Stream | Cap | Behavior |
-|--------|-----|----------|
-| stdout | 30,000 chars | Tail-preserving; keeps the last 30k chars |
-| stderr | 10,000 chars | Tail-preserving; errors appear at the end |
-| combined `output_text` | 50,000 chars | Safety net after interleaving |
+stdout keeps the last 30,000 chars, stderr the last 10,000 (tail-preserving, so errors appear at the end), and the combined `output_text` is capped at 50,000 chars as a safety net after interleaving.
 
 The 30k stdout cap is data-driven: analysis of 27,981 observed `exec_command` calls shows only 0.33% exceed this limit. When any cap fires, `output_truncated: true` is set in the response and recorded in the JSONL metrics.
 
@@ -201,19 +166,7 @@ A server-owned post-exit drain window (500 ms) waits for any background subproce
 
 A built-in filter table suppresses per-file noise from chatty CLI tools before output reaches the model. Filters apply to stdout, stderr, and interleaved output on success only; raw output is always preserved on failure.
 
-| Command | Behavior |
-|---------|----------|
-| `git pull` | Strips diff-stat noise (pipe bars, `create mode`, `delete mode`, `rename`, `mode change` lines); empty output replaced with `ok (up-to-date)` |
-| `git fetch` | Strips `From` and ref-range lines; caps at 10 lines; empty output replaced with `ok fetched` |
-| `git push` | Strips `remote:` progress lines and `To ` destination lines; caps at 10 lines; empty output replaced with `ok pushed` |
-| `git log` | Caps at 20 lines |
-| `git status` | Caps at 20 lines |
-| `git show` | Strips patch hunks (`@@` headers and `+`/`-` diff lines); caps at 200 lines |
-| `git commit` | Strips GPG signing and gitleaks hook output; caps at 10 lines; empty output replaced with `ok committed` |
-| `git diff` | Strips ANSI escape sequences; caps at 100 lines; empty output replaced with `ok (working tree clean)` |
-| `git add` | Strips gitleaks hook output; caps at 5 lines; empty output replaced with `ok staged` |
-| `cargo build` | Strips `Compiling` / `Checking` / `Downloading` / `Fresh` lines; empty output replaced with `ok (build clean)` |
-| `cargo test` | Strips `Compiling` / `Checking` / `Fresh` lines |
+Built-in rules cover the usual suspects: `git pull`/`fetch`/`push` strip diff-stat, remote-progress, and ref noise; `git log`/`status` cap at 20 lines; `git show` strips patch hunks; `git diff` strips ANSI escapes; `git commit`/`add` strip hook output; `cargo build`/`test` strip `Compiling`/`Checking`/`Fresh` progress lines. Clean output collapses to a short `ok` confirmation.
 
 Project-local rules can be added in `.aptu/filters.toml`. Parse errors and unrecognized schema_version values (version != 1) fall back to the built-in table with a logged warning; no crash occurs. When a filter fires, `filter_applied` in `structuredContent` identifies which rule matched.
 
@@ -247,6 +200,7 @@ For the JSONL schema, OTel configuration, and span attribute policy, see:
 
 ## Documentation
 
+- **[Blog](https://clouatre.ca/blog/)** - Design philosophy and agent-harness engineering behind aptu-coder
 - **[AGENTS.md](https://github.com/clouatre-labs/aptu-coder/blob/main/AGENTS.md)** - Contributor reference: project structure, commands, rmcp footguns, tool parameter constraints
 - **[ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)** - Design goals, module map, data flow, language handler system, caching strategy
 - **[CONTRIBUTING.md](https://github.com/clouatre-labs/aptu-coder/blob/main/CONTRIBUTING.md)** - Development workflow, commit conventions, PR checklist
