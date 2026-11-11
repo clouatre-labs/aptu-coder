@@ -148,6 +148,14 @@ pub struct MetricEvent {
     /// single-edit form. Only populated for `edit_replace`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_count: Option<usize>,
+    /// Query mode used by `search_code`: `"pattern"` or `"symbol"`. `None` for all
+    /// other tools; omitted from JSONL when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_mode: Option<&'static str>,
+    /// Number of matches returned by `search_code` (page size, not total). `None` for
+    /// all other tools; omitted from JSONL when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_count: Option<usize>,
     /// Rough token estimate for the response payload: `output_chars / 4`. Only populated
     /// on per-call events where a token estimate is useful; omitted otherwise. This is a
     /// coarse heuristic (~4 chars per token), not a tokenizer-accurate count.
@@ -209,6 +217,8 @@ pub(crate) struct MetricEventBuilder {
     stdout_bytes_raw: Option<u64>,
     stderr_bytes_raw: Option<u64>,
     edit_count: Option<usize>,
+    query_mode: Option<&'static str>,
+    result_count: Option<usize>,
     est_output_tokens: Option<u64>,
     schema_chars: Option<std::collections::BTreeMap<String, usize>>,
     output_schema_chars: Option<std::collections::BTreeMap<String, usize>>,
@@ -258,6 +268,7 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
+    #[allow(dead_code)] // adoption-gate wiring; exercised by serialization tests
     pub(crate) fn session_origin(mut self, v: Option<String>) -> Self {
         self.session_origin = v;
         self
@@ -363,6 +374,16 @@ impl MetricEventBuilder {
         self.edit_count = Some(v);
         self
     }
+    #[must_use]
+    pub(crate) fn query_mode(mut self, v: Option<&'static str>) -> Self {
+        self.query_mode = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn result_count(mut self, v: Option<usize>) -> Self {
+        self.result_count = v;
+        self
+    }
     /// Set an explicit token estimate. Per-call events are normally populated
     /// centrally (output_chars / 4) in `MetricsWriter::receive_batch`; this setter
     /// exists for handler-level overrides and the serialization unit tests.
@@ -428,6 +449,8 @@ impl MetricEventBuilder {
             stdout_bytes_raw: self.stdout_bytes_raw,
             stderr_bytes_raw: self.stderr_bytes_raw,
             edit_count: self.edit_count,
+            query_mode: self.query_mode,
+            result_count: self.result_count,
             est_output_tokens: self.est_output_tokens,
             schema_chars: self.schema_chars,
             output_schema_chars: self.output_schema_chars,
@@ -865,6 +888,8 @@ mod tests {
             session_id: Some("1742468880123-42".to_string()),
             session_origin: Some("test".to_string()),
             seq: Some(5),
+            query_mode: Some("pattern"),
+            result_count: Some(3),
             cache_hit: None,
             cache_write_failure: None,
             exit_code: None,
@@ -896,7 +921,7 @@ mod tests {
             output_schema_chars: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
-        let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","session_origin":"test","seq":5}"#;
+        let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","session_origin":"test","seq":5,"query_mode":"pattern","result_count":3}"#;
         assert_eq!(serialized, json_str);
     }
 }
