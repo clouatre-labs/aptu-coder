@@ -951,3 +951,104 @@ pub(crate) fn extract_def_use(
 
     sites
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::SemanticExtractor;
+
+    fn rust_imports(source: &str) -> Vec<crate::types::ImportInfo> {
+        SemanticExtractor::extract(source, "rust", None, None)
+            .expect("rust extraction should succeed")
+            .imports
+    }
+
+    #[test]
+    fn rust_scoped_identifier_import_records_module_and_item() {
+        let imports = rust_imports("use std::collections::HashMap;\n");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].module, "std::collections");
+        assert_eq!(imports[0].items, ["HashMap"]);
+        assert_eq!(imports[0].line, 1);
+    }
+
+    #[test]
+    fn rust_use_list_imports_each_item() {
+        let imports = rust_imports("use foo::{bar, baz};\n");
+        let mut names: Vec<&str> = imports.iter().map(|i| i.items[0].as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["bar", "baz"]);
+        assert!(imports.iter().all(|i| i.module == "foo"));
+    }
+
+    #[test]
+    fn rust_scoped_use_list_prefixes_each_item() {
+        let imports = rust_imports("use std::{io, fs};\n");
+        let mut names: Vec<&str> = imports.iter().map(|i| i.items[0].as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["fs", "io"]);
+        assert!(imports.iter().all(|i| i.module == "std"));
+    }
+
+    #[test]
+    fn rust_wildcard_import_records_star() {
+        let imports = rust_imports("use std::*;\n");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].module, "*");
+        assert_eq!(imports[0].items, ["*"]);
+    }
+
+    #[test]
+    fn rust_use_as_clause_records_alias() {
+        let imports = rust_imports("use io as stdio;\n");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].items, ["stdio"]);
+    }
+
+    #[test]
+    fn python_import_from_handles_wildcard_alias_and_plain_names() {
+        let source =
+            "from . import *\nfrom .mod import name as alias, other\nfrom pkg import thing\n";
+        let imports = SemanticExtractor::extract(source, "python", None, None)
+            .expect("python extraction should succeed")
+            .imports;
+        assert_eq!(imports.len(), 3);
+        assert_eq!(imports[0].module, ".");
+        assert_eq!(imports[0].items, ["*"]);
+        assert_eq!(imports[1].module, ".mod");
+        assert_eq!(imports[1].items, ["name", "other"]);
+        assert_eq!(imports[2].module, "pkg");
+        assert_eq!(imports[2].items, ["thing"]);
+    }
+
+    #[test]
+    fn calls_record_caller_and_module_level_fallback() {
+        let source = "fn outer() {\n    helper(1);\n}\nfn main() {\n    standalone();\n}\n";
+        let calls = SemanticExtractor::extract(source, "rust", None, None)
+            .expect("rust extraction should succeed")
+            .calls;
+        let helper = calls
+            .iter()
+            .find(|c| c.callee == "helper")
+            .expect("helper call");
+        assert_eq!(helper.caller, "outer");
+        assert_eq!(helper.line, 2);
+        let standalone = calls
+            .iter()
+            .find(|c| c.callee == "standalone")
+            .expect("standalone call");
+        assert_eq!(standalone.caller, "main");
+    }
+
+    #[test]
+    fn nested_call_argument_count_is_recorded() {
+        let source = "fn demo() {\n    outer(inner(1));\n}\n";
+        let calls = SemanticExtractor::extract(source, "rust", None, None)
+            .expect("rust extraction should succeed")
+            .calls;
+        let outer = calls
+            .iter()
+            .find(|c| c.callee == "outer")
+            .expect("outer call");
+        assert_eq!(outer.arg_count, Some(1));
+    }
+}

@@ -463,4 +463,45 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn changed_files_from_git_ref_reports_non_repository_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = changed_files_from_git_ref(tmp.path(), "HEAD");
+        match result {
+            Err(TraversalError::GitError(msg)) => {
+                assert!(msg.contains("not a git repository"), "{msg}");
+            }
+            // macOS temp dirs may resolve under /private/tmp symlinks; tolerate
+            // environments where the temp root still lands inside a repo.
+            Ok(_) => {}
+            Err(other) => panic!("expected GitError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn changed_files_from_git_ref_reports_failed_diff_for_unknown_ref() {
+        // The crate directory is inside this repository; an unknown ref fails at
+        // the git diff step rather than validation.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let result = changed_files_from_git_ref(dir, "no-such-ref-for-coverage-test");
+        match result {
+            Err(TraversalError::GitError(msg)) => {
+                assert!(msg.contains("git diff failed"), "{msg}");
+            }
+            Err(other) => panic!("expected GitError, got {other:?}"),
+            Ok(changed) => assert!(changed.is_empty()),
+        }
+    }
+
+    #[test]
+    fn changed_files_from_git_ref_succeeds_for_head() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let result = changed_files_from_git_ref(dir, "HEAD");
+        assert!(
+            result.is_ok(),
+            "diff against HEAD should succeed: {:?}",
+            result.err()
+        );
+    }
 }

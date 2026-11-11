@@ -350,3 +350,154 @@ fn extract_string_list_from_list_node(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn entry(path: PathBuf, is_symlink: bool) -> WalkEntry {
+        WalkEntry {
+            canonical_path: path.clone(),
+            depth: 1,
+            is_dir: false,
+            is_symlink,
+            mtime: None,
+            path,
+            symlink_target: None,
+        }
+    }
+
+    #[test]
+    fn import_lookup_matches_files_and_skips_symlinks_and_unknown_extensions() {
+        // Arrange
+        let dir = TempDir::new().unwrap();
+        let app = dir.path().join("app.py");
+        fs::write(&app, "from helpers import util\n").unwrap();
+        let link = dir.path().join("link.py");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&app, &link).unwrap();
+        let notes = dir.path().join("notes.unknownext");
+        fs::write(&notes, "import helpers\n").unwrap();
+
+        let entries = vec![
+            entry(app.clone(), false),
+            entry(link, cfg!(unix)),
+            entry(notes, false),
+        ];
+
+        // Act
+        let out = analyze_import_lookup(dir.path(), "helpers", &entries, None).unwrap();
+
+        // Assert: only app.py matches; symlink and unknown extension are skipped.
+        assert!(out.formatted.contains("MATCHES: 1"), "{}", out.formatted);
+        assert!(out.formatted.contains("app.py:1"), "{}", out.formatted);
+    }
+
+    #[test]
+    fn import_lookup_returns_empty_matches_when_no_imports_found() {
+        // Arrange
+        let dir = TempDir::new().unwrap();
+        let app = dir.path().join("app.py");
+        fs::write(&app, "import other\n").unwrap();
+        let entries = vec![entry(app, false)];
+
+        // Act
+        let out = analyze_import_lookup(dir.path(), "helpers", &entries, None).unwrap();
+
+        // Assert
+        assert!(out.formatted.contains("MATCHES: 0"), "{}", out.formatted);
+    }
+
+    #[test]
+    fn wildcard_import_resolves_symbols_via_dunder_all() {
+        // Arrange: target module defines __all__ plus private members.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("pkg")).unwrap();
+        let target = dir.path().join("pkg/mod.py");
+        fs::write(
+            &target,
+            "__all__ = [\"pub_a\", 'pub_b']\ndef _hidden(): pass\nclass Excluded: pass\n",
+        )
+        .unwrap();
+        let main = dir.path().join("main.py");
+        fs::write(&main, "from .pkg.mod import *\n").unwrap();
+        let mut imports =
+            SemanticExtractor::extract("from .pkg.mod import *\n", "python", None, None)
+                .unwrap()
+                .imports;
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].items, ["*"]);
+
+        // Act
+        resolve_wildcard_imports(&main, &mut imports);
+
+        // Assert
+        assert_eq!(imports[0].items, ["pub_a", "pub_b"]);
+    }
+
+    #[test]
+    fn dot_wildcard_import_resolves_fallback_symbols_from_init() {
+        // Arrange: `from . import *` targets __init__.py with no __all__.
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("__init__.py"),
+            "def public_fn(): pass\nclass PublicClass: pass\ndef _private(): pass\n",
+        )
+        .unwrap();
+        let main = dir.path().join("main.py");
+        fs::write(&main, "from . import *\n").unwrap();
+        let mut imports = SemanticExtractor::extract("from . import *\n", "python", None, None)
+            .unwrap()
+            .imports;
+
+        // Act
+        resolve_wildcard_imports(&main, &mut imports);
+
+        // Assert: fallback picks public functions/classes only.
+        assert_eq!(imports[0].items, ["public_fn", "PublicClass"]);
+    }
+
+    #[test]
+    fn wildcard_unresolvable_and_self_import_are_preserved() {
+        // Arrange: one wildcard targets a missing module; the other targets the file itself.
+        let dir = TempDir::new().unwrap();
+        let main = dir.path().join("self_mod.py");
+        fs::write(&main, "from .missing import *\nfrom .self_mod import *\n").unwrap();
+        let mut imports = SemanticExtractor::extract(
+            "from .missing import *\nfrom .self_mod import *\n",
+            "python",
+            None,
+            None,
+        )
+        .unwrap()
+        .imports;
+        assert_eq!(imports.len(), 2);
+
+        // Act
+        resolve_wildcard_imports(&main, &mut imports);
+
+        // Assert: both remain wildcards.
+        assert_eq!(imports[0].items, ["*"]);
+        assert_eq!(imports[1].items, ["*"]);
+    }
+
+    #[test]
+    fn non_wildcard_imports_are_left_untouched() {
+        // Arrange
+        let dir = TempDir::new().unwrap();
+        let main = dir.path().join("main.py");
+        fs::write(&main, "from .mod import name\n").unwrap();
+        let mut imports =
+            SemanticExtractor::extract("from .mod import name\n", "python", None, None)
+                .unwrap()
+                .imports;
+
+        // Act
+        resolve_wildcard_imports(&main, &mut imports);
+
+        // Assert
+        assert_eq!(imports[0].items, ["name"]);
+    }
+}

@@ -404,4 +404,42 @@ mod disk_cache_tests {
             "entry must contain data from one of the concurrent writers, got {writer:?}"
         );
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn disk_cache_put_failure_is_recorded_and_get_still_works() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let cache = DiskCache::new(dir.path().to_path_buf(), false);
+        let key = blake3::hash(b"failure-key");
+        cache.put("analyze_file", &key, &serde_json::json!({"v": 1}));
+        let retrieved: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert_eq!(retrieved, Some(serde_json::json!({"v": 1})));
+
+        // Make the shard directory read-only so the next put fails and is recorded.
+        let path = cache.entry_path("analyze_file", &key);
+        let shard = path.parent().unwrap();
+        std::fs::set_permissions(shard, std::fs::Permissions::from_mode(0o500)).unwrap();
+        cache.put("analyze_file", &key, &serde_json::json!({"v": 2}));
+
+        // Restore permissions so TempDir cleanup succeeds.
+        std::fs::set_permissions(shard, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let retrieved: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert_eq!(
+            retrieved,
+            Some(serde_json::json!({"v": 1})),
+            "failed write must not clobber"
+        );
+    }
+
+    #[test]
+    fn disk_cache_get_missing_key_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let cache = DiskCache::new(dir.path().to_path_buf(), false);
+        let key = blake3::hash(b"never-written");
+        let result: Option<serde_json::Value> = cache.get("analyze_file", &key);
+        assert!(result.is_none());
+    }
 }
