@@ -60,10 +60,7 @@ pub(crate) mod edit_replace;
 pub(crate) mod exec_command;
 pub(crate) mod exec_runtime;
 pub(crate) mod server;
-pub(crate) mod verify_anchors;
-
 pub(crate) use analyze_module::AnalyzeModuleContext;
-pub(crate) use verify_anchors::VerifyAnchorsContext;
 
 use aptu_coder_core::cache::AnalysisCache;
 use std::collections::HashMap;
