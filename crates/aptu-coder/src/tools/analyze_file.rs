@@ -169,7 +169,7 @@ pub(crate) async fn handle_file_details_mode(
 }
 
 /// Stable `error_subtype` values for `analyze_file` `invalid_params` telemetry,
-/// following the golden-list pattern of `analyze_symbol::AnalyzeSymbolErrorSubtype`.
+/// following the golden-list pattern previously established for symbol analysis.
 pub(crate) mod subtypes {
     /// `path` argument points to a directory instead of a file.
     pub(super) const PATH_IS_DIRECTORY: &str = "path_is_directory";

@@ -34,7 +34,7 @@ pub fn option_integer_schema(_gen: &mut schemars::SchemaGenerator) -> Schema {
     Schema::from(map)
 }
 
-/// Returns a nullable integer schema for `analyze_symbol`'s `max_depth`
+/// Returns a nullable integer schema for the graph `max_depth`
 /// field, capped at `MAX_TOOL_DEPTH`.
 // SAFETY: json! macro always produces a Value::Object for object literals.
 #[allow(clippy::expect_used)]
@@ -87,7 +87,7 @@ pub fn supported_file_ext_pattern() -> &'static str {
     })
 }
 
-/// Hard cap on `analyze_symbol`'s `max_depth` parameter (graph traversal
+/// Hard cap on the graph `max_depth` parameter (
 /// depth). Usage data (this
 /// repo + goose sessions) never exceeded 2; external comparables cap at 5-6,
 /// but that permits ~25x worst-case blowup for exponential graph output, so 3

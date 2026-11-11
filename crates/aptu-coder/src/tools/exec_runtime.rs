@@ -411,7 +411,7 @@ pub(crate) async fn run_exec_impl_with_timeouts(
 
 /// Applies the first matching filter rule to `output.stdout`/`output.interleaved` and,
 /// when a `max_lines` cap fires, persists the full pre-filter output to slot files so
-/// the caller can recover it via resources/read. Never overwrites overflow-persisted
+/// the caller can recover it from the filesystem. Never overwrites overflow-persisted
 /// slot files.
 async fn apply_filter_rules(
     output: &mut ShellOutput,
@@ -512,8 +512,8 @@ fn tmp_path(path: &std::path::Path) -> std::path::PathBuf {
 /// Filesystem base directory for an overflow slot: `{temp_dir}/aptu-coder-overflow/slot-{slot}`.
 ///
 /// Shared by the write path (`handle_output_persist`, `persist_interleaved_overflow`)
-/// and the read path (`resources.rs` overflow URI handling) so both always derive the
-/// same path from validated fields only.
+/// and the slot identifier embedded in aptu-overflow:// resource links so both always
+/// derive the same path from validated fields only.
 pub(crate) fn slot_base(slot: u32) -> std::path::PathBuf {
     std::env::temp_dir()
         .join("aptu-coder-overflow")
@@ -585,8 +585,8 @@ pub(crate) fn handle_output_persist(
     let stdout_path = base.join("stdout");
     let stderr_path = base.join("stderr");
 
-    // Only persist non-empty streams: an empty stream has no content to
-    // expose via resources/read, and writing it would clobber a concurrent
+    // Only persist non-empty streams: an empty stream has no content worth
+    // exposing, and writing it would clobber a concurrent
     // process's non-empty slot file (slot paths are shared across processes).
     let stdout_path_str = if stdout.is_empty() {
         None

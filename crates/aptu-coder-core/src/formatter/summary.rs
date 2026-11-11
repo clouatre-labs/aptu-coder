@@ -6,8 +6,8 @@ use crate::formatter::emit;
 use crate::graph::{CallGraph, InternalCallChain};
 use crate::test_detection::is_test_file;
 use crate::traversal::WalkEntry;
-use crate::types::{DefUseKind, DefUseSite, FileInfo};
-use std::collections::{HashMap, HashSet};
+use crate::types::{DefUseSite, FileInfo};
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -452,208 +452,6 @@ fn focused_prologue<'a>(
 
     Ok((output, prod_chains, test_chains, outgoing))
 }
-
-/// Full-format focused symbol output (callers/callees with chain trees).
-#[instrument(skip_all)]
-#[allow(clippy::too_many_arguments)] // preserves the unchanged public entry-point signature
-pub(crate) fn format_focused_internal(
-    graph: &CallGraph,
-    symbol: &str,
-    follow_depth: u32,
-    base_path: Option<&Path>,
-    incoming_chains: Option<&[InternalCallChain]>,
-    outgoing_chains: Option<&[InternalCallChain]>,
-    def_use_sites: &[DefUseSite],
-) -> Result<String, FormatterError> {
-    let (output, prod_chains, test_chains, outgoing_ref) = focused_prologue(
-        graph,
-        symbol,
-        follow_depth,
-        base_path,
-        incoming_chains,
-        outgoing_chains,
-    )?;
-    let outgoing_chains_ref: &[InternalCallChain] = &outgoing_ref;
-
-    render_focused_full(
-        output,
-        prod_chains,
-        test_chains,
-        outgoing_chains_ref,
-        base_path,
-        def_use_sites,
-        symbol,
-        graph,
-    )
-}
-
-/// Render the full-format tail: CALLERS/CALLEES sections with chain trees.
-#[allow(clippy::too_many_lines)] // exhaustive chain-tree rendering; splitting harms readability
-#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_summary
-fn render_focused_full(
-    mut output: String,
-    prod_chains: Vec<InternalCallChain>,
-    test_chains: Vec<InternalCallChain>,
-    outgoing_chains_ref: &[InternalCallChain],
-    base_path: Option<&Path>,
-    def_use_sites: &[DefUseSite],
-    symbol: &str,
-    graph: &CallGraph,
-) -> Result<String, FormatterError> {
-    // CALLERS section - who calls this symbol
-    output.push_str("CALLERS:\n");
-
-    // Render production callers
-    let prod_refs: Vec<_> = prod_chains
-        .iter()
-        .filter_map(|chain| {
-            if chain.chain.len() >= 2 {
-                Some((chain.chain[0].0.as_str(), chain.chain[1].0.as_str()))
-            } else if chain.chain.len() == 1 {
-                Some((chain.chain[0].0.as_str(), ""))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if prod_refs.is_empty() {
-        output.push_str("  (none)\n");
-    } else {
-        output.push_str(&crate::formatter::pagination::format_chains_as_tree(
-            &prod_refs, "<-", symbol,
-        ));
-    }
-
-    // Render test callers summary if any
-    if !test_chains.is_empty() {
-        let mut test_files: Vec<_> = test_chains
-            .iter()
-            .filter_map(|chain| {
-                chain
-                    .chain
-                    .first()
-                    .map(|(_, path, _)| path.to_string_lossy().into_owned())
-            })
-            .collect();
-        test_files.sort();
-        test_files.dedup();
-
-        // Strip base path for display
-        let display_files: Vec<_> = test_files
-            .iter()
-            .map(|f| emit::strip_base_path(Path::new(f), base_path))
-            .collect();
-
-        let file_list = display_files.join(", ");
-        let test_count = test_chains.len();
-        let _ = writeln!(
-            output,
-            "CALLERS (test): {test_count} test functions (in {file_list})"
-        );
-    }
-
-    // CALLEES section - what this symbol calls
-    output.push_str("CALLEES:\n");
-    let outgoing_refs: Vec<_> = outgoing_chains_ref
-        .iter()
-        .filter_map(|chain| {
-            if chain.chain.len() >= 2 {
-                Some((chain.chain[0].0.as_str(), chain.chain[1].0.as_str()))
-            } else if chain.chain.len() == 1 {
-                Some((chain.chain[0].0.as_str(), ""))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if outgoing_refs.is_empty() {
-        output.push_str("  (none)\n");
-    } else {
-        output.push_str(&crate::formatter::pagination::format_chains_as_tree(
-            &outgoing_refs,
-            "->",
-            symbol,
-        ));
-    }
-
-    // FILES section - collect unique files from production chains
-    let mut files: HashSet<PathBuf> = HashSet::new();
-    for chain in &prod_chains {
-        for (_, path, _) in &chain.chain {
-            files.insert(path.clone());
-        }
-    }
-    for chain in outgoing_chains_ref {
-        for (_, path, _) in &chain.chain {
-            files.insert(path.clone());
-        }
-    }
-    if let Some(definitions) = graph.definitions.get(symbol) {
-        for (path, _) in definitions {
-            files.insert(path.clone());
-        }
-    }
-
-    // Partition files into production and test
-    let (prod_files, test_files): (Vec<_>, Vec<_>) =
-        files.into_iter().partition(|path| !is_test_file(path));
-
-    output.push_str("FILES:\n");
-    if prod_files.is_empty() && test_files.is_empty() {
-        output.push_str("  (none)\n");
-    } else {
-        // Show production files first
-        if !prod_files.is_empty() {
-            let mut sorted_files = prod_files;
-            sorted_files.sort();
-            for file in sorted_files {
-                let display = emit::strip_base_path(&file, base_path);
-                let _ = writeln!(output, "  {display}");
-            }
-        }
-
-        // Show test files in separate subsection
-        if !test_files.is_empty() {
-            output.push_str("  TEST FILES:\n");
-            let mut sorted_files = test_files;
-            sorted_files.sort();
-            for file in sorted_files {
-                let display = emit::strip_base_path(&file, base_path);
-                let _ = writeln!(output, "    {display}");
-            }
-        }
-    }
-
-    // DEF-USE SITES section - show writes and reads of the symbol
-    if !def_use_sites.is_empty() {
-        let (write_count, read_count) = emit::def_use_write_read_counts(def_use_sites);
-        let total = def_use_sites.len();
-        let _ = writeln!(
-            output,
-            "DEF-USE SITES  {symbol}  ({total} total: {write_count} writes, {read_count} reads)"
-        );
-
-        emit::render_def_use_group(
-            &mut output,
-            def_use_sites,
-            "WRITES",
-            |s| matches!(s.kind, DefUseKind::Write | DefUseKind::WriteRead),
-            base_path,
-        );
-        emit::render_def_use_group(
-            &mut output,
-            def_use_sites,
-            "READS",
-            |s| s.kind == DefUseKind::Read,
-            base_path,
-        );
-    }
-
-    Ok(output)
-}
-
 /// Format a compact summary of focused symbol analysis.
 /// Used when output would exceed the size threshold or when explicitly requested.
 /// Internal helper that accepts pre-computed chains.
@@ -691,7 +489,7 @@ pub(crate) fn format_focused_summary_internal(
 /// Render the compact-summary tail: top-10 CALLERS/CALLEES sections.
 #[allow(clippy::too_many_lines)] // exhaustive symbol summary formatting; splitting harms readability
 #[allow(clippy::similar_names)] // domain pairs: callers_count/callees_count are intentionally similar
-#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_full
+#[allow(clippy::too_many_arguments)] // mirrors shared prologue outputs; kept in lockstep with render_focused_summary
 fn render_focused_summary(
     mut output: String,
     prod_chains: Vec<InternalCallChain>,

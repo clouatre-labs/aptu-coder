@@ -391,7 +391,7 @@ fn capture_hint(path: &str, bytes: u64) -> String {
 /// documents the last-run-wins retention of the slot directory.
 fn filter_capture_hint(path: &str) -> String {
     format!(
-        "output filter-capped; full pre-filter capture at {path} (filter-capped slot file, last-run-wins; readable via resources/read)\n"
+        "output filter-capped; full pre-filter capture at {path} (filter-capped slot file, last-run-wins; read from the filesystem path)\n"
     )
 }
 
@@ -591,15 +591,16 @@ pub(crate) async fn exec_command_impl(
     // MCP resource links for overflow slot files: emitted when output was
     // truncated OR a filter cap persisted pre-filter output (filter-capped
     // slot files exist even when output_truncated is false). URIs use the
-    // aptu-overflow:// scheme, readable via resources/read; the truncation
-    // notice still prints the filesystem path. Links are valid until the slot
-    // is overwritten (last-run-wins retention).
+    // aptu-overflow:// scheme; the truncation notice prints the filesystem
+    // path for direct reads. Links are valid until the slot is overwritten
+    // (last-run-wins retention).
     if output_truncated || output.filter_capped {
         if output.stdout_path.is_some() {
             content_blocks.push(ContentBlock::resource_link(
                 Resource::new(
                     format!("aptu-overflow://slot-{seq}/stdout"),
-                    "stdout capture (last-run-wins; readable via resources/read)".to_string(),
+                    "stdout capture (last-run-wins; see truncation notice for the filesystem path)"
+                        .to_string(),
                 )
                 .with_mime_type("text/plain"),
             ));
@@ -608,7 +609,8 @@ pub(crate) async fn exec_command_impl(
             content_blocks.push(ContentBlock::resource_link(
                 Resource::new(
                     format!("aptu-overflow://slot-{seq}/stderr"),
-                    "stderr capture (last-run-wins; readable via resources/read)".to_string(),
+                    "stderr capture (last-run-wins; see truncation notice for the filesystem path)"
+                        .to_string(),
                 )
                 .with_mime_type("text/plain"),
             ));
@@ -617,7 +619,7 @@ pub(crate) async fn exec_command_impl(
             content_blocks.push(ContentBlock::resource_link(
                 Resource::new(
                     format!("aptu-overflow://slot-{seq}/interleaved"),
-                    "interleaved output capture (last-run-wins; readable via resources/read)"
+                    "interleaved output capture (last-run-wins; see truncation notice for the filesystem path)"
                         .to_string(),
                 )
                 .with_mime_type("text/plain"),

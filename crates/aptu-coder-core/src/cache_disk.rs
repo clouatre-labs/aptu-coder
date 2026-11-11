@@ -261,9 +261,9 @@ mod disk_cache_tests {
         };
 
         // Act
-        cache.put("analyze_symbol", &key, &value);
+        cache.put("analyze_directory", &key, &value);
         let retrieved: Option<crate::analyze::FocusedAnalysisOutput> =
-            cache.get("analyze_symbol", &key);
+            cache.get("analyze_directory", &key);
 
         // Assert
         let retrieved = retrieved.unwrap();

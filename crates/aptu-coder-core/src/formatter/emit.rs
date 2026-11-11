@@ -134,40 +134,6 @@ pub(crate) fn def_use_write_read_counts(sites: &[DefUseSite]) -> (usize, usize) 
     (w, sites.len() - w)
 }
 
-/// Render a WRITES or READS group of def-use sites.
-pub(crate) fn render_def_use_group(
-    output: &mut String,
-    sites: &[DefUseSite],
-    heading: &str,
-    pred: impl Fn(&DefUseSite) -> bool,
-    base_path: Option<&Path>,
-) {
-    let filtered: Vec<_> = sites.iter().filter(|s| pred(s)).collect();
-    if filtered.is_empty() {
-        return;
-    }
-    let _ = writeln!(output, "  {heading}");
-    for site in filtered {
-        let file_display = strip_base_path(Path::new(&site.file), base_path);
-        let scope_str = site
-            .enclosing_scope
-            .as_ref()
-            .map(|s| format!("{}()", s))
-            .unwrap_or_default();
-        let snippet = snippet_one_line(&site.snippet);
-        let wr_label = if site.kind == DefUseKind::WriteRead {
-            " [write_read]"
-        } else {
-            ""
-        };
-        let _ = writeln!(
-            output,
-            "    {file_display}:{}  {scope_str}  {snippet}{wr_label}",
-            site.line
-        );
-    }
-}
-
 /// Format a single file entry line for paginated directory listing.
 pub(crate) fn format_file_entry(file: &FileInfo, base_path: Option<&Path>) -> String {
     let mut parts = Vec::new();

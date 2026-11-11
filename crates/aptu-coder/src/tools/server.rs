@@ -9,7 +9,7 @@
 
 use crate::filters::load_filter_table;
 use crate::shell::resolve_shell;
-use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
+use aptu_coder_core::cache::AnalysisCache;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::{Peer, RoleServer};
 
@@ -97,20 +97,6 @@ pub(crate) fn build_analyzer(
 
     let filter_table = Arc::new(load_filter_table(Path::new(".")));
 
-    // Graph disk store uses the same base directory as DiskCache
-    let graph_store_dir = std::env::var("APTU_CODER_DISK_CACHE_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| xdg_data_home.join("aptu-coder").join("analysis-cache"));
-    let graph_store_max_bytes = std::env::var("APTU_CODER_DISK_CACHE_MAX_BYTES")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(aptu_coder_core::graph::store::DEFAULT_MAX_DISK_CACHE_BYTES);
-    let graph_store =
-        std::sync::Arc::new(aptu_coder_core::graph::GraphDiskStore::new_with_max_bytes(
-            graph_store_dir,
-            graph_store_max_bytes,
-        ));
-
     crate::CodeAnalyzer {
         tool_router: {
             let tool_router = crate::CodeAnalyzer::tool_router();
@@ -129,21 +115,8 @@ pub(crate) fn build_analyzer(
         client_version: Arc::new(TokioMutex::new(None)),
         resolved_path,
         filter_table,
-        call_graph_cache: {
-            CallGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
-                "APTU_CODER_SYMBOL_CACHE_CAPACITY",
-                32,
-            ))
-        },
-        structural_graph_cache: {
-            StructuralGraphCache::new(aptu_coder_core::cache::parse_cache_capacity(
-                "APTU_CODER_STRUCTURAL_CACHE_CAPACITY",
-                16,
-            ))
-        },
         edit_failure_counts: Arc::new(Mutex::new(HashMap::new())),
         file_edit_locks: Arc::new(Mutex::new(HashMap::new())),
-        graph_store,
     }
 }
 

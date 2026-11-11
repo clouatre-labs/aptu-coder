@@ -32,20 +32,6 @@ fn test_file_details_output_size() {
 }
 
 #[test]
-fn test_symbol_focus_output_size() {
-    let output =
-        analyze::analyze_focused(Path::new("src"), "analyze_directory", 2, None, None).unwrap();
-    let char_count = output.formatted.len();
-
-    println!("Symbol focus output size: {} chars", char_count);
-    assert!(
-        (100..=10000).contains(&char_count),
-        "Symbol focus output size {} out of range [100, 10000]",
-        char_count
-    );
-}
-
-#[test]
 fn test_summary_mode_produces_smaller_output() {
     use aptu_coder_core::formatter::format_summary;
 

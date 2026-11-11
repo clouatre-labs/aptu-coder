@@ -1,5 +1,11 @@
 # Roadmap
 
+## Unreleased
+
+### Removed: `analyze_symbol` tool and MCP graph resources
+
+Removed the `analyze_symbol` MCP tool (call graph, import_lookup, and def_use modes) and the MCP resource templates it fed (`aptu-coder://graph/{repo_hash}/blast-radius/...`, `subgraph/...`, `blast-radius-bidirectional/...`). The tool layer (`tools/analyze_symbol.rs`, `tools/symbol_focused.rs`, `tools/resources.rs`) and their metrics, cache, and integration tests were deleted; the deep symbol-analysis core (`analyze_focused.rs`) was also removed. Retained in `aptu-coder-core` as library APIs: `analyze_import_lookup`, `analyze_module_file`, `FocusedAnalysisOutput`/`CallChainEntry`, and the `StructuralGraph`/`GraphDiskStore` structural graph. The JSONL metrics schema keeps `uri_kind`, `match_mode`, `follow_depth`, `mode`, `impl_only`, and the `l2_*` cache fields so historical metrics files still parse; they are no longer emitted.
+
 ## Wave History
 
 ### [Complete] Wave 1: Core Analysis

@@ -27,8 +27,8 @@ These values are safe to record as span attributes and appear in all tool spans.
 | `service.name` | `"aptu-coder"` | `env!("CARGO_PKG_VERSION")` at init |
 | `service.version` | semver string | `env!("CARGO_PKG_VERSION")` at init |
 | `path` | filesystem path | analyze/edit params |
-| `symbol` | symbol name | `analyze_symbol` param |
-| `max_depth` | integer | `analyze_symbol` param (recorded in JSONL under the legacy field name `follow_depth`) |
+| `symbol` | symbol name | historical `analyze_symbol` param (tool removed) |
+| `max_depth` | integer | historical `analyze_symbol` param (recorded in JSONL under the legacy field name `follow_depth`; tool removed) |
 | `match_mode`, `impl_only`, `import_lookup` | bounded enums/bools | analyze params |
 | `summary`, `git_ref` | bool/optional string | analyze params |
 | `working_dir` | filesystem path | exec_command param |
@@ -139,6 +139,6 @@ They carry no value payload, only their occurrence:
 - [OTel Collector redaction processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/redactionprocessor)
 - Observability roadmap: [docs/ROADMAP.md](docs/ROADMAP.md), milestone `observability-v1`
 
-## Resources surface
+## Resources surface (removed)
 
-The MCP Resources surface (`crates/aptu-coder/src/tools/resources.rs`) emits completed `read_resource` events through the same nonblocking JSONL and OTel pipeline as tool calls. These use `resources/read` as the MCP method and retain only privacy-safe URI classification.
+The MCP Resources surface (`crates/aptu-coder/src/tools/resources.rs`) and its graph URI templates were removed along with the `analyze_symbol` tool. Historical JSONL may still contain `read_resource` events and `uri_kind` values (`graph_blast_radius`, `graph_subgraph`, `graph_bidirectional`); the JSONL schema retains these fields so old files still parse.

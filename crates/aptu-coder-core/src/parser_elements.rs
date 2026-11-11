@@ -837,6 +837,8 @@ pub(crate) fn extract_impl_traits_from_tree(
 }
 
 /// Extract def-use sites for a symbol from the parsed AST.
+/// No production caller since the symbol tool removal; retained for language tests.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn extract_def_use(
     source: &str,
     compiled: &CompiledQueries,

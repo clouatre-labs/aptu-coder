@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-//! Module and wildcard-import lookup extracted from analyze_focused.
+//! Module and wildcard-import lookup helpers.
 
 use crate::analyze::{AnalyzeError, FocusedAnalysisOutput, MAX_FILE_SIZE_BYTES};
 use crate::lang::language_for_extension;

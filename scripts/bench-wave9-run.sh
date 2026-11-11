@@ -240,7 +240,7 @@ esac
 # Tool isolation flags
 # ---------------------------------------------------------------------------
 if [[ "$TOOL_SET" == "mcp" ]]; then
-  MCP_TOOLS="mcp__aptu-coder__analyze_directory,mcp__aptu-coder__analyze_file,mcp__aptu-coder__analyze_module,mcp__aptu-coder__analyze_symbol,mcp__aptu-coder__analyze_raw,mcp__aptu-coder__edit_overwrite,mcp__aptu-coder__edit_replace,mcp__aptu-coder__edit_rename,mcp__aptu-coder__edit_insert"
+  MCP_TOOLS="mcp__aptu-coder__analyze_directory,mcp__aptu-coder__analyze_file,mcp__aptu-coder__analyze_module,mcp__aptu-coder__analyze_raw,mcp__aptu-coder__edit_overwrite,mcp__aptu-coder__edit_replace,mcp__aptu-coder__edit_rename,mcp__aptu-coder__edit_insert"
   ALLOWED_TOOLS="$MCP_TOOLS"
   MCP_FLAGS=(--mcp-config "$MCP_CONFIG")
 else
@@ -517,7 +517,6 @@ MCP_TOOLS = {
     "mcp__aptu-coder__analyze_directory",
     "mcp__aptu-coder__analyze_file",
     "mcp__aptu-coder__analyze_module",
-    "mcp__aptu-coder__analyze_symbol",
     "mcp__aptu-coder__analyze_raw",
     "mcp__aptu-coder__edit_overwrite",
     "mcp__aptu-coder__edit_replace",

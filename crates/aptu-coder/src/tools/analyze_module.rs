@@ -16,7 +16,7 @@ use tracing::instrument;
 use crate::tools::common::{err_to_tool_result, error_meta, no_cache_meta};
 
 /// Stable `error_subtype` value for `analyze_module` `invalid_params` telemetry,
-/// following the golden-list pattern of `analyze_symbol::AnalyzeSymbolErrorSubtype`.
+/// following the golden-list pattern previously established for symbol analysis.
 pub(crate) const PATH_IS_DIRECTORY: &str = "path_is_directory";
 
 /// Shared handler context passed to extracted `analyze_module` free functions.

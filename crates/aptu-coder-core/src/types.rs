@@ -188,7 +188,7 @@ pub struct AnalyzeModuleParams {
     pub path: String,
 }
 
-/// Symbol name matching strategy for `analyze_symbol`.
+/// Symbol name matching strategy for graph queries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -200,7 +200,7 @@ pub enum SymbolMatchMode {
     Contains,
 }
 
-/// Analysis mode for `analyze_symbol`.
+/// Analysis mode for graph queries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
