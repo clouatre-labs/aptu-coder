@@ -927,7 +927,7 @@ mod tests {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct EditOverwriteParams {
     /// Path to the file to create or overwrite.
@@ -936,6 +936,50 @@ pub struct EditOverwriteParams {
     pub working_dir: Option<String>,
     /// UTF-8 content to write.
     pub content: String,
+}
+
+impl<'de> Deserialize<'de> for EditOverwriteParams {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &["path", "working_dir", "content"];
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = EditOverwriteParams;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("struct EditOverwriteParams")
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut path: Option<String> = None;
+                let mut working_dir: Option<Option<String>> = None;
+                let mut content: Option<String> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    let key: &str = &key;
+                    match key {
+                        "path" => path = Some(map.next_value()?),
+                        "working_dir" => working_dir = Some(map.next_value()?),
+                        "content" => content = Some(map.next_value()?),
+                        other => {
+                            return Err(serde::de::Error::custom(format!(
+                                "unknown field `{other}`, expected one of `{}`",
+                                FIELDS.join("`, `")
+                            )));
+                        }
+                    }
+                }
+                Ok(EditOverwriteParams {
+                    path: path.ok_or_else(|| serde::de::Error::missing_field("path"))?,
+                    working_dir: working_dir.unwrap_or(None),
+                    content: content.ok_or_else(|| serde::de::Error::missing_field("content"))?,
+                })
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
 }
 
 #[non_exhaustive]
@@ -953,7 +997,7 @@ pub struct EditOverwriteOutput {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct EditReplaceParams {
     /// Path to the file to edit.
@@ -978,6 +1022,72 @@ pub struct EditReplaceParams {
     /// Batch edits applied atomically to one file; mutually exclusive with `old_text`/`new_text`.
     #[serde(default)]
     pub edits: Option<Vec<BatchEdit>>,
+}
+
+impl<'de> Deserialize<'de> for EditReplaceParams {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "path",
+            "working_dir",
+            "old_text",
+            "new_text",
+            "replace_all",
+            "expected_content_hash",
+            "edits",
+        ];
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = EditReplaceParams;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("struct EditReplaceParams")
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut path: Option<String> = None;
+                let mut working_dir: Option<Option<String>> = None;
+                let mut old_text: Option<Option<String>> = None;
+                let mut new_text: Option<Option<String>> = None;
+                let mut replace_all: Option<Option<bool>> = None;
+                let mut expected_content_hash: Option<Option<String>> = None;
+                let mut edits: Option<Option<Vec<BatchEdit>>> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    let key: &str = &key;
+                    match key {
+                        "path" => path = Some(map.next_value()?),
+                        "working_dir" => working_dir = Some(map.next_value()?),
+                        "old_text" => old_text = Some(map.next_value()?),
+                        "new_text" => new_text = Some(map.next_value()?),
+                        "replace_all" => replace_all = Some(map.next_value()?),
+                        "expected_content_hash" => {
+                            expected_content_hash = Some(map.next_value()?);
+                        }
+                        "edits" => edits = Some(map.next_value()?),
+                        other => {
+                            return Err(serde::de::Error::custom(format!(
+                                "unknown field `{other}`, expected one of `{}`",
+                                FIELDS.join("`, `")
+                            )));
+                        }
+                    }
+                }
+                Ok(EditReplaceParams {
+                    path: path.ok_or_else(|| serde::de::Error::missing_field("path"))?,
+                    working_dir: working_dir.unwrap_or(None),
+                    old_text: old_text.unwrap_or(None),
+                    new_text: new_text.unwrap_or(None),
+                    replace_all: replace_all.unwrap_or(None),
+                    expected_content_hash: expected_content_hash.unwrap_or(None),
+                    edits: edits.unwrap_or(None),
+                })
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
 }
 
 /// One edit item within an `edits[]` batch for `edit_replace`.
@@ -1074,4 +1184,72 @@ pub struct FilterRule {
     pub max_lines: Option<usize>,
     /// Replacement text if filtered output is empty (success-only).
     pub on_empty: Option<String>,
+}
+#[cfg(test)]
+mod edit_params_deserialize_tests {
+    use super::{EditOverwriteParams, EditReplaceParams};
+
+    #[test]
+    fn edit_overwrite_valid_input_deserializes() {
+        let p: EditOverwriteParams =
+            serde_json::from_str(r#"{"path":"a.rs","working_dir":"w","content":"x"}"#)
+                .expect("valid input");
+        assert_eq!(p.path, "a.rs");
+        assert_eq!(p.working_dir.as_deref(), Some("w"));
+        assert_eq!(p.content, "x");
+    }
+
+    #[test]
+    fn edit_overwrite_unknown_key_errors_with_expected_fields() {
+        let err = serde_json::from_str::<EditOverwriteParams>(
+            r#"{"path":"a.rs","content":"x","data":1}"#,
+        )
+        .expect_err("unknown key must error");
+        assert!(err.to_string().contains("`data`"), "{err}");
+        assert!(
+            err.to_string().contains("`path`, `working_dir`, `content`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn edit_replace_miscased_key_errors_echoing_key_and_snake_fields() {
+        let err = serde_json::from_str::<EditReplaceParams>(r#"{"path":"a.rs","newText":"x"}"#)
+            .expect_err("camelCase key must error");
+        let msg = err.to_string();
+        assert!(msg.contains("`newText`"), "{msg}");
+        assert!(msg.contains("`old_text`"), "{msg}");
+        assert!(msg.contains("`new_text`"), "{msg}");
+    }
+
+    #[test]
+    fn edit_replace_valid_input_with_defaults_deserializes() {
+        let p: EditReplaceParams =
+            serde_json::from_str(r#"{"path":"a.rs"}"#).expect("valid minimal input");
+        assert_eq!(p.path, "a.rs");
+        assert!(p.working_dir.is_none());
+        assert!(p.old_text.is_none());
+        assert!(p.new_text.is_none());
+        assert!(p.replace_all.is_none());
+        assert!(p.expected_content_hash.is_none());
+        assert!(p.edits.is_none());
+    }
+
+    #[test]
+    fn edit_replace_batch_edits_nested_keys_still_work() {
+        let p: EditReplaceParams =
+            serde_json::from_str(r#"{"path":"a.rs","edits":[{"old_text":"o","new_text":"n"}]}"#)
+                .expect("valid batch input");
+        let edits = p.edits.expect("edits present");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].old_text, "o");
+        assert_eq!(edits[0].new_text, "n");
+    }
+
+    #[test]
+    fn edit_replace_missing_required_path_errors() {
+        let err = serde_json::from_str::<EditReplaceParams>(r#"{"content":"x"}"#)
+            .expect_err("missing path must error");
+        assert!(err.to_string().contains("path"), "{err}");
+    }
 }
