@@ -504,4 +504,77 @@ mod tests {
             result.err()
         );
     }
+
+    fn file_entry(path: &str) -> WalkEntry {
+        WalkEntry {
+            path: PathBuf::from(path),
+            depth: 1,
+            is_dir: false,
+            is_symlink: false,
+            symlink_target: None,
+            mtime: None,
+            canonical_path: PathBuf::from(path),
+        }
+    }
+
+    fn dir_entry(path: &str) -> WalkEntry {
+        WalkEntry {
+            is_dir: true,
+            ..file_entry(path)
+        }
+    }
+
+    #[test]
+    fn filter_entries_by_git_ref_keeps_changed_files_and_their_ancestor_dirs() {
+        // Arrange: temp layout so canonicalize() resolves the same prefix
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        let root_str = root.display().to_string();
+        let changed = format!("{root_str}/a/mod.rs");
+        std::fs::write(&changed, b"fn main() {}\n").unwrap();
+        std::fs::write(format!("{root_str}/untouched.rs"), b"// x\n").unwrap();
+
+        let entries = vec![
+            dir_entry(&format!("{root_str}/a")),
+            file_entry(&changed),
+            file_entry(&format!("{root_str}/untouched.rs")),
+        ];
+        let mut changed_set = std::collections::HashSet::new();
+        changed_set.insert(PathBuf::from(&changed));
+
+        // Act
+        let kept = filter_entries_by_git_ref(entries, &changed_set, &root);
+
+        // Assert: changed file and its ancestor dir kept; unrelated file dropped
+        let paths: Vec<_> = kept.iter().map(|e| e.path.display().to_string()).collect();
+        assert!(paths.contains(&changed));
+        assert!(paths.contains(&format!("{root_str}/a")));
+        assert!(!paths.iter().any(|p| p.ends_with("untouched.rs")));
+    }
+
+    #[test]
+    fn subtree_counts_from_entries_counts_files_per_top_dir_and_skips_excluded() {
+        // Arrange
+        let root = Path::new("/tmp/proj");
+        let entries = vec![
+            file_entry("/tmp/proj/README.md"),
+            dir_entry("/tmp/proj/src"),
+            file_entry("/tmp/proj/src/main.rs"),
+            file_entry("/tmp/proj/src/lib.rs"),
+            file_entry("/tmp/proj/target/out.rs"),
+        ];
+
+        // Act
+        let counts = subtree_counts_from_entries(root, &entries);
+
+        // Assert: sorted, dirs ignored, EXCLUDED_DIRS (target) skipped
+        assert_eq!(
+            counts,
+            vec![
+                (PathBuf::from("/tmp/proj/README.md"), 1),
+                (PathBuf::from("/tmp/proj/src"), 2),
+            ]
+        );
+    }
 }

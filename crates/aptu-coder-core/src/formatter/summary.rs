@@ -365,3 +365,87 @@ pub fn format_summary(
 
     output
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::FileInfo;
+    use std::path::PathBuf;
+
+    fn walk_dir(path: &str, depth: usize) -> WalkEntry {
+        WalkEntry {
+            path: PathBuf::from(path),
+            depth,
+            is_dir: true,
+            is_symlink: false,
+            symlink_target: None,
+            mtime: None,
+            canonical_path: PathBuf::from(path),
+        }
+    }
+
+    fn walk_file(path: &str, depth: usize) -> WalkEntry {
+        WalkEntry {
+            path: PathBuf::from(path),
+            depth,
+            is_dir: false,
+            is_symlink: false,
+            symlink_target: None,
+            mtime: None,
+            canonical_path: PathBuf::from(path),
+        }
+    }
+
+    fn file_info(path: &str, language: &str, is_test: bool) -> FileInfo {
+        FileInfo {
+            path: path.to_string(),
+            language: language.to_string(),
+            line_count: 10,
+            function_count: 2,
+            class_count: 1,
+            is_test,
+        }
+    }
+
+    #[test]
+    fn format_structure_lists_prod_and_test_files_with_language_totals() {
+        // Arrange
+        let entries = vec![
+            walk_dir("src", 1),
+            walk_file("src/lib.rs", 2),
+            walk_file("src/lib_test.rs", 2),
+        ];
+        let analyses = vec![
+            file_info("src/lib.rs", "rust", false),
+            file_info("src/lib_test.rs", "rust", true),
+        ];
+
+        // Act
+        let output = format_structure(&entries, &analyses, Some(2));
+
+        // Assert
+        assert!(output.starts_with("2 files, 20L, 4F, 2C (rust 100%)"));
+        assert!(output.contains("Shown: 2 files (1 prod, 1 test), 20L, 4F, 2C (max_depth=2)"));
+        assert!(output.contains("Languages: rust (100%)"));
+        assert!(output.contains("PATH [LOC, FUNCTIONS, CLASSES]"));
+        assert!(output.contains("  lib.rs [10L, 2F, 1C]"));
+        assert!(output.contains("TEST FILES [LOC, FUNCTIONS, CLASSES]"));
+        assert!(output.contains("  lib_test.rs [10L, 2F, 1C]"));
+    }
+
+    #[test]
+    fn format_structure_skips_depth0_and_unanalyzed_entries() {
+        // Arrange: root entry (depth 0) and a file with zero stats (hidden by formatter)
+        let entries = vec![walk_file("README.md", 0), walk_file("src/main.rs", 1)];
+        let analyses = vec![file_info("src/main.rs", "rust", false)];
+
+        // Act
+        let output = format_structure(&entries, &analyses, None);
+
+        // Assert: depth-0 entries skipped; no max_depth suffix
+        assert!(!output.contains("README.md"));
+        assert!(output.contains("Shown: 1 files (1 prod, 0 test)"));
+        assert!(!output.contains("(max_depth="));
+        assert!(output.contains("main.rs [10L, 2F, 1C]"));
+    }
+}
