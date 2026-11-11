@@ -7,7 +7,7 @@ use serde_json::Value;
 fn test_all_tools_have_correct_annotations() {
     let tools = CodeAnalyzer::list_tools();
 
-    assert_eq!(tools.len(), 6, "expected 6 registered tools");
+    assert_eq!(tools.len(), 7, "expected 7 registered tools");
 
     let expected_names = [
         "analyze_directory",
@@ -16,6 +16,7 @@ fn test_all_tools_have_correct_annotations() {
         "edit_overwrite",
         "edit_replace",
         "exec_command",
+        "search_code",
     ];
 
     for tool in &tools {
@@ -89,6 +90,34 @@ fn test_all_tools_have_correct_annotations() {
             );
         }
     }
+}
+
+#[test]
+fn test_all_tools_have_titles() {
+    let tools = CodeAnalyzer::list_tools();
+    for tool in &tools {
+        let name = tool.name.as_ref();
+        let title = tool.title.as_deref().unwrap_or("");
+        assert!(!title.is_empty(), "tool '{}' is missing a title", name);
+    }
+}
+
+#[test]
+fn test_search_code_read_only_posture_and_title() {
+    let tools = CodeAnalyzer::list_tools();
+    let tool = tools
+        .iter()
+        .find(|t| t.name.as_ref() == "search_code")
+        .unwrap_or_else(|| panic!("tool 'search_code' not found"));
+    let annotations = tool
+        .annotations
+        .as_ref()
+        .unwrap_or_else(|| panic!("tool 'search_code' is missing annotations"));
+    assert_eq!(annotations.read_only_hint, Some(true));
+    assert_eq!(annotations.destructive_hint, Some(false));
+    assert_eq!(annotations.idempotent_hint, Some(true));
+    assert_eq!(annotations.open_world_hint, Some(false));
+    assert_eq!(tool.title.as_deref(), Some("Search Code"));
 }
 
 #[test]

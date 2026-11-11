@@ -16,6 +16,9 @@
 //! **Exec family:**
 //! - **`exec_command`**: Run shell commands with progress notifications
 //!
+//! **Search family:**
+//! - **`search_code`**: Structural code search (pattern and symbol modes)
+//!
 //! Key entry points:
 //! - [`analyze::analyze_directory`]: Analyze entire directory tree
 //! - [`analyze::analyze_file`]: Analyze single file
@@ -50,6 +53,62 @@ use validation::validate_path;
 use crate::tools::common::err_to_tool_result;
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
+
+/// Which structural search mode `search_code` runs. Strict enum: values are
+/// exactly `pattern` or `symbol`.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMode {
+    /// Structural code-pattern search with metavariables over the in-tree
+    /// tree-sitter parsers.
+    #[default]
+    Pattern,
+    /// Def/use and impl resolution via an on-demand structural graph.
+    Symbol,
+}
+
+/// Parameters for the `search_code` tool.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub(crate) struct SearchCodeParams {
+    /// Search mode: `pattern` for structural code-pattern search, `symbol` for definitions, callers, and implementors of a symbol. Strict enum; exactly one of these two values.
+    pub mode: SearchMode,
+    /// Root directory to search (or a single source file for pattern mode). Validated against path traversal; respects .gitignore.
+    pub path: String,
+    /// Language for pattern mode. Required when mode=pattern. Supported: rust, go, python, typescript. Ignored in symbol mode, which covers every language the structural graph supports.
+    #[schemars(extend("examples" = ["rust", "go", "python", "typescript"]))]
+    pub language: Option<String>,
+    /// Structural pattern for mode=pattern, written as code with metavariables: `$NAME` matches any single node; `$$$REST` matches zero or more sibling nodes. Example: `fn $NAME($$$ARGS) { $$$BODY }`. Required when mode=pattern; matching is exact-shape (an unlisted optional child such as a return type prevents a match).
+    #[schemars(extend("examples" = ["fn $NAME($$$ARGS) { $$$BODY }", "$PKG.$FN($$$ARGS)", "$FN($$$ARGS)"]))]
+    pub pattern: Option<String>,
+    /// Exact symbol name to resolve when mode=symbol. Returns definition sites plus resolved callers, or implementors (impl Trait for Type) when impl_only=true. Spans are byte-exact and suitable for edit_replace.
+    pub symbol: Option<String>,
+    /// mode=symbol only: return implementors (impl Trait for Type) of the symbol instead of definitions and callers.
+    pub impl_only: Option<bool>,
+    /// Opaque pagination cursor from a previous NEXT_CURSOR line; page size is server-owned (50). Empty string is treated as absent.
+    pub cursor: Option<String>,
+}
+
+impl SearchCodeParams {
+    /// Stable telemetry label for the active mode; also used in output headers.
+    #[must_use]
+    pub(crate) fn query_mode_label(&self) -> &'static str {
+        match self.mode {
+            SearchMode::Pattern => "pattern",
+            SearchMode::Symbol => "symbol",
+        }
+    }
+}
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -489,7 +548,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_file",
         title = "Analyze File",
-        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories, analyze_module for a lightweight index (~75% smaller). Text block output only; no structured content or output schema. Paginates with an opaque cursor (50); git_ref not supported.",
+        description = "Functions, types, classes, and imports from a single source file with signatures and line ranges. Fails if directory path supplied; use analyze_directory for directories, analyze_module for a lightweight index (~75% smaller). To search across files use search_code; this tool inspects a known file, not to search. Text block output only; no structured content or output schema. Paginates with an opaque cursor (50); git_ref not supported.",
         annotations(
             title = "Analyze File",
             read_only_hint = true,
@@ -544,7 +603,7 @@ impl CodeAnalyzer {
     #[tool(
         name = "analyze_module",
         title = "Analyze Module",
-        description = "Lightweight function and import index for a single source file (~75% smaller than analyze_file): file name, line count, language, function names with line numbers, and the import list. Fails if directory path supplied; use analyze_file for signatures, types, or class details. Pagination and git_ref not supported; responses are always a single response.",
+        description = "Lightweight function and import index for a single source file (~75% smaller than analyze_file): file name, line count, language, function names with line numbers, and the import list. Fails if directory path supplied; use analyze_file for signatures, types, or class details. To search across files use search_code; this tool inspects a known file, not to search. Pagination and git_ref not supported; responses are always a single response.",
         annotations(
             title = "Analyze Module",
             read_only_hint = true,
@@ -590,6 +649,56 @@ impl CodeAnalyzer {
             seq,
         };
         tools::analyze_module::analyze_module_handler(ctx, params, param_path, &span, t_start).await
+    }
+
+    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]
+    #[tool(
+        name = "search_code",
+        title = "Search Code",
+        description = "Structural code search: finds references, callers, and implementors of a symbol, or code matching a structural pattern with metavariables ($NAME, $$$REST). Returns byte-exact spans suitable for edit_replace. Prefer ripgrep (exec_command) for literal or one-off text search; use this tool when matches must be structural or when same-name text matches are ambiguous. Use analyze_file/analyze_module to inspect a known file, not to search.",
+        annotations(
+            title = "Search Code",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn search_code(
+        &self,
+        params: Parameters<SearchCodeParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let params = params.0;
+        let t_start = std::time::Instant::now();
+        let (seq, sid) = self.begin_tool_call("search_code", &context.meta).await;
+        let span = tracing::Span::current();
+        span.record("gen_ai.system", "mcp");
+        span.record("gen_ai.operation.name", "execute_tool");
+        span.record("gen_ai.tool.name", "search_code");
+        span.record("path", &params.path);
+        let _validated_path = match validate_path(&params.path, true) {
+            Ok(p) => p,
+            Err(e) => {
+                span.record("error", true);
+                span.record("error.type", "invalid_params");
+                self.emit_validation_error_metric(
+                    "search_code",
+                    seq,
+                    sid.clone(),
+                    t_start,
+                    &params.path,
+                    Some(crate::validation::path_error_subtype(&e)),
+                );
+                return Ok(err_to_tool_result(e));
+            }
+        };
+        let param_path = params.path.clone();
+        let ctx = tools::search_code::SearchCodeContext {
+            metrics_tx: self.metrics_tx.clone(),
+        };
+        tools::search_code::search_code_handler(&ctx, params, seq, sid, t_start, param_path, &span)
+            .await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty))]

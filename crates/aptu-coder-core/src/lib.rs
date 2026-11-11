@@ -46,6 +46,7 @@ pub(crate) mod module_lookup;
 pub mod pagination;
 pub mod parser;
 pub(crate) mod parser_elements;
+pub mod search;
 pub mod test_detection;
 pub mod traversal;
 pub mod types;

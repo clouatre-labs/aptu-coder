@@ -21,7 +21,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the module map, [MCP-BEST-PRACTICES.m
 
 **Principle:** Each tool does one thing well. Non-overlapping interfaces eliminate ambiguous routing. When two tools can satisfy the same request, the model must guess; that is a reliability failure, not a model failure. (See [MCP-BEST-PRACTICES.md](MCP-BEST-PRACTICES.md), section 3.2.)
 
-*Example: This server has six tools — `analyze_directory`, `analyze_file`, `analyze_module` (analysis family); `edit_overwrite`, `edit_replace` (editing family); `exec_command` (exec family) — each with a distinct, non-overlapping responsibility. A single auto-detecting tool was rejected because it required the model to infer the correct mode from context, which failed under small models. (A seventh tool, `analyze_symbol`, was removed; see ROADMAP.md.)*
+*Example: This server has seven tools — `analyze_directory`, `analyze_file`, `analyze_module` (analysis family); `edit_overwrite`, `edit_replace` (editing family); `exec_command` (exec family); `search_code` (search family: structural pattern and symbol search) — each with a distinct, non-overlapping responsibility. A single auto-detecting tool was rejected because it required the model to infer the correct mode from context, which failed under small models. (A prior graph tool, `analyze_symbol`, was removed; see ROADMAP.md.)*
 
 ```mermaid
 graph TD
