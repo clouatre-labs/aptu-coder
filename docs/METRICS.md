@@ -27,7 +27,7 @@ Each line in the JSONL file is one JSON object:
 | Field | Type | Description |
 |---|---|---|
 | `ts` | `u64` | Unix timestamp in milliseconds at handler return |
-| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `edit_overwrite`, `edit_replace`, `exec_command` (historical JSONL may also contain `analyze_symbol` and `read_resource` from earlier versions) |
+| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `verify_anchors`, `edit_overwrite`, `edit_replace`, `exec_command` (historical JSONL may also contain `analyze_symbol` and `read_resource` from earlier versions) |
 
 | `duration_ms` | `u64` | Wall-clock time from handler entry to return |
 | `uri_kind` | `string \| null` | Privacy-safe resource URI shape from the removed Resources surface: `graph_blast_radius`, `graph_subgraph`, `graph_bidirectional`, or `unknown`; raw URIs were never retained. Historical only; no longer emitted. |

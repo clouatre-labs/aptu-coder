@@ -5,7 +5,7 @@
 Rust workspace with two crates:
 
 - `crates/aptu-coder-core` -- parsing, analysis, formatting, graph, pagination, types
-- `crates/aptu-coder` -- MCP server, tool handlers, logging, metrics, MCP Resources surface (list_resources, list_resource_templates, read_resource in crates/aptu-coder/src/tools/resources.rs)
+- `crates/aptu-coder` -- MCP server, tool handlers, logging, metrics
 
 MCP tool surface and parameter schemas are documented by the tools themselves; do not duplicate them here. Tool handler logic lives in `crates/aptu-coder/src/tools/<tool>.rs`. Path validation lives in `src/validation.rs`; shell detection in `src/shell.rs`; exec output filtering (built-in rules, project-local `.aptu/filters.toml`, `schema_version` enforcement) in `src/filters.rs`. Read the relevant handler or module before touching those subsystems.
 Rust edition 2024, async with tokio, latest MCP protocol via `rmcp`. Supported languages are listed in `crates/aptu-coder-core/src/lang.rs`.
