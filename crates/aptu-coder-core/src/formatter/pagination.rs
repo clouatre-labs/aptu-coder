@@ -1,87 +1,12 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-//! Paginated formatters for directory, file details, and focused symbol output.
+//! Paginated formatters for directory and file details output.
 
 use crate::formatter::emit;
-use crate::graph::InternalCallChain;
-use crate::pagination::PaginationMode;
 use crate::types::{AnalyzeFileField, FileInfo, FunctionInfo, SemanticAnalysis};
-use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 use std::path::Path;
 use tracing::instrument;
-
-/// Format chains as a tree-indented output, grouped by depth-1 symbol.
-pub(crate) fn format_chains_as_tree(
-    chains: &[(&str, &str)],
-    arrow: &str,
-    focus_symbol: &str,
-) -> String {
-    if chains.is_empty() {
-        return "  (none)\n".to_string();
-    }
-
-    let mut output = String::new();
-
-    // Group chains by depth-1 symbol, counting duplicate children
-    let mut groups: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
-    for (parent, child) in chains {
-        // Only count non-empty children
-        if child.is_empty() {
-            // Ensure parent is in groups even if no children
-            groups.entry(parent.to_string()).or_default();
-        } else {
-            *groups
-                .entry(parent.to_string())
-                .or_default()
-                .entry(child.to_string())
-                .or_insert(0) += 1;
-        }
-    }
-
-    // Render grouped tree
-    for (parent, children) in groups {
-        let _ = writeln!(output, "  {focus_symbol} {arrow} {parent}");
-        // Sort children by count descending, then alphabetically
-        let mut sorted: Vec<_> = children.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        for (child, count) in sorted {
-            if count > 1 {
-                let _ = writeln!(output, "    {arrow} {child} (x{count})");
-            } else {
-                let _ = writeln!(output, "    {arrow} {child}");
-            }
-        }
-    }
-
-    output
-}
-
-/// Render the current page of chains as a tree, parametrized by arrow direction.
-fn render_paginated_page(
-    paginated_chains: &[InternalCallChain],
-    arrow: &str,
-    symbol: &str,
-) -> String {
-    let page_refs: Vec<_> = paginated_chains
-        .iter()
-        .filter_map(|chain| {
-            if chain.chain.len() >= 2 {
-                Some((chain.chain[0].0.as_str(), chain.chain[1].0.as_str()))
-            } else if chain.chain.len() == 1 {
-                Some((chain.chain[0].0.as_str(), ""))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if page_refs.is_empty() {
-        "  (none)\n".to_string()
-    } else {
-        format_chains_as_tree(&page_refs, arrow, symbol)
-    }
-}
 
 /// Format a paginated list of files for directory analysis results.
 #[instrument(skip_all)]
@@ -203,109 +128,6 @@ pub fn format_file_details_paginated(
             top_level_functions.iter().copied(),
             &semantic.call_frequency,
         ));
-    }
-
-    output
-}
-
-/// Format a paginated subset of callers or callees for `SymbolFocus` mode.
-#[instrument(skip_all)]
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::similar_names)]
-pub fn format_focused_paginated(
-    paginated_chains: &[InternalCallChain],
-    total: usize,
-    mode: PaginationMode,
-    symbol: &str,
-    prod_chains: &[InternalCallChain],
-    test_chains: &[InternalCallChain],
-    outgoing_chains: &[InternalCallChain],
-    def_count: usize,
-    offset: usize,
-    base_path: Option<&Path>,
-    _verbose: bool,
-) -> String {
-    let start = offset + 1;
-    let end = offset + paginated_chains.len();
-
-    let callers_count = prod_chains.len();
-    let callees_count = outgoing_chains.len();
-
-    let mut output = String::new();
-
-    let _ = writeln!(
-        output,
-        "FOCUS: {symbol} ({def_count} defs, {callers_count} callers, {callees_count} callees)"
-    );
-
-    match mode {
-        PaginationMode::Callers => {
-            let _ = writeln!(output, "CALLERS ({start}-{end} of {total}):");
-
-            output.push_str(&render_paginated_page(paginated_chains, "<-", symbol));
-
-            if !test_chains.is_empty() {
-                let mut test_files: Vec<_> = test_chains
-                    .iter()
-                    .filter_map(|chain| {
-                        chain
-                            .chain
-                            .first()
-                            .map(|(_, path, _)| path.to_string_lossy().into_owned())
-                    })
-                    .collect();
-                test_files.sort();
-                test_files.dedup();
-
-                let display_files: Vec<_> = test_files
-                    .iter()
-                    .map(|f| emit::strip_base_path(Path::new(f), base_path))
-                    .collect();
-
-                let test_count = test_chains.len();
-                let _ = writeln!(
-                    output,
-                    "CALLERS (test): {test_count} test functions (in {})",
-                    display_files.join(", ")
-                );
-            }
-
-            let callee_names: Vec<_> = outgoing_chains
-                .iter()
-                .filter_map(|chain| chain.chain.first().map(|(p, _, _)| p.clone()))
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-            if callee_names.is_empty() {
-                output.push_str("CALLEES: (none)\n");
-            } else {
-                let _ = writeln!(
-                    output,
-                    "CALLEES: {callees_count} (use cursor for callee pagination)"
-                );
-            }
-        }
-        PaginationMode::Callees => {
-            let _ = writeln!(output, "CALLERS: {callers_count} production callers");
-
-            if !test_chains.is_empty() {
-                let _ = writeln!(
-                    output,
-                    "CALLERS (test): {} test functions",
-                    test_chains.len()
-                );
-            }
-
-            let _ = writeln!(output, "CALLEES ({start}-{end} of {total}):");
-
-            output.push_str(&render_paginated_page(paginated_chains, "->", symbol));
-        }
-        PaginationMode::Default => {
-            unreachable!("format_focused_paginated called with PaginationMode::Default")
-        }
-        PaginationMode::DefUse => {
-            unreachable!("format_focused_paginated called with PaginationMode::DefUse")
-        }
     }
 
     output

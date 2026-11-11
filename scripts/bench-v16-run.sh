@@ -306,7 +306,6 @@ session_file = sys.argv[1]
 MCP_TOOLS = {
     "mcp__aptu-coder__analyze_directory",
     "mcp__aptu-coder__analyze_file",
-    "mcp__aptu-coder__analyze_symbol",
     "mcp__aptu-coder__analyze_module",
     "mcp__aptu-coder__exec_command",
 }

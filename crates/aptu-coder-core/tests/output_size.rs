@@ -19,7 +19,7 @@ fn test_overview_output_size() {
 #[test]
 fn test_file_details_output_size() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let file_path = format!("{}/src/formatter/summary.rs", manifest_dir);
+    let file_path = format!("{}/src/graph/call_graph.rs", manifest_dir);
     let output = analyze::analyze_file(&file_path, None).unwrap();
     let char_count = output.formatted.len();
 
@@ -27,20 +27,6 @@ fn test_file_details_output_size() {
     assert!(
         (500..=30000).contains(&char_count),
         "File details output size {} out of range [500, 30000]",
-        char_count
-    );
-}
-
-#[test]
-fn test_symbol_focus_output_size() {
-    let output =
-        analyze::analyze_focused(Path::new("src"), "analyze_directory", 2, None, None).unwrap();
-    let char_count = output.formatted.len();
-
-    println!("Symbol focus output size: {} chars", char_count);
-    assert!(
-        (100..=10000).contains(&char_count),
-        "Symbol focus output size {} out of range [100, 10000]",
         char_count
     );
 }

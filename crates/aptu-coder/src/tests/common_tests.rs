@@ -15,26 +15,6 @@ fn test_summary_cursor_conflict() {
     assert!(!summary_cursor_conflict(None, None));
 }
 
-#[tokio::test]
-async fn test_validate_impl_only_non_rust_returns_invalid_params() {
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join("main.py"), "def foo(): pass").unwrap();
-
-    let analyzer = make_analyzer();
-    // Call analyze_symbol with impl_only=true on a Python-only directory via the tool API.
-    // We use handle_focused_mode which calls validate_impl_only internally.
-    let entries: Vec<traversal::WalkEntry> =
-        traversal::walk_directory(dir.path(), None).unwrap_or_default();
-    let result = crate::tools::analyze_symbol::validate_impl_only(&entries);
-    assert!(result.is_err());
-    let (err, subtype) = result.unwrap_err();
-    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-    assert_eq!(subtype.as_str(), "impl_only_requires_rust");
-    drop(analyzer); // ensure it compiles with analyzer in scope
-}
-
 #[test]
 fn test_complete_path_completions_returns_suggestions() {
     // Test the underlying completion function (same code path as complete()) directly
@@ -147,33 +127,8 @@ async fn test_analyze_directory_summary_false_forces_pagination() {
 
 // --- cache_hit integration tests ---
 
-#[test]
-fn test_analyze_symbol_mode_missing_symbol_invalid_params() {
-    // Arrange: empty symbol with mode=import_lookup (violates the guard:
-    // symbol must hold the module path when mode=import_lookup).
-    // Act: call the validate helper directly (same pattern as validate_impl_only).
-    let result = crate::tools::analyze_symbol::validate_mode_symbol(
-        aptu_coder_core::types::SymbolAnalysisMode::ImportLookup,
-        "",
-    );
-
-    // Assert: INVALID_PARAMS is returned, paired with the ModeMissingSymbol subtype.
-    assert!(
-        result.is_err(),
-        "mode=import_lookup with empty symbol must return Err"
-    );
-    let (err, subtype) = result.unwrap_err();
-    assert_eq!(
-        err.code,
-        rmcp::model::ErrorCode::INVALID_PARAMS,
-        "expected INVALID_PARAMS; got {:?}",
-        err.code
-    );
-    assert_eq!(subtype.as_str(), "mode_missing_symbol");
-}
-
 #[tokio::test]
-async fn test_analyze_symbol_import_lookup_found() {
+async fn test_import_lookup_found() {
     use tempfile::TempDir;
 
     // Arrange: a Rust file that imports "std::collections"
@@ -204,7 +159,7 @@ async fn test_analyze_symbol_import_lookup_found() {
 }
 
 #[tokio::test]
-async fn test_analyze_symbol_import_lookup_empty() {
+async fn test_import_lookup_empty() {
     use tempfile::TempDir;
 
     // Arrange: a Rust file that does NOT import "no_such_module"

@@ -10,7 +10,7 @@
 
 - **Minimize token usage**: Return only structured, relevant context - no prose, no noise
 - **Language-agnostic parsing via tree-sitter**: Support 18 languages (Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML) with a unified query-based extraction system; TypeScript and TSX use distinct grammars (`LANGUAGE_TYPESCRIPT` and `LANGUAGE_TSX`) but share the same queries in `crates/aptu-coder-core/src/languages/typescript.rs`
-- **Seven focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
+- **Six focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
 - **Compatible with any MCP orchestrator**: Designed to work with any standards-compliant MCP host
 - **Performance via parallelism**: Use rayon for parallel file processing and ignore crate for efficient .gitignore-aware directory walking
 
@@ -32,14 +32,14 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `heredoc_validation` | `crates/aptu-coder/src/heredoc_validation.rs` | Pre-spawn heredoc guard for `exec_command`: `validate_heredocs` (Phase 1 file-write pattern + stdin-consuming flag + `params.stdin` conflict scan, Phase 2 missing closing-delimiter scan) and its error helpers |
 | `shell_scan` | `crates/aptu-coder/src/shell_scan.rs` | Backward token-scanning primitives used by `heredoc_validation`: `scan_backward_for_file_write`, `scan_backward_for_stdin_flag` |
 | `validation` | `crates/aptu-coder/src/validation.rs` | Path resolution and boundary enforcement: `validate_path` (CWD-relative; enforces containment via `validate_parent_in_root`), `validate_path_relative_to` (working_dir-relative; deliberately does *not* enforce containment -- its doc comment states it "removes the final `starts_with` containment check... This aligns with MCP 2025-11-25 spec intent: path resolution is a convenience; containment is operator responsibility", so the caller/operator owns access control), `canonical_cwd` (undocumented helper resolving the canonicalized CWD the same way `validate_path_relative_to` does, used by edit tools with no `working_dir` param), `io_error_to_path_error` |
-| `resources` | `crates/aptu-coder/src/tools/resources.rs` | MCP Resources surface: `list_resources`, `list_resource_templates`, `read_resource` for the knowledge-graph URI templates (blast-radius, subgraph) |
+| `resources` (removed) | `crates/aptu-coder/src/tools/resources.rs` | Historical: MCP Resources surface (`list_resources`, `list_resource_templates`, `read_resource`) for the knowledge-graph URI templates; removed with `analyze_symbol` |
 | **`aptu-coder-core`** | | |
 | `analyze` | `crates/aptu-coder-core/src/analyze.rs` | High-level analysis orchestration; directory, file, and module analysis |
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
 | `cache` | `crates/aptu-coder-core/src/cache.rs` | Two-tier caching: L1 in-memory LRU (`AnalysisCache`, `CallGraphCache`) with mtime invalidation and lock_or_recover pattern; L2 on-disk call-graph cache (`DiskCache`) keyed by canonical path + git HEAD SHA, configurable via `APTU_CODER_DISK_CACHE_DIR` and `APTU_CODER_DISK_CACHE_DISABLED` |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
 | `formatter` | `crates/aptu-coder-core/src/formatter/` (emit.rs, mod.rs, pagination.rs, render.rs, summary.rs) | Output formatting for all seven tools |
-| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | `CallGraph` and BFS traversal for symbol focus mode; `StructuralGraph` for knowledge-graph resource queries; `GraphDiskStore` persists the structural graph, keyed by blake3 content hashes, with size-capped LRU-by-mtime eviction (`APTU_CODER_DISK_CACHE_MAX_BYTES`, default 512 MiB) |
+| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | `CallGraph` and BFS traversal retained as library APIs after the removal of symbol focus mode and the MCP knowledge-graph resources; `StructuralGraph` and `GraphDiskStore` (blake3 content-hash keyed, size-capped LRU-by-mtime eviction) remain in the core crate as library capabilities |
 | `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
 | `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
 | `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
@@ -50,7 +50,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `schema_helpers` | `crates/aptu-coder-core/src/schema_helpers.rs` | Core JSON Schema helpers for field validation |
 | `test_detection` | `crates/aptu-coder-core/src/test_detection.rs` | Test file detection by path heuristics (directory and filename patterns) |
 | `traversal` | `crates/aptu-coder-core/src/traversal.rs` | Directory walking with .gitignore support via ignore crate |
-| `types` | `crates/aptu-coder-core/src/types.rs` | Shared data structures (`AnalyzeDirectoryParams`, `AnalyzeFileParams`, `AnalyzeModuleParams`, `AnalyzeSymbolParams`, `AnalysisResult`, etc.) |
+| `types` | `crates/aptu-coder-core/src/types.rs` | Shared data structures (`AnalyzeDirectoryParams`, `AnalyzeFileParams`, `AnalyzeModuleParams`, `AnalysisResult`, etc.) |
 
 ## Data Flow
 
@@ -59,7 +59,6 @@ graph TD
     A["MCP Request"] --> B1["analyze_directory"]
     A --> B2["analyze_file"]
     A --> B4["analyze_module"]
-    A --> B3["analyze_symbol"]
     A --> B6["edit_overwrite"]
     A --> B7["edit_replace"]
     A --> B10["exec_command"]
@@ -126,21 +125,9 @@ When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the
 
 Exported from `aptu_coder_core` as a public API for library consumers that hold source text in memory (e.g. language servers, test harnesses) without a corresponding on-disk path. Eliminates the TOCTOU race and I/O overhead of writing a temp file first.
 
-### analyze_symbol (Symbol Call Graph)
+## Symbol Call Graph (historical)
 
-1. Walk entire directory to build symbol index
-2. Build CallGraph via BFS: callers (incoming) and callees (outgoing) to configurable depth
-3. Sentinel values: `<module>` for top-level calls, `<reference>` for type references
-4. Symbols called >3x marked with `•N`
-5. Format as FOCUS/DEPTH/DEFINED/CALLERS/CALLEES sections
-
-**Output contract:** The MCP tool returns formatted text only; the mirrored `structuredContent`/output schema was removed (#1660 series). The depth-1 callers/callees appear in the CALLERS/CALLEES text sections. The `FocusedAnalysisOutput` fields `callers`, `test_callers`, and `callees` (`Option<Vec<CallChainEntry>>`) remain available on the public core API in `aptu_coder_core` for library consumers. `CallChainEntry` is a stable public type with fields `symbol: String`, `file: String`, `line: usize`; conversion from the internal `InternalCallChain` (which is non-serializable and stays internal) happens via the private `chains_to_entries` helper. The `follow_depth` parameter does not affect these arrays; they always represent depth-1 relationships.
-
-**Import lookup mode:** When `mode=import_lookup`, instead of building a call graph, the tool scans all files in the directory for imports of the module path specified in `symbol`. Returns a list of files that import that module. This mode rejects `match_mode`, `follow_depth`, and `impl_only` (`mode_param_conflict`).
-
-**Git ref filtering:** When `git_ref` is set, `changed_files_from_git_ref()` runs `git diff` to get the set of changed files, and `filter_entries_by_git_ref()` restricts the analysis to those files before the graph is built.
-
-**Def-use mode:** When `mode=def_use`, the tool computes definition and use sites alongside the call graph, but in the initial response the handler does not set `structuredContent`: the bootstrap cursor is delivered as a `NEXT_CURSOR:` line in the text output (with a usage hint). Following that cursor enters `PaginationMode::DefUse`, where `def_use_sites` is populated as `Vec<DefUseSite>` and sliced per page. Each `DefUseSite` has: `kind` (write/read/write_read), `symbol`, `file`, `line`, `column`, `snippet`, `enclosing_scope`.
+The `analyze_symbol` MCP tool (call graph for a named symbol, with import_lookup and def_use modes) was removed. Historical behavior: directory walk to build a symbol index, CallGraph BFS for callers/callees to configurable depth, FOCUS/DEPTH/DEFINED/CALLERS/CALLEES text sections. The `FocusedAnalysisOutput` fields `callers`, `test_callers`, and `callees` (`Option<Vec<CallChainEntry>>`) remain available on the public core API in `aptu_coder_core` for library consumers. `CallChainEntry` is a stable public type with fields `symbol: String`, `file: String`, `line: usize`; conversion from the internal `InternalCallChain` (which is non-serializable and stays internal) happens via the private `chains_to_entries` helper. The import_lookup path survives in `aptu_coder_core` as `analyze_import_lookup`.
 
 ## Observability Architecture
 
@@ -163,7 +150,7 @@ Key sub-operations are wrapped in named child spans so P95 breakdowns are visibl
 | Span name | Location | Sub-operation |
 |---|---|---|
 | `ast.parse_batch` | `analyze.rs` | Rayon parallel parse batch for `analyze_directory` |
-| `graph.traverse` | `graph.rs` | BFS traversal per depth level in `analyze_symbol` |
+| `graph.traverse` | `graph.rs` | BFS traversal per depth level (historically used by `analyze_symbol`; now library-only) |
 | `walk_directory` | `traversal.rs` | .gitignore-aware directory walk |
 
 ### Span attribute policy
@@ -172,7 +159,7 @@ All tool handlers record bounded, safe-to-emit span attributes (tool name, path,
 
 ### `no_cache_meta` convention
 
-`crate::tools::common::no_cache_meta()` builds a `MetaObject` with `_meta.cache_hint = "no-cache"`, telling MCP clients/orchestrators not to cache the result. It is defined once and applied via `.with_meta(...)`: (a) on every error response path, through `err_to_tool_result`; (b) on every response (success and error) of the three mutating/destructive tools, `exec_command`, `edit_overwrite`, `edit_replace`; and (c) on the successful responses of `analyze_directory`, `analyze_file`, `analyze_module`, and `analyze_symbol`, where the handler takes `no_cache_meta().0` as the base map and inserts a `content_hash` (blake3 of the formatted output) alongside it. The MCP Resources surface (`resources.rs`) and the `list_tools` response use a separate mechanism instead -- `with_ttl_ms`/`with_cache_scope(CacheScope::Public)` -- since those are meant to be cached by clients.
+`crate::tools::common::no_cache_meta()` builds a `MetaObject` with `_meta.cache_hint = "no-cache"`, telling MCP clients/orchestrators not to cache the result. It is defined once and applied via `.with_meta(...)`: (a) on every error response path, through `err_to_tool_result`; (b) on every response (success and error) of the three mutating/destructive tools, `exec_command`, `edit_overwrite`, `edit_replace`; and (c) on the successful responses of `analyze_directory`, `analyze_file`, and `analyze_module`, where the handler takes `no_cache_meta().0` as the base map and inserts a `content_hash` (blake3 of the formatted output) alongside it. The `list_tools` response uses a separate mechanism instead -- `with_ttl_ms`/`with_cache_scope(CacheScope::Public)` -- since it is meant to be cached by clients.
 
 ## Language Handler System
 
@@ -202,24 +189,10 @@ Symbol resolution uses SymbolMatchMode to locate the target symbol: Exact (case-
 
 Use `AnalysisConfig::default()` for standard behavior with no limits applied.
 
-## MCP Resources
+## MCP Resources (removed)
 
-The server exposes MCP resource templates that surface the knowledge graph built during `analyze_symbol` calls. Resources are URI-addressed and read-only; no `subscribe` or `list-changed` support is provided.
+The MCP resource templates that surfaced the knowledge graph built during `analyze_symbol` calls were removed together with that tool (blast-radius, subgraph, blast-radius-bidirectional URI templates under `aptu-coder://graph/{repo_hash}/...`; see [ROADMAP.md](ROADMAP.md) for the historical description).
 
-**URI scheme:** `aptu-coder://graph/{repo_hash}/{type}/{path}?{params}`
+The structural graph itself (`StructuralGraph`, `GraphDiskStore`) remains in `aptu-coder-core` as a library capability.
 
-| Resource Template | Description |
-|---|---|
-| `blast-radius/{symbol}?depth={depth}` | BFS traversal from a symbol outward; depth defaults to 3 (max 5) |
-| `subgraph/{symbol}` | Full subgraph (callers, callees, connections) for a single symbol |
-| `blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}` | Bidirectional BFS from one or more comma-separated seed symbols; `max_nodes` defaults to 50 (must be >=1), `depth` defaults to 3 (max 5); backed by `GraphQuery::BidirectionalBlastRadius` |
-
-**Output format:** All three templates accept a `format=text|json` query parameter (default `json`), parsed by `parse_graph_uri` and honored in `read_resource_impl`: `format=text` returns plain text instead of the default paginated JSON.
-
-**Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
-
-**Persistence:** `GraphDiskStore` persists the structural graph to disk, keyed by blake3 content hashes of the analyzed files (not mtime). On restart the graph is reloaded if available; I/O errors degrade silently.
-
-**Cross-file symbol disambiguation:** `StructuralGraph::build_from_analysis` (`structural.rs`) resolves `Calls` edges through a symbol index keyed by name (`HashMap<String, Vec<NodeIndex>>`) that tracks every candidate definition, then `resolve_candidate()` disambiguates caller and callee resolution via staged heuristics: same-file preference, then line-proximity, then arg-count match, then first-definition fallback. This is distinct from `analyze_symbol`'s `CallGraph` BFS (see [Call Graph Design](#call-graph-design)), which resolves by name only and can still produce a cross-file edge between two same-named functions in different files. Merged in `43812d7` (#1461/#1463).
-
-**Warm-up requirement:** Resources return a cold-cache message if `analyze_symbol` has not been called on the directory first. The structural graph is built as a side effect of the `analyze_symbol` cold-cache path.
+**Cross-file symbol disambiguation:** `StructuralGraph::build_from_analysis` (`structural.rs`) resolves `Calls` edges through a symbol index keyed by name (`HashMap<String, Vec<NodeIndex>>`) that tracks every candidate definition, then `resolve_candidate()` disambiguates caller and callee resolution via staged heuristics: same-file preference, then line-proximity, then arg-count match, then first-definition fallback. This is distinct from the removed `analyze_symbol` tool's `CallGraph` BFS, which resolved by name only and could still produce a cross-file edge between two same-named functions in different files. Merged in `43812d7` (#1461/#1463).

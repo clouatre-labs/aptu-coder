@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Rust MCP server for code structure analysis using tree-sitter.
 //!
-//! This crate exposes eight MCP tools for multiple programming languages:
+//! This crate exposes seven MCP tools for multiple programming languages:
 //!
 //! **Analyze family:**
 //! - **`analyze_directory`**: Directory tree with file counts and structure
 //! - **`analyze_file`**: Semantic extraction (functions, classes, imports)
-//! - **`analyze_symbol`**: Call graph analysis (callers and callees)
 //! - **`analyze_module`**: Lightweight function and import index
 //!
 //! **Verification family:**
@@ -51,7 +50,7 @@ use aptu_coder_core::analyze;
 use aptu_coder_core::{cache, completion};
 use validation::validate_path;
 
-use crate::tools::common::{err_to_tool_result, no_cache_meta};
+use crate::tools::common::err_to_tool_result;
 
 pub const STDIN_MAX_BYTES: usize = 1_048_576;
 
@@ -209,13 +208,12 @@ impl From<&EditReplaceOutput> for EditReplaceOutputMetadata {
     }
 }
 
+use aptu_coder_core::cache::AnalysisCache;
 #[cfg(test)]
 use aptu_coder_core::cache::CacheTier;
-use aptu_coder_core::cache::{AnalysisCache, CallGraphCache, StructuralGraphCache};
 use aptu_coder_core::types::{
-    AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, AnalyzeSymbolParams,
-    EditOverwriteParams, EditReplaceOutput, EditReplaceParams, VerifyAnchorsOutput,
-    VerifyAnchorsParams,
+    AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeModuleParams, EditOverwriteParams,
+    EditReplaceOutput, EditReplaceParams, VerifyAnchorsOutput, VerifyAnchorsParams,
 };
 use filters::CompiledRule;
 
@@ -259,9 +257,8 @@ pub(crate) fn slim_output_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CacheScope, CallToolResponse, CallToolResult, CancelledNotificationParam,
-    CompleteRequestParams, CompleteResult, CompletionInfo, ContentBlock, DiscoverResult, ErrorData,
-    Implementation, InitializeRequestParams, InitializeResult, ListResourceTemplatesResult,
-    ListResourcesResult, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
+    CompleteRequestParams, CompleteResult, CompletionInfo, DiscoverResult, ErrorData,
+    Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
@@ -269,7 +266,6 @@ use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::instrument;
 
@@ -280,13 +276,6 @@ static GLOBAL_SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic:
 // 50_000 threshold never triggered once. At 5_000, auto-summary engages for repos that
 // would otherwise produce an overwhelming flat response.
 pub(crate) const SIZE_LIMIT: usize = 5_000;
-
-pub(crate) fn err_to_tool_result_from_pagination(
-    e: aptu_coder_core::pagination::PaginationError,
-) -> CallToolResult {
-    let msg = format!("Pagination error: {}", e);
-    CallToolResult::error(vec![ContentBlock::text(msg)]).with_meta(Some(no_cache_meta()))
-}
 
 /// MCP server handler that wires the four analysis tools to the rmcp transport.
 ///
@@ -312,12 +301,6 @@ pub struct CodeAnalyzer {
     // Compiled filter rules table (built-in + project-local from .aptu/filters.toml).
     // Immutable after init; no lock needed.
     filter_table: Arc<Vec<CompiledRule>>,
-    // L1 in-memory LRU cache for call graph results (analyze_symbol).
-    // Capacity controlled by APTU_CODER_SYMBOL_CACHE_CAPACITY env var (default 32).
-    call_graph_cache: CallGraphCache,
-    // L1 in-memory LRU cache for structural graph results (analyze_focused).
-    // Capacity controlled by APTU_CODER_STRUCTURAL_CACHE_CAPACITY env var (default 16).
-    structural_graph_cache: StructuralGraphCache,
     // Per-(session_id, canonical_path) consecutive edit_replace failure counter.
     // Used to detect stale LLM context and return a directive error instead of
     // repeatedly trying an old_text that no longer matches the file content.
@@ -326,8 +309,6 @@ pub struct CodeAnalyzer {
     // Arc<Mutex<()>> that is acquired inside spawn_blocking to prevent concurrent
     // read-modify-write cycles on the same file (silent data loss prevention).
     file_edit_locks: tools::FileEditLockRegistry,
-    // On-disk graph store for structural knowledge graph resources.
-    graph_store: std::sync::Arc<aptu_coder_core::graph::GraphDiskStore>,
 }
 
 #[tool_router]
@@ -560,69 +541,6 @@ impl CodeAnalyzer {
             &ctx, params, seq, sid, t_start, param_path, &span,
         )
         .await
-    }
-
-    #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, symbol = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
-    #[tool(
-        name = "analyze_symbol",
-        title = "Analyze Symbol",
-        description = "Call graph for a named symbol across all files in a directory. Prefer over analyze_file when the question is who calls X or what does X call. Modes: call_graph (default), import_lookup, def_use. symbol must be a plain unqualified name defined in that directory. Paginates with an opaque cursor (20). Fails if file path supplied or if impl_only=true on a non-Rust directory. git_ref restricts to changed files.",
-        annotations(
-            title = "Analyze Symbol",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
-    async fn analyze_symbol(
-        &self,
-        params: Parameters<AnalyzeSymbolParams>,
-        context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let params = params.0;
-        let t_start = std::time::Instant::now();
-        let (seq, sid) = self.begin_tool_call("analyze_symbol", &context.meta).await;
-        let span = tracing::Span::current();
-        span.record("gen_ai.system", "mcp");
-        span.record("gen_ai.operation.name", "execute_tool");
-        span.record("gen_ai.tool.name", "analyze_symbol");
-        span.record("symbol", &params.symbol);
-        let _validated_path = match validate_path(&params.path, true) {
-            Ok(p) => p,
-            Err(e) => {
-                span.record("error", true);
-                span.record("error.type", "invalid_params");
-                self.emit_validation_error_metric(
-                    "analyze_symbol",
-                    seq,
-                    sid.clone(),
-                    t_start,
-                    &params.path,
-                    None,
-                );
-                return Ok(err_to_tool_result(e));
-            }
-        };
-        let ct = context.ct.clone();
-        let param_path = params.path.clone();
-        let max_depth_val = params.max_depth;
-        let ctx = tools::AnalyzeSymbolContext {
-            metrics_tx: self.metrics_tx.clone(),
-            call_graph_cache: self.call_graph_cache.clone(),
-            structural_graph_cache: self.structural_graph_cache.clone(),
-            disk_cache: self.disk_cache.clone(),
-            sid: sid.clone(),
-            seq,
-        };
-        let call = tools::AnalyzeSymbolCall {
-            ct,
-            param_path,
-            max_depth_val,
-            span,
-            t_start,
-        };
-        tools::analyze_symbol::analyze_symbol_handler(ctx, params, call).await
     }
 
     #[instrument(skip(self, context), fields(gen_ai.system = tracing::field::Empty, gen_ai.operation.name = tracing::field::Empty, gen_ai.tool.name = tracing::field::Empty, error = tracing::field::Empty, error.type = tracing::field::Empty, path = tracing::field::Empty, mcp.session.id = tracing::field::Empty, client.name = tracing::field::Empty, client.version = tracing::field::Empty, mcp.client.session.id = tracing::field::Empty, cache_tier = tracing::field::Empty))]
@@ -877,13 +795,12 @@ impl ServerHandler for CodeAnalyzer {
     fn get_info(&self) -> InitializeResult {
         let instructions = "MCP server for code structure analysis (tree-sitter). Start \
             with analyze_directory for a package/module map, then \
-            analyze_module/analyze_file for per-file detail and analyze_symbol for call \
-            graphs. JSONL metrics and jq recipes: docs/METRICS.md.";
+            analyze_module/analyze_file for per-file detail. JSONL metrics and jq \
+            recipes: docs/METRICS.md.";
         let capabilities = ServerCapabilities::builder()
             .enable_tools()
             .enable_tool_list_changed()
             .enable_completions()
-            .enable_resources()
             .build();
         let server_info = Implementation::new("aptu-coder", env!("CARGO_PKG_VERSION"))
             .with_title("Aptu Coder")
@@ -914,85 +831,6 @@ impl ServerHandler for CodeAnalyzer {
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let router = self.tool_router.read().await;
         router.call(tcc).await
-    }
-
-    async fn list_resources(
-        &self,
-        _request: Option<rmcp::model::PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListResourcesResult, ErrorData> {
-        tools::resources::list_resources_impl(_request, &_context)
-    }
-
-    async fn list_resource_templates(
-        &self,
-        _request: Option<rmcp::model::PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        tools::resources::list_resource_templates_impl(_request, &_context)
-    }
-
-    async fn read_resource(
-        &self,
-        request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResponse, ErrorData> {
-        let uri_kind = tools::resources::classify_uri_kind(&request.uri);
-        let is_paginated = request.uri.contains("cursor=");
-        let started = Instant::now();
-        let result = tools::resources::read_resource_impl(request, &self.graph_store);
-        let duration_ms = started.elapsed().as_millis() as u64;
-        let (result_name, error_type, error_subtype, cache_tier, output_chars) = match &result {
-            Ok(response) => {
-                let chars = match response {
-                    ReadResourceResponse::Complete(value) => value
-                        .contents
-                        .iter()
-                        .map(|item| match item {
-                            rmcp::model::ResourceContents::TextResourceContents {
-                                text, ..
-                            } => text.len(),
-                            rmcp::model::ResourceContents::BlobResourceContents {
-                                blob, ..
-                            } => blob.len(),
-                            _ => 0,
-                        })
-                        .sum(),
-                    ReadResourceResponse::InputRequired(_) => 0,
-                    _ => 0,
-                };
-                ("ok", None, None, Some("l2_disk"), chars)
-            }
-            Err(error) => {
-                let (error_type, error_subtype) = crate::metrics::classify_error_code(error.code);
-                let kind =
-                    (error.code == rmcp::model::ErrorCode::RESOURCE_NOT_FOUND).then_some("miss");
-                (
-                    "error",
-                    Some(error_type.to_owned()),
-                    error_subtype.map(str::to_owned),
-                    kind,
-                    0,
-                )
-            }
-        };
-        let seq = self
-            .session_call_seq
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let sid = self.session_id.lock().await.clone();
-        self.metrics_tx.send(
-            crate::metrics::MetricEventBuilder::new("read_resource", result_name, duration_ms)
-                .uri_kind(Some(uri_kind))
-                .session_id(sid)
-                .seq(Some(seq))
-                .is_paginated(is_paginated)
-                .output_chars(output_chars)
-                .cache_tier(cache_tier)
-                .error_type(error_type)
-                .error_subtype(error_subtype)
-                .build(),
-        );
-        result
     }
 
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {

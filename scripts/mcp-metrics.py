@@ -38,17 +38,17 @@ from typing import Any, Callable, Dict, List, NamedTuple
 # Constants
 # ---------------------------------------------------------------------------
 
-# The seven tools shipped in the current server.  Records from renamed or
+# The tools shipped in the current server.  Records from renamed or
 # removed tools (analyze_raw, remote_file, etc.) are excluded by default
 # to avoid polluting aggregate statistics with obsolete data.
 CURRENT_TOOLS = {
     "analyze_directory",
     "analyze_file",
     "analyze_module",
-    "analyze_symbol",
     "edit_overwrite",
     "edit_replace",
     "exec_command",
+    "verify_anchors",
 }
 
 
@@ -261,7 +261,6 @@ def compute_cache(records):
         "analyze_directory",
         "analyze_file",
         "analyze_module",
-        "analyze_symbol",
     }
     by_tool = defaultdict(list)
     by_tier = defaultdict(int)
@@ -493,50 +492,10 @@ def compute_pagination(records):
 
 
 # ---------------------------------------------------------------------------
-# Section 8: Feature Adoption (analyze_symbol)
-# ---------------------------------------------------------------------------
-# For analyze_symbol calls only: import_lookup, def_use, impl_only bool
-# distributions and match_mode string histogram (default 'exact').
-
-
-def compute_features(records):
-    has_any = False
-    sym_records = [r for r in records if r.get("tool") == "analyze_symbol"]
-    feature_fields = ["import_lookup", "def_use", "impl_only"]
-    for rec in sym_records:
-        if (
-            any(rec.get(f) is not None for f in feature_fields)
-            or rec.get("match_mode") is not None
-        ):
-            has_any = True
-            break
-    if not has_any:
-        return None
-
-    bool_counts = {f: {"true": 0, "false": 0} for f in feature_fields}
-    match_mode_counts = defaultdict(int)
-    for rec in sym_records:
-        for f in feature_fields:
-            val = rec.get(f)
-            if val is True:
-                bool_counts[f]["true"] += 1
-            elif val is False:
-                bool_counts[f]["false"] += 1
-        mm = rec.get("match_mode") or "exact"
-        match_mode_counts[mm] += 1
-
-    return {
-        "total": len(sym_records),
-        "bool_fields": bool_counts,
-        "match_mode": dict(match_mode_counts),
-    }
-
-
-# ---------------------------------------------------------------------------
 # Section 9: git_ref Adoption
 # ---------------------------------------------------------------------------
 # Per-tool breakdown of git_ref_used for tools that support git refs
-# (analyze_directory, analyze_symbol).
+# (analyze_directory).
 
 
 def compute_git_ref(records):
@@ -548,7 +507,7 @@ def compute_git_ref(records):
     if not has_any:
         return None
 
-    ref_tools = {"analyze_directory", "analyze_symbol"}
+    ref_tools = {"analyze_directory"}
     by_tool = {}
     for rec in records:
         tool = rec.get("tool", "unknown")
@@ -1133,57 +1092,9 @@ def _render_csv_pagination(data: Dict, w: csv.writer) -> None:
     )
 
 
-def _render_text_features(lines: List[str], data: Dict) -> None:
-    """Render features section for text output."""
-    _section(
-        lines,
-        "8. Feature Adoption (analyze_symbol)  "
-        "[import_lookup, def_use, impl_only, match_mode]",
-    )
-    lines.append("  Total analyze_symbol calls: {}".format(data["total"]))
-    lines.append("")
-    bool_fields = ["import_lookup", "def_use", "impl_only"]
-    _table(
-        lines,
-        ["field", "true", "false"],
-        [22, 6, 6],
-        [
-            [
-                f,
-                data["bool_fields"][f]["true"],
-                data["bool_fields"][f]["false"],
-            ]
-            for f in bool_fields
-        ],
-    )
-    lines.append("")
-    lines.append("  match_mode distribution:")
-    for mm, cnt in sorted(data["match_mode"].items(), key=lambda x: -x[1]):
-        lines.append("    {:20s}  {:>5}".format(mm, cnt))
-
-
-def _render_csv_features(data: Dict, w: csv.writer) -> None:
-    """Render features section for CSV output."""
-    w.writerow([])
-    w.writerow(["# Section 8: Feature Adoption (analyze_symbol)"])
-    w.writerow(["total_analyze_symbol_calls", data["total"]])
-    bool_fields = ["import_lookup", "def_use", "impl_only"]
-    w.writerow(["field", "true", "false"])
-    for f in bool_fields:
-        w.writerow(
-            [
-                f,
-                data["bool_fields"][f]["true"],
-                data["bool_fields"][f]["false"],
-            ]
-        )
-    for mm, cnt in sorted(data["match_mode"].items(), key=lambda x: -x[1]):
-        w.writerow(["match_mode:{}".format(mm), cnt])
-
-
 def _render_text_git_ref(lines: List[str], data: Dict) -> None:
     """Render git_ref section for text output."""
-    _section(lines, "9. git_ref Adoption  [analyze_directory + analyze_symbol]")
+    _section(lines, "9. git_ref Adoption  [analyze_directory]")
     _table(
         lines,
         ["tool", "calls", "git_ref_used", "adoption%"],
@@ -1278,7 +1189,6 @@ SECTIONS = [
     SectionSpec(
         "pagination", "7. Pagination", _render_text_pagination, _render_csv_pagination
     ),
-    SectionSpec("features", "8. Features", _render_text_features, _render_csv_features),
     SectionSpec("git_ref", "9. git_ref", _render_text_git_ref, _render_csv_git_ref),
     SectionSpec("timeout", "10. Timeout", _render_text_timeout, _render_csv_timeout),
 ]
@@ -1298,7 +1208,6 @@ def fmt_text(
     show_trend,
     params_usage=None,
     pagination=None,
-    features=None,
     git_ref=None,
     timeout=None,
 ):
@@ -1313,7 +1222,6 @@ def fmt_text(
         "trend": trend,
         "params_usage": params_usage,
         "pagination": pagination,
-        "features": features,
         "git_ref": git_ref,
         "timeout": timeout,
     }
@@ -1328,7 +1236,7 @@ def fmt_text(
         if spec.key == "trend" and not data:
             continue
         if (
-            spec.key in ("params_usage", "pagination", "features", "git_ref", "timeout")
+            spec.key in ("params_usage", "pagination", "git_ref", "timeout")
             and data is None
         ):
             continue
@@ -1353,7 +1261,6 @@ def fmt_json(
     show_trend,
     params_usage=None,
     pagination=None,
-    features=None,
     git_ref=None,
     timeout=None,
 ):
@@ -1369,8 +1276,6 @@ def fmt_json(
         data["params_usage"] = params_usage
     if pagination is not None:
         data["pagination"] = pagination
-    if features is not None:
-        data["features"] = features
     if git_ref is not None:
         data["git_ref"] = git_ref
     if timeout is not None:
@@ -1392,7 +1297,6 @@ def fmt_csv(
     show_trend,
     params_usage=None,
     pagination=None,
-    features=None,
     git_ref=None,
     timeout=None,
 ):
@@ -1408,7 +1312,6 @@ def fmt_csv(
         "trend": trend,
         "params_usage": params_usage,
         "pagination": pagination,
-        "features": features,
         "git_ref": git_ref,
         "timeout": timeout,
     }
@@ -1423,7 +1326,7 @@ def fmt_csv(
         if spec.key == "trend" and not data:
             continue
         if (
-            spec.key in ("params_usage", "pagination", "features", "git_ref", "timeout")
+            spec.key in ("params_usage", "pagination", "git_ref", "timeout")
             and data is None
         ):
             continue
@@ -1524,7 +1427,6 @@ Examples:
     trend = compute_trend(records) if args.trend else []
     params_usage = compute_params_usage(records)
     pagination = compute_pagination(records)
-    features = compute_features(records)
     git_ref = compute_git_ref(records)
     timeout = compute_timeout(records)
 
@@ -1538,7 +1440,6 @@ Examples:
             args.trend,
             params_usage=params_usage,
             pagination=pagination,
-            features=features,
             git_ref=git_ref,
             timeout=timeout,
         )
@@ -1552,7 +1453,6 @@ Examples:
             args.trend,
             params_usage=params_usage,
             pagination=pagination,
-            features=features,
             git_ref=git_ref,
             timeout=timeout,
         )
@@ -1566,7 +1466,6 @@ Examples:
             args.trend,
             params_usage=params_usage,
             pagination=pagination,
-            features=features,
             git_ref=git_ref,
             timeout=timeout,
         )

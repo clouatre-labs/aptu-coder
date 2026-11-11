@@ -21,7 +21,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the module map, [MCP-BEST-PRACTICES.m
 
 **Principle:** Each tool does one thing well. Non-overlapping interfaces eliminate ambiguous routing. When two tools can satisfy the same request, the model must guess; that is a reliability failure, not a model failure. (See [MCP-BEST-PRACTICES.md](MCP-BEST-PRACTICES.md), section 3.2.)
 
-*Example: This server has seven tools — `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol` (analysis family); `edit_overwrite`, `edit_replace` (editing family); `exec_command` (exec family) — each with a distinct, non-overlapping responsibility. A single auto-detecting tool was rejected because it required the model to infer the correct mode from context, which failed under small models.*
+*Example: This server has six tools — `analyze_directory`, `analyze_file`, `analyze_module` (analysis family); `edit_overwrite`, `edit_replace` (editing family); `exec_command` (exec family) — each with a distinct, non-overlapping responsibility. A single auto-detecting tool was rejected because it required the model to infer the correct mode from context, which failed under small models. (A seventh tool, `analyze_symbol`, was removed; see ROADMAP.md.)*
 
 ```mermaid
 graph TD
@@ -29,11 +29,9 @@ graph TD
     B --> C[Directory tree with counts]
     B --> D[File semantic details: functions, classes, imports]
     B --> E[Minimal function/import index]
-    B --> F[Call graph for a specific symbol]
     C --> G[analyze_directory]
     D --> H[analyze_file]
     E --> I[analyze_module]
-    F --> J[analyze_symbol]
 ```
 
 *Figure 1: Agent tool-selection flow: each decision branch maps to exactly one tool.*
@@ -43,7 +41,6 @@ graph TD
 | `analyze_directory` | Directory tree with LOC, function count, class count | Function signatures, call graphs, imports |
 | `analyze_file` | Functions with signatures, classes, imports, type references | Call graph traversal, directory walking |
 | `analyze_module` | Minimal function/import index (~75% smaller than `analyze_file`) | Signatures, types, class details, call graphs |
-| `analyze_symbol` | Call graph for a named function/method across a directory | File-level details, directory counts |
 | `edit_overwrite` | Create or overwrite a file | AST awareness, incremental updates |
 | `edit_replace` | Replace exact text block in a file | AST awareness, directory-wide changes |
 | `exec_command` | Execute arbitrary shell commands | Output parsing, scripting language support, interactive sessions |
@@ -86,7 +83,7 @@ Returns a tree with LOC, function count, and class count."
 
 **Principle:** Server instructions should provide an ordered workflow, not open-ended guidance. Small models execute numbered steps sequentially; they do not synthesize a strategy from a list of capabilities.
 
-*Example: The server instructions for this server were originally a 4-step numbered workflow (introduced in Wave 6, #342); they have since been trimmed (#1636) to a single short paragraph: start with `analyze_directory` for a package/module map, then `analyze_module`/`analyze_file` for per-file detail and `analyze_symbol` for call graphs. The lesson stands -- guidance should be ordered and concrete, not a list of capabilities.*
+*Example: The server instructions for this server were originally a 4-step numbered workflow (introduced in Wave 6, #342); they have since been trimmed (#1636) to a single short paragraph: start with `analyze_directory` for a package/module map, then `analyze_module`/`analyze_file` for per-file detail. (The call-graph step referencing the now-removed `analyze_symbol` was dropped with that tool.) The lesson stands -- guidance should be ordered and concrete, not a list of capabilities.*
 
 ### Structured Output Belongs at the Runner Layer
 
@@ -239,33 +236,33 @@ Parameter documentation flows through schemars: `///` doc comments on struct fie
 
 **`format:uint` footgun:** schemars emits `"format": "uint"` or `"format": "uint32"` for unsigned integers by default. These formats are non-standard JSON Schema and are ignored or flagged by strict validators. Override them via `schema_with` (see `crates/aptu-coder-core/src/schema_helpers.rs`) for any numeric field where validator compatibility matters.
 
-## 8. MCP Resources Design
+## 8. MCP Resources Design (historical)
 
-MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced three resource templates as a second access path to the structural graph that `analyze_symbol` builds.
+MCP Resources provide a URI-addressed read-only data surface alongside tools. The knowledge graph feature introduced three resource templates as a second access path to the structural graph built by the now-removed `analyze_symbol` tool; those templates were removed together with it. The design principles below are retained as guidance for any future resource surface.
 
 ### Small-Model-First URI Design
 
 **Principle:** Resource URI templates must be self-documenting. A small model reading the template description should be able to construct a valid URI without examples.
 
-*Example: The resource templates use flat, descriptive paths: `blast-radius/{symbol}`, `subgraph/{symbol}`, `blast-radius-bidirectional/{symbols}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it is returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
+*Example: The resource templates used flat, descriptive paths: `blast-radius/{symbol}`, `subgraph/{symbol}`, `blast-radius-bidirectional/{symbols}`. The `{repo_hash}` prefix is a technical identifier the model never needs to construct manually -- it was returned by the initial `analyze_symbol` response. Template descriptions include the exact URI pattern and the expected response shape.*
 
 ### Prescriptive Resource Template Descriptions
 
 **Principle:** Resource template descriptions must state the URI pattern, the required and optional parameters, and the expected response shape. They must also state when the resource is not available (cold cache) and what action the model should take.
 
-*Example: The blast-radius template description includes: the URI pattern with `{repo_hash}` and `{symbol}` placeholders, the optional `depth` query parameter and its default, the pagination format, and a note that the graph must be built first via `analyze_symbol`.*
+*Example: The blast-radius template description included: the URI pattern with `{repo_hash}` and `{symbol}` placeholders, the optional `depth` query parameter and its default, the pagination format, and a note that the graph must be built first via `analyze_symbol`.*
 
 ### Pagination Conventions
 
 **Principle:** Resource pagination should follow the same cursor-based convention as tool pagination. The cursor encoding must be documented in the template description.
 
-*Example: Resource responses use an opaque cursor in the same shape as tool pagination cursors, so models that already understand pagination from tools can apply the same pattern to resources.*
+*Example: Resource responses used an opaque cursor in the same shape as tool pagination cursors, so models that already understood pagination from tools could apply the same pattern to resources.*
 
 ### New Server Checklist Extension
 
 Add to the New Server checklist (Section 10, step 13):
 
-13. **Add MCP resource templates (if applicable).** Resources are URI-addressed, read-only data surfaces. Follow the same design principles as tools: prescriptive descriptions, cursor pagination, cold-cache guidance. Resource templates are discoverable via `resources/templates/list`; the `resources/list` endpoint may return empty if all resources are template-based.
+13. **Add MCP resource templates (if applicable).** Resources are URI-addressed, read-only data surfaces. Follow the same design principles as tools: prescriptive descriptions, cursor pagination, cold-cache guidance. Resource templates are discoverable via `resources/templates/list`; the `resources/list` endpoint may return empty if all resources are template-based. (This server removed its resource templates with the `analyze_symbol` tool; keep this step only if your server exposes resources.)
 
 ## 9. Anti-Patterns
 

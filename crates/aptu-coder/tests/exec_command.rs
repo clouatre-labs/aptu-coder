@@ -1298,16 +1298,18 @@ async fn test_exec_command_filter_capped_notice_and_resource_link() {
         .expect("filter-capped run should emit a resource link")
         .to_string();
 
-    let common_analyzer = common::make_test_analyzer();
-    let read = common::send_raw_request(
-        common_analyzer,
-        "resources/read",
-        serde_json::json!({"uri": link_uri}),
-    )
-    .await;
-    let text = read["result"]["contents"][0]["text"]
-        .as_str()
-        .unwrap_or_else(|| panic!("resources/read text: {read}"));
+    // Read the full pre-filter output from the slot file on disk.
+    let slot = link_uri
+        .split("slot-")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .expect("uri should contain slot identifier");
+    let slot_file = std::env::temp_dir()
+        .join("aptu-coder-overflow")
+        .join(format!("slot-{slot}"))
+        .join("stdout");
+    let text = std::fs::read_to_string(&slot_file)
+        .unwrap_or_else(|e| panic!("slot file {slot_file:?} should be readable: {e}"));
 
     // Assert: full pre-filter content, not the 20-line preview.
     assert!(

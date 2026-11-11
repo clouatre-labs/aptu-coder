@@ -31,35 +31,6 @@ fn test_call_tool_result_cache_hint_metadata() {
 }
 
 #[tokio::test]
-async fn test_no_cache_meta_on_pagination_error() {
-    // Arrange: Trigger a DefUse pagination error by passing an invalid cursor.
-    // Analyze_symbol with def_use=true requires a valid cursor to paginate through
-    // def-use results; an invalid/corrupted cursor should trigger PaginationError,
-    // which should return with cache_hint: no-cache in _meta.
-
-    let resp = call_tool_raw(
-        "analyze_symbol",
-        serde_json::json!({
-            "path": ".",
-            "symbol": "test_symbol",
-            "max_depth": 3,
-                        "mode": "def_use",
-            "cursor": "INVALID_CORRUPTED_CURSOR_12345"
-        }),
-    )
-    .await;
-
-    // Assert the response has cache_hint: no-cache in _meta
-    assert_eq!(
-        resp["result"]["_meta"]
-            .get("cache_hint")
-            .and_then(|v| v.as_str()),
-        Some("no-cache"),
-        "Expected _meta.cache_hint to be 'no-cache' in pagination error response: {resp}"
-    );
-}
-
-#[tokio::test]
 async fn test_analyze_directory_bounded_traversal_skips_deep() {
     use tempfile::TempDir;
 
@@ -1213,15 +1184,6 @@ async fn test_analyze_tools_reject_legacy_page_size() {
         (
             "analyze_file",
             serde_json::json!({ "path": "src/lib.rs", "page_size": 30 }),
-        ),
-        (
-            "analyze_symbol",
-            serde_json::json!({
-                "path": "src",
-                "symbol": "no_cache_meta",
-                "match_mode": "exact",
-                "page_size": 30
-            }),
         ),
     ];
 

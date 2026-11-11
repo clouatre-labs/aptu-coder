@@ -76,6 +76,9 @@ pub(crate) struct CompiledQueries {
     pub impl_block: Option<Query>,
     pub reference: Option<Query>,
     pub impl_trait: Option<Query>,
+    /// Def-use query. No production caller since the symbol tool removal; kept so
+    /// per-language defuse query compilation stays covered by language tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub defuse: Option<Query>,
 }
 
@@ -541,6 +544,8 @@ impl SemanticExtractor {
 
     /// Parse `source` in `language`, run the defuse query for `symbol`, and return all sites.
     /// Returns an empty vec if the language has no defuse query or parsing fails.
+    /// No production caller since the symbol tool removal; retained for language tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn extract_def_use_for_file(
         source: &str,
         language: &str,

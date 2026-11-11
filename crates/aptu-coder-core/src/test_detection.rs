@@ -101,4 +101,13 @@ mod tests {
         assert!(is_test_file(Path::new("src/tests/utils.rs")));
         assert!(!is_test_file(Path::new("src/utils.rs")));
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn non_utf8_filename_is_not_a_test_file() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let path = Path::new(OsStr::from_bytes(b"/src/\xff\xfe.rs"));
+        assert!(!is_test_file(path));
+    }
 }

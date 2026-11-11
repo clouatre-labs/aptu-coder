@@ -211,7 +211,7 @@ The server also exposes resources (arbitrary data identified by URI) and prompts
 
 2026-07-28 requires `ttlMs` and `cacheScope` fields on the results of `tools/list`, `prompts/list`, `resources/list`, `resources/read`, and `resources/templates/list`. `ttlMs` is a freshness hint in milliseconds telling the client (or an intermediary cache) how long the result may be reused before re-fetching. `cacheScope` is either `public` (safe for a shared intermediary to cache and serve to other clients) or `private` (must only be cached per-client/session).
 
-This codebase implements both fields at every applicable call site: `list_tools()` in `crates/aptu-coder/src/lib.rs` chains `.with_ttl_ms(3_600_000)` and `.with_cache_scope(CacheScope::Public)` (~lines 768-771), and `crates/aptu-coder/src/tools/resources.rs` applies the same pattern at four call sites across `list_resources_impl`, `list_resource_templates_impl`, and `read_resource_impl` (the latter applies it on two return branches).
+This codebase implements both fields on `tools/list` results via `list_tools()` in `crates/aptu-coder/src/lib.rs`, which chains `.with_ttl_ms(3_600_000)` and `.with_cache_scope(CacheScope::Public)`. (The server previously applied the same pattern on its resource endpoints; those were removed together with the `analyze_symbol` tool and its Resources surface.)
 
 ### 3.2 Tool Design Principles
 

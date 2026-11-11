@@ -16,7 +16,7 @@ pub(crate) use crate::metrics_export::{
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
-use rmcp::model::{ErrorCode, ProtocolVersion};
+use rmcp::model::ProtocolVersion;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
@@ -37,7 +37,7 @@ pub struct MetricEvent {
     pub error_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_subtype: Option<String>,
-    /// Machine-readable cause of an `analyze_symbol` `internal_error` event (e.g.
+    /// Machine-readable cause of a historical symbol-tool `internal_error` event (e.g.
     /// "spawn_blocking_join", "analysis_failed", "panic", "handler_internal"). `None` for
     /// ok events and for `invalid_params` events, which carry `error_subtype` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,35 +81,36 @@ pub struct MetricEvent {
     /// `analyze_module`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
-    /// Whether the tool call used a `git_ref` parameter. Populated by `analyze_directory`
-    /// and `analyze_symbol`.
+    /// Whether the tool call used a `git_ref` parameter. Historically populated by
+    /// `analyze_directory` only (the symbol tool was removed).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub git_ref_used: bool,
     /// Whether the tool call used `summary=true` or was auto-summarized.
-    /// Populated by `analyze_directory`, `analyze_file`, and `analyze_symbol`.
+    /// Populated by `analyze_directory` and `analyze_file`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub summary_mode: bool,
     /// Whether the tool call used pagination (`cursor` was provided).
-    /// Populated by `analyze_directory`, `analyze_file`, and `analyze_symbol`.
+    /// Populated by `analyze_directory` and `analyze_file`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_paginated: bool,
     /// Whether the `fields` parameter was provided to `analyze_file`.
     /// Populated by `analyze_file`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fields_projected: bool,
-    /// Symbol matching mode used by `analyze_symbol` (e.g., "exact", "insensitive").
-    /// `None` when not an `analyze_symbol` call.
+    /// Symbol matching mode used by the removed symbol tool (e.g., "exact").
+    /// Retained for JSONL schema compatibility with historical metrics; always `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_mode: Option<String>,
-    /// Call graph traversal depth for `analyze_symbol` (default 1).
+    /// Call graph traversal depth for the removed symbol tool (default 1).
+    /// Retained for JSONL schema compatibility; always `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_depth: Option<u32>,
-    /// Analysis mode used by `analyze_symbol` (e.g., "call_graph", "import_lookup").
-    /// `None` when the mode parameter was omitted (defaults to call_graph) or not an
-    /// `analyze_symbol` call.
+    /// Analysis mode used by the removed symbol tool (e.g., "call_graph").
+    /// Retained for JSONL schema compatibility; always `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
-    /// Whether `impl_only=true` was set on `analyze_symbol`.
+    /// Whether `impl_only=true` was set on the removed symbol tool.
+    /// Retained for JSONL schema compatibility; always `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub impl_only: bool,
     /// Whether `stdin` was provided to `exec_command`.
@@ -236,11 +237,6 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
-    pub(crate) fn uri_kind(mut self, v: Option<String>) -> Self {
-        self.uri_kind = v;
-        self
-    }
-    #[must_use]
     pub(crate) fn error_type(mut self, v: Option<String>) -> Self {
         self.error_type = v;
         self
@@ -248,11 +244,6 @@ impl MetricEventBuilder {
     #[must_use]
     pub(crate) fn error_subtype(mut self, v: Option<String>) -> Self {
         self.error_subtype = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn error_kind(mut self, v: Option<String>) -> Self {
-        self.error_kind = v;
         self
     }
     #[must_use]
@@ -337,26 +328,6 @@ impl MetricEventBuilder {
         self
     }
     #[must_use]
-    pub(crate) fn match_mode(mut self, v: Option<String>) -> Self {
-        self.match_mode = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn follow_depth(mut self, v: Option<u32>) -> Self {
-        self.follow_depth = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn mode(mut self, v: Option<String>) -> Self {
-        self.mode = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn impl_only(mut self, v: bool) -> Self {
-        self.impl_only = v;
-        self
-    }
-    #[must_use]
     pub(crate) fn stdin_provided(mut self, v: bool) -> Self {
         self.stdin_provided = v;
         self
@@ -364,21 +335,6 @@ impl MetricEventBuilder {
     #[must_use]
     pub(crate) fn working_dir_used(mut self, v: bool) -> Self {
         self.working_dir_used = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn l1_eviction_count(mut self, v: Option<u64>) -> Self {
-        self.l1_eviction_count = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn l2_entry_count(mut self, v: Option<u64>) -> Self {
-        self.l2_entry_count = v;
-        self
-    }
-    #[must_use]
-    pub(crate) fn l2_size_bytes(mut self, v: Option<u64>) -> Self {
-        self.l2_size_bytes = v;
         self
     }
     #[must_use]
@@ -535,32 +491,9 @@ pub(crate) struct ToolMetrics {
     pub(crate) output_chars: u64,
 }
 
-/// Return bounded, privacy-safe classifications for an MCP error code.
-#[must_use]
-pub(crate) fn classify_error_code(code: ErrorCode) -> (&'static str, Option<&'static str>) {
-    match code {
-        ErrorCode::RESOURCE_NOT_FOUND => ("RESOURCE_NOT_FOUND", None),
-        ErrorCode::INVALID_PARAMS => ("INVALID_PARAMS", None),
-        ErrorCode::INVALID_REQUEST => ("INVALID_REQUEST", None),
-        ErrorCode::METHOD_NOT_FOUND => ("METHOD_NOT_FOUND", None),
-        ErrorCode::PARSE_ERROR => ("PARSE_ERROR", None),
-        ErrorCode::INTERNAL_ERROR => ("INTERNAL_ERROR", None),
-        _ => ("MCP_ERROR", None),
-    }
-}
-
-#[must_use]
-pub(crate) fn otel_method_name(tool: &str) -> &'static str {
-    if tool == "read_resource" {
-        "resources/read"
-    } else {
-        "tools/call"
-    }
-}
-
 #[must_use]
 pub(crate) fn otel_labels(event: &MetricEvent) -> (&'static str, &'static str) {
-    (otel_method_name(event.tool), event.tool)
+    ("tools/call", event.tool)
 }
 
 /// Whether an event should be recorded to OpenTelemetry metrics. Receipt
@@ -956,30 +889,13 @@ fn test_metric_event_builder_raw_bytes_skip_when_none() {
 }
 
 #[test]
-fn test_otel_method_mapping_for_resources_and_tools() {
-    let resource_event = MetricEvent {
-        tool: "read_resource",
-        ..MetricEvent::default()
-    };
-    let tool_event = MetricEvent {
+fn test_otel_labels_for_tool_calls() {
+    let event = MetricEvent {
         tool: "analyze_file",
         ..MetricEvent::default()
     };
 
-    assert_eq!(
-        otel_labels(&resource_event),
-        ("resources/read", "read_resource")
-    );
-    assert_eq!(otel_labels(&tool_event), ("tools/call", "analyze_file"));
-}
-
-#[test]
-fn test_read_resource_error_code_is_bounded() {
-    assert_eq!(
-        classify_error_code(ErrorCode::RESOURCE_NOT_FOUND),
-        ("RESOURCE_NOT_FOUND", None)
-    );
-    assert_eq!(classify_error_code(ErrorCode(-12345)), ("MCP_ERROR", None));
+    assert_eq!(otel_labels(&event), ("tools/call", "analyze_file"));
 }
 
 /// Edge case: overflow of the bounded channel drops the event and increments the

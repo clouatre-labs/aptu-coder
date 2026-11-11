@@ -54,19 +54,15 @@
 pub(crate) mod analyze_directory;
 pub(crate) mod analyze_file;
 pub(crate) mod analyze_module;
-pub(crate) mod analyze_symbol;
 pub(crate) mod common;
 pub(crate) mod edit_overwrite;
 pub(crate) mod edit_replace;
 pub(crate) mod exec_command;
 pub(crate) mod exec_runtime;
-pub(crate) mod resources;
 pub(crate) mod server;
-pub(crate) mod symbol_focused;
 pub(crate) mod verify_anchors;
 
 pub(crate) use analyze_module::AnalyzeModuleContext;
-pub(crate) use analyze_symbol::AnalyzeSymbolContext;
 pub(crate) use verify_anchors::VerifyAnchorsContext;
 
 use aptu_coder_core::cache::AnalysisCache;
@@ -124,16 +120,4 @@ pub(crate) struct AnalyzeFileContext {
     pub(crate) disk_cache: Arc<aptu_coder_core::cache::DiskCache>,
     pub(crate) metrics_tx: crate::metrics::MetricsSender,
     pub(crate) sid: Option<String>,
-}
-
-/// Per-call metadata passed to `analyze_symbol_handler`.
-///
-/// Bundles the call-site values so the handler stays within
-/// `clippy::too_many_arguments` (7 args max).
-pub(crate) struct AnalyzeSymbolCall {
-    pub(crate) ct: tokio_util::sync::CancellationToken,
-    pub(crate) param_path: String,
-    pub(crate) max_depth_val: Option<u32>,
-    pub(crate) span: tracing::Span,
-    pub(crate) t_start: std::time::Instant,
 }
