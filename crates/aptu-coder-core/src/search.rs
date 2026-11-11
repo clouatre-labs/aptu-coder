@@ -32,6 +32,9 @@ use tree_sitter::{Node as TsNode, Parser, Tree};
 /// Languages supported by pattern mode. Symbol mode is not limited to this list.
 pub const PATTERN_LANGUAGES: &[&str] = &["rust", "go", "python", "typescript"];
 
+/// Maximum number of near-miss candidates attached to a symbol-not-found error.
+pub const MAX_SYMBOL_CANDIDATES: usize = 5;
+
 /// Error type for structural code search.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -46,6 +49,11 @@ pub enum SearchError {
     /// Filesystem access failed while building the symbol graph.
     #[error("Directory walk failed: {0}")]
     Walk(String),
+    /// Symbol mode found no definitions or implementors for the queried symbol.
+    /// Carries up to [`MAX_SYMBOL_CANDIDATES`] near-miss names from the graph's
+    /// symbol index for the error message.
+    #[error("Symbol not found")]
+    SymbolNotFound { candidates: Vec<String> },
 }
 
 /// What kind of location a [`SearchMatch`] anchors.
@@ -595,6 +603,12 @@ pub fn symbol_search(
         matches
             .sort_by(|a, b| (a.file.as_str(), a.start_byte).cmp(&(b.file.as_str(), b.start_byte)));
         matches.dedup_by(|a, b| a.file == b.file && a.start_byte == b.start_byte);
+        if matches.is_empty() {
+            let graph = StructuralGraph::build_from_analysis(&analyses);
+            return Err(SearchError::SymbolNotFound {
+                candidates: graph.candidate_symbols(symbol, MAX_SYMBOL_CANDIDATES),
+            });
+        }
         return Ok(matches);
     }
 
@@ -651,6 +665,11 @@ pub fn symbol_search(
 
     matches.sort_by(|a, b| (a.file.as_str(), a.start_byte).cmp(&(b.file.as_str(), b.start_byte)));
     matches.dedup_by(|a, b| a.file == b.file && a.start_byte == b.start_byte);
+    if matches.is_empty() {
+        return Err(SearchError::SymbolNotFound {
+            candidates: graph.candidate_symbols(symbol, MAX_SYMBOL_CANDIDATES),
+        });
+    }
     Ok(matches)
 }
 
@@ -746,5 +765,49 @@ mod tests {
         let matches = pattern_search("$FN($$$ARGS);", "typescript", src, "m.ts").unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].text, "helper(true);");
+    }
+
+    #[test]
+    fn pattern_two_rest_metavariables_at_one_level_is_no_match() {
+        // Two $$$REST at one level must yield a clean no-match, never a panic
+        // (match_items filters double-Rest before match_single).
+        let matches = pattern_search("fn $NAME($$$A, $$$B) {}", "rust", RUST_SRC, "a.rs");
+        assert!(matches.is_ok());
+        assert_eq!(matches.unwrap().len(), 0);
+    }
+
+    fn symbol_search_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("lib.rs"),
+            "pub struct Alpha;\n\npub fn Alphabet() {}\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn symbol_search_not_found_returns_candidates() {
+        let dir = symbol_search_fixture();
+        let err = symbol_search(dir.path(), "alpha", false).unwrap_err();
+        match err {
+            SearchError::SymbolNotFound { candidates } => {
+                assert_eq!(
+                    candidates,
+                    vec!["Alpha".to_string(), "Alphabet".to_string()]
+                );
+            }
+            other => panic!("expected SymbolNotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn symbol_search_not_found_without_near_misses_has_no_candidates() {
+        let dir = symbol_search_fixture();
+        let err = symbol_search(dir.path(), "zzzz", false).unwrap_err();
+        match err {
+            SearchError::SymbolNotFound { candidates } => assert!(candidates.is_empty()),
+            other => panic!("expected SymbolNotFound, got {other:?}"),
+        }
     }
 }

@@ -178,6 +178,7 @@ pub(crate) async fn emit_received_metric(
         tool,
         result: "received",
         session_id: sid.clone(),
+        session_origin: crate::metrics::global_session_origin(),
         seq: Some(seq),
         duration_ms: 0,
         ..Default::default()

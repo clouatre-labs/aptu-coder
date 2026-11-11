@@ -85,6 +85,31 @@ impl StructuralGraph {
         self.symbol_index = Self::build_symbol_index(&self.graph);
     }
 
+    /// Near-miss symbol names for a failed exact-name lookup, capped at `cap`.
+    ///
+    /// A key is a candidate when it differs from `query` and its lowercase form is a
+    /// prefix of the query's lowercase form or vice versa (this covers case-only
+    /// differences such as `foo` vs `Foo`). Output is sorted deterministically.
+    pub fn candidate_symbols(&self, query: &str, cap: usize) -> Vec<String> {
+        if cap == 0 {
+            return Vec::new();
+        }
+        let q = query.to_lowercase();
+        let mut out: Vec<String> = self
+            .symbol_index
+            .keys()
+            .filter(|key| **key != query)
+            .filter(|key| {
+                let k = key.to_lowercase();
+                k.starts_with(q.as_str()) || q.starts_with(k.as_str())
+            })
+            .cloned()
+            .collect();
+        out.sort();
+        out.truncate(cap);
+        out
+    }
+
     /// Disambiguate a list of candidate nodes for a symbol using the heuristic:
     /// a. Return immediately if 0 or 1 candidates.
     /// b. Same-file preference: filter to candidates in call_file; if non-empty, use that pool.

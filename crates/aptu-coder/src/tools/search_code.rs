@@ -46,6 +46,13 @@ pub(crate) mod subtypes {
 /// Page size for `search_code` results; server-owned, mirroring the analyze tools.
 const SEARCH_PAGE_SIZE: usize = 50;
 
+/// Outcome of the blocking search task: matches, or a symbol-mode miss carrying
+/// near-miss candidate names for the error message.
+enum SymbolSearchOutcome {
+    Matches(Vec<SearchMatch>),
+    NotFound(Vec<String>),
+}
+
 /// Emit a terminal `result="error"` metric on an early return so the invocation
 /// does not disappear from the shutdown summary call_count.
 #[allow(clippy::too_many_arguments)]
@@ -193,40 +200,83 @@ pub(crate) async fn search_code_handler(
     let slang = params.language.clone();
     let ssymbol = params.symbol.clone();
     let simpl = params.impl_only;
-    let search_result = tokio::task::spawn_blocking(move || -> Result<Vec<SearchMatch>, String> {
-        match mode {
-            crate::SearchMode::Pattern => {
-                let Some(pattern) = spattern.as_deref().filter(|p| !p.is_empty()) else {
-                    return Err(subtypes::INVALID_PATTERN.to_string());
-                };
-                let Some(language) = slang.as_deref().map(str::to_owned) else {
-                    return Err(subtypes::INVALID_PATTERN.to_string());
-                };
-                run_pattern_mode(std::path::Path::new(&spath), &language, pattern).map_err(|e| {
-                    match e {
-                        SearchError::UnsupportedLanguage(_) => {
-                            subtypes::UNSUPPORTED_LANGUAGE.to_string()
+    let search_result =
+        tokio::task::spawn_blocking(move || -> Result<SymbolSearchOutcome, String> {
+            match mode {
+                crate::SearchMode::Pattern => {
+                    let Some(pattern) = spattern.as_deref().filter(|p| !p.is_empty()) else {
+                        return Err(subtypes::INVALID_PATTERN.to_string());
+                    };
+                    let Some(language) = slang.as_deref().map(str::to_owned) else {
+                        return Err(subtypes::INVALID_PATTERN.to_string());
+                    };
+                    run_pattern_mode(std::path::Path::new(&spath), &language, pattern)
+                        .map(SymbolSearchOutcome::Matches)
+                        .map_err(|e| {
+                            match e {
+                                SearchError::UnsupportedLanguage(_) => {
+                                    subtypes::UNSUPPORTED_LANGUAGE.to_string()
+                                }
+                                // SearchError is #[non_exhaustive]; all remaining variants
+                                // are pattern-side failures.
+                                _ => subtypes::INVALID_PATTERN.to_string(),
+                            }
+                        })
+                }
+                crate::SearchMode::Symbol => {
+                    let Some(symbol) = ssymbol.as_deref().filter(|s| !s.is_empty()) else {
+                        return Err(subtypes::SYMBOL_NOT_FOUND.to_string());
+                    };
+                    match search::symbol_search(
+                        std::path::Path::new(&spath),
+                        symbol,
+                        simpl.unwrap_or(false),
+                    ) {
+                        Ok(matches) => Ok(SymbolSearchOutcome::Matches(matches)),
+                        Err(SearchError::SymbolNotFound { candidates }) => {
+                            Ok(SymbolSearchOutcome::NotFound(candidates))
                         }
-                        // SearchError is #[non_exhaustive]; all remaining variants
-                        // are pattern-side failures.
-                        _ => subtypes::INVALID_PATTERN.to_string(),
+                        Err(e) => Err(e.to_string()),
                     }
-                })
+                }
             }
-            crate::SearchMode::Symbol => {
-                let Some(symbol) = ssymbol.as_deref().filter(|s| !s.is_empty()) else {
-                    return Err(subtypes::SYMBOL_NOT_FOUND.to_string());
-                };
-                search::symbol_search(std::path::Path::new(&spath), symbol, simpl.unwrap_or(false))
-                    .map_err(|e| e.to_string())
-            }
-        }
-    })
-    .await
-    .unwrap_or_else(|e| Err(format!("internal_error: {e}")));
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("internal_error: {e}")));
 
     let matches = match search_result {
-        Ok(m) => m,
+        Ok(SymbolSearchOutcome::Matches(m)) => m,
+        Ok(SymbolSearchOutcome::NotFound(candidates)) => {
+            span.record("error", true);
+            span.record("error.type", "invalid_params");
+            emit_validation_error(
+                ctx,
+                &params,
+                seq,
+                &sid,
+                t_start,
+                &param_path,
+                subtypes::SYMBOL_NOT_FOUND,
+            );
+            let symbol = params.symbol.as_deref().unwrap_or_default();
+            let message = if candidates.is_empty() {
+                "symbol not found; verify the exact symbol name".to_string()
+            } else {
+                format!(
+                    "symbol \"{symbol}\" not found; similar: {}",
+                    candidates.join(", ")
+                )
+            };
+            return Ok(err_to_tool_result(ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                message,
+                Some(error_meta(
+                    "validation",
+                    false,
+                    "verify the exact symbol name or use pattern mode",
+                )),
+            )));
+        }
         Err(subtype) => {
             let subtype: &'static str = match subtype.as_str() {
                 s if s == subtypes::UNSUPPORTED_LANGUAGE => subtypes::UNSUPPORTED_LANGUAGE,

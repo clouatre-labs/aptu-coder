@@ -244,6 +244,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install global tracing subscriber with optional OTel layers
     setup_tracing(otel_provider.clone(), log_provider.clone());
 
+    // Configure the metrics session origin before any event can be emitted.
+    aptu_coder::init_session_origin(std::env::var("APTU_CODER_SESSION_ORIGIN").ok().as_deref());
+
     // Create bounded metrics channel and spawn writer. Capacity is fixed so a
     // stalled writer cannot grow RSS; overflow drops events (counted).
     let (metrics_tx, metrics_rx) =
