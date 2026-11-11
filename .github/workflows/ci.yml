@@ -352,12 +352,25 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.15"
-      - name: Install pytest and bench_v19 dependencies
-        # Acquire::Retries rides out transient runner DNS/mirror failures;
-        # apt keeps ripgrep on the distro security-update channel.
+      - name: Install ripgrep
+        # Pinned to ripgrep 15.1.0 (aarch64-unknown-linux-gnu). The apt
+        # install proved persistently unreliable on ubuntu-26.04-arm on
+        # 2026-11-11 (DNS failures, then a 5-minute hang, against
+        # security.ubuntu.com); the github.com release channel stayed healthy.
+        # Bump VERSION+SHA256 together on ripgrep updates.
         run: |
-          sudo apt-get update -qq -o Acquire::Retries=5 \
-            && sudo apt-get install -y -qq -o Acquire::Retries=5 ripgrep
+          set -euo pipefail
+          VERSION=15.1.0
+          SHA256=2b661c6ef508e902f388e9098d9c4c5aca72c87b55922d94abdba830b4dc885e
+          curl --fail --silent --show-error --location --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 \
+            "https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/ripgrep-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" \
+            -o ripgrep.tar.gz
+          echo "${SHA256}  ripgrep.tar.gz" | sha256sum -c -
+          tar -xzf ripgrep.tar.gz
+          sudo install -m 0755 "ripgrep-${VERSION}-aarch64-unknown-linux-gnu/rg" /usr/local/bin/rg
+          rg --version
+      - name: Install pytest and bench_v19 dependencies
+        run: |
           python3 -m pip install pytest==8.3.4
           python3 -m pip install -r scripts/bench_v19/requirements.txt
       - name: Run bench_v18 unit tests
