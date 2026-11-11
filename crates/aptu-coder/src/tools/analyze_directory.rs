@@ -308,12 +308,14 @@ fn emit_validation_error(
     param_path: &str,
     cursor: Option<&str>,
     error_type: &str,
+    error_subtype: &'static str,
 ) {
     let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     ctx.metrics_tx.send(
         crate::metrics::MetricEventBuilder::new("analyze_directory", "error", dur)
             .param_path_depth(crate::metrics::path_component_count(param_path))
             .error_type(Some(error_type.to_string()))
+            .error_subtype(Some(error_subtype.to_string()))
             .session_id(sid.clone())
             .seq(Some(seq))
             .summary_mode(params.output_control.summary.unwrap_or(false))
@@ -351,6 +353,11 @@ pub(crate) async fn analyze_directory_handler(
                 _ => "internal_error",
             };
             span.record("error.type", error_type);
+            let error_subtype = if error_type == "invalid_params" {
+                crate::validation::path_error_subtype(&e)
+            } else {
+                "unexpected"
+            };
             emit_validation_error(
                 ctx,
                 &params,
@@ -360,6 +367,7 @@ pub(crate) async fn analyze_directory_handler(
                 &param_path,
                 cursor,
                 error_type,
+                error_subtype,
             );
             return Ok(err_to_tool_result(e));
         }
@@ -382,6 +390,7 @@ pub(crate) async fn analyze_directory_handler(
             &param_path,
             cursor,
             "invalid_params",
+            "summary_cursor_conflict",
         );
         return Ok(err_to_tool_result(ErrorData::new(
             rmcp::model::ErrorCode::INVALID_PARAMS,
@@ -428,6 +437,7 @@ pub(crate) async fn analyze_directory_handler(
                     &param_path,
                     cursor,
                     error_type,
+                    "invalid_offset",
                 );
             });
         }
@@ -451,6 +461,7 @@ pub(crate) async fn analyze_directory_handler(
                             &param_path,
                             cursor,
                             error_type,
+                            "unexpected",
                         );
                     },
                 );
@@ -667,6 +678,7 @@ mod tests {
             "src",
             None,
             "internal_error",
+            "unexpected",
         );
 
         // Assert

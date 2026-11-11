@@ -426,6 +426,36 @@ fn send_invalid_params_metric(
     );
 }
 
+/// Send the terminal `timeout` error metric when a command is killed after
+/// exceeding the configured timeout.
+#[allow(clippy::too_many_arguments)]
+fn send_timeout_metric(
+    metrics_tx: &MetricsSender,
+    param_path: &Option<String>,
+    stdin_provided: bool,
+    working_dir_used: bool,
+    sid: Option<String>,
+    seq: u32,
+    t_start: std::time::Instant,
+) {
+    let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+    metrics_tx.send(
+        crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
+            .param_path_depth(crate::metrics::path_component_count(
+                param_path.as_deref().unwrap_or(""),
+            ))
+            .error_type(Some("timeout".to_string()))
+            .error_subtype(Some("command_timeout".to_string()))
+            .session_id(sid)
+            .seq(Some(seq))
+            .timed_out(true)
+            .output_truncated(Some(false))
+            .stdin_provided(stdin_provided)
+            .working_dir_used(working_dir_used)
+            .build(),
+    );
+}
+
 /// Free-function implementation of the `exec_command` tool handler.
 ///
 /// The `#[tool(...)]`-decorated shim in `lib.rs` extracts state from `&self` into
@@ -537,20 +567,14 @@ pub(crate) async fn exec_command_impl(
         {
             Ok(o) => o,
             Err(result) => {
-                let dur = t_start.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-                metrics_tx.send(
-                    crate::metrics::MetricEventBuilder::new("exec_command", "error", dur)
-                        .param_path_depth(crate::metrics::path_component_count(
-                            param_path.as_deref().unwrap_or(""),
-                        ))
-                        .error_type(Some("timeout".to_string()))
-                        .session_id(sid)
-                        .seq(Some(seq))
-                        .timed_out(true)
-                        .output_truncated(Some(false))
-                        .stdin_provided(stdin_provided)
-                        .working_dir_used(working_dir_used)
-                        .build(),
+                send_timeout_metric(
+                    &metrics_tx,
+                    &param_path,
+                    stdin_provided,
+                    working_dir_used,
+                    sid,
+                    seq,
+                    t_start,
                 );
                 return Ok(result);
             }
@@ -659,6 +683,7 @@ pub(crate) async fn exec_command_impl(
                         param_path.as_deref().unwrap_or(""),
                     ))
                     .error_type(Some("internal_error".to_string()))
+                    .error_subtype(Some("unexpected".to_string()))
                     .session_id(sid.clone())
                     .seq(Some(seq))
                     .exit_code(exit_code)
@@ -964,5 +989,37 @@ mod tests {
             // Assert
             assert_eq!(subtype.as_str(), expected);
         }
+    }
+}
+
+/// Error-subtype telemetry contract: the timeout error metric event carries
+/// `error_subtype` = `command_timeout`.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod error_subtype_tests {
+    use super::*;
+
+    #[test]
+    fn send_timeout_metric_carries_command_timeout_subtype() {
+        // Arrange
+        let (tx, mut rx) = tokio::sync::mpsc::channel(crate::metrics::METRICS_CHANNEL_CAPACITY);
+        let metrics_tx = MetricsSender(tx);
+
+        // Act
+        send_timeout_metric(
+            &metrics_tx,
+            &Some("src/lib.rs".to_string()),
+            false,
+            true,
+            Some("test-session".to_string()),
+            1,
+            std::time::Instant::now(),
+        );
+
+        // Assert
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.result, "error");
+        assert_eq!(event.error_type.as_deref(), Some("timeout"));
+        assert_eq!(event.error_subtype.as_deref(), Some("command_timeout"));
     }
 }

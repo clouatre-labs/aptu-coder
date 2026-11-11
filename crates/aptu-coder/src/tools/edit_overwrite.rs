@@ -59,6 +59,7 @@ pub(crate) async fn edit_overwrite(
             crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
                 .param_path_depth(crate::metrics::path_component_count(&param_path))
                 .error_type(Some("invalid_params".to_string()))
+                .error_subtype(Some("directory_path".to_string()))
                 .session_id(ctx.sid.clone())
                 .seq(Some(ctx.seq))
                 .working_dir_used(working_dir_used)
@@ -90,6 +91,7 @@ pub(crate) async fn edit_overwrite(
                 crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(&param_path))
                     .error_type(Some("invalid_params".to_string()))
+                    .error_subtype(Some("not_a_file".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -113,6 +115,7 @@ pub(crate) async fn edit_overwrite(
                 crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(&param_path))
                     .error_type(Some("internal_error".to_string()))
+                    .error_subtype(Some("io_error".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -146,6 +149,7 @@ pub(crate) async fn edit_overwrite(
                 crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(&param_path))
                     .error_type(Some("internal_error".to_string()))
+                    .error_subtype(Some("unexpected".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -169,6 +173,7 @@ pub(crate) async fn edit_overwrite(
                 crate::metrics::MetricEventBuilder::new("edit_overwrite", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(&param_path))
                     .error_type(Some("internal_error".to_string()))
+                    .error_subtype(Some("unexpected".to_string()))
                     .session_id(ctx.sid.clone())
                     .seq(Some(ctx.seq))
                     .working_dir_used(working_dir_used)
@@ -212,4 +217,49 @@ pub(crate) async fn edit_overwrite(
             .build(),
     );
     Ok(result)
+}
+
+/// Error-subtype telemetry contract: every `edit_overwrite` error metric event
+/// must carry a non-null `error_subtype`.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod error_subtype_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn edit_overwrite_directory_error_event_carries_non_null_subtype() {
+        // Arrange: target a directory so the handler hits the directory guard.
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache = aptu_coder_core::cache::AnalysisCache::new(4);
+        let counts = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let locks: crate::tools::FileEditLockRegistry =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel(crate::metrics::METRICS_CHANNEL_CAPACITY);
+        let metrics_tx = crate::metrics::MetricsSender(tx);
+        let ctx = EditHandlerContext {
+            sid: Some("test-session".to_string()),
+            seq: 1,
+            cache: &cache,
+            metrics_tx: &metrics_tx,
+            edit_failure_counts: &counts,
+            file_edit_locks: &locks,
+        };
+        let params: EditOverwriteParams = serde_json::from_value(serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "content": "x",
+        }))
+        .unwrap();
+        let span = tracing::Span::none();
+
+        // Act
+        let result = edit_overwrite(params, ctx, &span, std::time::Instant::now())
+            .await
+            .unwrap();
+
+        // Assert
+        assert!(result.is_error.is_some_and(|e| e));
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.result, "error");
+        assert!(event.error_subtype.is_some(), "subtype must be non-null");
+    }
 }
