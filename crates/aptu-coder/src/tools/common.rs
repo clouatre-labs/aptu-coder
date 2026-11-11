@@ -94,7 +94,7 @@ pub(crate) fn normalize_cursor(cursor: Option<&str>) -> Option<&str> {
 
 /// Decodes a pagination cursor into its byte offset, returning offset 0 when the cursor is
 /// absent. Malformed cursors yield an `INVALID_PARAMS` error with a validation meta payload.
-pub(crate) fn decode_offset(cursor: Option<&str>) -> Result<usize, ErrorData> {
+pub(crate) fn decode_pagination_offset(cursor: Option<&str>) -> Result<usize, ErrorData> {
     match cursor {
         Some(cursor_str) => decode_cursor(cursor_str).map(|c| c.offset).map_err(|e| {
             ErrorData::new(
