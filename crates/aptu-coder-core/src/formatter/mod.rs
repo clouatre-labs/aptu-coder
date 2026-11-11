@@ -13,13 +13,11 @@ pub mod summary;
 // Re-export all public API items for backward compatibility.
 // Downstream files import via `aptu_coder_core::formatter::*` or specific paths.
 
-pub use self::pagination::{
-    format_file_details_paginated, format_focused_paginated, format_structure_paginated,
-};
+pub use self::pagination::{format_file_details_paginated, format_structure_paginated};
 pub use self::render::{
     FormatterError, format_file_details, format_file_details_summary, format_module_info,
 };
-pub use self::summary::{format_focused_summary, format_structure, format_summary};
+pub use self::summary::{format_structure, format_summary};
 
 // pub(crate) re-exports for internal cross-crate use.
 // Used by formatter_defuse.rs: snippet_one_line, strip_base_path.

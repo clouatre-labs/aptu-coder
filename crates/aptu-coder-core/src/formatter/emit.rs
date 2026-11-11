@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Low-level string formatting helpers used across formatter sub-modules.
 
-use crate::types::{ClassInfo, DefUseKind, DefUseSite, FileInfo, FunctionInfo, ImportInfo};
+use crate::types::{ClassInfo, FileInfo, FunctionInfo, ImportInfo};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
@@ -123,15 +123,6 @@ pub(crate) fn snippet_one_line(snippet: &str) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-/// Count (writes, reads) in a def-use site slice.
-pub(crate) fn def_use_write_read_counts(sites: &[DefUseSite]) -> (usize, usize) {
-    let w = sites
-        .iter()
-        .filter(|s| matches!(s.kind, DefUseKind::Write | DefUseKind::WriteRead))
-        .count();
-    (w, sites.len() - w)
 }
 
 /// Format a single file entry line for paginated directory listing.
