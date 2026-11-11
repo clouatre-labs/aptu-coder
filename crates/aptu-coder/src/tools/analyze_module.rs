@@ -88,6 +88,7 @@ pub(crate) async fn analyze_module_handler(
                 crate::metrics::MetricEventBuilder::new("analyze_module", "error", dur)
                     .param_path_depth(crate::metrics::path_component_count(&param_path))
                     .error_type(Some("internal_error".to_string()))
+                    .error_subtype(Some("io_error".to_string()))
                     .session_id(sid.clone())
                     .seq(Some(seq))
                     .file_ext(crate::metrics::path_file_ext(&param_path))

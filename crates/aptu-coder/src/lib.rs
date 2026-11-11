@@ -455,7 +455,7 @@ impl CodeAnalyzer {
                     sid.clone(),
                     t_start,
                     &params.path,
-                    None,
+                    Some(crate::validation::path_error_subtype(&e)),
                 );
                 return Ok(err_to_tool_result(e));
             }
