@@ -42,6 +42,7 @@ Each line in the JSONL file is one JSON object:
 | `edit_count` | `usize \| null` | Number of edits the call carried: `edits[].len()` for the batch form, `1` for the single-edit form. Only populated for `edit_replace`; enables batch-vs-single adoption and batch-specific error-rate analysis. Omitted from JSONL when `null` for backward compatibility. |
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
+| `session_origin` | `string \| null` | Origin marker distinguishing real-agent sessions from maintainer/test sessions (e.g. `"agent"`, `"maintainer"`, `"test"`). Drives the adoption-gate real-agent-session share (see the search_code gate in this document); omitted from JSONL when `null`. |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
 | `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable. For historical `read_resource` events (Resources surface removed), success was `l2_disk`, `RESOURCE_NOT_FOUND` was `miss`, and URI parse errors were null. |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |

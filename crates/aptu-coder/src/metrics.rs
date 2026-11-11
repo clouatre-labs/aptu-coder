@@ -44,6 +44,11 @@ pub struct MetricEvent {
     pub error_kind: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Origin marker distinguishing real-agent sessions from maintainer/test sessions
+    /// (e.g. `"agent"`, `"maintainer"`, `"test"`). Drives the adoption-gate
+    /// real-agent-session share in docs/METRICS.md; omitted from JSONL when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_origin: Option<String>,
     #[serde(default)]
     pub seq: Option<u32>,
     #[serde(default)]
@@ -176,6 +181,7 @@ pub(crate) struct MetricEventBuilder {
     error_subtype: Option<String>,
     error_kind: Option<String>,
     session_id: Option<String>,
+    session_origin: Option<String>,
     seq: Option<u32>,
     cache_hit: Option<bool>,
     cache_write_failure: Option<bool>,
@@ -249,6 +255,11 @@ impl MetricEventBuilder {
     #[must_use]
     pub(crate) fn session_id(mut self, v: Option<String>) -> Self {
         self.session_id = v;
+        self
+    }
+    #[must_use]
+    pub(crate) fn session_origin(mut self, v: Option<String>) -> Self {
+        self.session_origin = v;
         self
     }
     #[must_use]
@@ -389,6 +400,7 @@ impl MetricEventBuilder {
             error_subtype: self.error_subtype,
             error_kind: self.error_kind,
             session_id: self.session_id,
+            session_origin: self.session_origin,
             seq: self.seq,
             cache_hit: self.cache_hit,
             cache_write_failure: self.cache_write_failure,
@@ -686,6 +698,42 @@ mod tests {
     }
 
     #[test]
+    fn test_metric_event_session_origin_some_serializes() {
+        let event = MetricEvent {
+            ts: 1_700_000_000_000,
+            tool: "analyze_file",
+            duration_ms: 10,
+            output_chars: 100,
+            param_path_depth: 1,
+            max_depth: None,
+            result: "ok",
+            session_id: Some("1742468880123-7".to_string()),
+            session_origin: Some("agent".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""session_origin":"agent""#));
+    }
+
+    #[test]
+    fn test_metric_event_session_origin_none_omits_field() {
+        let event = MetricEvent {
+            ts: 1_700_000_000_000,
+            tool: "analyze_file",
+            duration_ms: 10,
+            output_chars: 100,
+            param_path_depth: 1,
+            max_depth: None,
+            result: "ok",
+            session_id: None,
+            session_origin: None,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("session_origin"));
+    }
+
+    #[test]
     fn test_metric_event_serialization() {
         let event = MetricEvent {
             ts: 1_700_000_000_000,
@@ -815,6 +863,7 @@ mod tests {
             error_subtype: None,
             error_kind: None,
             session_id: Some("1742468880123-42".to_string()),
+            session_origin: Some("test".to_string()),
             seq: Some(5),
             cache_hit: None,
             cache_write_failure: None,
@@ -847,7 +896,7 @@ mod tests {
             output_schema_chars: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
-        let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","seq":5}"#;
+        let json_str = r#"{"ts":1700000000000,"tool":"analyze_file","duration_ms":100,"output_chars":500,"param_path_depth":2,"max_depth":3,"result":"ok","session_id":"1742468880123-42","session_origin":"test","seq":5}"#;
         assert_eq!(serialized, json_str);
     }
 }
