@@ -12,13 +12,14 @@ For span attribute policy, the never-record list, and trace context propagation 
 
 ## Channel Pattern
 
-The metrics channel uses an unbounded mpsc pattern with a single sender-receiver pair:
+The metrics channel uses a bounded mpsc pattern with a single sender-receiver pair:
 
-- `unbounded_channel::<MetricEvent>()` created in `main()`
-- Sender stored on `CodeAnalyzer` as `MetricsSender` (newtype over `UnboundedSender<MetricEvent>`)
+- `tokio::sync::mpsc::channel::<MetricEvent>(METRICS_CHANNEL_CAPACITY)` created in `main()`; capacity is fixed at 4096 so a stalled writer cannot grow RSS
+- Sender stored on `CodeAnalyzer` as `MetricsSender` (newtype over `Sender<MetricEvent>`)
 - Receiver moved directly into `MetricsWriter::new()` — no `Arc<TokioMutex<Option<Receiver>>>` wrapper
 - Writer task spawned with `tokio::spawn(MetricsWriter::new(metrics_rx, None).run())`
-- `MetricsSender::send()` discards `SendError` silently with `.ok()` — fire-and-forget, never blocks the hot path
+- `MetricsSender::send()` uses `try_send` and drops the event when the channel is full, incrementing an internal `DROPPED_EVENTS` counter. The counter is observable only in tests (via the `#[cfg(test)]`-gated `dropped_events()`); it is not emitted to JSONL or OTel. Fire-and-forget: the hot path never blocks.
+- Overflow behavior is locked by the `test_bounded_channel_overflow_drops_and_counts` test
 
 ## Metric Record Schema
 
@@ -44,7 +45,7 @@ Each line in the JSONL file is one JSON object:
 | `result_count` | `number \| null` | Number of matches returned by `search_code` (page size, not total). `null` for all other tools. Omitted from JSONL when `null`. |
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
-| `session_origin` | `string \| null` | Origin marker distinguishing real-agent sessions from maintainer/test sessions (e.g. `"agent"`, `"maintainer"`, `"test"`). Drives the adoption-gate real-agent-session share (see the search_code gate in this document); omitted from JSONL when `null`. |
+| `session_origin` | `string \| null` | Origin marker distinguishing real-agent sessions from maintainer/test sessions (`"agent"`, `"maintainer"`, `"test"`). Set at startup from the `APTU_CODER_SESSION_ORIGIN` environment variable; unset or invalid values leave it `null` (invalid values log a one-time startup warning). Drives the adoption-gate real-agent-session share (see the [search_code adoption gate](#search_code-adoption-gate)); omitted from JSONL when `null`. |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
 | `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable. For historical `read_resource` events (Resources surface removed), success was `l2_disk`, `RESOURCE_NOT_FOUND` was `miss`, and URI parse errors were null. |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
@@ -266,7 +267,7 @@ The `MetricsWriter` checks the current UTC date on each drain iteration. When th
 
 ```rust
 let tmp = tempfile::tempdir().unwrap();
-let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+let (tx, rx) = tokio::sync::mpsc::channel(METRICS_CHANNEL_CAPACITY);
 let writer = MetricsWriter::new(rx, Some(tmp.path().to_path_buf()));
 tokio::spawn(writer.run());
 // ... send events via tx, then verify JSONL files in tmp.path()
@@ -274,10 +275,20 @@ tokio::spawn(writer.run());
 
 This avoids `XDG_DATA_HOME` environment variable manipulation in tests.
 
+## search_code adoption gate
+
+The `search_code` tool operates under a pre-registered adoption gate (PR #1825, per #1823/#1824). Gate analysis runs monthly over the JSONL corpus using three schema fields: `query_mode`, `result_count`, and `session_origin`.
+
+- **Error rate**: the monthly `error_subtype` distribution for `search_code` (`invalid_pattern`, `unsupported_language`, `symbol_not_found`, `path_not_a_file`, `invalid_cursor`; see [error_subtype values](#error_subtype-values)). A subtype sustained above 10% for two consecutive months opens a fix-or-remove issue.
+- **Session origin**: the monthly share of `search_code` calls from real-agent sessions (via `session_origin`, populated from `APTU_CODER_SESSION_ORIGIN`). Zero real-agent sessions for one full calendar month opens a removal issue. The gate clock starts when session_origin population lands (#1830).
+- **Benefit**: the v20 ablation is pre-registered as its own design issue (#1824) and includes a pattern-mode task family so pattern mode earns its own verdict. A `NOT-SUPPORTED` verdict opens a removal issue per the #1807 playbook.
+
+Watch item: the share of `query_mode=pattern` calls with `result_count=0` (silent-empty results). Silent empties suppress agent usage in ways the error-rate signal cannot catch.
+
 ## Risks
 
 - **Clock skew**: `unix_ms()` uses `SystemTime::now()` which can go backward under NTP adjustment. Events may appear out of order in the JSONL file. This is acceptable for observability purposes.
-- **Unbounded channel backpressure**: If the writer task falls behind (slow disk I/O), the unbounded channel will grow. This is acceptable because metrics writes are the lowest-priority operation. A future enhancement could add a bounded channel with a drop-on-full policy.
+- **Bounded channel drops**: If the writer task falls behind (slow disk I/O), the bounded 4096-slot channel drops new events and counts them in an internal `DROPPED_EVENTS` counter. This is acceptable because metrics writes are the lowest-priority operation.
 - **Date arithmetic**: The Gregorian calendar implementation in `current_date_str()` does not handle leap seconds. Off-by-one errors at year boundaries are possible but inconsequential for 30-day retention logic.
 - **Hint semantics**: Per MCP Blog 2, `readOnlyHint` and `idempotentHint` are not enforced by the protocol. Clients make their own trust decisions.
 

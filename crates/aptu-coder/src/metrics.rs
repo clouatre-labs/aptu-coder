@@ -233,6 +233,7 @@ impl MetricEventBuilder {
             tool,
             result,
             duration_ms,
+            session_origin: global_session_origin(),
             ..Self::default()
         }
     }
@@ -265,12 +266,6 @@ impl MetricEventBuilder {
     #[must_use]
     pub(crate) fn session_id(mut self, v: Option<String>) -> Self {
         self.session_id = v;
-        self
-    }
-    #[must_use]
-    #[allow(dead_code)] // adoption-gate wiring; exercised by serialization tests
-    pub(crate) fn session_origin(mut self, v: Option<String>) -> Self {
-        self.session_origin = v;
         self
     }
     #[must_use]
@@ -464,7 +459,7 @@ impl MetricEventBuilder {
 /// character lengths in `BTreeMap`s keyed by tool name (`schema_chars` and
 /// `output_schema_chars` respectively; tools without an output schema record `0`).
 /// Serialization failures skip the individual tool so a metrics problem can never block
-/// startup. Sent fire-and-forget through the existing unbounded channel; the
+/// startup. Sent fire-and-forget through the existing bounded channel; the
 /// `schema_chars` total equals the event's `output_chars` slot.
 pub(crate) fn emit_schema_surface(sender: &MetricsSender, tools: &[rmcp::model::Tool]) {
     let mut schema_chars = std::collections::BTreeMap::new();
@@ -489,6 +484,40 @@ pub(crate) fn emit_schema_surface(sender: &MetricsSender, tools: &[rmcp::model::
             .output_schema_chars(output_schema_chars)
             .build(),
     );
+}
+
+/// Startup-configured session origin (`APTU_CODER_SESSION_ORIGIN`), applied to every
+/// `MetricEvent` built via [`MetricEventBuilder::new`]. `None` means unclassified.
+static SESSION_ORIGIN: OnceLock<Option<String>> = OnceLock::new();
+
+/// Parse a raw `APTU_CODER_SESSION_ORIGIN` value. Accepted values are exactly
+/// `agent`, `maintainer`, or `test`; anything else (including unset) is `None`.
+#[must_use]
+pub(crate) fn parse_session_origin(raw: Option<&str>) -> Option<&'static str> {
+    match raw {
+        Some("agent") => Some("agent"),
+        Some("maintainer") => Some("maintainer"),
+        Some("test") => Some("test"),
+        _ => None,
+    }
+}
+
+/// Install the global session origin from a raw env value. Invalid values log a
+/// one-time warning and are treated as unset. Called once in `main()` before any
+/// metric event can be emitted.
+pub fn init_session_origin(raw: Option<&str>) {
+    let _ = SESSION_ORIGIN.set(parse_session_origin(raw).map(str::to_string));
+    if parse_session_origin(raw).is_none() && raw.is_some() {
+        tracing::warn!(
+            "APTU_CODER_SESSION_ORIGIN is invalid; accepted values are agent, maintainer, test; \
+             treating as unset"
+        );
+    }
+}
+
+/// Current global session origin, if initialized and valid.
+pub(crate) fn global_session_origin() -> Option<String> {
+    SESSION_ORIGIN.get().cloned().flatten()
 }
 
 /// Sender half of the metrics channel; cloned and passed to tools for event emission.
@@ -754,6 +783,25 @@ mod tests {
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(!json.contains("session_origin"));
+    }
+
+    #[test]
+    fn test_parse_session_origin_accepts_exact_values_only() {
+        assert_eq!(parse_session_origin(Some("agent")), Some("agent"));
+        assert_eq!(parse_session_origin(Some("maintainer")), Some("maintainer"));
+        assert_eq!(parse_session_origin(Some("test")), Some("test"));
+        // Unset, case-mismatched, and unknown values are all treated as unset.
+        assert_eq!(parse_session_origin(None), None);
+        assert_eq!(parse_session_origin(Some("Agent")), None);
+        assert_eq!(parse_session_origin(Some("other")), None);
+        assert_eq!(parse_session_origin(Some("")), None);
+    }
+
+    #[test]
+    fn test_session_origin_env_applied_by_builder() {
+        init_session_origin(Some("agent"));
+        let event = MetricEventBuilder::new("analyze_file", "ok", 0).build();
+        assert_eq!(event.session_origin.as_deref(), Some("agent"));
     }
 
     #[test]

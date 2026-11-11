@@ -186,6 +186,7 @@ The server's own instructions are deliberately minimal, a single short paragraph
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
 | `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |
 | `APTU_CODER_BEARER_TOKEN` | unset | Bearer token for Streamable HTTP transport authentication. A warning is logged if the value is fewer than 32 characters. |
+| `APTU_CODER_SESSION_ORIGIN` | unset | Marks the session origin for JSONL metrics: `agent`, `maintainer`, or `test`. Invalid values log a one-time warning and are treated as unset. |
 | `APTU_SHELL` | unset | Shell for `exec_command`. Defaults to `bash` then `/bin/sh`. |
 
 ## Observability

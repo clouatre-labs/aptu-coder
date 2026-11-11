@@ -40,7 +40,9 @@ pub(crate) mod shell_write;
 pub(crate) mod tools;
 pub(crate) mod validation;
 
-pub use metrics::{METRICS_CHANNEL_CAPACITY, MetricEvent, MetricsSender, MetricsWriter};
+pub use metrics::{
+    METRICS_CHANNEL_CAPACITY, MetricEvent, MetricsSender, MetricsWriter, init_session_origin,
+};
 pub use otel::{
     ClientMetadata, extract_and_set_trace_context, init_log_appender, init_meter, init_otel,
 };
