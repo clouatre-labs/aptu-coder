@@ -119,8 +119,6 @@ extensions:
 
 ## Tools
 
-All optional parameters may be omitted. Shared optional parameters for `analyze_directory`, `analyze_file`, and `analyze_module`:
-
 All optional parameters may be omitted. `analyze_directory`, `analyze_file`, and `analyze_module` accept `summary` (compact output, auto-triggers above 50K chars) and `cursor` (pagination token). Page size is server-owned; there is no client `page_size` parameter (passing one returns INVALID_PARAMS).
 
 - `analyze_directory` -- directory tree with LOC, function, and class counts; respects `.gitignore`
@@ -129,8 +127,7 @@ All optional parameters may be omitted. `analyze_directory`, `analyze_file`, and
 - `edit_overwrite` -- create or overwrite a file; creates parent directories
 - `edit_replace` -- replace a unique exact text block (or all occurrences with `replace_all`); batch form `edits[]` applies multiple replacements atomically; optional `expected_content_hash` rejects stale edits
 - `exec_command` -- run a shell command; output is capped, filtered, and returned with exit code; cancelled requests kill the command
-
-Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
+- `search_code` -- structural code search in two modes: `pattern` (metavariable patterns with `$X` and `$$$REST`; Rust, Go, Python, and TypeScript) and `symbol` (definitions, callers, and implementors via the structural graph, all supported languages); byte-exact spans suitable for `edit_replace`; cursor-paginated
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
