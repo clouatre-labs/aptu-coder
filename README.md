@@ -8,14 +8,14 @@
   <a href="https://www.bestpractices.dev/projects/12275"><img alt="OpenSSF Best Practices" src="https://img.shields.io/cii/level/12275?style=for-the-badge" height="20"></a>
 </p>
 
-<p align="center">A Model Context Protocol (MCP) code-intelligence server that gives AI coding agents pre-parsed symbol tables and call graphs instead of raw file bytes, cutting token usage by up to 59% in the cited benchmark conditions (see <a href="#benchmarks">Benchmarks</a>). OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
+<p align="center">A Model Context Protocol (MCP) code-intelligence server that gives AI coding agents pre-parsed symbol tables and structural code search instead of raw file bytes, cutting token usage by up to 59% in the cited benchmark conditions (see <a href="#benchmarks">Benchmarks</a>). OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
 
 <!-- mcp-name: io.github.clouatre-labs/aptu-coder -->
 
 > [!NOTE]
-> Native agent tools (regex search, path matching, file reading) handle targeted lookups well. `aptu-coder` handles the mechanical, non-AI work: mapping directory structure, extracting symbols, and tracing call graphs, so a coding agent's context window is spent reasoning instead of re-deriving structure on every call.
+> Native agent tools (regex search, path matching, file reading) handle targeted lookups well. `aptu-coder` handles the mechanical, non-AI work: mapping directory structure, extracting symbols, and locating callers and implementors via structural search, so a coding agent's context window is spent reasoning instead of re-deriving structure on every call.
 
-Most code-intelligence tooling for AI agents indexes a codebase into a cloud embedding or vector store and retrieves by similarity search. aptu-coder instead parses the codebase into a structural graph on-device with tree-sitter and serves it locally over MCP: no source code leaves the machine, and retrieval is exact (symbol tables and call graphs) rather than approximate (nearest-neighbor similarity).
+Most code-intelligence tooling for AI agents indexes a codebase into a cloud embedding or vector store and retrieves by similarity search. aptu-coder instead parses the codebase into a structural graph on-device with tree-sitter and serves it locally over MCP: no source code leaves the machine, and retrieval is exact (symbol tables and structural code search) rather than approximate (nearest-neighbor similarity).
 
 ## Benchmarks
 
@@ -36,7 +36,7 @@ The token-savings figures above come from single, focused comprehension tasks wh
 
 ## Overview
 
-aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and call graphs, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
+aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and callers and implementors via structural search, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
 
 Structural context is built once and reused: an on-disk cache keyed by blake3 content hashes keeps results correct across concurrent writes. For consumers that hold source text without an on-disk path, `aptu-coder-core` also exposes `analyze_str` as a public Rust library API (see [ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)).
 
