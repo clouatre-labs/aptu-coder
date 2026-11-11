@@ -3,7 +3,7 @@
 
 //! Drift-guard tests: analyze_module must not mirror structuredContent
 //! (MCP 2026-07-28 alpha policy) and its tools/list entry must not carry
-//! an outputSchema. Mirrors the analyze_symbol precedent (#1645).
+//! an outputSchema. Mirrors the earlier structured-content precedent (#1645).
 
 mod common;
 

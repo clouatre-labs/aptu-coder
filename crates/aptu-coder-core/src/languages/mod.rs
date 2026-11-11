@@ -378,4 +378,35 @@ mod tests {
             "expected None for 'cobol'"
         );
     }
+
+    #[test]
+    fn test_get_language_info_covers_remaining_registered_languages() {
+        // Table-driven: every registered language key resolves with expected metadata
+        for (lang, has_references, has_imports) in [
+            ("tsx", true, true),
+            ("fortran", true, true),
+            ("markdown", false, false),
+            ("css", false, true),
+            ("yaml", false, false),
+        ] {
+            let info = get_language_info(lang);
+            assert!(info.is_some(), "expected Some for '{lang}'");
+            let info = info.unwrap();
+            assert_eq!(info.name, lang);
+            assert_eq!(
+                info.reference_query.is_some(),
+                has_references,
+                "reference_query mismatch for '{lang}'"
+            );
+            assert_eq!(
+                info.import_query.is_some(),
+                has_imports,
+                "import_query mismatch for '{lang}'"
+            );
+            assert!(
+                get_ts_language(lang).is_some() || lang == "markdown",
+                "expected tree-sitter language for '{lang}'"
+            );
+        }
+    }
 }

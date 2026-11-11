@@ -27,10 +27,10 @@ Each line in the JSONL file is one JSON object:
 | Field | Type | Description |
 |---|---|---|
 | `ts` | `u64` | Unix timestamp in milliseconds at handler return |
-| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `analyze_symbol`, `edit_overwrite`, `edit_replace`, `exec_command`, `read_resource` (MCP `resources/read`, not an ordinary `tools/call`) |
+| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `verify_anchors`, `edit_overwrite`, `edit_replace`, `exec_command` (historical JSONL may also contain `analyze_symbol` and `read_resource` from earlier versions) |
 
 | `duration_ms` | `u64` | Wall-clock time from handler entry to return |
-| `uri_kind` | `string \| null` | Privacy-safe resource URI shape: `graph_blast_radius`, `graph_subgraph`, `graph_bidirectional`, or `unknown`; raw URIs are never retained. |
+| `uri_kind` | `string \| null` | Privacy-safe resource URI shape from the removed Resources surface: `graph_blast_radius`, `graph_subgraph`, `graph_bidirectional`, or `unknown`; raw URIs were never retained. Historical only; no longer emitted. |
 | `output_chars` | `usize` | Byte length (`str::len()`) of the final text returned; `0` on error paths |
 | `param_path_depth` | `usize` | `Path::components().count()` on `params.path` |
 | `file_ext` | `string \| null` | Lowercased file extension of `params.path`: known extension key (e.g. `"rs"`), `"other"` for unrecognized extensions, `null` when the path has no extension. Only populated for `analyze_file` and `analyze_module`. |
@@ -43,7 +43,7 @@ Each line in the JSONL file is one JSON object:
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
-| `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable. For `read_resource`, success is `l2_disk`, `RESOURCE_NOT_FOUND` is `miss`, and URI parse errors are null. |
+| `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable. For historical `read_resource` events (Resources surface removed), success was `l2_disk`, `RESOURCE_NOT_FOUND` was `miss`, and URI parse errors were null. |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
 | `exit_code` | `i32 \| null` | Process exit code for `exec_command`; `null` if not applicable or if the process was killed due to timeout |
 | `filter_applied` | `string \| null` | The filter rule name that caused output suppression via `.aptu/filters.toml`; `null` when no filter was applied. Omitted from JSONL when `null`. |
@@ -52,19 +52,19 @@ Each line in the JSONL file is one JSON object:
 | `chars_threshold_breach` | `bool` | `true` when `output_chars > 30,000`; fires for the top ~0.33% of `exec_command` calls (p99.7 of 27,981 observed calls). Early-warning signal for responses approaching the per-stream byte-cap threshold (MAX_STDOUT_BYTES = 30,000). Omitted from JSONL when `false` (`#[serde(skip_serializing_if)]`); defaults to `false` on parse for backward compatibility. |
 | `stdout_bytes_raw` | `u64 \| null` | Approximate stdout bytes read before any truncation (counted as `line.len() + 1` per `LinesStream` line; last line and CRLF not exact); populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
 | `stderr_bytes_raw` | `u64 \| null` | Approximate stderr bytes read before any truncation (counted as `line.len() + 1` per `LinesStream` line; last line and CRLF not exact); populated only when `output_truncated=true`, `timed_out=false`, and no drain-abort occurred. Omitted from JSONL when `null` (`#[serde(skip_serializing_if)]`). |
-| `git_ref_used` | `bool` | `true` when the `git_ref` parameter was supplied on `analyze_directory` or `analyze_symbol`. Omitted from JSONL when `false`. |
-| `summary_mode` | `bool` | `true` when `summary=true` was set on `analyze_directory`, `analyze_file`, or `analyze_symbol`. Omitted from JSONL when `false`. |
+| `git_ref_used` | `bool` | `true` when the `git_ref` parameter was supplied on `analyze_directory`. Omitted from JSONL when `false`. |
+| `summary_mode` | `bool` | `true` when `summary=true` was set on `analyze_directory`, `analyze_file`, or `analyze_module`. Omitted from JSONL when `false`. |
 | `is_paginated` | `bool` | For resources, true when the request contains `cursor=`, including malformed cursors; otherwise indicates tool continuation pages. Omitted from JSONL when `false`. |
 | `fields_projected` | `bool` | `true` when the `fields` projection parameter was supplied on `analyze_file`. Omitted from JSONL when `false`. |
-| `match_mode` | `string \| null` | The `match_mode` value passed to `analyze_symbol` (e.g. `"exact"`, `"contains"`); `null` when not set (defaults to `exact` in the handler). Omitted from JSONL when `null`. |
-| `follow_depth` | `u32 \| null` | Effective call-graph traversal depth for `analyze_symbol` (field name kept for schema continuity; the value is derived from the `max_depth` parameter — the former `follow_depth` parameter was removed). `null` when `max_depth` was not explicitly supplied. Omitted from JSONL when `null`. |
-| `mode` | `string \| null` | The `mode` value passed to `analyze_symbol` (`"call_graph"`, `"import_lookup"`, or `"def_use"`); `null` when not set (defaults to `call_graph` in the handler). Omitted from JSONL when `null`. |
-| `impl_only` | `bool` | `true` when `impl_only=true` was set on `analyze_symbol`. Omitted from JSONL when `false`. |
+| `match_mode` | `string \| null` | Historical: the `match_mode` value passed to the removed `analyze_symbol` tool (e.g. `"exact"`, `"contains"`). No longer emitted; retained in the schema so old JSONL still parses. Omitted from JSONL when `null`. |
+| `follow_depth` | `u32 \| null` | Historical: effective call-graph traversal depth for the removed `analyze_symbol` tool (field name kept for schema continuity). No longer emitted. Omitted from JSONL when `null`. |
+| `mode` | `string \| null` | Historical: the `mode` value passed to the removed `analyze_symbol` tool. No longer emitted; retained so old JSONL still parses. Omitted from JSONL when `null`. |
+| `impl_only` | `bool` | Historical: `impl_only=true` on the removed `analyze_symbol` tool. No longer emitted. Omitted from JSONL when `false`. |
 | `stdin_provided` | `bool` | `true` when the `stdin` parameter was supplied to `exec_command` (presence-only; content is never recorded). Omitted from JSONL when `false`. |
 | `working_dir_used` | `bool` | `true` when the `working_dir` parameter was supplied to `exec_command`, `edit_overwrite`, or `edit_replace`. Omitted from JSONL when `false`. |
-| `l1_eviction_count` | `u64 \| null` | Number of L1 in-memory LRU evictions that have occurred in the cache since process start, at the time of metric emission. Process-lifetime counter; resets on restart. Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls that use the call-graph cache. |
-| `l2_entry_count` | `u64 \| null` | Approximate number of entries currently tracked in the L2 disk cache, at the time of metric emission. Incremented on successful `put()`; approximate (does not account for manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
-| `l2_size_bytes` | `u64 \| null` | Approximate total compressed size in bytes of L2 disk cache entries, at the time of metric emission. Incremented on successful `put()` by the compressed entry size; approximate (does not account for evictions or manual deletions). Omitted from JSONL when `null`. Only populated for `analyze_symbol` calls. |
+| `l1_eviction_count` | `u64 \| null` | Historical: number of L1 in-memory LRU evictions of the removed call-graph cache at metric-emission time. No longer emitted. Omitted from JSONL when `null`. |
+| `l2_entry_count` | `u64 \| null` | Historical: approximate number of entries tracked in the removed call-graph L2 disk cache at metric-emission time. No longer emitted. Omitted from JSONL when `null`. |
+| `l2_size_bytes` | `u64 \| null` | Historical: approximate compressed size in bytes of the removed call-graph L2 disk cache at metric-emission time. No longer emitted. Omitted from JSONL when `null`. |
 | `est_output_tokens` | `u64 \| null` | Rough token estimate for the response payload: `output_chars / 4`. This is a coarse heuristic (~4 chars per token), not a tokenizer-accurate count; treat it as an order-of-magnitude signal only. Populated centrally on per-call completion events only (receipt `"received"` events and the `schema_surface` startup event are excluded); omitted from JSONL when `null`. |
 | `schema_chars` | `object \| null` | Per-tool serialized JSON-schema size in serialized UTF-8 bytes, captured once at server start on the `schema_surface` event. Keys are tool names; values are `serde_json::to_string(&tool.input_schema).len()` — that is, byte length, not character count (consistent with the byte-based unit used by `stdout_bytes_raw`/`stderr_bytes_raw`). The event's `output_chars` field holds the sum of all values. `null` on all other events. |
 | `output_schema_chars` | `object \| null` | Per-tool serialized output-schema size in serialized UTF-8 bytes, captured once at server start on the `schema_surface` event. Keys are tool names; values are `serde_json::to_string(&tool.output_schema).len()` when the tool declares an output schema, and `0` when it does not. Output schemas are slimmed at server start (all `description` keys stripped), so these values reflect the compact on-the-wire schemas. `null` on all other events. |
@@ -131,21 +131,21 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `exec_command` | `cd_path_not_found` | A promoted `cd <path> &&` prefix does not exist or is outside CWD. |
 | `exec_command` | `stdin_too_large` | `stdin` content exceeds the 1 MB size cap. |
 | `exec_command` | `heredoc_error` | Heredoc validation failed (malformed or unterminated heredoc). |
-| `analyze_symbol` | `path_is_file` | `path` argument points to a file instead of a directory. |
-| `analyze_symbol` | `path_empty` | `path` argument is empty or whitespace-only. |
-| `analyze_symbol` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
-| `analyze_symbol` | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `max_depth`, or `impl_only`. |
-| `analyze_symbol` | `mode_missing_symbol` | Non-call-graph `mode` without a non-empty `symbol`. |
-| `analyze_symbol` | `max_depth_exceeded` | `max_depth` exceeds `MAX_TOOL_DEPTH`. |
-| `analyze_symbol` | `invalid_cursor` | The pagination `cursor` failed to decode. |
-| `analyze_symbol` | `git_ref_filter_failed` | `git_ref` filtering failed (not a git repo, git unavailable, etc.). |
-| `analyze_symbol` | `pagination_mode_invalid` | Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`. |
-| `analyze_symbol` | `pagination_page_size_invalid` | Call-graph pagination `page_size` is zero, which cannot make progress (Callers/Callees). |
-| `analyze_symbol` | `pagination_def_use_invalid` | DefUse-mode pagination rejected the requested cursor/offset. |
-| `analyze_symbol` | `impl_only_requires_rust` | `impl_only=true` on a directory containing no Rust source files. |
-| `analyze_symbol` | `output_too_large` | Formatted output exceeds the size limit even with `summary=true`. |
-| `analyze_symbol` | `symbol_not_found` | `symbol` matches no indexed symbol in the target directory (caller-input failure reclassified from internal_error). |
-| `analyze_symbol` | `symbol_multiple_candidates` | `symbol` matched multiple candidates under a non-exact `match_mode`. |
+| `analyze_symbol` (historical, tool removed) | `path_is_file` | `path` argument points to a file instead of a directory. |
+| `analyze_symbol` (historical) | `path_empty` | `path` argument is empty or whitespace-only. |
+| `analyze_symbol` (historical) | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
+| `analyze_symbol` (historical) | `mode_param_conflict` | `mode=import_lookup` combined with `match_mode`, `max_depth`, or `impl_only`. |
+| `analyze_symbol` (historical) | `mode_missing_symbol` | Non-call-graph `mode` without a non-empty `symbol`. |
+| `analyze_symbol` (historical) | `max_depth_exceeded` | `max_depth` exceeds `MAX_TOOL_DEPTH`. |
+| `analyze_symbol` (historical) | `invalid_cursor` | The pagination `cursor` failed to decode. |
+| `analyze_symbol` (historical) | `git_ref_filter_failed` | `git_ref` filtering failed (not a git repo, git unavailable, etc.). |
+| `analyze_symbol` (historical) | `pagination_mode_invalid` | Call-graph pagination cursor specifies an unknown/invalid `PaginationMode`. |
+| `analyze_symbol` (historical) | `pagination_page_size_invalid` | Call-graph pagination `page_size` is zero, which cannot make progress (Callers/Callees). |
+| `analyze_symbol` (historical) | `pagination_def_use_invalid` | DefUse-mode pagination rejected the requested cursor/offset. |
+| `analyze_symbol` (historical) | `impl_only_requires_rust` | `impl_only=true` on a directory containing no Rust source files. |
+| `analyze_symbol` (historical) | `output_too_large` | Formatted output exceeds the size limit even with `summary=true`. |
+| `analyze_symbol` (historical) | `symbol_not_found` | `symbol` matches no indexed symbol in the target directory (caller-input failure reclassified from internal_error). |
+| `analyze_symbol` (historical) | `symbol_multiple_candidates` | `symbol` matched multiple candidates under a non-exact `match_mode`. |
 | `analyze_file` | `path_is_directory` | `path` argument points to a directory instead of a file. |
 | `analyze_file` | `summary_cursor_conflict` | `summary=true` combined with a pagination `cursor`. |
 | `analyze_file` | `output_too_large` | Formatted output exceeds the size limit without `summary`/`fields`. |
@@ -164,11 +164,11 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `analyze_module` | `parent_not_directory` | Path validation: `path`'s parent is not a directory. |
 | `analyze_module` | `path_invalid` | Path validation failed for another reason. |
 
-Resource reads are emitted as `read_resource` events with `mcp.method.name=resources/read`; they are distinct from ordinary `tools/call` events. Agent token accounting remains external to this server.
+Historical resource reads were emitted as `read_resource` events with `mcp.method.name=resources/read`, distinct from ordinary `tools/call` events. The Resources surface was removed with `analyze_symbol`; historical JSONL files may still contain such events. Agent token accounting remains external to this server.
 
 ### error_kind values
 
-Populated only on `analyze_symbol` `internal_error` events, alongside the full parameter-shape fields (`match_mode`, `mode`, `impl_only`, `is_paginated`, `follow_depth`, `git_ref_used`, `summary_mode`, `param_path_depth`) so error telemetry is diagnosable by input shape. `null` for ok events and for `invalid_params` events, which carry `error_subtype` instead.
+Populated only on `analyze_symbol` (historical, tool removed) `internal_error` events, alongside the full parameter-shape fields (`match_mode`, `mode`, `impl_only`, `is_paginated`, `follow_depth`, `git_ref_used`, `summary_mode`, `param_path_depth`) so error telemetry is diagnosable by input shape. `null` for ok events and for `invalid_params` events, which carry `error_subtype` instead.
 
 | Value | Meaning |
 |---|---|
@@ -180,9 +180,9 @@ Populated only on `analyze_symbol` `internal_error` events, alongside the full p
 
 ## OpenTelemetry attribute mapping
 
-Completed `read_resource` events use `mcp.method.name=resources/read`; ordinary tool events retain `mcp.method.name=tools/call`. In both cases, `gen_ai.tool.name` remains the discriminator (`read_resource` or the ordinary tool name), and `error.type` uses the bounded event classification.
+Historical `read_resource` events (Resources surface removed) used `mcp.method.name=resources/read`; ordinary tool events use `mcp.method.name=tools/call`. In both cases, `gen_ai.tool.name` remains the discriminator (`read_resource` or the ordinary tool name), and `error.type` uses the bounded event classification.
 
-Read-resource queries (from the existing JSONL one-liner style):
+Read-resource queries over historical JSONL (from the existing JSONL one-liner style):
 
 ```bash
 cd ~/.local/share/aptu-coder && jq -r 'select(.tool=="read_resource") | [.uri_kind, .duration_ms, .cache_tier] | @tsv' metrics-*.jsonl
@@ -220,15 +220,15 @@ The following fields are optional (marked with `#[serde(default)]` in the Rust s
 | `summary_mode` | `false` (omitted when false; `true` only when `summary=true` was set) |
 | `is_paginated` | `false` (omitted when false; `true` only when a `cursor` was supplied) |
 | `fields_projected` | `false` (omitted when false; `true` only when `fields` was supplied on `analyze_file`) |
-| `match_mode` | `null` (omitted when null; present only when explicitly set on `analyze_symbol`) |
-| `follow_depth` | `null` (omitted when null; derived from the `max_depth` parameter on `analyze_symbol`) |
+| `match_mode` | `null` (omitted when null; historical `analyze_symbol` field, no longer emitted) |
+| `follow_depth` | `null` (omitted when null; historical `analyze_symbol` field, no longer emitted) |
 | `import_lookup` / `def_use` | removed (superseded by the `mode` field; only emitted by older server versions) |
 | `impl_only` | `false` (omitted when false; `true` only when `impl_only=true` was set) |
 | `stdin_provided` | `false` (omitted when false; `true` only when `stdin` was supplied to `exec_command`) |
 | `working_dir_used` | `false` (omitted when false; `true` only when `working_dir` was supplied) |
-| `l1_eviction_count` | `null` (omitted when null; process-lifetime L1 LRU eviction counter; only for `analyze_symbol`) |
-| `l2_entry_count` | `null` (omitted when null; approximate L2 entry count; only for `analyze_symbol`) |
-| `l2_size_bytes` | `null` (omitted when null; approximate L2 compressed size in bytes; only for `analyze_symbol`) |
+| `l1_eviction_count` | `null` (omitted when null; historical `analyze_symbol` field, no longer emitted) |
+| `l2_entry_count` | `null` (omitted when null; historical `analyze_symbol` field, no longer emitted) |
+| `l2_size_bytes` | `null` (omitted when null; historical `analyze_symbol` field, no longer emitted) |
 | `est_output_tokens` | `null` (omitted when null; populated centrally on per-call events as `output_chars / 4`; coarse heuristic, not tokenizer-accurate) |
 | `schema_chars` | `null` (omitted when null; populated only on the one-time `schema_surface` event at server start; values are serialized UTF-8 byte lengths) |
 | `output_schema_chars` | `null` (omitted when null; populated only on the one-time `schema_surface` event at server start; values are serialized UTF-8 byte lengths of slimmed output schemas, `0` when a tool declares no output schema) |

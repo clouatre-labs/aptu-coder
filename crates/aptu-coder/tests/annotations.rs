@@ -7,13 +7,12 @@ use serde_json::Value;
 fn test_all_tools_have_correct_annotations() {
     let tools = CodeAnalyzer::list_tools();
 
-    assert_eq!(tools.len(), 8, "expected 8 registered tools");
+    assert_eq!(tools.len(), 7, "expected 7 registered tools");
 
     let expected_names = [
         "analyze_directory",
         "analyze_file",
         "analyze_module",
-        "analyze_symbol",
         "edit_overwrite",
         "edit_replace",
         "exec_command",

@@ -30,8 +30,6 @@
 #![cfg_attr(test, allow(clippy::expect_used))]
 
 pub mod analyze;
-/// Internal implementation details for focused analysis. Use the `analyze` module for the public API.
-pub(crate) mod analyze_focused;
 pub mod anchors;
 pub mod ansi;
 pub mod cache;
@@ -71,7 +69,6 @@ pub const EXCLUDED_DIRS: &[&str] = &[
 pub use analyze::{
     AnalysisOutput, AnalyzeError, CallChainEntry, FileAnalysisOutput, FocusedAnalysisConfig,
     FocusedAnalysisOutput, analyze_directory, analyze_directory_with_progress, analyze_file,
-    analyze_focused, analyze_focused_with_progress, analyze_focused_with_progress_with_entries,
     analyze_module_file, analyze_str,
 };
 pub use config::AnalysisConfig;

@@ -382,8 +382,8 @@ impl StructuralGraph {
         else {
             return Err(GraphError::SymbolNotFound {
                 symbol: symbol.to_string(),
-                hint: "The symbol is not present in the built graph; run analyze_symbol on the \
-                       directory and check spelling."
+                hint: "The symbol is not present in the built graph; run analyze_directory on \
+                       the directory and check spelling."
                     .to_string(),
             });
         };

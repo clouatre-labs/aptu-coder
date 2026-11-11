@@ -45,7 +45,7 @@ The token-savings figures above come from single, focused comprehension tasks wh
 
 aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and call graphs, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
 
-Structural context is built once and reused: an on-disk cache keyed by blake3 content hashes keeps results correct across concurrent writes. The same structural graph backs the [Knowledge Graph](#knowledge-graph) resource surface below. For consumers that hold source text without an on-disk path, `aptu-coder-core` also exposes `analyze_str` as a public Rust library API (see [ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)).
+Structural context is built once and reused: an on-disk cache keyed by blake3 content hashes keeps results correct across concurrent writes. For consumers that hold source text without an on-disk path, `aptu-coder-core` also exposes `analyze_str` as a public Rust library API (see [ARCHITECTURE.md](https://github.com/clouatre-labs/aptu-coder/blob/main/docs/ARCHITECTURE.md)).
 
 Further reading on the design philosophy: [The Agentic SDLC Governance Stack](https://clouatre.ca/blog/ai-sdlc-governance-stack/), [Context Engineering for Multi-Agent Reliability](https://clouatre.ca/blog/context-engineering-multi-agent-reliability/), and [Orchestrating AI Agents: Subagent Architecture](https://clouatre.ca/blog/orchestrating-ai-agents-subagent-architecture/).
 
@@ -170,7 +170,7 @@ Or add manually to `.mcp.json` at your project root (shared with your team via v
 
 ## Tools
 
-All optional parameters may be omitted. Shared optional parameters for `analyze_directory`, `analyze_file`, and `analyze_symbol`:
+All optional parameters may be omitted. Shared optional parameters for `analyze_directory`, `analyze_file`, and `analyze_module`:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -184,7 +184,6 @@ Page size is server-owned; there is no client `page_size` parameter (passing one
 | `analyze_directory` | Directory tree with LOC, function, and class counts; respects `.gitignore`; file paths in the output are relative to the working directory | all |
 | `analyze_file` | Functions, classes, and imports with signatures and line ranges; returns graceful fallback (line count, file head, no AST) for unsupported extensions | all |
 | `analyze_module` | Lightweight function and import index (~75% smaller than `analyze_file`); returns graceful fallback (empty index with note) for unsupported extensions | all |
-| `analyze_symbol` | Call graph for a named symbol across a directory; callers, callees, call depth | all |
 | `edit_overwrite` | Create or overwrite a file; creates parent directories | any file |
 | `edit_replace` | Replace a unique exact text block or all non-overlapping occurrences (replace_all=true); errors if zero or multiple matches; empty `new_text` deletes the block; CRLF normalized before matching; optional expected_content_hash (blake3 hex of raw bytes) rejects stale edits; concurrent edits to the same file are serialized per-path; returns occurrences_replaced count. Batch form: pass `edits[]` (array of `{old_text, new_text, replace_all}`) instead of `old_text`/`new_text` to apply multiple replacements to one file atomically (any invalid edit aborts with per-index errors, no write) | all |
 | `exec_command` | Run a shell command; returns stdout, stderr, exit code; output capped and filtered; the command is killed when the request is cancelled; server-owned post-exit drain window (500 ms default); heredoc rejected before spawn (file-write pattern, stdin-consuming flag, stdin parameter conflict, or missing closing delimiter); structuredContent carries metadata only (exit code, truncation, collection-error flags), command output lives in the text stream | any |
@@ -192,40 +191,20 @@ Page size is server-owned; there is no client `page_size` parameter (passing one
 
 Tool parameters, constraints, and examples are available via your MCP client's tool inspector or `tools/list` response.
 
-## Knowledge Graph
-
-`analyze_symbol` builds a structural graph of the codebase as a side effect: files, symbols, and modules as nodes, connected by typed edges (`contains`, `calls`, `imports`). That graph is exposed to agents as MCP resource templates for navigating relationships beyond a single symbol's immediate call graph. Resources are URI-addressed; use `resources/templates/list` to discover available templates.
-
-| URI Template | Description |
-|---|---|
-| `aptu-coder://graph/{repo_hash}/blast-radius/{symbol}?depth={depth}&format={format}` | BFS traversal from a symbol outward to configurable depth (default: 3). Returns caller/callee chains in a radial layout. |
-| `aptu-coder://graph/{repo_hash}/subgraph/{symbol}?format={format}` | The full subgraph (callers, callees, and their connections) for a single symbol. |
-| `aptu-coder://graph/{repo_hash}/blast-radius-bidirectional/{symbols}?max_nodes={max_nodes}&depth={depth}&format={format}` | Bidirectional BFS from one or more comma-separated seed symbols walking both callers and callees. |
-
-**Pagination:** Results are paginated; pass the opaque `cursor` value from a previous response to fetch the next page.
-
-**Depth parameter:** The `blast-radius` and `blast-radius-bidirectional` templates accept an optional `depth` query parameter (integer in range 1-5, default 3).
-
-**Max nodes parameter:** The `blast-radius-bidirectional` template accepts an optional `max_nodes` query parameter (integer, default 50) that caps the visited node set during traversal.
-
-**Format parameter:** All three query types accept an optional `format` query parameter (`text` or `json`, default `json`). When `format=text`, the response is a prompt-ready plain-text representation generated by `render_subgraph_text` instead of the JSON nodes/edges structure.
-
-**Cold cache:** Call `analyze_symbol` on the directory first to build the graph. Resources return an informational message until the graph is available.
-
 ## Output Management
 
 For large codebases, several mechanisms prevent context overflow.
 
 **Pagination**
 
-`analyze_file` and `analyze_symbol` append a `NEXT_CURSOR:` line when output is truncated. Pass the token back as `cursor` to fetch the next page. `summary=true` and `cursor` are mutually exclusive; passing both returns an error.
+`analyze_file` appends a `NEXT_CURSOR:` line when output is truncated. Pass the token back as `cursor` to fetch the next page. `summary=true` and `cursor` are mutually exclusive; passing both returns an error.
 
 ```
 # Response ends with:
 NEXT_CURSOR: eyJvZmZzZXQiOjUwfQ==
 
 # Fetch next page:
-analyze_symbol path: /my/project symbol: my_function cursor: eyJvZmZzZXQiOjUwfQ==
+analyze_file path: /my/project/src/lib.rs cursor: eyJvZmZzZXQiOjUwfQ==
 ```
 
 **exec_command output caps**
@@ -268,7 +247,7 @@ Project-local rules can be added in `.aptu/filters.toml`. Parse errors and unrec
 
 In single-pass subagent sessions, prompt caches are written but never reused. Benchmarks showed MCP responses writing ~2x more to cache than native-only workflows, adding cost with no quality gain. Set `DISABLE_PROMPT_CACHING=1` (or `DISABLE_PROMPT_CACHING_HAIKU=1` for Haiku-specific pipelines) to avoid this overhead.
 
-The server's own instructions are deliberately minimal, a single short paragraph: start with `analyze_directory` for a package/module map, then use `analyze_module`/`analyze_file` for per-file detail and `analyze_symbol` for call graphs, with a pointer to `docs/METRICS.md` for JSONL metrics and jq recipes. MCP clients that surface server instructions will present this guidance automatically to the agent.
+The server's own instructions are deliberately minimal, a single short paragraph: start with `analyze_directory` for a package/module map, then use `analyze_module`/`analyze_file` for per-file detail, with a pointer to `docs/METRICS.md` for JSONL metrics and jq recipes. MCP clients that surface server instructions will present this guidance automatically to the agent.
 
 ## Environment Variables
 
@@ -277,9 +256,8 @@ The server's own instructions are deliberately minimal, a single short paragraph
 | Variable | Default | Description |
 |---|---|---|
 | `APTU_CODER_DIR_CACHE_CAPACITY` | `20` | LRU cache size for directory-analysis results. |
-| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory shared by the L2 call-graph cache and the structural-graph cache used by `analyze_symbol`. Created automatically if it does not exist. |
-| `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 call-graph disk cache entirely. |
-| `APTU_CODER_DISK_CACHE_MAX_BYTES` | `536870912` (512 MiB) | Max size in bytes for the structural-graph disk cache. LRU-by-mtime eviction runs when exceeded. |
+| `APTU_CODER_DISK_CACHE_DIR` | `$XDG_DATA_HOME/aptu-coder/analysis-cache` | Directory for the L2 analysis disk cache. Created automatically if it does not exist. |
+| `APTU_CODER_DISK_CACHE_DISABLED` | unset | Set to `1` to disable the L2 analysis disk cache entirely. |
 | `APTU_CODER_FILE_CACHE_CAPACITY` | `100` | LRU cache size for file-analysis results. |
 | `APTU_CODER_METRICS_EXPORT_FILE` | unset | Absolute path for a one-shot JSONL metrics export on shutdown. |
 | `APTU_CODER_PORT` | unset | Port for streamable HTTP mode. Equivalent to `--port N`; `--port` takes precedence. When unset and `--port` is not passed, stdio mode is used. |

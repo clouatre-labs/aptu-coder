@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use aptu_coder_core::cache::{CallGraphCache, CallGraphCacheKey};
 use aptu_coder_core::graph::StructuralGraph;
-use aptu_coder_core::types::{SymbolAnalysisMode, SymbolMatchMode};
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::path::Path;
 use std::sync::Arc;
@@ -38,39 +36,6 @@ fn file_details_benchmark(c: &mut Criterion) {
             let ast_recursion_limit = std::hint::black_box(None);
 
             aptu_coder_core::analyze::analyze_file(path, ast_recursion_limit)
-        });
-    });
-
-    group.finish();
-}
-
-fn symbol_focus_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("symbol_focus");
-    group.sample_size(10);
-
-    group.bench_function("analyze_focused_src", |b| {
-        b.iter(|| {
-            let path = std::hint::black_box(Path::new("src"));
-            let focus = std::hint::black_box("analyze_directory".to_string());
-            let follow_depth = std::hint::black_box(2);
-            let max_depth = std::hint::black_box(None);
-            let ast_recursion_limit = std::hint::black_box(None);
-            let progress = Arc::new(AtomicUsize::new(0));
-            let ct = CancellationToken::new();
-
-            let params = aptu_coder_core::analyze::FocusedAnalysisConfig {
-                focus,
-                match_mode: SymbolMatchMode::Exact,
-                follow_depth,
-                max_depth,
-                ast_recursion_limit,
-                use_summary: false,
-                impl_only: None,
-                def_use: false,
-                parse_timeout_micros: None,
-            };
-
-            aptu_coder_core::analyze::analyze_focused_with_progress(path, &params, progress, ct)
         });
     });
 
@@ -296,146 +261,6 @@ fn analyze_directory_depth_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-fn call_graph_cache_benchmark(c: &mut Criterion) {
-    let root = Path::new("src");
-    let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
-
-    let params = aptu_coder_core::analyze::FocusedAnalysisConfig {
-        focus: "analyze_directory".to_string(),
-        match_mode: SymbolMatchMode::Exact,
-        follow_depth: 2,
-        max_depth: None,
-        ast_recursion_limit: None,
-        use_summary: false,
-        impl_only: None,
-        def_use: false,
-        parse_timeout_micros: None,
-    };
-
-    // Pre-compute output and populate cache for warm_hit benchmark
-    let precomputed_progress = Arc::new(AtomicUsize::new(0));
-    let precomputed_ct = CancellationToken::new();
-    let output = aptu_coder_core::analyze::analyze_focused_with_progress_with_entries(
-        root,
-        &params,
-        &precomputed_progress,
-        &precomputed_ct,
-        &entries,
-        None,
-    )
-    .unwrap();
-
-    let key = CallGraphCacheKey::from_entries(
-        root,
-        &entries,
-        None,
-        params.follow_depth,
-        &params.match_mode,
-        params.impl_only.unwrap_or(false),
-        params.ast_recursion_limit,
-        &params.focus,
-        if params.def_use {
-            &SymbolAnalysisMode::DefUse
-        } else {
-            &SymbolAnalysisMode::CallGraph
-        },
-    );
-    let cache = CallGraphCache::new(32);
-    cache.put(key.clone(), Arc::new(output));
-
-    let mut group = c.benchmark_group("call_graph_cache");
-    group.sample_size(10);
-
-    group.bench_function("cold_miss", |b| {
-        b.iter(|| {
-            let progress = Arc::new(AtomicUsize::new(0));
-            let ct = CancellationToken::new();
-
-            aptu_coder_core::analyze::analyze_focused_with_progress_with_entries(
-                std::hint::black_box(root),
-                std::hint::black_box(&params),
-                std::hint::black_box(&progress),
-                std::hint::black_box(&ct),
-                std::hint::black_box(&entries),
-                None,
-            )
-        });
-    });
-
-    group.bench_function("warm_hit", |b| {
-        b.iter(|| cache.get(std::hint::black_box(&key)));
-    });
-
-    group.finish();
-}
-
-fn structural_graph_benchmark(c: &mut Criterion) {
-    use aptu_coder_core::cache::StructuralGraphCache;
-
-    let root = Path::new("src");
-    let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
-
-    let file_outputs: Vec<_> = entries
-        .iter()
-        .filter(|e| !e.is_dir && e.path.extension().is_some_and(|ext| ext == "rs"))
-        .map(|e| aptu_coder_core::analyze::analyze_file(e.path.to_str().unwrap(), None).unwrap())
-        .collect();
-
-    // Compute cache key from content hashes
-    let mut hashes = Vec::new();
-    for e in &entries {
-        if !e.is_dir
-            && !e.is_symlink
-            && let Ok(bytes) = std::fs::read(&e.path)
-        {
-            let hash = blake3::hash(&bytes);
-            hashes.push((e.path.clone(), hash));
-        }
-    }
-    let cache_key = aptu_coder_core::graph::GraphDiskStore::cache_key(root, &hashes);
-
-    // Pre-build and populate cache
-    let graph = std::sync::Arc::new(StructuralGraph::build_from_analysis(&file_outputs));
-    let sg_cache = StructuralGraphCache::new(16);
-    sg_cache.put(cache_key.clone(), graph.clone());
-
-    let mut group = c.benchmark_group("structural_graph");
-    group.sample_size(10);
-
-    group.bench_function("cold_miss", |b| {
-        b.iter(|| StructuralGraph::build_from_analysis(std::hint::black_box(&file_outputs)));
-    });
-
-    group.bench_function("warm_hit", |b| {
-        b.iter(|| sg_cache.get(std::hint::black_box(&cache_key)));
-    });
-
-    let call_graph = aptu_coder_core::graph::CallGraph::build_from_results(
-        file_outputs
-            .iter()
-            .map(|e| (std::path::PathBuf::from(&e.path), e.semantic.clone()))
-            .collect(),
-        &[],
-        false,
-    )
-    .unwrap();
-
-    group.bench_function("cache_miss_old_independent_rebuild", |b| {
-        b.iter(|| StructuralGraph::build_from_analysis(std::hint::black_box(&file_outputs)));
-    });
-
-    group.bench_function("cache_miss_collapsed_from_call_graph", |b| {
-        b.iter(|| {
-            StructuralGraph::from_call_graph(
-                std::hint::black_box(&file_outputs),
-                std::hint::black_box(&call_graph),
-            )
-        });
-    });
-
-    group.finish();
-}
-
 fn structural_graph_query_benchmark(c: &mut Criterion) {
     let root = Path::new("src");
     let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
@@ -525,14 +350,11 @@ criterion_group!(
     benches,
     overview_benchmark,
     file_details_benchmark,
-    symbol_focus_benchmark,
     subtree_count_overhead,
     subtree_count_overhead_500,
     subtree_count_overhead_1000,
     analyze_module_benchmark,
     analyze_directory_depth_benchmark,
-    call_graph_cache_benchmark,
-    structural_graph_benchmark,
     structural_graph_query_benchmark,
     cache_paths_benchmark
 );

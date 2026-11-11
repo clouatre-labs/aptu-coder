@@ -72,7 +72,6 @@ def test_fmt_text_happy_path():
     trend = []
     params_usage = None
     pagination = None
-    features = None
     git_ref = None
     timeout = None
 
@@ -85,8 +84,7 @@ def test_fmt_text_happy_path():
         show_trend=False,
         params_usage=params_usage,
         pagination=pagination,
-        features=features,
-        git_ref=git_ref,
+            git_ref=git_ref,
         timeout=timeout,
     )
 
@@ -147,8 +145,7 @@ def test_fmt_text_edge_case_all_optional_none():
         show_trend=False,
         params_usage=None,
         pagination=None,
-        features=None,
-        git_ref=None,
+            git_ref=None,
         timeout=None,
     )
 
@@ -231,7 +228,7 @@ def test_fmt_text_edge_case_show_trend_true_empty():
     """Test fmt_text handles show_trend=True with empty trend list."""
     latency = [
         {
-            "tool": "analyze_symbol",
+            "tool": "analyze_directory",
             "calls": 75,
             "dur_p50": 60,
             "dur_p95": 150,
@@ -245,7 +242,7 @@ def test_fmt_text_edge_case_show_trend_true_empty():
     ]
     reliability = [
         {
-            "tool": "analyze_symbol",
+            "tool": "analyze_directory",
             "calls": 75,
             "success_rate": 98.0,
             "error_rate": 2.0,
@@ -397,8 +394,7 @@ def test_fmt_csv_edge_case_all_optional_none():
         show_trend=False,
         params_usage=None,
         pagination=None,
-        features=None,
-        git_ref=None,
+            git_ref=None,
         timeout=None,
     )
 
@@ -558,8 +554,8 @@ def test_section_header():
 
 
 def test_all_sections_in_registry():
-    """Test all 10 sections are in SECTIONS registry in correct order."""
-    assert len(mcp_metrics.SECTIONS) == 10
+    """Test all 9 sections are in SECTIONS registry in correct order."""
+    assert len(mcp_metrics.SECTIONS) == 9
     expected_keys = [
         "latency",
         "reliability",
@@ -568,7 +564,6 @@ def test_all_sections_in_registry():
         "trend",
         "params_usage",
         "pagination",
-        "features",
         "git_ref",
         "timeout",
     ]

@@ -90,7 +90,7 @@ fn test_analyze_module_cache_hit_metrics() {
     );
 }
 
-// --- analyze_symbol mode metric tests ---
+// --- mode metric tests ---
 
 #[test]
 #[serial_test::serial]
@@ -134,14 +134,14 @@ fn test_file_cache_capacity_from_env() {
 }
 
 #[test]
-fn test_analyze_symbol_cache_fields_use_cache_tier_enum() {
+fn test_cache_fields_use_cache_tier_enum() {
     // Verify that CacheTier::Miss produces the expected cache_hit/cache_tier
-    // values that analyze_symbol writes in both code paths (#950).
+    // values that analyze tools write in both cache code paths (#950).
     // Guards against string drift if CacheTier::Miss.as_str() ever changes.
     assert_eq!(
         CacheTier::Miss.as_str(),
         "miss",
-        "CacheTier::Miss.as_str() must stay \"miss\" -- analyze_symbol metrics depend on it"
+        "CacheTier::Miss.as_str() must stay \"miss\" -- tool metrics depend on it"
     );
     assert!(
         !matches!(CacheTier::Miss, CacheTier::L1Memory | CacheTier::L2Disk),
@@ -260,24 +260,11 @@ fn test_metric_chars_threshold_breach_no_fire() {
 }
 
 #[test]
-fn test_metric_event_uri_kind_serializes_only_when_present() {
-    let event = crate::metrics::MetricEventBuilder::new("read_resource", "ok", 1)
-        .uri_kind(Some("graph_subgraph".to_string()))
-        .build();
-    let json = serde_json::to_string(&event).unwrap();
-    assert!(json.contains(r#""uri_kind":"graph_subgraph""#));
-
-    let without = crate::metrics::MetricEventBuilder::new("read_resource", "ok", 1).build();
-    let json_without = serde_json::to_string(&without).unwrap();
-    assert!(!json_without.contains("uri_kind"));
-}
-
-#[test]
 fn test_metric_event_old_record_without_uri_kind_deserializes_unchanged() {
-    let old = r#"{"ts":1,"tool":"read_resource","duration_ms":2,"output_chars":3,"param_path_depth":0,"result":"ok"}"#;
+    let old = r#"{"ts":1,"tool":"analyze_file","duration_ms":2,"output_chars":3,"param_path_depth":0,"result":"ok"}"#;
     let event: crate::metrics::MetricEvent = serde_json::from_str(old).unwrap();
     assert_eq!(event.uri_kind, None);
-    assert_eq!(event.tool, "read_resource");
+    assert_eq!(event.tool, "analyze_file");
     assert_eq!(event.output_chars, 3);
 }
 

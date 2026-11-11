@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
-use aptu_coder_core::analyze::{analyze_directory, analyze_file, analyze_focused};
+use aptu_coder_core::analyze::{analyze_directory, analyze_file};
 use tempfile::TempDir;
 
 #[test]
@@ -69,32 +69,4 @@ pub fn calculate(a: i32, b: i32) -> i32 {
     assert_eq!(output.semantic.functions.len(), 3); // new, distance, calculate
     assert_eq!(output.semantic.classes.len(), 1); // Point
     assert_eq!(output.semantic.imports.len(), 1); // HashMap import
-}
-
-#[test]
-fn test_acceptance_symbol_focus_mode() {
-    let temp_dir = TempDir::new().unwrap();
-    let file_path = temp_dir.path().join("test.rs");
-
-    let rust_code = r#"
-fn main() {
-    helper();
-}
-
-fn helper() {
-    worker();
-}
-
-fn worker() {
-    println!("Working");
-}
-"#;
-
-    std::fs::write(&file_path, rust_code).unwrap();
-
-    let output = analyze_focused(temp_dir.path(), "helper", 1, Some(2), None).unwrap();
-
-    // Verify output contains focused analysis
-    assert!(output.formatted.contains("helper"));
-    assert!(!output.formatted.is_empty());
 }

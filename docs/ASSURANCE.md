@@ -4,7 +4,7 @@ This document provides the security assurance case for aptu-coder.
 
 ## What the tool does
 
-aptu-coder is a static analysis server that parses source files using tree-sitter and returns structured code metadata (functions, classes, imports, call graphs) over the MCP protocol. **Analyzed code is never executed.** The server performs read-only operations on local files.
+aptu-coder is a static analysis server that parses source files using tree-sitter and returns structured code metadata (functions, classes, imports) over the MCP protocol. **Analyzed code is never executed.** The server performs read-only operations on local files.
 
 ## Trust boundaries
 
@@ -15,7 +15,7 @@ aptu-coder is a static analysis server that parses source files using tree-sitte
 | Streamable HTTP listener | Inbound | When `--port` or `APTU_CODER_PORT` is set, the server binds to `127.0.0.1:PORT` and serves MCP requests over HTTP |
 | OTLP exporter | Outbound | When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the server exports traces, logs, and metrics to the configured collector endpoint via OTLP/HTTP |
 
-In the default stdio transport mode, the server makes no outbound network calls and holds no credentials. "No persistent state" is scoped to no database/session store: an always-on JSONL metrics writer (`MetricsWriter`, spawned unconditionally in `crates/aptu-coder/src/main.rs`) appends metrics files under `$XDG_DATA_HOME/aptu-coder/`, and `analyze_symbol`'s L2 disk cache (`crates/aptu-coder-core/src/analyze_focused.rs`, keyed by canonical path + git HEAD SHA) is enabled by default under the same XDG data directory, opt-out only via `APTU_CODER_DISK_CACHE_DISABLED=1`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
+In the default stdio transport mode, the server makes no outbound network calls and holds no credentials. "No persistent state" is scoped to no database/session store: an always-on JSONL metrics writer (`MetricsWriter`, spawned unconditionally in `crates/aptu-coder/src/main.rs`) appends metrics files under `$XDG_DATA_HOME/aptu-coder/`, and the L2 analysis disk cache (`crates/aptu-coder-core/src/cache_disk.rs`) is enabled by default under the same XDG data directory, opt-out only via `APTU_CODER_DISK_CACHE_DISABLED=1`. (The `analyze_symbol` call-graph disk cache that previously shared this directory was removed with that tool.) See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
 
 **Outbound network calls:** In the default stdio transport, the server makes no outbound network calls. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the OpenTelemetry exporter sends traces, logs, and metrics to the configured collector endpoint via OTLP/HTTP.
 
