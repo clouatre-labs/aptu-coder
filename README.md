@@ -106,50 +106,7 @@ The binary is at `target/release/aptu-coder`.
 
 ### Configure MCP Client
 
-Two transports are available. **Streamable HTTP is recommended** when using orchestrators that spawn delegates (e.g. goose coder): a single server process is shared across the orchestrator and all agents, eliminating extension-drift that occurs when each stdio subprocess gets its own isolated instance.
-
-**Streamable HTTP (recommended for multi-agent setups)**
-
-With Homebrew, one command starts the server on login and keeps it running:
-
-```bash
-brew services start aptu-coder
-```
-
-The Homebrew formula starts the server on port `49200` by default. Then add the extension once to `~/.config/goose/config.yaml`:
-
-```yaml
-extensions:
-  aptu-coder:
-    type: streamable_http
-    uri: http://127.0.0.1:49200/mcp
-    name: aptu-coder
-    timeout: 300
-```
-
-Or for Claude Code:
-
-```bash
-claude mcp add --transport http aptu-coder http://127.0.0.1:49200/mcp
-```
-
-To use a different port, set `APTU_CODER_PORT` before restarting:
-
-```bash
-APTU_CODER_PORT=4000 brew services restart aptu-coder
-```
-
-To start directly without brew services:
-
-```bash
-aptu-coder --port 49200
-# or equivalently
-APTU_CODER_PORT=49200 aptu-coder
-```
-
-**stdio (single-client use)**
-
-Suitable when only one process needs the server. The client owns the process lifecycle and spawns it automatically:
+**stdio (default)** — the client spawns and owns the server process; this works with orchestrators that spawn delegates (goose, pi) as well as single clients:
 
 ```bash
 claude mcp add --transport stdio aptu-coder -- aptu-coder
@@ -166,6 +123,24 @@ Or add manually to `.mcp.json` at your project root (shared with your team via v
     }
   }
 }
+```
+
+**Streamable HTTP (optional)** — runs a single shared server process instead of one per client. Only worth it if you specifically want a daemon-style setup:
+
+```bash
+aptu-coder --port 49200            # or: brew services start aptu-coder
+claude mcp add --transport http aptu-coder http://127.0.0.1:49200/mcp
+```
+
+For goose, add to `~/.config/goose/config.yaml`:
+
+```yaml
+extensions:
+  aptu-coder:
+    type: streamable_http
+    uri: http://127.0.0.1:49200/mcp
+    name: aptu-coder
+    timeout: 300
 ```
 
 ## Tools
