@@ -560,7 +560,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: "1.99.1"
+          toolchain: "1.100.0"
       - name: Setup Rust cache
         # cargo-release runs a verify build per crate during publish; restore
         # the cache main saved instead of rebuilding the workspace from scratch.
@@ -571,7 +571,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-release
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-release
 
