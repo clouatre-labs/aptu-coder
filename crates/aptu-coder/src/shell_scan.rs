@@ -260,22 +260,12 @@ pub(crate) fn scan_backward_for_stdin_flag(bytes: &[u8], here_pos: usize) -> boo
         }
         // Find the flag before `-`
         let flag = prev_token(bytes, pos);
-        if is_stdin_consuming_flag(flag) {
-            return true;
-        }
         // cat - << EOF
-        if flag == b"cat" {
-            return true;
-        }
-        return false;
+        return is_stdin_consuming_flag(flag) || flag == b"cat";
     }
 
     // Case 2: standalone flag like --stdin (no trailing `-` value)
-    if is_stdin_consuming_flag(tok) {
-        return true;
-    }
-
-    false
+    is_stdin_consuming_flag(tok)
 }
 
 #[cfg(test)]

@@ -3,6 +3,11 @@
 
 [advisories]
 version = 2
+ignore = [
+    # RUSTSEC-2026-0543: chrono 0.4.45 arrives transitively via rmcp/schemars;
+    # no fixed version exists upstream yet. Revisit when rmcp drops chrono.
+    "RUSTSEC-2026-0543",
+]
 
 [licenses]
 version = 2
