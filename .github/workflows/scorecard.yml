@@ -1,53 +1,25 @@
-name: OpenSSF Scorecard
+# Golden reusable workflow (clouatre-labs/.github#103): OpenSSF Scorecard
+# with the ossf/scorecard#5382 allow-list fallback built in.
+name: Scorecard
 
 on:
-  schedule:
-    - cron: '0 6 * * 1'
   push:
     branches: [main]
-  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
-permissions: {}
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
 
 jobs:
   scorecard:
-    name: Scorecard Analysis
-    # OpenSSF Scorecard only supports public repositories.
-    # Skip on private/internal repos to avoid GITHUB_TOKEN GraphQL access errors.
-    if: github.event.repository.visibility == 'public'
-    runs-on: ubuntu-26.04-arm
+    uses: clouatre-labs/.github/.github/workflows/scorecard.yml@486670d6268671be7b25a7e9cacce6aca47f05a6
+    with:
+      runner_label: ubuntu-26.04-arm
     permissions:
       contents: read
+      id-token: write
       security-events: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Scorecard CLI
-        env:
-          VERSION: "5.5.0"
-          SHA256: "3ce59d20c1d53e540c4a14e0da1e0d96b3b294e8ddc96a3c5a7b8a637b32991e"
-        run: |
-          curl --fail --silent --show-error --location --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 \
-            "https://github.com/ossf/scorecard/releases/download/v${VERSION}/scorecard_${VERSION}_linux_arm64.tar.gz" \
-            -o scorecard.tar.gz
-          echo "${SHA256}  scorecard.tar.gz" | sha256sum -c -
-          tar -xzf scorecard.tar.gz
-
-      - name: Run OpenSSF Scorecard
-        env:
-          ENABLE_SARIF: "1"
-          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scorecard --repo=github.com/${{ github.repository }} --format=sarif --show-details --policy=.github/scorecard-policy.yml > results.sarif
-
-      - name: Upload SARIF results
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
-        continue-on-error: true
-        with:
-          sarif_file: results.sarif
