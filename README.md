@@ -3,9 +3,9 @@
 <h1 align="center">aptu-coder</h1>
 
 <p align="center">
-  <a href="https://crates.io/crates/aptu-coder"><img alt="crates.io" src="https://img.shields.io/crates/v/aptu-coder.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20"></a>
-  <a href="https://slsa.dev"><img alt="SLSA Level 3" src="https://img.shields.io/badge/SLSA-Level%203-green?style=for-the-badge" height="20"></a>
-  <a href="https://www.bestpractices.dev/projects/12275"><img alt="OpenSSF Best Practices" src="https://img.shields.io/cii/level/12275?style=for-the-badge" height="20"></a>
+  <a href="https://crates.io/crates/aptu-coder"><img alt="crates.io" src="https://img.shields.io/crates/v/aptu-coder.svg?style=for-the-badge&color=fc8d62&logo=rust" height="28"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue.svg?style=for-the-badge" height="28"></a>
+  <a href="https://api.reuse.software/info/github.com/clouatre-labs/aptu-coder"><img alt="REUSE" src="https://img.shields.io/reuse/compliance/github.com/clouatre-labs/aptu-coder?style=for-the-badge" height="28"></a>
 </p>
 
 <p align="center">A Model Context Protocol (MCP) code-intelligence server that gives AI coding agents pre-parsed symbol tables and structural code search instead of raw file bytes, cutting token usage by up to 59% in the cited benchmark conditions (see <a href="#benchmarks">Benchmarks</a>). OpenSSF silver certified: fewer than 1% of open source projects reach this level.</p>
@@ -37,10 +37,10 @@ The token-savings figures above come from single, focused comprehension tasks wh
 ## Overview
 
 <p align="center">
-  <img alt="Architecture diagram: an AI agent connects over MCP to the aptu-coder server, whose analyze, search_code, edit, and exec tools feed tree-sitter parsing, pattern search, the blake3 cache, and shell filtering into the StructuralGraph and formatter that produce the MCP response" src="docs/diagrams/architecture.svg" width="560">
+  <img alt="Architecture diagram: an AI agent connects over MCP to aptu-coder, whose analyze and search tools feed tree-sitter parsing into the StructuralGraph and formatter that produce the MCP response" src="docs/diagrams/architecture.svg" width="720">
 </p>
 
-*Figure 1: aptu-coder parses code with tree-sitter into a structural graph served locally to the agent over MCP.*
+*Figure 1: An AI agent connects over MCP to aptu-coder, whose analyze and search tools feed tree-sitter parsing into the structural graph and formatter.*
 
 aptu-coder is a comprehension layer for coding agents: it gives an agent harness precise structural context about a codebase, directory trees, symbol definitions, and callers and implementors via structural search, without the agent reading raw files or re-deriving structure on every call. That prevents context starvation on large or unfamiliar codebases while keeping the result set small enough to fit the model's context window. It supports 18 languages (see [Supported Languages](#supported-languages)) and integrates with any MCP-compatible orchestrator.
 
