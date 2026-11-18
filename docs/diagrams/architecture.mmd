@@ -1,17 +1,8 @@
-graph TD
-    A[AI Agent] -->|"MCP stdio / HTTP"| S[aptu-coder server]
-    S --> T1["analyze_* tools"]
-    S --> T2[search_code]
-    S --> T3["edit_* tools"]
-    S --> T4[exec_command]
-    T1 --> P["tree-sitter parse"]
-    T1 --> C[blake3 cache]
-    T2 --> PS[pattern search]
-    T4 --> E[shell + filters]
-    P --> G[StructuralGraph]
-    C --> G
-    PS --> G
-    G --> F[formatter]
-    T3 --> F
+graph LR
+    A[Agent] --> S[aptu-coder]
+    S --> P[tree-sitter]
+    S --> E[edit]
+    P --> G[graph]
+    G --> F[format]
     E --> F
-    F -->|"MCP Response"| A
+    F --> A
