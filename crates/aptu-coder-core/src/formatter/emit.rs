@@ -8,8 +8,6 @@ use std::fmt::Write;
 use std::path::Path;
 
 const MULTILINE_THRESHOLD: usize = 10;
-const SNIPPET_MAX_LEN: usize = 80;
-const SNIPPET_TRUNCATION_POINT: usize = 77;
 
 /// Check if a function falls within a class's line range (method detection).
 pub(crate) fn is_method_of_class(func: &FunctionInfo, class: &ClassInfo) -> bool {
@@ -109,19 +107,6 @@ pub(crate) fn strip_base_path(path: &Path, base_path: Option<&Path>) -> String {
             }
         }
         None => path.display().to_string(),
-    }
-}
-
-/// Extract the center line from a snippet window and truncate at a char boundary.
-pub(crate) fn snippet_one_line(snippet: &str) -> String {
-    let lines: Vec<&str> = snippet.split('\n').collect();
-    let center = if lines.len() >= 2 { lines[1] } else { lines[0] };
-    let trimmed = center.trim();
-    if trimmed.len() > SNIPPET_MAX_LEN {
-        let truncate_at = trimmed.floor_char_boundary(SNIPPET_TRUNCATION_POINT);
-        format!("{}...", &trimmed[..truncate_at])
-    } else {
-        trimmed.to_string()
     }
 }
 

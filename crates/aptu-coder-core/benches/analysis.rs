@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 aptu-coder contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use aptu_coder_core::graph::StructuralGraph;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::path::Path;
 use std::sync::Arc;
@@ -261,43 +260,6 @@ fn analyze_directory_depth_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-fn structural_graph_query_benchmark(c: &mut Criterion) {
-    let root = Path::new("src");
-    let entries = aptu_coder_core::traversal::walk_directory(root, None).unwrap();
-
-    let file_outputs: Vec<_> = entries
-        .iter()
-        .filter(|e| !e.is_dir && e.path.extension().is_some_and(|ext| ext == "rs"))
-        .map(|e| aptu_coder_core::analyze::analyze_file(e.path.to_str().unwrap(), None).unwrap())
-        .collect();
-
-    let graph = std::sync::Arc::new(StructuralGraph::build_from_analysis(&file_outputs));
-
-    let mut group = c.benchmark_group("structural_graph_query");
-    group.sample_size(10);
-
-    group.bench_function("render_subgraph_text", |b| {
-        let seed_nodes = graph
-            .blast_radius_subgraph("analyze_directory", 3)
-            .map(|(nodes, _)| nodes)
-            .unwrap_or_default();
-        b.iter(|| graph.render_subgraph_text(std::hint::black_box(&seed_nodes)))
-    });
-
-    group.bench_function("blast_radius_bidirectional", |b| {
-        let seeds = graph.find_symbols(&["analyze_directory", "analyze_file"]);
-        b.iter(|| {
-            graph.blast_radius_bidirectional(
-                std::hint::black_box(&seeds),
-                std::hint::black_box(50),
-                std::hint::black_box(3),
-            )
-        })
-    });
-
-    group.finish();
-}
-
 fn cache_paths_benchmark(c: &mut Criterion) {
     use aptu_coder_core::cache::DirectoryCacheKey;
     use aptu_coder_core::types::AnalysisMode;
@@ -355,7 +317,6 @@ criterion_group!(
     subtree_count_overhead_1000,
     analyze_module_benchmark,
     analyze_directory_depth_benchmark,
-    structural_graph_query_benchmark,
     cache_paths_benchmark
 );
 criterion_main!(benches);

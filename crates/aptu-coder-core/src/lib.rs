@@ -38,15 +38,12 @@ mod config;
 pub mod edit;
 pub mod file_lock;
 pub mod formatter;
-pub mod formatter_defuse;
-pub mod graph;
 pub mod lang;
 pub mod languages;
 pub(crate) mod module_lookup;
 pub mod pagination;
 pub mod parser;
 pub(crate) mod parser_elements;
-pub mod search;
 pub mod test_detection;
 pub mod traversal;
 pub mod types;
@@ -76,18 +73,17 @@ pub use edit::{
     BatchFailure, BatchFailureClass, EditError, edit_overwrite_content, edit_replace_batch,
     edit_replace_block,
 };
-pub use graph::{GraphError, InternalCallChain};
 pub use lang::{language_for_extension, supported_languages};
 pub use pagination::{CursorData, PaginationError};
 pub use parser::ParserError;
 pub use traversal::{TraversalError, WalkEntry};
 pub use types::{
     AnalysisMode, AnalyzeDirectoryParams, AnalyzeFileField, AnalyzeFileParams, AnalyzeModuleParams,
-    AnalyzeSymbolParams, BatchEdit, BatchEditResult, CallEdge, CallInfo, ClassInfo, DefUseKind,
-    DefUseSite, EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams,
-    FileInfo, FilterRule, FunctionInfo, ImplTraitInfo, ImportInfo, ModuleFunctionInfo,
-    ModuleImportInfo, ModuleInfo, OutputControlParams, PaginationParams, ReferenceInfo,
-    ReferenceType, SemanticAnalysis, SymbolMatchMode,
+    BatchEdit, BatchEditResult, CallEdge, CallInfo, ClassInfo, DefUseKind, DefUseSite,
+    EditOverwriteOutput, EditOverwriteParams, EditReplaceOutput, EditReplaceParams, FileInfo,
+    FilterRule, FunctionInfo, ImplTraitInfo, ImportInfo, ModuleFunctionInfo, ModuleImportInfo,
+    ModuleInfo, OutputControlParams, PaginationParams, ReferenceInfo, ReferenceType,
+    SemanticAnalysis,
 };
 
 /// Captures from a custom tree-sitter query.
