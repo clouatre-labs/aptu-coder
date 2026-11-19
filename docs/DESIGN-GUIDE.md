@@ -38,9 +38,9 @@ graph TD
 
 | Tool | Purpose | Intentionally Excludes |
 |---|---|---|
-| `analyze_directory` | Directory tree with LOC, function count, class count | Function signatures, call graphs, imports |
-| `analyze_file` | Functions with signatures, classes, imports, type references | Call graph traversal, directory walking |
-| `analyze_module` | Minimal function/import index (~75% smaller than `analyze_file`) | Signatures, types, class details, call graphs |
+| `analyze_directory` | Directory tree with LOC, function count, class count | Function signatures, imports |
+| `analyze_file` | Functions with signatures, classes, imports, type references | Directory walking |
+| `analyze_module` | Minimal function/import index (~75% smaller than `analyze_file`) | Signatures, types, class details |
 | `edit_overwrite` | Create or overwrite a file | AST awareness, incremental updates |
 | `edit_replace` | Replace exact text block in a file | AST awareness, directory-wide changes |
 | `exec_command` | Execute arbitrary shell commands | Output parsing, scripting language support, interactive sessions |
