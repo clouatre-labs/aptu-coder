@@ -1,0 +1,6 @@
+{
+  "pack": "family1-contract-drift",
+  "description": "Type-compatible contract drift: normalize_window returns its pair in descending order while callers prune_entries and clamp_entry consume it as an ascending (lo, hi) range. Same types, arity, and names, so cargo check and cargo test are clean. The focal surface (window_bounds) is correct; the defect is in the helper outside it.",
+  "defect_symbols": ["normalize_window"],
+  "broken_callers": ["prune_entries", "clamp_entry"]
+}

@@ -1,0 +1,13 @@
+{
+  "pack": "family3-pattern-mode",
+  "description": "Call-shape pattern query target: the method name reset exists on two traits (Node, Leaf) and as a free function. Ground truth is the set of call sites in cycle whose receiver type implements Node (sensor.reset and register.reset), which a type-aware pattern query must return exactly and a text query cannot separate from line.reset or reset(seed).",
+  "defect_symbols": [],
+  "pattern_targets": [
+    {"method": "reset", "trait": "Node", "callsite": "cycle", "receiver": "Sensor"},
+    {"method": "reset", "trait": "Node", "callsite": "cycle", "receiver": "Register"}
+  ],
+  "pattern_distractors": [
+    {"method": "reset", "trait": "Leaf", "callsite": "cycle", "receiver": "CacheLine"},
+    {"method": "reset", "trait": null, "callsite": "cycle", "receiver": "u32"}
+  ]
+}

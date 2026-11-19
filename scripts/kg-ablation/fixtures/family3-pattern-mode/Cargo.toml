@@ -1,0 +1,10 @@
+[package]
+name = "family3-pattern-mode"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone pack: excluded from the repository cargo workspace.
+[workspace]
+
+[lib]
+path = "src/lib.rs"

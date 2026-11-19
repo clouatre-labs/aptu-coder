@@ -1,0 +1,21 @@
+{
+  "pack": "family2-reference-resolution",
+  "description": "Cross-file reference resolution on a lexically collision-dense target: lookup, resolve, entry, and index recur across three types and four free functions, so text queries have low precision by construction. Ground truth is the exact caller-to-callee reference set reachable from the aggregate entry point, resolvable only by type-aware structural resolution.",
+  "defect_symbols": [],
+  "references": [
+    {"caller": "aggregate", "callee": "build"},
+    {"caller": "aggregate", "callee": "resolve"},
+    {"caller": "aggregate", "callee": "EntryIndex::lookup"},
+    {"caller": "aggregate", "callee": "ResolveTable::lookup"},
+    {"caller": "aggregate", "callee": "IndexEntry::lookup"},
+    {"caller": "aggregate", "callee": "entry_resolve"},
+    {"caller": "aggregate", "callee": "index_of"},
+    {"caller": "resolve", "callee": "EntryIndex::resolve"},
+    {"caller": "resolve", "callee": "ResolveTable::resolve_entry"},
+    {"caller": "EntryIndex::resolve", "callee": "EntryIndex::lookup"},
+    {"caller": "ResolveTable::resolve_entry", "callee": "ResolveTable::lookup"},
+    {"caller": "ResolveTable::resolve_entry", "callee": "IndexEntry::lookup"},
+    {"caller": "entry_resolve", "callee": "ResolveTable::lookup"},
+    {"caller": "entry_resolve", "callee": "IndexEntry::resolve"}
+  ]
+}
