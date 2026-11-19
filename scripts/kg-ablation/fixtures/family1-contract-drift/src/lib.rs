@@ -9,6 +9,7 @@ pub struct Window {
 
 /// Public entry point. Correct on its own; the drift lives in the
 /// helper it does not use.
+/// Returns the inclusive `(start, end)` offsets spanned by `w`.
 pub fn window_bounds(w: &Window) -> (u32, u32) {
     let start = w.origin;
     let end = w.origin + w.extent;
