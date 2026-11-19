@@ -4,6 +4,7 @@
 //! call sites by receiver type.
 
 pub trait Node {
+    /// Restores the node to its initial state.
     fn reset(&mut self);
     fn generation(&self) -> u32;
 }
