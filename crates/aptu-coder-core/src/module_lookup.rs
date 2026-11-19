@@ -93,9 +93,6 @@ pub fn analyze_import_lookup(
     Ok(FocusedAnalysisOutput {
         formatted: text,
         next_cursor: None,
-        prod_chains: vec![],
-        test_chains: vec![],
-        outgoing_chains: vec![],
         def_count: 0,
         unfiltered_caller_count: 0,
         impl_trait_caller_count: 0,

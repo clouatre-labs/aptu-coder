@@ -241,15 +241,9 @@ mod disk_cache_tests {
         let dir = TempDir::new().unwrap();
         let cache = DiskCache::new(dir.path().to_path_buf(), false);
         let key = blake3::hash(b"focused-analysis-key");
-        let chain = crate::graph::InternalCallChain {
-            chain: vec![("caller_fn".to_string(), PathBuf::from("src/lib.rs"), 10)],
-        };
         let value = crate::analyze::FocusedAnalysisOutput {
             formatted: "formatted output".to_string(),
             next_cursor: None,
-            prod_chains: vec![chain.clone()],
-            test_chains: vec![chain.clone()],
-            outgoing_chains: vec![chain],
             def_count: 3,
             unfiltered_caller_count: 5,
             impl_trait_caller_count: 2,
@@ -267,9 +261,6 @@ mod disk_cache_tests {
 
         // Assert
         let retrieved = retrieved.unwrap();
-        assert_eq!(retrieved.prod_chains, value.prod_chains);
-        assert_eq!(retrieved.test_chains, value.test_chains);
-        assert_eq!(retrieved.outgoing_chains, value.outgoing_chains);
         assert_eq!(retrieved.def_count, value.def_count);
         assert_eq!(
             retrieved.unfiltered_caller_count,

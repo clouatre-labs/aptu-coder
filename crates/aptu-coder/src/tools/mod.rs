@@ -59,7 +59,6 @@ pub(crate) mod edit_overwrite;
 pub(crate) mod edit_replace;
 pub(crate) mod exec_command;
 pub(crate) mod exec_runtime;
-pub(crate) mod search_code;
 pub(crate) mod server;
 pub(crate) use analyze_module::AnalyzeModuleContext;
 

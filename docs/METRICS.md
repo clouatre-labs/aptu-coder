@@ -28,7 +28,7 @@ Each line in the JSONL file is one JSON object:
 | Field | Type | Description |
 |---|---|---|
 | `ts` | `u64` | Unix timestamp in milliseconds at handler return |
-| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `edit_overwrite`, `edit_replace`, `exec_command`, `search_code` (historical JSONL may also contain `analyze_symbol` and `read_resource` from earlier versions) |
+| `tool` | `string` | One of: `analyze_directory`, `analyze_file`, `analyze_module`, `edit_overwrite`, `edit_replace`, `exec_command` (historical JSONL may also contain `search_code`, `analyze_symbol`, and `read_resource` from earlier versions) |
 
 | `duration_ms` | `u64` | Wall-clock time from handler entry to return |
 | `uri_kind` | `string \| null` | Privacy-safe resource URI shape from the removed Resources surface: `graph_blast_radius`, `graph_subgraph`, `graph_bidirectional`, or `unknown`; raw URIs were never retained. Historical only; no longer emitted. |
@@ -41,11 +41,9 @@ Each line in the JSONL file is one JSON object:
 | `error_type` | `string \| null` | On error: `invalid_params`, `parse`, or `unknown`; `null` on success |
 | `error_subtype` | `string \| null` | On error: detailed subtype for `invalid_params` failures, tool-specific (see [error_subtype values](#error_subtype-values) below); `null` on success or for `parse`/`unknown`/`internal_error` failures. Omitted from JSONL when `null` for backward compatibility. |
 | `edit_count` | `usize \| null` | Number of edits the call carried: `edits[].len()` for the batch form, `1` for the single-edit form. Only populated for `edit_replace`; enables batch-vs-single adoption and batch-specific error-rate analysis. Omitted from JSONL when `null` for backward compatibility. |
-| `query_mode` | `string \| null` | Query mode used by `search_code`: `"pattern"` or `"symbol"`. `null` for all other tools. Omitted from JSONL when `null`. |
-| `result_count` | `number \| null` | Number of matches returned by `search_code` (page size, not total). `null` for all other tools. Omitted from JSONL when `null`. |
 | `cache_hit` | `bool \| null` | `true` if the result was served from cache (L1 or L2); `false` if computed; `null` if caching is not applicable for this tool |
 | `session_id` | `string \| null` | Session identifier in format `MILLIS-N` (13-digit Unix milliseconds + AtomicU64 counter); generated on server initialization |
-| `session_origin` | `string \| null` | Origin marker distinguishing real-agent sessions from maintainer/test sessions (`"agent"`, `"maintainer"`, `"test"`). Set at startup from the `APTU_CODER_SESSION_ORIGIN` environment variable; unset or invalid values leave it `null` (invalid values log a one-time startup warning). Drives the adoption-gate real-agent-session share (see the [search_code adoption gate](#search_code-adoption-gate)); omitted from JSONL when `null`. |
+| `session_origin` | `string \| null` | Origin marker distinguishing real-agent sessions from maintainer/test sessions (`"agent"`, `"maintainer"`, `"test"`). Set at startup from the `APTU_CODER_SESSION_ORIGIN` environment variable; unset or invalid values leave it `null` (invalid values log a one-time startup warning); omitted from JSONL when `null`. |
 | `seq` | `u32 \| null` | 0-indexed call sequence within session; incremented atomically when emitting each `MetricEvent` at handler return |
 | `cache_tier` | `string \| null` | Disk cache tier hit: `l1_memory` or `l2_disk`; `null` if not applicable. For historical `read_resource` events (Resources surface removed), success was `l2_disk`, `RESOURCE_NOT_FOUND` was `miss`, and URI parse errors were null. |
 | `cache_write_failure` | `bool \| null` | `true` if cache write failed (dir, tempfile, write, or rename); `null` if not applicable |
@@ -167,11 +165,6 @@ Populated only when `error_type=invalid_params`; `null` for `parse`, `unknown`, 
 | `analyze_module` | `path_missing_filename` | Path validation: `path` has no filename component. |
 | `analyze_module` | `parent_not_directory` | Path validation: `path`'s parent is not a directory. |
 | `analyze_module` | `path_invalid` | Path validation failed for another reason. |
-| `search_code` | `invalid_pattern` | `pattern` absent or failed to parse in the target language. |
-| `search_code` | `unsupported_language` | Pattern mode requested for a language outside `rust`, `go`, `python`, `typescript`. |
-| `search_code` | `symbol_not_found` | `mode=symbol` found no definitions or implementors for the symbol. |
-| `search_code` | `path_not_a_file` | `path` exists but is neither a directory nor a regular file. |
-| `search_code` | `invalid_cursor` | The pagination `cursor` failed to decode. |
 
 Historical resource reads were emitted as `read_resource` events with `mcp.method.name=resources/read`, distinct from ordinary `tools/call` events. The Resources surface was removed with `analyze_symbol`; historical JSONL files may still contain such events. Agent token accounting remains external to this server.
 
@@ -274,16 +267,6 @@ tokio::spawn(writer.run());
 ```
 
 This avoids `XDG_DATA_HOME` environment variable manipulation in tests.
-
-## search_code adoption gate
-
-The `search_code` tool operates under a pre-registered adoption gate (PR #1825, per #1823/#1824). Gate analysis runs monthly over the JSONL corpus using three schema fields: `query_mode`, `result_count`, and `session_origin`.
-
-- **Error rate**: the monthly `error_subtype` distribution for `search_code` (`invalid_pattern`, `unsupported_language`, `symbol_not_found`, `path_not_a_file`, `invalid_cursor`; see [error_subtype values](#error_subtype-values)). A subtype sustained above 10% for two consecutive months opens a fix-or-remove issue.
-- **Session origin**: the monthly share of `search_code` calls from real-agent sessions (via `session_origin`, populated from `APTU_CODER_SESSION_ORIGIN`). Zero real-agent sessions for one full calendar month opens a removal issue. The gate clock starts when session_origin population lands (#1830).
-- **Benefit**: the v20 ablation is pre-registered as its own design issue (#1824) and includes a pattern-mode task family so pattern mode earns its own verdict. A `NOT-SUPPORTED` verdict opens a removal issue per the #1807 playbook.
-
-Watch item: the share of `query_mode=pattern` calls with `result_count=0` (silent-empty results). Silent empties suppress agent usage in ways the error-rate signal cannot catch.
 
 ## Risks
 

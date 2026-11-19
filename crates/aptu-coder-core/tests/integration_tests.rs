@@ -2407,9 +2407,7 @@ fn test_analyze_module_unsupported_extension() {
 #[cfg(feature = "schemars")]
 #[test]
 fn test_no_uint_format_in_schemas() {
-    use aptu_coder_core::types::{
-        AnalyzeDirectoryParams, AnalyzeFileParams, AnalyzeSymbolParams, FileInfo,
-    };
+    use aptu_coder_core::types::{AnalyzeDirectoryParams, AnalyzeFileParams, FileInfo};
 
     // Use schema_for! (root schema) so $defs are included and $ref targets are
     // fully present in the serialized JSON, not hidden behind unresolved $ref pointers.
@@ -2425,10 +2423,6 @@ fn test_no_uint_format_in_schemas() {
         (
             "AnalyzeFileParams",
             serde_json::to_string(&schemars::schema_for!(AnalyzeFileParams)).unwrap(),
-        ),
-        (
-            "AnalyzeSymbolParams",
-            serde_json::to_string(&schemars::schema_for!(AnalyzeSymbolParams)).unwrap(),
         ),
     ];
 

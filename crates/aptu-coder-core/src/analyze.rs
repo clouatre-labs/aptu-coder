@@ -6,12 +6,11 @@
 //! and `analyze_module` (lightweight index). Handles parallel processing and cancellation.
 
 use crate::formatter::{format_file_details, format_structure};
-use crate::graph::InternalCallChain;
 use crate::lang::{language_for_extension, supported_languages};
 use crate::parser::{ElementExtractor, SemanticExtractor};
 use crate::test_detection::is_test_file;
 use crate::traversal::{WalkEntry, walk_directory};
-use crate::types::{AnalysisMode, FileInfo, SemanticAnalysis, SymbolMatchMode};
+use crate::types::{AnalysisMode, FileInfo, SemanticAnalysis};
 use rayon::prelude::*;
 #[cfg(feature = "schemars")]
 use schemars::JsonSchema;
@@ -33,8 +32,6 @@ pub enum AnalyzeError {
     Traversal(#[from] crate::traversal::TraversalError),
     #[error("Parser error: {0}")]
     Parser(#[from] crate::parser::ParserError),
-    #[error("Graph error: {0}")]
-    Graph(#[from] crate::graph::GraphError),
     #[error("Formatter error: {0}")]
     Formatter(#[from] crate::formatter::FormatterError),
     #[error("Analysis cancelled")]
@@ -563,19 +560,6 @@ pub struct FocusedAnalysisOutput {
         )
     )]
     pub next_cursor: Option<String>,
-    /// Production caller chains (partitioned from incoming chains, excluding test callers).
-    /// Not serialized; used for pagination in lib.rs.
-    #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(skip))]
-    pub prod_chains: Vec<InternalCallChain>,
-    /// Test caller chains. Not serialized; used for pagination summary in lib.rs.
-    #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(skip))]
-    pub test_chains: Vec<InternalCallChain>,
-    /// Outgoing (callee) chains. Not serialized; used for pagination in lib.rs.
-    #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(skip))]
-    pub outgoing_chains: Vec<InternalCallChain>,
     /// Number of definitions for the symbol. Not serialized; used for pagination headers.
     #[serde(default)]
     #[cfg_attr(feature = "schemars", schemars(skip))]
@@ -613,7 +597,6 @@ pub struct FocusedAnalysisOutput {
 #[derive(Clone)]
 pub struct FocusedAnalysisConfig {
     pub focus: String,
-    pub match_mode: SymbolMatchMode,
     pub follow_depth: u32,
     pub max_depth: Option<u32>,
     pub ast_recursion_limit: Option<usize>,
@@ -638,9 +621,6 @@ mod tests {
         let output = FocusedAnalysisOutput {
             formatted: "text".to_string(),
             next_cursor: None,
-            prod_chains: Vec::new(),
-            test_chains: Vec::new(),
-            outgoing_chains: Vec::new(),
             def_count: 0,
             unfiltered_caller_count: 0,
             impl_trait_caller_count: 0,

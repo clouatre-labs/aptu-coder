@@ -20,7 +20,5 @@ pub use self::render::{
 pub use self::summary::{format_structure, format_summary};
 
 // pub(crate) re-exports for internal cross-crate use.
-// Used by formatter_defuse.rs: snippet_one_line, strip_base_path.
 // (format_focused_internal / format_focused_summary_internal were used by the
 // removed symbol tool; the pub(crate) re-export was dropped with it.)
-pub(crate) use self::emit::{snippet_one_line, strip_base_path};

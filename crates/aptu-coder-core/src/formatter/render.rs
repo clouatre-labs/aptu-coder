@@ -10,11 +10,12 @@ use tracing::instrument;
 
 use super::emit;
 
+/// Errors produced by the formatter tier. Currently no recoverable formatter
+/// failures exist; the enum is retained so future variants do not break the
+/// public error surface.
 #[derive(Debug, Error)]
-pub enum FormatterError {
-    #[error("Graph error: {0}")]
-    GraphError(#[from] crate::graph::GraphError),
-}
+#[non_exhaustive]
+pub enum FormatterError {}
 
 /// Format file-level semantic analysis results.
 #[instrument(skip_all)]

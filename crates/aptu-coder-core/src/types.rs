@@ -188,72 +188,6 @@ pub struct AnalyzeModuleParams {
     pub path: String,
 }
 
-/// Symbol name matching strategy for graph queries.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum SymbolMatchMode {
-    #[default]
-    Exact,
-    Insensitive,
-    Prefix,
-    Contains,
-}
-
-/// Analysis mode for graph queries.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum SymbolAnalysisMode {
-    /// Build a call graph for the symbol (default).
-    #[default]
-    CallGraph,
-    /// Find all files in the directory that import the module path given in symbol.
-    ImportLookup,
-    /// Extract write/read sites for the symbol.
-    DefUse,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schemars", derive(JsonSchema))]
-pub struct AnalyzeSymbolParams {
-    /// Directory path to search for the symbol
-    pub path: String,
-
-    /// Plain symbol name (no :: path) defined in the directory given by path; function or method. Example: `parse_config` finds all callers and callees of that function.
-    pub symbol: String,
-
-    /// Symbol matching mode (default: exact). exact: case-sensitive exact match. insensitive: case-insensitive exact match. prefix: case-insensitive prefix match. contains: case-insensitive substring match.
-    pub match_mode: Option<SymbolMatchMode>,
-
-    /// Maximum traversal depth. For call graph mode, level 1 = direct callers and callees, level 2 = one more hop, etc.; also caps directory walking. Unset means graph depth 1 and unlimited directory walk. Warn user on levels above 2. Hard cap of 3.
-    #[cfg_attr(
-        feature = "schemars",
-        schemars(schema_with = "crate::schema_helpers::max_depth_schema")
-    )]
-    pub max_depth: Option<u32>,
-
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-
-    #[serde(flatten)]
-    pub output_control: OutputControlParams,
-
-    /// Filter callers to impl Trait for Type blocks only. Rust only; returns INVALID_PARAMS for other languages.
-    #[serde(default)]
-    pub impl_only: Option<bool>,
-
-    /// Analysis mode. call_graph (default): build a call graph for the symbol. import_lookup: find all files in the directory that import the module path given in symbol (e.g., std::collections); requires symbol to be non-empty and rejects match_mode/max_depth/impl_only. def_use: extract write/read sites for the symbol; requires symbol to be non-empty.
-    #[serde(default)]
-    pub mode: Option<SymbolAnalysisMode>,
-
-    /// Restrict analysis to files changed relative to this git ref (branch, tag, or commit SHA). Empty string or unset means no filtering.
-    #[serde(default)]
-    #[cfg_attr(feature = "schemars", schemars(extend("examples" = ["main"])))]
-    pub git_ref: Option<String>,
-}
-
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
@@ -755,55 +689,25 @@ mod tests {
             "summary must be top-level in AnalyzeFileParams schema"
         );
 
-        // Test AnalyzeSymbolParams
-        let symbol_schema = schema_for!(AnalyzeSymbolParams);
-        let symbol_props = symbol_schema
-            .as_object()
-            .and_then(|o| o.get("properties"))
-            .and_then(|v| v.as_object())
-            .expect("AnalyzeSymbolParams must have properties");
+        // Test AnalyzeSymbolParams removed: symbol params pruned with the
+        // structural tier (issue #1846).
 
-        assert!(
-            symbol_props.contains_key("cursor"),
-            "cursor must be top-level in AnalyzeSymbolParams schema"
-        );
-        assert!(
-            !symbol_props.contains_key("page_size"),
-            "page_size must be ABSENT from AnalyzeSymbolParams schema"
-        );
-        assert!(
-            symbol_props.contains_key("summary"),
-            "summary must be top-level in AnalyzeSymbolParams schema"
-        );
-
-        // Verify verbose is NOT present in either param schema (removed per issue 1129)
+        // Verify verbose is NOT present in the param schema (removed per issue 1129)
         assert!(
             !file_props.contains_key("verbose"),
             "verbose must be removed from AnalyzeFileParams schema"
         );
-        assert!(
-            !symbol_props.contains_key("verbose"),
-            "verbose must be removed from AnalyzeSymbolParams schema"
-        );
 
-        // Verify force is NOT present in either param schema (removed per issue 1129)
+        // Verify force is NOT present in the param schema (removed per issue 1129)
         assert!(
             !file_props.contains_key("force"),
             "force must be removed from AnalyzeFileParams schema"
         );
-        assert!(
-            !symbol_props.contains_key("force"),
-            "force must be removed from AnalyzeSymbolParams schema"
-        );
 
-        // Verify ast_recursion_limit is NOT present in either param schema (removed per issue 1129)
+        // Verify ast_recursion_limit is NOT present in the param schema (removed per issue 1129)
         assert!(
             !file_props.contains_key("ast_recursion_limit"),
             "ast_recursion_limit must be removed from AnalyzeFileParams schema"
-        );
-        assert!(
-            !symbol_props.contains_key("ast_recursion_limit"),
-            "ast_recursion_limit must be removed from AnalyzeSymbolParams schema"
         );
     }
 

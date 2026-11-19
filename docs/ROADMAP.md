@@ -10,6 +10,10 @@ Added the `search_code` MCP tool (#1825), the structural escalation tier between
 
 Removed the `analyze_symbol` MCP tool (call graph, import_lookup, and def_use modes) and the MCP resource templates it fed (`aptu-coder://graph/{repo_hash}/blast-radius/...`, `subgraph/...`, `blast-radius-bidirectional/...`). The tool layer (`tools/analyze_symbol.rs`, `tools/symbol_focused.rs`, `tools/resources.rs`) and their metrics, cache, and integration tests were deleted; the deep symbol-analysis core (`analyze_focused.rs`) was also removed. Retained in `aptu-coder-core` as library APIs: `analyze_import_lookup`, `analyze_module_file`, `FocusedAnalysisOutput`/`CallChainEntry`, and the `StructuralGraph`/`GraphDiskStore` structural graph. The JSONL metrics schema keeps `uri_kind`, `match_mode`, `follow_depth`, `mode`, `impl_only`, and the `l2_*` cache fields so historical metrics files still parse; they are no longer emitted.
 
+### Removed: `search_code` tool and structural tier
+
+Removed the `search_code` MCP tool and the in-tool structural analysis tier (#1846). Deleted the tool layer (`tools/search_code.rs`), the core search engine (`search.rs`), the structural graph (`graph/`: `call_graph.rs`, `structural.rs`, `store.rs`, `mod.rs`), the defuse formatter (`formatter_defuse.rs`), and their integration tests; `petgraph` and `postcard` dependencies were dropped. The JSONL metrics schema keeps `query_mode`, `result_count`, and `session_origin` so historical metrics files still parse; `query_mode` and `result_count` are no longer emitted. The pre-registered adoption gate (#1825) is superseded by this removal per the #1807 playbook.
+
 ## Wave History
 
 ### [Complete] Wave 1: Core Analysis

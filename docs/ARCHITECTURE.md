@@ -10,7 +10,7 @@
 
 - **Minimize token usage**: Return only structured, relevant context - no prose, no noise
 - **Language-agnostic parsing via tree-sitter**: Support 18 languages (Astro, C/C++, C#, CSS, Fortran, Go, HTML, Java, JavaScript, JSON, Kotlin, Markdown, Python, Rust, TOML, TSX, TypeScript, YAML) with a unified query-based extraction system; TypeScript and TSX use distinct grammars (`LANGUAGE_TYPESCRIPT` and `LANGUAGE_TSX`) but share the same queries in `crates/aptu-coder-core/src/languages/typescript.rs`
-- **Seven focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family); `search_code` (search family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
+- **Six focused MCP tools**: `analyze_directory`, `analyze_file`, `analyze_module` (analyze_* family); `edit_overwrite`, `edit_replace` (edit_* family); `exec_command` (exec_* family) -- each with a clear, explicit interface rather than a single tool with auto-detected modes
 - **Compatible with any MCP orchestrator**: Designed to work with any standards-compliant MCP host
 - **Performance via parallelism**: Use rayon for parallel file processing and ignore crate for efficient .gitignore-aware directory walking
 
@@ -27,7 +27,7 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `metrics` | `crates/aptu-coder/src/metrics.rs` | `MetricEvent` schema and builder fields; OTel-metric recording (`record_otel_metrics`); re-exports `MetricsWriter` and `migrate_legacy_metrics_dir` from `metrics_export` for callers that use `crate::metrics::*` |
 | `metrics_export` | `crates/aptu-coder/src/metrics_export.rs` | Metrics file I/O: `MetricsWriter::run` (drains the channel), `rotate_metrics_file`, `ensure_metrics_dir`, `xdg_metrics_dir`, `cleanup_old_files` (30-day retention), `migrate_legacy_metrics_dir_impl` for the `code-analyze-mcp` → `aptu-coder` XDG path migration |
 | `otel` | `crates/aptu-coder/src/otel.rs` | OpenTelemetry provider initialization; `init_otel` (traces), `init_log_appender` (logs), `init_meter` (metrics); all gated on `OTEL_EXPORTER_OTLP_ENDPOINT`; noop when unset |
-| `search_code` | `crates/aptu-coder/src/tools/search_code.rs` | `search_code` handler: `pattern` mode delegates to `aptu_coder_core::search::pattern_search` (metavariable `$X`/`$$$REST` matcher over the in-tree tree-sitter parsers; Rust, Go, Python, TypeScript), `symbol` mode builds a `StructuralGraph` on demand from directory analysis (definitions, callers, implementors); byte-exact spans with cursor pagination |
+| `search_code` (removed) | `crates/aptu-coder/src/tools/search_code.rs` | Historical: structural code search (`pattern` metavariable search and `symbol` resolution over an on-demand `StructuralGraph`); removed in #1846 with the structural tier (see [ROADMAP.md](ROADMAP.md)) |
 | `shell` | `crates/aptu-coder/src/shell.rs` | Login shell detection: `resolve_shell` checks `APTU_SHELL` env, then scans `PATH` for `bash`, falls back to `/bin/sh` (Unix) or `cmd` (Windows) |
 | `shell_write` | `crates/aptu-coder/src/shell_write.rs` | Compatibility re-export shim (14 lines): `pub(crate) use crate::heredoc_validation::validate_heredocs;` -- kept so `exec_command.rs` can keep calling `crate::shell_write::validate_heredocs` |
 | `heredoc_validation` | `crates/aptu-coder/src/heredoc_validation.rs` | Pre-spawn heredoc guard for `exec_command`: `validate_heredocs` (Phase 1 file-write pattern + stdin-consuming flag + `params.stdin` conflict scan, Phase 2 missing closing-delimiter scan) and its error helpers |
@@ -39,8 +39,8 @@ For the reasoning behind these goals, see [DESIGN-GUIDE.md](DESIGN-GUIDE.md).
 | `analyze_str` | `crates/aptu-coder-core/src/analyze.rs` | Public in-memory API; parses source text without filesystem access; `AnalyzeError::UnsupportedLanguage` variant |
 | `cache` | `crates/aptu-coder-core/src/cache.rs` | Two-tier caching: L1 in-memory LRU (`AnalysisCache`, `CallGraphCache`) with mtime invalidation and lock_or_recover pattern; L2 on-disk call-graph cache (`DiskCache`) keyed by canonical path + git HEAD SHA, configurable via `APTU_CODER_DISK_CACHE_DIR` and `APTU_CODER_DISK_CACHE_DISABLED` |
 | `completion` | `crates/aptu-coder-core/src/completion.rs` | Path completion support respecting .gitignore |
-| `formatter` | `crates/aptu-coder-core/src/formatter/` (emit.rs, mod.rs, pagination.rs, render.rs, summary.rs) | Output formatting for all seven tools |
-| `graph` | `crates/aptu-coder-core/src/graph/` (call_graph.rs, mod.rs, store.rs, structural.rs) | `CallGraph` and BFS traversal retained as library APIs after the removal of symbol focus mode and the MCP knowledge-graph resources; `StructuralGraph` and `GraphDiskStore` (blake3 content-hash keyed, size-capped LRU-by-mtime eviction) remain in the core crate as library capabilities |
+| `formatter` | `crates/aptu-coder-core/src/formatter/` (emit.rs, mod.rs, pagination.rs, render.rs, summary.rs) | Output formatting for all six tools |
+| `graph` (removed) | `crates/aptu-coder-core/src/graph/` | Historical: `CallGraph`, `StructuralGraph`, and `GraphDiskStore` library APIs; removed in #1846 (see [ROADMAP.md](ROADMAP.md)) |
 | `lang` | `crates/aptu-coder-core/src/lang.rs` | Extension-to-language mapping |
 | `languages/fortran` | `crates/aptu-coder-core/src/languages/fortran.rs` | Fortran-specific queries and semantic handlers; supports module extraction, subroutine/function name extraction, Fortran 2003+ OOP bound procedure calls (`obj%method()`); registers `extract_function_name`, `find_receiver_type`, and `find_method_for_receiver` |
 | `languages/kotlin` | `crates/aptu-coder-core/src/languages/kotlin.rs` | Kotlin-specific queries and semantic handlers; supports `.kt` and `.kts` extensions |
@@ -73,9 +73,6 @@ graph TD
     B4 --> R["Read File"]
     R --> S["analyze_module_file"]
     S --> T["format_module_info"]
-    B3 --> G["walk_directory"]
-    G --> H["Build CallGraph BFS"]
-    H --> I["format_focused"]
     B6 --> F2["edit_overwrite_content"]
     B7 --> F3["edit_replace_block"]
     B10 --> F6["exec_sh_command"]
@@ -83,7 +80,6 @@ graph TD
     P --> Q["MCP Response"]
     L --> Q
     T --> Q
-    I --> Q
     F2 --> Q
     F3 --> Q
     F7 --> Q
@@ -128,7 +124,7 @@ Exported from `aptu_coder_core` as a public API for library consumers that hold 
 
 ## Symbol Call Graph (historical)
 
-The `analyze_symbol` MCP tool (call graph for a named symbol, with import_lookup and def_use modes) was removed. Historical behavior: directory walk to build a symbol index, CallGraph BFS for callers/callees to configurable depth, FOCUS/DEPTH/DEFINED/CALLERS/CALLEES text sections. The `FocusedAnalysisOutput` fields `callers`, `test_callers`, and `callees` (`Option<Vec<CallChainEntry>>`) remain available on the public core API in `aptu_coder_core` for library consumers. `CallChainEntry` is a stable public type with fields `symbol: String`, `file: String`, `line: usize`; conversion from the internal `InternalCallChain` (which is non-serializable and stays internal) happens via the private `chains_to_entries` helper. The import_lookup path survives in `aptu_coder_core` as `analyze_import_lookup`.
+The `analyze_symbol` MCP tool (call graph for a named symbol, with import_lookup and def_use modes) was removed. Historical behavior: directory walk to build a symbol index, CallGraph BFS for callers/callees to configurable depth, FOCUS/DEPTH/DEFINED/CALLERS/CALLEES text sections. `CallChainEntry` remains a stable public type with fields `symbol: String`, `file: String`, `line: usize` on the public core API in `aptu_coder_core`. The import_lookup path survives in `aptu_coder_core` as `analyze_import_lookup`.
 
 ## Observability Architecture
 
@@ -151,7 +147,7 @@ Key sub-operations are wrapped in named child spans so P95 breakdowns are visibl
 | Span name | Location | Sub-operation |
 |---|---|---|
 | `ast.parse_batch` | `analyze.rs` | Rayon parallel parse batch for `analyze_directory` |
-| `graph.traverse` | `graph.rs` | BFS traversal per depth level (historically used by `analyze_symbol`; now library-only) |
+| `graph.traverse` | `graph.rs` | BFS traversal per depth level (historical; the `graph` module was removed in #1846) |
 | `walk_directory` | `traversal.rs` | .gitignore-aware directory walk |
 
 ### Span attribute policy
@@ -174,11 +170,11 @@ Adding a language requires: a tree-sitter grammar crate, a language module with 
 
 JavaScript is the only language registered with `reference_query: None`. JavaScript's dynamic typing makes static type reference extraction low-value: identifiers appear in many non-type contexts, producing excessive false positives with no meaningful signal. All other supported languages provide a `REFERENCE_QUERY`.
 
-## Call Graph Design
+## Call Graph Design (historical)
 
-BFS from the target symbol outward, tracking callers and callees at each depth level. Visited symbols are memoized to avoid cycles. Call frequency is counted across the walk; symbols exceeding the threshold are annotated in output. Sentinel values (`<module>`, `<reference>`) represent call sites that have no enclosing function or are type-level references rather than call expressions.
+BFS from the target symbol outward, tracking callers and callees at each depth level. Visited symbols are memoized to avoid cycles. Call frequency is counted across the walk; symbols exceeding the threshold are annotated in output. Sentinel values (`<module>`, `<reference>`) represent call sites that have no enclosing function or are type-level references rather than call expressions. The graph module backing this design was removed in #1846; this section is retained as history.
 
-Symbol resolution uses SymbolMatchMode to locate the target symbol: Exact (case-sensitive, default), Insensitive (case-insensitive exact), Prefix (case-insensitive prefix match), and Contains (case-insensitive substring match). When multiple candidates match, resolve_symbol() returns an error listing candidates; clients must refine the query or use a stricter match_mode.
+Symbol resolution used SymbolMatchMode to locate the target symbol: Exact (case-sensitive, default), Insensitive (case-insensitive exact match), Prefix (case-insensitive prefix match), and Contains (case-insensitive substring match).
 
 ## AnalysisConfig
 
@@ -194,6 +190,6 @@ Use `AnalysisConfig::default()` for standard behavior with no limits applied.
 
 The MCP resource templates that surfaced the knowledge graph built during `analyze_symbol` calls were removed together with that tool (blast-radius, subgraph, blast-radius-bidirectional URI templates under `aptu-coder://graph/{repo_hash}/...`; see [ROADMAP.md](ROADMAP.md) for the historical description).
 
-The structural graph itself (`StructuralGraph`, `GraphDiskStore`) remains in `aptu-coder-core` as a library capability.
+The structural graph itself (`StructuralGraph`, `GraphDiskStore`) was removed from `aptu-coder-core` in #1846 (see [ROADMAP.md](ROADMAP.md)).
 
-**Cross-file symbol disambiguation:** `StructuralGraph::build_from_analysis` (`structural.rs`) resolves `Calls` edges through a symbol index keyed by name (`HashMap<String, Vec<NodeIndex>>`) that tracks every candidate definition, then `resolve_candidate()` disambiguates caller and callee resolution via staged heuristics: same-file preference, then line-proximity, then arg-count match, then first-definition fallback. This is distinct from the removed `analyze_symbol` tool's `CallGraph` BFS, which resolved by name only and could still produce a cross-file edge between two same-named functions in different files. Merged in `43812d7` (#1461/#1463).
+**Cross-file symbol disambiguation (historical):** `StructuralGraph::build_from_analysis` (`structural.rs`, removed in #1846) resolved `Calls` edges through a symbol index keyed by name (`HashMap<String, Vec<NodeIndex>>`) that tracked every candidate definition, then `resolve_candidate()` disambiguated caller and callee resolution via staged heuristics: same-file preference, then line-proximity, then arg-count match, then first-definition fallback. This is distinct from the removed `analyze_symbol` tool's `CallGraph` BFS, which resolved by name only. Merged in `43812d7` (#1461/#1463).
