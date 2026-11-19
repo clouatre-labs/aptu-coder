@@ -1,5 +1,6 @@
 //! Clean control pack: no defect. Reviewers should report no defects.
 
+// Simple ledger fixture; no defects expected.
 pub struct Ledger {
     pub balance: i64,
 }
