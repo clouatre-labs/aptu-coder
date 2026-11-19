@@ -1,0 +1,18 @@
+{
+  "fixture": "family1-contract-drift",
+  "catch": true,
+  "false_positive": false,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [
+    "e current repository. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Graph context tools and reso",
+    "tory. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Graph context tools and resources may be ava",
+    "diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Graph context tools and resources may be available on reques"
+  ],
+  "notes": "named defect symbol ['normalize_window'] identified with concrete breakage terms ['broken caller', 'dangling call', 'contract mismatch']",
+  "needs_review": false,
+  "run_id": "2d2245f6b8d5463c968a5412637a28a8",
+  "arm": "optional-graph",
+  "run": 1,
+  "complete": true
+}

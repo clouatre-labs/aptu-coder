@@ -1,0 +1,14 @@
+{
+  "fixture": "clean-control",
+  "catch": false,
+  "false_positive": false,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [],
+  "notes": "clean control correctly reported harmless",
+  "needs_review": false,
+  "run_id": "565dcb1a3fac45f7b59e6571529d3223",
+  "arm": "no-graph",
+  "run": 2,
+  "complete": true
+}

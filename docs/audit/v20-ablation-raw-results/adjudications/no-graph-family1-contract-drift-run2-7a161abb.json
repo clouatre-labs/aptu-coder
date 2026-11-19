@@ -1,0 +1,18 @@
+{
+  "fixture": "family1-contract-drift",
+  "catch": true,
+  "false_positive": false,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [
+    "e current repository. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. The PR head branch is bench-",
+    "tory. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. The PR head branch is bench-fixture-family1-",
+    "diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. The PR head branch is bench-fixture-family1-contract-drift. "
+  ],
+  "notes": "named defect symbol ['normalize_window'] identified with concrete breakage terms ['broken caller', 'dangling call', 'contract mismatch']",
+  "needs_review": false,
+  "run_id": "7a161abb218149559ee19dfeffc584a7",
+  "arm": "no-graph",
+  "run": 2,
+  "complete": true
+}

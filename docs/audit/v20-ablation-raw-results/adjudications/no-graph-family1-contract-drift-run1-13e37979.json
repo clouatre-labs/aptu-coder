@@ -1,0 +1,19 @@
+{
+  "fixture": "family1-contract-drift",
+  "catch": true,
+  "false_positive": false,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [
+    "e current repository. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. The PR head branch is bench-",
+    "tory. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. The PR head branch is bench-fixture-family1-",
+    "diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. The PR head branch is bench-fixture-family1-contract-drift. ",
+    "`, on `window_bounds`: ```rust /// Returns the inclusive `(start, end)` offsets spanned by `w`. ``` No code, signature, call site, or test changes.  ### Findings: no concrete defects introduced by the diff  I checked each defect class explicitly:  - **Broken callers / dangling calls** \u2014 none. The diff adds a `///` line; no symbol, arity, or type is touched. "
+  ],
+  "notes": "named defect symbol ['normalize_window'] identified with concrete breakage terms ['broken caller', 'dangling call', 'contract mismatch', 'call site']",
+  "needs_review": false,
+  "run_id": "13e379799aa14c5b9b9c35b4b6885dab",
+  "arm": "no-graph",
+  "run": 1,
+  "complete": true
+}

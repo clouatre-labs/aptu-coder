@@ -1,0 +1,74 @@
+{
+  "fixture_by_arm": {
+    "clean-control|no-graph": {
+      "catch": 0,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "clean-control|optional-graph": {
+      "catch": 0,
+      "false_positive": 2,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family1-contract-drift|forced-graph": {
+      "catch": 1,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family1-contract-drift|no-graph": {
+      "catch": 2,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family1-contract-drift|optional-graph": {
+      "catch": 2,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family2-reference-resolution|no-graph": {
+      "catch": 0,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family2-reference-resolution|optional-graph": {
+      "catch": 0,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family3-pattern-mode|no-graph": {
+      "catch": 0,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    },
+    "family3-pattern-mode|optional-graph": {
+      "catch": 0,
+      "false_positive": 0,
+      "false_negative": 0,
+      "false_reassurance": 0
+    }
+  },
+  "catches_by_arm": {
+    "forced-graph": [
+      "family1-contract-drift"
+    ],
+    "no-graph": [
+      "family1-contract-drift"
+    ],
+    "optional-graph": [
+      "family1-contract-drift"
+    ]
+  },
+  "unique_catches_vs_no_graph": {
+    "optional-graph": [],
+    "forced-graph": []
+  },
+  "false_reassurance_total": 0
+}
