@@ -51,6 +51,7 @@ impl ResolveTable {
     }
 }
 
+/// Resolve `key` against `table`, falling back to `index`.
 pub fn resolve(table: &ResolveTable, index: &EntryIndex, key: &str) -> u32 {
     let via_index = index.resolve(key);
     let via_table = table.resolve_entry(key);
