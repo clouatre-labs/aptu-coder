@@ -1,0 +1,14 @@
+{
+  "fixture": "family3-pattern-mode",
+  "catch": false,
+  "false_positive": false,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [],
+  "notes": "partial signal: symbol_hit=False, breakage_hit=['broken caller', 'dangling call', 'contract mismatch', 'call site']; hedge patterns present=False",
+  "needs_review": true,
+  "run_id": "4ea284e077f642f78f9327fb53eae921",
+  "arm": "optional-graph",
+  "run": 1,
+  "complete": true
+}

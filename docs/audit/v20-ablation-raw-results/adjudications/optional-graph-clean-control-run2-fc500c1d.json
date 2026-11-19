@@ -1,0 +1,16 @@
+{
+  "fixture": "clean-control",
+  "catch": false,
+  "false_positive": true,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [
+    "e current repository. Fetch its diff with `gh pr diff 1844` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Graph context tools and reso"
+  ],
+  "notes": "",
+  "needs_review": false,
+  "run_id": "fc500c1d1c4a418e9059cbd0d41e2c96",
+  "arm": "optional-graph",
+  "run": 2,
+  "complete": true
+}

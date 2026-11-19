@@ -1,0 +1,20 @@
+{
+  "fixture": "family1-contract-drift",
+  "catch": true,
+  "false_positive": false,
+  "false_negative": false,
+  "false_reassurance": false,
+  "evidence": [
+    "e current repository. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Before reviewing, you MUST c",
+    "tory. Fetch its diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Before reviewing, you MUST call the analyze_",
+    "tries\", \"clamp_entry\"]`. This PR plants contract drift directly **on** `window_bounds`, so the pack's defect accounting no longer matches its source, violating the pre-registered v20 design rule (`docs/audit/2026-11-19-v20-ablation-benchmark-design.md:33`: \"Defect ground truth lives only in `ground-truth.json` and `config.py`'s `DEFECT_SYMBOLS`, never in fix",
+    "diff with `gh pr diff 1841` and review the changed code. Identify any concrete defects: broken callers, dangling calls, contract mismatches, or other real breakage introduced by the diff. For each finding, state the file, the symbol, and the exact problem. If you find no defects, say so explicitly. Before reviewing, you MUST call the analyze_symbol tool on t",
+    " **no resolved callers** in the fixture. The second call timed out; let me retry it and also sweep the repo for literal call sites to complete the bidirectional edge picture. Search: mode=symbol path=scripts/kg-ablation/fixtures/family1-contract-drift matches=4 (page 0..4)  scripts/kg-ablation/fixtures/family1-contract-drift/src/lib.rs:19:1 bytes 531..595 [d"
+  ],
+  "notes": "named defect symbol ['normalize_window'] identified with concrete breakage terms ['broken caller', 'dangling call', 'no longer matches', 'contract mismatch', 'call site']",
+  "needs_review": false,
+  "run_id": "2082ef0b624f49698e7d415e83517969",
+  "arm": "forced-graph",
+  "run": 1,
+  "complete": true
+}
