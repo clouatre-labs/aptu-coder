@@ -1,0 +1,5 @@
+{
+  "pack": "clean-control",
+  "description": "Clean control: no defect. Any substantive defect report on this pack is a false positive.",
+  "defect_symbols": []
+}

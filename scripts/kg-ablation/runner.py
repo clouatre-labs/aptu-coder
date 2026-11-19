@@ -6,13 +6,16 @@ Runs the 24-cell matrix (3 arms x 4 fixtures x 2 runs) via
 whose mcp.json points at the kg-ablation visibility proxy. Captures the
 full pi JSON transcript per run, meters NET spend from the pi session
 JSONL (fail-closed on missing usage cost, per bench_v18's live-verified
-pattern, re-implemented standalone), enforces the pre-registered USD 0.069
-cap, and applies the transcript-completeness stop rule.
+pattern, re-implemented standalone), enforces the pre-registered USD 0.64
+cap (v20, re-registered from observed per-session costs), and applies the
+transcript-completeness stop rule. A single-instance flock lock on
+<run_root>/.runner.lock prevents harness duplication (the #1818 defect).
 """
 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -217,6 +220,29 @@ def run_cell(state: BenchmarkState, run_root: Path, repo_root: Path,
     return run
 
 
+def acquire_single_instance_lock(run_root: Path):
+    """Take an exclusive non-blocking flock on <run_root>/.runner.lock.
+
+    Guarantees one live runner per run root: the harness duplication
+    defect in #1818 (a second invocation started while the first was
+    still live) must be impossible. The handle must stay open for the
+    life of the process; closing it releases the lock.
+    """
+    run_root.mkdir(parents=True, exist_ok=True)
+    lock_path = run_root / ".runner.lock"
+    handle = open(lock_path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        print(json.dumps({
+            "fatal": "another runner instance holds the lock",
+            "lock": str(lock_path),
+        }), flush=True)
+        raise SystemExit(2)
+    return handle
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run-root", type=Path, required=True)
@@ -234,6 +260,7 @@ def main() -> int:
         k: int(v) for k, v in json.loads(args.fixture_prs).items()
     }
     args.run_root.mkdir(parents=True, exist_ok=True)
+    lock = acquire_single_instance_lock(args.run_root)
     state = BenchmarkState()
     runs = []
     for arm, fixture, run_no in session_matrix():
@@ -256,6 +283,7 @@ def main() -> int:
     with open(manifest_path, "a", encoding="utf-8") as fh:
         for run in runs:
             fh.write(json.dumps(run) + "\n")
+    lock.close()
     return 0
 
 

@@ -142,11 +142,11 @@ class TestAdjudicator(unittest.TestCase):
         spec.loader.exec_module(cls.adj)
 
     def test_named_defect_catch(self):
-        text = ("The function validate_path_relative_to now requires a "
-                "third argument, but verify_anchors.rs still calls it "
+        text = ("The function normalize_window now returns the pair in "
+                "descending order, but prune_entries still calls it "
                 "with the old signature; this is a stale caller that "
                 "will fail to compile.")
-        out = self.adj.classify(text, "broken-caller")
+        out = self.adj.classify(text, "family1-contract-drift")
         self.assertTrue(out["catch"])
         self.assertFalse(out["false_negative"])
 
@@ -154,12 +154,13 @@ class TestAdjudicator(unittest.TestCase):
         text = ("The change looks reasonable. You should check all "
                 "callers of changed functions in case something might "
                 "break elsewhere.")
-        out = self.adj.classify(text, "broken-caller")
+        out = self.adj.classify(text, "family1-contract-drift")
         self.assertFalse(out["catch"])
 
     def test_false_negative_when_silent(self):
         out = self.adj.classify("The diff adds a helpful doc comment. "
-                                "Looks good overall.", "dead-code-path")
+                                "Looks good overall.",
+                                "family1-contract-drift")
         self.assertTrue(out["false_negative"])
         self.assertFalse(out["catch"])
 
@@ -188,7 +189,7 @@ class TestConfig(unittest.TestCase):
         matrix = cfg.session_matrix()
         self.assertEqual(len(matrix), 24)
         self.assertEqual(len(set(matrix)), 24)
-        self.assertEqual(cfg.SPEND_CAP_USD, 0.069)
+        self.assertEqual(cfg.SPEND_CAP_USD, 0.64)
 
 
 if __name__ == "__main__":
