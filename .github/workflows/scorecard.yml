@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   scorecard:
-    uses: clouatre-labs/.github/.github/workflows/scorecard.yml@ac324c6e5fa4e63277256a8455049d56fc8afc38
+    uses: clouatre-labs/.github/.github/workflows/scorecard.yml@9b42cd352620915a6d484806db9ef1b589d65367
     with:
       runner_label: ubuntu-26.04-arm
     permissions:
