@@ -77,7 +77,7 @@ jobs:
     name: Lint Commits
     permissions:
       contents: read
-    uses: clouatre-labs/.github/.github/workflows/lint-commits.yml@ac324c6e5fa4e63277256a8455049d56fc8afc38 # reusable lint-commits (skips empty SHAs on push)
+    uses: clouatre-labs/.github/.github/workflows/lint-commits.yml@3945fce6160418daaee3333d28f526dc27eb7a40 # reusable lint-commits (skips empty SHAs on push)
     with:
       base-sha: ${{ github.event.pull_request.base.sha }}
       head-sha: ${{ github.event.pull_request.head.sha }}
