@@ -47,4 +47,3 @@ Replace `<version>` with the release version and `<target>` with the target trip
 ## Supply Chain Integrity
 
 - New Cargo.lock dependencies must be at least 7 days old at the time of addition (enforced by CI; bypass with `SKIP_PACKAGE_AGE_CHECK=true` for urgent security patches).
-- OpenSSF Scorecard runs weekly and uploads results to the GitHub Security tab as SARIF.
