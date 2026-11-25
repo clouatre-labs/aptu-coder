@@ -15,12 +15,12 @@
 # - tools-call-*: the suite invokes conformance reference fixture tools
 #   ("Failed: tool not found"). aptu-coder exposes its own analyzer tools;
 #   protocol-level tool behavior is covered by the passing tools-list scenario.
-# - resources-read-*: the suite reads fixture URIs like test://static-text
-#   ("invalid URI scheme: expected aptu-coder://"). aptu-coder serves
-#   aptu-coder:// resources; listing behavior is covered by resources-list.
-# - prompts-get-*: the suite gets reference fixture prompts
-#   ("Failed: prompts/get"); aptu-coder registers no fixture prompts.
-#   Listing behavior is covered by prompts-list.
+# - resources-list / resources-read-*: aptu-coder declares no resources
+#   capability (the resource surface was removed in #1819). Since rmcp 3.11.0
+#   the server rejects resources/* with -32601, as the spec requires for
+#   unadvertised capabilities.
+# - prompts-list / prompts-get-*: aptu-coder declares no prompts capability;
+#   prompts/* is rejected with -32601 for the same reason.
 server:
   # tools-call-simple-text: reference fixture tool not present in aptu-coder
   - tools-call-simple-text
@@ -36,12 +36,16 @@ server:
   - tools-call-error
   # tools-call-with-progress: reference fixture tool not present in aptu-coder
   - tools-call-with-progress
-  # resources-read-text: suite reads test:// fixture URIs; server serves aptu-coder:// only
+  # resources-list: no resources capability declared; server answers -32601
+  - resources-list
+  # resources-read-text: no resources capability declared; server answers -32601
   - resources-read-text
-  # resources-read-binary: suite reads test:// fixture URIs; server serves aptu-coder:// only
+  # resources-read-binary: no resources capability declared; server answers -32601
   - resources-read-binary
-  # resources-templates-read: suite reads test:// fixture URIs; server serves aptu-coder:// only
+  # resources-templates-read: no resources capability declared; server answers -32601
   - resources-templates-read
+  # prompts-list: no prompts capability declared; server answers -32601
+  - prompts-list
   # prompts-get-simple: no conformance fixture prompts registered
   - prompts-get-simple
   # prompts-get-with-args: no conformance fixture prompts registered
